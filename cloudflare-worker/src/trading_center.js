@@ -3567,11 +3567,18 @@ export class TradingCenter {
     const liveReport=discoverInformationEdges(live,liveFeatures,"ret_fwd_60m");
 
     const ablation=this.latestFeatureAblation()||this.featureAblationResearchReport();
+    const adaptiveMemory=this.latestAdaptiveMemory()||this.adaptiveMemoryReport();
     const historicalAblation=new Map(
       (ablation.historicalCore?.features||[]).map(x=>[x.feature,x])
     );
     const liveAblation=new Map(
       (ablation.liveExtended?.features||[]).map(x=>[x.feature,x])
+    );
+    const historicalMemory=new Map(
+      (adaptiveMemory.historicalCore?.features||[]).map(x=>[x.feature,x])
+    );
+    const liveMemory=new Map(
+      (adaptiveMemory.liveExtended?.features||[]).map(x=>[x.feature,x])
     );
     const abstinencePass=(dataset,feature)=>{
       const x=(dataset==="HISTORICAL_CORE"?historicalAblation:liveAblation).get(feature);
@@ -3582,12 +3589,12 @@ export class TradingCenter {
     const promoted=[
       ...(historicalReport.governor||[])
         .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST" && abstinencePass("HISTORICAL_CORE",x.feature))
-        .map(x=>({dataset:"HISTORICAL_CORE",type:"FEATURE",ablation:historicalAblation.get(x.feature)||null,...x})),
+        .map(x=>({dataset:"HISTORICAL_CORE",type:"FEATURE",ablation:historicalAblation.get(x.feature)||null,memory:historicalMemory.get(x.feature)||null,...x})),
       ...(historicalReport.interactionGovernor||[])
         .map(x=>({dataset:"HISTORICAL_CORE",type:"INTERACTION",...x})),
       ...(liveReport.governor||[])
         .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST" && abstinencePass("LIVE_EXTENDED",x.feature))
-        .map(x=>({dataset:"LIVE_EXTENDED",type:"FEATURE",ablation:liveAblation.get(x.feature)||null,...x})),
+        .map(x=>({dataset:"LIVE_EXTENDED",type:"FEATURE",ablation:liveAblation.get(x.feature)||null,memory:liveMemory.get(x.feature)||null,...x})),
       ...(liveReport.interactionGovernor||[])
         .map(x=>({dataset:"LIVE_EXTENDED",type:"INTERACTION",...x}))
     ].sort((a,b)=>Number(b.discoveryScore||0)-Number(a.discoveryScore||0));
@@ -3597,6 +3604,7 @@ export class TradingCenter {
       historicalCore:historicalReport,
       liveExtended:liveReport,
       featureAblation:ablation,
+      adaptiveMemory,
       promotedToChallengerTest:promoted.slice(0,30),
       policy:{
         automaticChampionChanges:false,
