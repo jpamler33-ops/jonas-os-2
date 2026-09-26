@@ -48,6 +48,15 @@ import {
   nextStateForecast,
   scoreObservedToken
 } from "./market_grammar.js";
+import {
+  ADAPTIVE_MEMORY_VERSION,
+  learnFeatureMemory,
+  memoryRoutingPlan
+} from "./adaptive_memory.js";
+import {
+  GRAMMAR_COUNTERFACTUAL_VERSION,
+  grammarCounterfactuals
+} from "./grammar_counterfactual.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -642,6 +651,21 @@ export class TradingCenter {
         hit3 INTEGER
       );
 
+      CREATE TABLE IF NOT EXISTS adaptive_memory_snapshots (
+        ts INTEGER PRIMARY KEY,
+        version TEXT NOT NULL,
+        historical_json TEXT NOT NULL,
+        live_json TEXT NOT NULL,
+        routing_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS grammar_counterfactual_snapshots (
+        ts INTEGER PRIMARY KEY,
+        version TEXT NOT NULL,
+        token_id TEXT,
+        payload_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -722,6 +746,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_phase_transition_ts ON phase_transition_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_grammar_transition_context ON grammar_transition_counts(order_n,context_key);
       CREATE INDEX IF NOT EXISTS idx_grammar_forecast_status ON grammar_forecasts(status,resolved_ts);
+      CREATE INDEX IF NOT EXISTS idx_adaptive_memory_ts ON adaptive_memory_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_grammar_counterfactual_ts ON grammar_counterfactual_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -3361,6 +3387,139 @@ export class TradingCenter {
     };
   }
 
+  adaptiveMemoryReport() {
+    const historical=this.rows(
+      `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
+        oi_change,funding_rate,long_short_ratio,cross_ret_60m,data_completeness,
+        ret_fwd_60m
+       FROM historical_genomes
+       WHERE ret_fwd_60m IS NOT NULL
+       ORDER BY ts ASC LIMIT 10000`
+    );
+    const historicalFeatures=[
+      "ret_5m","ret_15m","atr_pct","volume_ratio","ema_distance_pct",
+      "oi_change","funding_rate","long_short_ratio","cross_ret_60m","data_completeness"
+    ];
+
+    const live=this.rows(
+      `SELECT g.ts,g.ret_5m,g.ret_15m,g.atr_pct,g.volume_ratio,g.ema_distance_pct,
+        g.level_distance_pct,g.bias_score,g.oi_change,g.funding_rate,g.long_short_ratio,
+        g.liq_5m,g.liq_imbalance,g.cross_ret_60m,g.flow_delta_ratio,g.spread_bps,
+        g.book_imbalance,g.agreement,g.entropy,g.novelty,g.data_quality,
+        e.options_iv_30d,e.options_skew_30d,e.options_term_30m7,
+        e.coinbase_premium_bps,e.venue_spot_diff_bps,e.perp_spot_basis_bps,
+        e.mark_index_basis_bps,e.depth_imbalance_01,e.liquidity_shock,e.futures_basis,
+        e.vix_change,e.sp500_change,e.nasdaq_change,e.usd_change,
+        e.us2y_change_bps,e.us10y_change_bps,e.source_completeness,
+        o.ret_fwd_60m
+       FROM market_genomes g
+       LEFT JOIN market_genome_extensions e ON e.ts=g.ts
+       JOIN genome_safe_outcomes o ON o.ts=g.ts
+       JOIN genome_provenance p ON p.ts=g.ts AND p.leakage_safe=1
+       WHERE o.ret_fwd_60m IS NOT NULL
+       ORDER BY g.ts ASC LIMIT 5000`
+    );
+    const liveFeatures=[
+      "ret_5m","ret_15m","atr_pct","volume_ratio","ema_distance_pct","level_distance_pct",
+      "bias_score","oi_change","funding_rate","long_short_ratio","liq_5m","liq_imbalance",
+      "cross_ret_60m","flow_delta_ratio","spread_bps","book_imbalance","agreement","entropy",
+      "novelty","data_quality","options_iv_30d","options_skew_30d","options_term_30m7",
+      "coinbase_premium_bps","venue_spot_diff_bps","perp_spot_basis_bps","mark_index_basis_bps",
+      "depth_imbalance_01","liquidity_shock","futures_basis","vix_change","sp500_change",
+      "nasdaq_change","usd_change","us2y_change_bps","us10y_change_bps","source_completeness"
+    ];
+
+    const historicalCore=learnFeatureMemory(historical,historicalFeatures,"ret_fwd_60m");
+    const liveExtended=learnFeatureMemory(live,liveFeatures,"ret_fwd_60m");
+    return{
+      generatedAt:Date.now(),
+      version:ADAPTIVE_MEMORY_VERSION,
+      historicalCore,
+      liveExtended,
+      routing:{
+        historicalCore:memoryRoutingPlan(historicalCore),
+        liveExtended:memoryRoutingPlan(liveExtended)
+      },
+      policy:"Memory horizons route research windows only. They do not automatically alter champion strategy rules."
+    };
+  }
+
+  refreshAdaptiveMemory() {
+    const report=this.adaptiveMemoryReport();
+    const ts=Date.now();
+    this.sql.exec(
+      `INSERT OR REPLACE INTO adaptive_memory_snapshots(
+        ts,version,historical_json,live_json,routing_json
+      ) VALUES(?,?,?,?,?)`,
+      ts,ADAPTIVE_MEMORY_VERSION,
+      JSON.stringify(report.historicalCore),
+      JSON.stringify(report.liveExtended),
+      JSON.stringify(report.routing)
+    );
+    return{ts,...report};
+  }
+
+  latestAdaptiveMemory() {
+    const r=this.one("SELECT * FROM adaptive_memory_snapshots ORDER BY ts DESC LIMIT 1");
+    if(!r)return null;
+    return{
+      ts:Number(r.ts),version:r.version,
+      historicalCore:JSON.parse(r.historical_json||"{}"),
+      liveExtended:JSON.parse(r.live_json||"{}"),
+      routing:JSON.parse(r.routing_json||"{}")
+    };
+  }
+
+  grammarCounterfactualReport(limit=3500) {
+    const rows=this.rows(
+      `SELECT ts,token_id,grammar,components_json,ret_fwd_15m,ret_fwd_60m,ret_fwd_240m
+       FROM market_tokens ORDER BY ts DESC LIMIT ?`,
+      Math.min(8000,Math.max(200,Number(limit||3500)))
+    ).reverse();
+    if(rows.length<30)return{
+      status:"LEARNING",version:GRAMMAR_COUNTERFACTUAL_VERSION,n:rows.length,features:[]
+    };
+
+    const parsed=rows.map((r,i)=>({
+      ts:Number(r.ts),
+      tokenId:String(r.token_id),
+      grammar:r.grammar,
+      components:JSON.parse(r.components_json||"{}"),
+      ret15:r.ret_fwd_15m===null?null:Number(r.ret_fwd_15m),
+      ret60:r.ret_fwd_60m===null?null:Number(r.ret_fwd_60m),
+      ret240:r.ret_fwd_240m===null?null:Number(r.ret_fwd_240m),
+      nextToken:i+1<rows.length?String(rows[i+1].token_id):null
+    }));
+    const current=parsed.at(-1);
+    const history=parsed.slice(0,-1).filter(r=>r.ret60!==null||r.nextToken);
+
+    const report=grammarCounterfactuals({current,history});
+    return{
+      ...report,
+      generatedAt:Date.now(),
+      n:history.length,
+      note:"Counterfactuals compare matched historical grammar states that differ on one selected component while allowing limited mismatch on other components."
+    };
+  }
+
+  refreshGrammarCounterfactuals() {
+    const report=this.grammarCounterfactualReport();
+    const ts=Date.now();
+    this.sql.exec(
+      `INSERT OR REPLACE INTO grammar_counterfactual_snapshots(
+        ts,version,token_id,payload_json
+      ) VALUES(?,?,?,?)`,
+      ts,GRAMMAR_COUNTERFACTUAL_VERSION,report.current?.tokenId||null,JSON.stringify(report)
+    );
+    return{ts,...report};
+  }
+
+  latestGrammarCounterfactuals() {
+    const r=this.one("SELECT * FROM grammar_counterfactual_snapshots ORDER BY ts DESC LIMIT 1");
+    if(!r)return null;
+    return{ts:Number(r.ts),version:r.version,...JSON.parse(r.payload_json||"{}")};
+  }
+
   edgeDiscoveryReport() {
     const historical=this.rows(
       `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
@@ -3522,6 +3681,8 @@ export class TradingCenter {
       informationFlow:this.latestInformationFlow()||this.informationFlowReport(),
       phaseTransition:this.phaseTransitionReport(),
       marketGrammar:this.marketGrammarReport(),
+      adaptiveMemory:this.latestAdaptiveMemory()||this.adaptiveMemoryReport(),
+      grammarCounterfactuals:this.latestGrammarCounterfactuals()||this.grammarCounterfactualReport(),
       versions:this.versionReport(),
       predictionLedger:this.predictionLedgerAudit(),
       parity:this.parityReport(),
@@ -4503,7 +4664,9 @@ export class TradingCenter {
       marketTokens: Number(this.one("SELECT COUNT(*) AS n FROM market_tokens")?.n || 0),
       informationFlowSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM information_flow_snapshots")?.n || 0),
       grammarTransitions: Number(this.one("SELECT COUNT(*) AS n FROM grammar_transition_counts")?.n || 0),
-      grammarForecasts: Number(this.one("SELECT COUNT(*) AS n FROM grammar_forecasts")?.n || 0)
+      grammarForecasts: Number(this.one("SELECT COUNT(*) AS n FROM grammar_forecasts")?.n || 0),
+      adaptiveMemorySnapshots: Number(this.one("SELECT COUNT(*) AS n FROM adaptive_memory_snapshots")?.n || 0),
+      grammarCounterfactualSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM grammar_counterfactual_snapshots")?.n || 0)
     };
   }
 
