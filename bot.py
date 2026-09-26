@@ -997,6 +997,8 @@ def main() -> int:
         "RETEST WATCH SHORT",
         "LONG SETUP",
         "SHORT SETUP",
+        "LATE LONG",
+        "LATE SHORT",
         "INVALIDATED LONG",
         "INVALIDATED SHORT",
         "TARGET HIT",
