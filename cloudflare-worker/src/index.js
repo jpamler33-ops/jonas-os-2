@@ -265,6 +265,27 @@ async function getCandles(interval, limit = 260) {
   throw lastError || new Error("market data unavailable");
 }
 
+async function fetchBookTicker() {
+  let lastError;
+  for (const base of REST_BASES) {
+    try {
+      const x = await fetchJson(`${base}/api/v3/ticker/bookTicker?symbol=${SYMBOL}`);
+      const bid=Number(x.bidPrice), ask=Number(x.askPrice);
+      const bidQty=Number(x.bidQty), askQty=Number(x.askQty);
+      const mid=(bid+ask)/2;
+      return {
+        ts:Date.now(),
+        bid,ask,bidQty,askQty,
+        spreadBps:mid>0 ? (ask-bid)/mid*10000 : null,
+        imbalance:(bidQty+askQty)>0 ? (bidQty-askQty)/(bidQty+askQty) : null
+      };
+    } catch (e) {
+      lastError=e;
+    }
+  }
+  throw lastError || new Error("book ticker unavailable");
+}
+
 async function buildContext() {
   const [c5, c15, c1h, c4h] = await Promise.all([
     getCandles("5m"),
@@ -300,11 +321,21 @@ async function buildContext() {
 }
 
 function evaluateConfirmed(ctx) {
-  const { c5, score, price, ema20, ema50, resistance, support } = ctx;
+  const { c5, price, ema20, ema50, resistance, support, trends } = ctx;
   const longPattern = findBreakRetest(c5, "LONG");
   const shortPattern = findBreakRetest(c5, "SHORT");
 
-  if (longPattern && score >= 1 && price >= Math.min(ema20, ema50)) {
+  const fresh = p => p && p.retest_i >= c5.length - 2 &&
+    Math.abs(price - p.level) / Math.max(1e-9, p.level) <= DO_NOT_CHASE_DISTANCE;
+
+  const macroLong = trends?.["4h"] === "BULLISH" &&
+    trends?.["1h"] === "BULLISH" &&
+    trends?.["15m"] !== "BEARISH";
+  const macroShort = trends?.["4h"] === "BEARISH" &&
+    trends?.["1h"] === "BEARISH" &&
+    trends?.["15m"] !== "BULLISH";
+
+  if (fresh(longPattern) && macroLong && price > ema20 && price > ema50) {
     const lows = pivots(c5.slice(-80))
       .filter(p => p.kind === "L" && p.price < price)
       .map(p => p.price);
@@ -327,7 +358,7 @@ function evaluateConfirmed(ctx) {
     }
   }
 
-  if (shortPattern && score <= -1 && price <= Math.max(ema20, ema50)) {
+  if (fresh(shortPattern) && macroShort && price < ema20 && price < ema50) {
     const highs = pivots(c5.slice(-80))
       .filter(p => p.kind === "H" && p.price > price)
       .map(p => p.price);
@@ -404,7 +435,9 @@ export class RadarDO extends DurableObject {
       lastTelegramChat: null,
       lastNewsPoll: 0,
       lastNewsError: null,
-      backfill: null
+      backfill: null,
+      flow5m: null,
+      bookTicker: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -453,6 +486,10 @@ export class RadarDO extends DurableObject {
         lastTelegramOkAt: this.mem.lastTelegramOkAt || null,
         lastTelegramError: this.mem.lastTelegramError || null,
         backfill: this.backfillPublicState(),
+        dataQuality: this.context ? this.center.dataQuality(this.context) : null,
+        genomeRows: this.center.summary().genomeRows,
+        orderflow5mRows: this.center.summary().orderflow5mRows,
+        orderflowMode: "BINANCE_KLINE_TAKER_VOLUME_PLUS_BOOK_SNAPSHOT",
         selfHealing: true
       });
     }
@@ -513,8 +550,21 @@ export class RadarDO extends DurableObject {
         factorEdges: this.center.factorEdgeStats(),
         factorSnapshots: this.center.factorSnapshotStats(),
         alertFunnel: this.center.alertFunnel(),
-        currentFactors: this.context ? this.center.factorsFromContext(this.context) : null
+        currentFactors: this.context ? this.center.factorsFromContext(this.context) : null,
+        genome: this.context ? this.center.currentGenomeIntelligence(this.context, 20) : null,
+        coverage: this.center.coverageReport(this.context)
       });
+    }
+    if (path === "/api/genome" || path === "/api/twins") {
+      return Response.json(this.context
+        ? this.center.currentGenomeIntelligence(this.context, 30)
+        : {error:"context_not_ready"});
+    }
+    if (path === "/api/coverage" || path === "/api/data-quality") {
+      return Response.json(this.center.coverageReport(this.context));
+    }
+    if (path === "/api/timeline") {
+      return Response.json(this.center.recentTimeline(200));
     }
 
     if (path === "/backfill/status") {
@@ -840,9 +890,10 @@ export class RadarDO extends DurableObject {
       this.center.recordFactorSnapshot(this.context);
 
       try {
-        const [derivatives, crossAssets] = await Promise.all([
+        const [derivatives, crossAssets, bookTicker] = await Promise.all([
           fetchDerivativesData(),
-          fetchCrossAssets()
+          fetchCrossAssets(),
+          fetchBookTicker()
         ]);
 
         for (const row of derivatives.openInterest) this.center.recordOpenInterest(row.ts, row.value);
@@ -851,12 +902,15 @@ export class RadarDO extends DurableObject {
         for (const row of crossAssets) {
           this.center.recordCrossAsset(row.ts, row.symbol, row.ret5m, row.ret60m, row.close);
         }
+        this.mem.bookTicker = bookTicker;
         this.mem.lastExternalDataError = null;
       } catch (e) {
         this.mem.lastExternalDataError = e?.message || String(e);
       }
+      this.center.recordMarketGenome(this.context);
       this.center.updatePatternOutcomes(Date.now());
       this.center.updateFactorOutcomes(Date.now());
+      this.center.updateGenomeOutcomes(Date.now());
       this.center.updateNewsImpacts(Date.now());
       await this.pollNews(false);
       await this.persist();
@@ -905,6 +959,38 @@ export class RadarDO extends DurableObject {
       await this.persist();
       console.log("refreshContext failed", msg);
     }
+  }
+
+  accumulateOrderflowFromClosedKline(k, closeTime) {
+    const quoteVolume=Number(k.q||0);
+    const takerBuyQuote=Number(k.Q||0);
+    const buy=Math.max(0,takerBuyQuote);
+    const sell=Math.max(0,quoteVolume-takerBuyQuote);
+    const bucketStart=Math.floor(Number(closeTime)/(5*60_000))*5*60_000;
+
+    let b=this.mem.flow5m;
+    if(!b || Number(b.ts)!==bucketStart){
+      if(b && Number(b.tradeCount||0)>0) this.flushOrderflowBucket(b);
+      b={ts:bucketStart,buy:0,sell:0,tradeCount:0};
+    }
+    b.buy+=buy;
+    b.sell+=sell;
+    b.tradeCount+=Number(k.n||0);
+    this.mem.flow5m=b;
+  }
+
+  flushOrderflowBucket(bucket=this.mem.flow5m) {
+    if(!bucket || !Number(bucket.tradeCount||0)) return;
+    const book=this.mem.bookTicker||{};
+    this.center.recordOrderflow5m({
+      ts:Number(bucket.ts),
+      buyNotional:Number(bucket.buy||0),
+      sellNotional:Number(bucket.sell||0),
+      tradeCount:Number(bucket.tradeCount||0),
+      spreadBps:Number.isFinite(Number(book.spreadBps))?Number(book.spreadBps):null,
+      bookImbalance:Number.isFinite(Number(book.imbalance))?Number(book.imbalance):null,
+      source:"binance"
+    });
   }
 
   async ensureConnected() {
@@ -1050,6 +1136,7 @@ export class RadarDO extends DurableObject {
 
     if (Boolean(k.x)) {
       const closeTime = Number(k.T || eventTime);
+      this.accumulateOrderflowFromClosedKline(k, closeTime);
       this.center.recordMinute({
         ts: closeTime,
         open: Number(k.o),
@@ -1086,6 +1173,8 @@ export class RadarDO extends DurableObject {
 
       const d = new Date(closeTime);
       if ((d.getUTCMinutes() + 1) % 5 === 0) {
+        this.flushOrderflowBucket();
+        this.mem.flow5m = null;
         this.center.updatePatternOutcomes(closeTime);
         this.center.updateFactorOutcomes(closeTime);
         this.center.updateNewsImpacts(closeTime);
