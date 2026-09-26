@@ -566,6 +566,9 @@ export class RadarDO extends DurableObject {
     if (path === "/api/timeline") {
       return Response.json(this.center.recentTimeline(200));
     }
+    if (path === "/api/research") {
+      return Response.json(this.center.fullResearchReport(this.context));
+    }
 
     if (path === "/backfill/status") {
       return Response.json({
@@ -933,9 +936,14 @@ export class RadarDO extends DurableObject {
       if (confirmed) {
         const setup = this.center.openSetup(confirmed, this.context);
         const hist = this.center.matchingSetupHistory(confirmed.side, this.context);
+        const twins = this.center.currentGenomeIntelligence(this.context, 20);
+        const g = twins.current || {};
         const histText = hist.n >= 8
           ? `Historischer Match: N=${hist.n} | TP-Quote ${(hist.hitRate*100).toFixed(1)}% | Ø ${hist.avgR?.toFixed(2) ?? "—"}R | ${hist.evidence}`
           : `Historischer Match: N=${hist.n} | noch Lernphase, keine belastbare Aussage`;
+        const twinText = twins.outcomeSample >= 8
+          ? `Genome-Twins: N=${twins.outcomeSample} | Ø 60m ${((twins.avgForward60m||0)*100).toFixed(2)}% | Novelty ${((g.novelty||0)*100).toFixed(0)}%`
+          : `Genome-Twins: N=${twins.outcomeSample} | noch zu wenig Outcome-Daten`;
         await this.notifyOnce(
           `setup|${setup?.id || "new"}|${confirmed.side}`,
           [
@@ -947,7 +955,10 @@ export class RadarDO extends DurableObject {
             `CRV: ${confirmed.rr.toFixed(2)}R`,
             `4H/1H/15m/5m: ${this.context.trends["4h"]} / ${this.context.trends["1h"]} / ${this.context.trends["15m"]} / ${this.context.trends["5m"]}`,
             `Session: ${hist.factors.session} | Volatilität: ${hist.factors.volatility_regime} | Trend: ${hist.factors.trend_alignment}`,
+            `Datenqualität: ${Number(g.data_quality||0).toFixed(0)}/100 | Agreement: ${((g.agreement||0)*100).toFixed(0)}% | Entropie: ${Number(g.entropy??1).toFixed(2)}`,
             histText,
+            twinText,
+            (g.novelty||0) >= 0.7 ? "WARNUNG: Ungewöhnlicher Markt-Zustand; historische Vergleiche schwächer." : "",
             "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
             "Historische Statistik beschreibt Vergangenheitsdaten und ist keine Gewinnwahrscheinlichkeit."
           ].join("\n")
