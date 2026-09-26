@@ -414,7 +414,7 @@ def send_telegram(result: dict) -> None:
         print("Telegram: noch kein Chat gefunden. Oeffne den Bot in Telegram und sende /start.")
         return
 
-    manual_test = os.getenv("GITHUB_EVENT_NAME", "") == "workflow_dispatch"
+    manual_test = (os.getenv("GITHUB_EVENT_NAME", "") == "workflow_dispatch" or os.getenv("FORCE_TELEGRAM_TEST", "") == "1")
     is_signal = result["decision"] in ("LONG SETUP", "SHORT SETUP")
 
     if not is_signal and not manual_test:
