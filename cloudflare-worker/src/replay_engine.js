@@ -1,3 +1,5 @@
+import { contextFrom5m, evaluateStrategyContext } from "./strategy_core.js";
+
 const EMA_FAST=20;
 const EMA_SLOW=50;
 const PIVOT_WINDOW=2;
@@ -85,44 +87,21 @@ function rr(entry,stop,target,side){
 }
 
 export function evaluateReplaySetup(all5,currentIndex,params={}){
-  const retestTol=Number(params.retestTol??0.0012);
-  const stopBuffer=Number(params.stopBuffer??0.0005);
-  const minRR=Number(params.minRR??2);
-  const maxExtension=Number(params.maxExtension??0.002);
-  const c5=all5.slice(Math.max(0,currentIndex-6000),currentIndex+1);
-  if(c5.length<1000)return null;
-  const last=c5.at(-1),currentClose=Number(last.t)+5*60_000;
-  const c15=aggregateClosed(c5,15,currentClose);
-  const c1h=aggregateClosed(c5,60,currentClose);
-  const c4h=aggregateClosed(c5,240,currentClose);
-  if(c15.length<60||c1h.length<60||c4h.length<20)return null;
-
-  const trends={"5m":trend(c5),"15m":trend(c15),"1h":trend(c1h),"4h":trend(c4h)};
-  const price=Number(last.c);
-  const closes=c5.map(x=>Number(x.c));
-  const e20=ema(closes,EMA_FAST).at(-1),e50=ema(closes,EMA_SLOW).at(-1);
-  const {support,resistance}=nearestLevels(c15,price);
-  const lp=findBreakRetest(c5,"LONG",retestTol),sp=findBreakRetest(c5,"SHORT",retestTol);
-  const fresh=p=>p&&p.retest_i>=c5.length-2&&Math.abs(price-p.level)/Math.max(1e-9,p.level)<=maxExtension;
-
-  const macroLong=trends["4h"]==="BULLISH"&&trends["1h"]==="BULLISH"&&trends["15m"]!=="BEARISH";
-  const macroShort=trends["4h"]==="BEARISH"&&trends["1h"]==="BEARISH"&&trends["15m"]!=="BULLISH";
-
-  if(fresh(lp)&&macroLong&&price>e20&&price>e50&&resistance>price){
-    const lows=pivots(c5.slice(-80)).filter(p=>p.kind==="L"&&p.price<price).map(p=>p.price);
-    let base=lows.slice(-3).length?Math.max(...lows.slice(-3)):lp.retest_low;
-    base=Math.min(base,lp.retest_low);
-    const stop=base*(1-stopBuffer),ratio=rr(price,stop,resistance,"LONG");
-    if(ratio>=minRR)return{ts:last.t,side:"LONG",entry:price,stop,target:resistance,planned_rr:ratio,level:lp.level,trends};
-  }
-  if(fresh(sp)&&macroShort&&price<e20&&price<e50&&support<price){
-    const highs=pivots(c5.slice(-80)).filter(p=>p.kind==="H"&&p.price>price).map(p=>p.price);
-    let base=highs.slice(-3).length?Math.min(...highs.slice(-3)):sp.retest_high;
-    base=Math.max(base,sp.retest_high);
-    const stop=base*(1+stopBuffer),ratio=rr(price,stop,support,"SHORT");
-    if(ratio>=minRR)return{ts:last.t,side:"SHORT",entry:price,stop,target:support,planned_rr:ratio,level:sp.level,trends};
-  }
-  return null;
+  const ctx=contextFrom5m(all5,currentIndex);
+  if(!ctx)return null;
+  const setup=evaluateStrategyContext(ctx,params);
+  if(!setup)return null;
+  return{
+    ts:Number(ctx.c5.at(-1).t),
+    side:setup.side,
+    entry:Number(setup.entry),
+    stop:Number(setup.stop),
+    target:Number(setup.target),
+    planned_rr:Number(setup.rr),
+    level:Number(setup.level),
+    trends:ctx.trends,
+    strategyVersion:setup.strategyVersion
+  };
 }
 
 export function simulateOutcome(all5,currentIndex,setup,maxBars=288){
