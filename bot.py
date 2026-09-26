@@ -213,8 +213,9 @@ def prepare_cross(
         dist = (price - level) / price
         prev_dist = (prev - level) / prev if prev > level else -1
 
-    # Nur beim frischen Eintritt in die Vorwarn-Zone melden, damit Telegram nicht spammt.
-    if 0 <= dist <= PREPARE_DISTANCE and prev_dist > PREPARE_DISTANCE:
+    # Solange die Vorwarn-Zone aktiv ist, bleibt der Status bestehen.
+    # Telegram-Duplikate werden ueber den persistenten Bot-State verhindert.
+    if 0 <= dist <= PREPARE_DISTANCE:
         return {
             "side": side,
             "level": level,
@@ -424,6 +425,321 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
         "reasons": reasons,
         "warning": "Technisches Regelwerk; kein automatischer News-Filter und keine echten Orders.",
     }
+
+
+STATE_FILE = "bot_state.json"
+RADAR_DISTANCE = 0.0060       # 0.60 %: erste Vorbereitung
+ARMED_TIMEOUT_MS = 35 * 60 * 1000
+HEARTBEAT_SECONDS = 12 * 60 * 60
+FAST_RANGE_PCT = 0.0040
+FAST_VOLUME_RATIO = 2.0
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+            return state if isinstance(state, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_state(state: dict) -> None:
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def event_copy(
+    result: dict,
+    decision: str,
+    stage: str,
+    action: str,
+    *,
+    side: Optional[str] = None,
+    level: Optional[float] = None,
+    warning: Optional[str] = None,
+) -> dict:
+    out = dict(result)
+    out["decision"] = decision
+    out["stage"] = stage
+    out["action"] = action
+    if side is not None:
+        out["side"] = side
+    if level is not None:
+        out["breakout_level"] = level
+    if warning is not None:
+        out["warning"] = warning
+    return out
+
+
+def market_speed(c5: List[Candle]) -> Tuple[float, float]:
+    if len(c5) < 25:
+        return 0.0, 0.0
+    last = c5[-1]
+    range_pct = (last.h - last.l) / last.c if last.c else 0.0
+    vols = sorted(x.v for x in c5[-21:-1])
+    median = (vols[9] + vols[10]) / 2.0 if len(vols) >= 20 else 0.0
+    volume_ratio = (last.v / median) if median > 0 else 0.0
+    return range_pct, volume_ratio
+
+
+def alert_key(result: dict) -> str:
+    level = result.get("breakout_level")
+    bucket = "none"
+    if isinstance(level, (int, float)) and level:
+        bucket = str(int(round(level / 25.0) * 25))
+    return f"{result.get('decision')}|{result.get('side')}|{bucket}"
+
+
+def radar_event(result: dict, data: Dict[str, List[Candle]]) -> Optional[dict]:
+    if result.get("decision") != "WAIT / NO TRADE":
+        return None
+
+    price = data["5m"][-1].c
+    score = result["bias_score"]
+    trend5 = result["trends"]["5m"]
+    e20 = result["ema20"]
+    resistance = result.get("resistance")
+    support = result.get("support")
+
+    if resistance and resistance > price and score >= 1 and trend5 != "BEARISH" and price >= e20:
+        dist = (resistance - price) / price
+        if dist <= RADAR_DISTANCE:
+            out = event_copy(
+                result,
+                "RADAR LONG",
+                "RADAR LONG",
+                "Chart noch nicht noetig offen lassen. Long-Szenario beobachten; bei weiterer Annaeherung kommt PREPARE.",
+                side="LONG",
+                level=resistance,
+                warning="Fruehe Orientierung, kein Entry-Signal.",
+            )
+            out["distance_to_level_pct"] = dist * 100.0
+            return out
+
+    if support and support < price and score <= -1 and trend5 != "BULLISH" and price <= e20:
+        dist = (price - support) / price
+        if dist <= RADAR_DISTANCE:
+            out = event_copy(
+                result,
+                "RADAR SHORT",
+                "RADAR SHORT",
+                "Chart noch nicht noetig offen lassen. Short-Szenario beobachten; bei weiterer Annaeherung kommt PREPARE.",
+                side="SHORT",
+                level=support,
+                warning="Fruehe Orientierung, kein Entry-Signal.",
+            )
+            out["distance_to_level_pct"] = dist * 100.0
+            return out
+    return None
+
+
+def apply_state_logic(result: dict, data: Dict[str, List[Candle]], state: dict) -> dict:
+    c5 = data["5m"]
+    last = c5[-1]
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    prev_stage = state.get("last_stage", "")
+    prev_side = state.get("watch_side")
+    prev_level = state.get("watch_level")
+    armed_at = int(state.get("armed_at_ms") or 0)
+
+    # 1) Bereits bestaetigten Paper-Plan weiter ueberwachen.
+    plan = state.get("active_plan")
+    if isinstance(plan, dict):
+        side = plan.get("side")
+        stop = plan.get("stop")
+        target = plan.get("target")
+        if all(isinstance(x, (int, float)) for x in (stop, target)):
+            hit_stop = last.l <= stop if side == "LONG" else last.h >= stop
+            hit_target = last.h >= target if side == "LONG" else last.l <= target
+
+            if hit_stop and hit_target:
+                out = event_copy(
+                    result,
+                    "PLAN OUTCOME AMBIGUOUS",
+                    "PAPER PLAN CLOSED",
+                    "In derselben 5m-Kerze wurden Stop und Ziel beruehrt. Reihenfolge aus OHLC-Daten nicht sicher bestimmbar.",
+                    side=side,
+                    warning="Ergebnis nicht als Win/Loss werten; fuer Review markieren.",
+                )
+                out["entry"] = plan.get("entry")
+                out["stop"] = stop
+                out["target"] = target
+                out["rr"] = plan.get("rr")
+                state["active_plan"] = None
+                return out
+
+            if hit_target:
+                out = event_copy(
+                    result,
+                    "TARGET HIT",
+                    "PAPER TARGET HIT",
+                    "Paper-Ziel wurde erreicht. Trade fuer das Journal als Zieltreffer markieren.",
+                    side=side,
+                    warning="Paper-Auswertung, keine automatische Order.",
+                )
+                out["entry"] = plan.get("entry")
+                out["stop"] = stop
+                out["target"] = target
+                out["rr"] = plan.get("rr")
+                state["active_plan"] = None
+                return out
+
+            if hit_stop:
+                out = event_copy(
+                    result,
+                    "STOP HIT",
+                    "PAPER STOP HIT",
+                    "Paper-Stop wurde erreicht. Nicht sofort erneut einsteigen; neues Setup abwarten.",
+                    side=side,
+                    warning="Paper-Auswertung, keine automatische Order.",
+                )
+                out["entry"] = plan.get("entry")
+                out["stop"] = stop
+                out["target"] = target
+                out["rr"] = plan.get("rr")
+                state["active_plan"] = None
+                return out
+
+    # 2) Nach Breakout/Breakdown den Retest-Watch ueber mehrere Runs halten.
+    if result.get("decision") == "WAIT / NO TRADE" and prev_stage in ("ARMED LONG", "ARMED SHORT"):
+        if isinstance(prev_level, (int, float)) and armed_at and last.t - armed_at <= ARMED_TIMEOUT_MS:
+            if prev_stage == "ARMED LONG":
+                if last.c < prev_level * (1 - RETEST_TOL):
+                    return event_copy(
+                        result,
+                        "INVALIDATED LONG",
+                        "SETUP INVALID",
+                        "Breakout ist zurueck unter das Level gefallen. Long-Szenario verwerfen und neu warten.",
+                        side="LONG",
+                        level=prev_level,
+                        warning="Kein Entry.",
+                    )
+                return event_copy(
+                    result,
+                    "RETEST WATCH LONG",
+                    "ARMED LONG",
+                    f"Long bleibt scharf. Auf Retest um {prev_level:.2f} und Halt warten. Noch nicht einsteigen.",
+                    side="LONG",
+                    level=prev_level,
+                    warning="Vorwarnung, noch kein bestaetigtes Entry-Signal.",
+                )
+            else:
+                if last.c > prev_level * (1 + RETEST_TOL):
+                    return event_copy(
+                        result,
+                        "INVALIDATED SHORT",
+                        "SETUP INVALID",
+                        "Breakdown ist wieder ueber das Level gestiegen. Short-Szenario verwerfen und neu warten.",
+                        side="SHORT",
+                        level=prev_level,
+                        warning="Kein Entry.",
+                    )
+                return event_copy(
+                    result,
+                    "RETEST WATCH SHORT",
+                    "ARMED SHORT",
+                    f"Short bleibt scharf. Auf Retest um {prev_level:.2f} und Ablehnung warten. Noch nicht einsteigen.",
+                    side="SHORT",
+                    level=prev_level,
+                    warning="Vorwarnung, noch kein bestaetigtes Entry-Signal.",
+                )
+
+    # 3) Radarschicht vor PREPARE.
+    radar = radar_event(result, data)
+    if radar:
+        return radar
+
+    # 4) Bedeutende 4H-/1H-Kontextaenderung melden.
+    old_trends = state.get("trends")
+    if result.get("decision") == "WAIT / NO TRADE" and isinstance(old_trends, dict):
+        changed = []
+        for tf in ("4h", "1h"):
+            if old_trends.get(tf) and old_trends.get(tf) != result["trends"].get(tf):
+                changed.append(f"{tf}: {old_trends.get(tf)} -> {result['trends'].get(tf)}")
+        if changed:
+            return event_copy(
+                result,
+                "CONTEXT CHANGE",
+                "HIGHER-TF CHANGE",
+                "Bias neu einordnen. Keine alten Setup-Annahmen weiterverwenden.",
+                warning=" | ".join(changed),
+            )
+
+    # 5) Schnelle Marktphase warnen: grosse 5m Range + starkes Volumen.
+    range_pct, volume_ratio = market_speed(c5)
+    if (
+        result.get("decision") == "WAIT / NO TRADE"
+        and range_pct >= FAST_RANGE_PCT
+        and volume_ratio >= FAST_VOLUME_RATIO
+    ):
+        out = event_copy(
+            result,
+            "FAST MARKET",
+            "VOLATILITY WARNING",
+            "Markt bewegt sich ungewoehnlich schnell. Nicht jagen; auf neuen Close, Struktur und Retest warten.",
+            warning=f"5m Range {range_pct*100:.2f}% | Volumen ca. {volume_ratio:.1f}x Median.",
+        )
+        out["market_range_pct"] = range_pct * 100.0
+        out["volume_ratio"] = volume_ratio
+        return out
+
+    # 6) Seltene Lebenszeichen-Nachricht, damit klar ist, dass der Bot weiterlaeuft.
+    last_hb = int(state.get("last_heartbeat_ts") or 0)
+    if result.get("decision") == "WAIT / NO TRADE" and now_ts - last_hb >= HEARTBEAT_SECONDS:
+        state["last_heartbeat_ts"] = now_ts
+        return event_copy(
+            result,
+            "BOT ALIVE",
+            "SYSTEM OK",
+            "Keine Handlung. Bot laeuft und ueberwacht weiter.",
+            warning="Status-Heartbeat; kein Trading-Signal.",
+        )
+
+    return result
+
+
+def update_state_after_result(result: dict, state: dict, data: Dict[str, List[Candle]]) -> None:
+    stage = result.get("stage", "WAIT")
+    state["last_stage"] = stage
+    state["trends"] = result.get("trends", {})
+    state["last_scan_candle_t"] = data["5m"][-1].t
+
+    if stage in ("RADAR LONG", "WATCH LONG", "ARMED LONG"):
+        state["watch_side"] = "LONG"
+        state["watch_level"] = result.get("breakout_level")
+    elif stage in ("RADAR SHORT", "WATCH SHORT", "ARMED SHORT"):
+        state["watch_side"] = "SHORT"
+        state["watch_level"] = result.get("breakout_level")
+    elif result.get("decision") in (
+        "INVALIDATED LONG",
+        "INVALIDATED SHORT",
+        "TARGET HIT",
+        "STOP HIT",
+        "PLAN OUTCOME AMBIGUOUS",
+    ):
+        state["watch_side"] = None
+        state["watch_level"] = None
+        state["armed_at_ms"] = 0
+
+    if stage in ("ARMED LONG", "ARMED SHORT") and not int(state.get("armed_at_ms") or 0):
+        state["armed_at_ms"] = data["5m"][-1].t
+    elif stage not in ("ARMED LONG", "ARMED SHORT"):
+        # confirmed/invalidation closes the armed waiting phase
+        if stage not in ("WATCH LONG", "WATCH SHORT", "RADAR LONG", "RADAR SHORT"):
+            state["armed_at_ms"] = 0
+
+    if result.get("decision") in ("LONG SETUP", "SHORT SETUP"):
+        state["active_plan"] = {
+            "side": result.get("side"),
+            "entry": result.get("entry"),
+            "stop": result.get("stop"),
+            "target": result.get("target"),
+            "rr": result.get("rr"),
+            "created_t": data["5m"][-1].t,
+        }
+
+
 
 
 class Market:
