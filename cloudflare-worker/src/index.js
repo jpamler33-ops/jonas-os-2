@@ -584,7 +584,10 @@ export class RadarDO extends DurableObject {
       lastOptionsPoll: 0,
       lastOptionsError: null,
       lastCoinbasePoll: 0,
-      lastCoinbaseError: null
+      lastCoinbaseError: null,
+      lastResearchGovernorAt: 0,
+      lastResearchGovernorError: null,
+      lastResearchGovernorSignature: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -688,6 +691,11 @@ export class RadarDO extends DurableObject {
           latest: this.center.latestCoinbasePremium(),
           lastPoll: this.mem.lastCoinbasePoll || null,
           lastError: this.mem.lastCoinbaseError || null
+        },
+        researchGovernor: {
+          lastRunAt: this.mem.lastResearchGovernorAt || null,
+          lastError: this.mem.lastResearchGovernorError || null,
+          latest: this.center.latestResearchGovernor()
         },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
@@ -837,6 +845,15 @@ export class RadarDO extends DurableObject {
         summary:this.center.coinbasePremiumSummary(),
         lastPoll:this.mem.lastCoinbasePoll||null,
         lastError:this.mem.lastCoinbaseError||null
+      });
+    }
+
+    if (path === "/api/edge-discovery" || path === "/api/governor") {
+      const latest=this.center.latestResearchGovernor();
+      return Response.json({
+        latest:latest||this.center.edgeDiscoveryReport(),
+        lastRunAt:this.mem.lastResearchGovernorAt||null,
+        lastError:this.mem.lastResearchGovernorError||null
       });
     }
 
@@ -1317,6 +1334,46 @@ export class RadarDO extends DurableObject {
     await this.ctx.storage.setAlarm(when);
   }
 
+  async runResearchGovernor(force=false) {
+    const now=Date.now();
+    if(!force && now-Number(this.mem.lastResearchGovernorAt||0)<6*60*60_000) return;
+
+    this.mem.lastResearchGovernorAt=now;
+    try {
+      const report=this.center.refreshResearchGovernor();
+      this.mem.lastResearchGovernorError=null;
+
+      const promoted=report?.promotedToChallengerTest||[];
+      const signature=promoted.slice(0,8).map(x=>{
+        if(x.type==="INTERACTION") return `${x.dataset}:I:${(x.features||[]).join("+")}`;
+        return `${x.dataset}:F:${x.feature||"-"}`;
+      }).join("|");
+
+      if(signature && signature!==this.mem.lastResearchGovernorSignature) {
+        this.mem.lastResearchGovernorSignature=signature;
+        const lines=promoted.slice(0,5).map((x,i)=>{
+          if(x.type==="INTERACTION") {
+            return `${i+1}. ${x.dataset} · ${(x.features||[]).join(" + ")} · synergy score ${Number(x.discoveryScore||0).toFixed(5)}`;
+          }
+          return `${i+1}. ${x.dataset} · ${x.feature} · score ${Number(x.discoveryScore||0).toFixed(5)}`;
+        });
+        await this.notifyOnce(
+          `research-governor|${signature}`,
+          [
+            "BTC RESEARCH GOVERNOR — NEW CHALLENGER CANDIDATES",
+            ...lines,
+            "",
+            "Status: Research-only. Keine Live-Regel wurde automatisch verändert.",
+            "Kandidaten müssen weiter in Shadow/Out-of-Sample-Tests bestehen."
+          ].join("\n")
+        );
+      }
+    } catch(e) {
+      this.mem.lastResearchGovernorError=e?.message||String(e);
+    }
+    await this.persist();
+  }
+
   async pollCrossMarketExtensions(force=false) {
     const now=Date.now();
 
@@ -1471,6 +1528,7 @@ export class RadarDO extends DurableObject {
       await this.pollOfficialMacro(false);
       await this.pollMacroMarket(false);
       await this.pollCrossMarketExtensions(false);
+      await this.runResearchGovernor(false);
 
       try {
         const [derivatives, crossAssets, bookTicker, venue] = await Promise.all([
