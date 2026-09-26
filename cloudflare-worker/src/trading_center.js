@@ -20,6 +20,7 @@ import {
 } from "./research_engine.js";
 import { parameterGrid } from "./replay_engine.js";
 import { discoverInformationEdges } from "./edge_discovery.js";
+import { compareDecisions, STRATEGY_CORE_VERSION } from "./strategy_core.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -445,6 +446,56 @@ export class TradingCenter {
         promoted_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS genome_provenance (
+        ts INTEGER PRIMARY KEY,
+        known_at_ts INTEGER NOT NULL,
+        recorded_at_ts INTEGER NOT NULL,
+        options_source_ts INTEGER,
+        coinbase_source_ts INTEGER,
+        venue_source_ts INTEGER,
+        micro_source_ts INTEGER,
+        macro_source_ts INTEGER,
+        source_completeness REAL,
+        leakage_safe INTEGER NOT NULL,
+        issues_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS genome_safe_outcomes (
+        ts INTEGER PRIMARY KEY,
+        reference_ts INTEGER NOT NULL,
+        ret_fwd_15m REAL,
+        ret_fwd_60m REAL,
+        ret_fwd_240m REAL
+      );
+
+      CREATE TABLE IF NOT EXISTS parity_audits (
+        ts INTEGER PRIMARY KEY,
+        strategy_version TEXT NOT NULL,
+        match INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        native_signal TEXT,
+        replay_signal TEXT,
+        details_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS evidence_maturity_snapshots (
+        ts INTEGER PRIMARY KEY,
+        payload_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS leakage_audits (
+        ts INTEGER PRIMARY KEY,
+        safe INTEGER NOT NULL,
+        issues_json TEXT NOT NULL,
+        metrics_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS promotion_audits (
+        ts INTEGER PRIMARY KEY,
+        constitution_version TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -513,6 +564,9 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_market_genome_extensions_ts ON market_genome_extensions(ts);
       CREATE INDEX IF NOT EXISTS idx_research_governor_ts ON research_governor_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_genome_provenance_recorded ON genome_provenance(recorded_at_ts);
+      CREATE INDEX IF NOT EXISTS idx_safe_outcomes_reference ON genome_safe_outcomes(reference_ts);
+      CREATE INDEX IF NOT EXISTS idx_parity_audits_ts ON parity_audits(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -1096,6 +1150,14 @@ export class TradingCenter {
 
   recordGenomeExtension(ts) {
     const x=this.buildGenomeExtension(ts);
+    const recordedAt=Date.now();
+    const options=this.latestOptionsContext()||{};
+    const premium=this.latestCoinbasePremium()||{};
+    const venue=this.latestVenueSnapshot()||{};
+    const micro=this.latestSecondaryMicrostructure()||{};
+    const macro=this.macroMarketSummary()||{};
+    const macroSourceTs=Number(macro.latestFetch||0)||null;
+
     this.sql.exec(
       `INSERT OR REPLACE INTO market_genome_extensions(
         ts,options_iv_30d,options_skew_30d,options_term_30m7,coinbase_premium_bps,
@@ -1109,6 +1171,37 @@ export class TradingCenter {
       x.depth_imbalance_01,x.liquidity_shock,x.futures_basis,
       x.vix_change,x.sp500_change,x.nasdaq_change,x.usd_change,
       x.us2y_change_bps,x.us10y_change_bps,x.source_completeness
+    );
+
+    const sources={
+      options:Number(options.ts||0)||null,
+      coinbase:Number(premium.ts||0)||null,
+      venue:Number(venue.ts||0)||null,
+      micro:Number(micro.ts||0)||null,
+      macro:macroSourceTs
+    };
+    const issues=[];
+    for(const [name,sourceTs] of Object.entries(sources)){
+      if(sourceTs!==null && sourceTs>recordedAt+5_000) issues.push(`${name}:source_after_ingest`);
+    }
+    const knownAt=Number(ts)+5*60_000;
+    if(recordedAt<knownAt) issues.push("recorded_before_candle_close");
+
+    this.sql.exec(
+      `INSERT OR REPLACE INTO genome_provenance(
+        ts,known_at_ts,recorded_at_ts,options_source_ts,coinbase_source_ts,
+        venue_source_ts,micro_source_ts,macro_source_ts,source_completeness,
+        leakage_safe,issues_json
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      Number(ts),knownAt,recordedAt,
+      sources.options,sources.coinbase,sources.venue,sources.micro,sources.macro,
+      Number(x.source_completeness||0),issues.length?0:1,JSON.stringify(issues)
+    );
+
+    this.sql.exec(
+      `INSERT OR IGNORE INTO genome_safe_outcomes(ts,reference_ts)
+       VALUES(?,?)`,
+      Number(ts),Math.max(knownAt,recordedAt)
     );
     return x;
   }
@@ -2158,6 +2251,206 @@ export class TradingCenter {
     };
   }
 
+  updateSafeGenomeOutcomes(nowTs=Date.now()) {
+    const rows=this.rows(
+      `SELECT o.ts,o.reference_ts,o.ret_fwd_15m,o.ret_fwd_60m,o.ret_fwd_240m,g.price
+       FROM genome_safe_outcomes o
+       JOIN market_genomes g ON g.ts=o.ts
+       WHERE o.ret_fwd_240m IS NULL
+       ORDER BY o.reference_ts ASC LIMIT 300`
+    );
+    const horizons=[["ret_fwd_15m",15],["ret_fwd_60m",60],["ret_fwd_240m",240]];
+    for(const row of rows){
+      const updates=[],vals=[];
+      for(const [field,min] of horizons){
+        if(row[field]!==null&&row[field]!==undefined) continue;
+        const target=Number(row.reference_ts)+min*60_000;
+        if(Number(nowTs)<target) continue;
+        const base=this.nearestAnyClose(Number(row.reference_ts));
+        const future=this.nearestAnyClose(target);
+        if(!base?.close||!future?.close) continue;
+        updates.push(`${field}=?`);
+        vals.push(Number(future.close)/Number(base.close)-1);
+      }
+      if(updates.length){
+        vals.push(Number(row.ts));
+        this.sql.exec(`UPDATE genome_safe_outcomes SET ${updates.join(",")} WHERE ts=?`,...vals);
+      }
+    }
+  }
+
+  recordParityAudit(nativeDecision,replayDecision,details={}) {
+    const compared=compareDecisions(nativeDecision,replayDecision);
+    const ts=Date.now();
+    this.sql.exec(
+      `INSERT OR REPLACE INTO parity_audits(
+        ts,strategy_version,match,reason,native_signal,replay_signal,details_json
+      ) VALUES(?,?,?,?,?,?,?)`,
+      ts,STRATEGY_CORE_VERSION,compared.match?1:0,compared.reason,
+      compared.a?.signal||"NONE",compared.b?.signal||"NONE",
+      JSON.stringify({...details,comparison:compared})
+    );
+    return {ts,strategyVersion:STRATEGY_CORE_VERSION,...compared};
+  }
+
+  parityReport(limit=200) {
+    const rows=this.rows(
+      "SELECT * FROM parity_audits ORDER BY ts DESC LIMIT ?",
+      Math.min(1000,Math.max(1,Number(limit||200)))
+    );
+    const matched=rows.filter(r=>Number(r.match)===1).length;
+    const reasons={};
+    for(const r of rows) reasons[r.reason]=(reasons[r.reason]||0)+1;
+    return {
+      strategyVersion:STRATEGY_CORE_VERSION,
+      n:rows.length,
+      matched,
+      mismatch:rows.length-matched,
+      matchRate:rows.length?matched/rows.length:null,
+      reasons,
+      latest:rows[0]||null,
+      status:rows.length<20?"LEARNING":matched/rows.length>=0.99?"PASS":"FAIL"
+    };
+  }
+
+  leakageInspectorReport() {
+    const provenance=this.rows(
+      "SELECT * FROM genome_provenance ORDER BY recorded_at_ts DESC LIMIT 1000"
+    );
+    const unsafe=provenance.filter(r=>Number(r.leakage_safe)!==1);
+    const safeOutcomes=Number(this.one(
+      "SELECT COUNT(*) AS n FROM genome_safe_outcomes WHERE ret_fwd_60m IS NOT NULL"
+    )?.n||0);
+    const legacyLive=Number(this.one(
+      "SELECT COUNT(*) AS n FROM market_genomes WHERE ret_fwd_60m IS NOT NULL"
+    )?.n||0);
+    const issues={};
+    for(const r of unsafe){
+      for(const x of JSON.parse(r.issues_json||"[]")) issues[x]=(issues[x]||0)+1;
+    }
+    const safe=unsafe.length===0;
+    return {
+      safe,
+      provenanceN:provenance.length,
+      unsafeN:unsafe.length,
+      unsafeRate:provenance.length?unsafe.length/provenance.length:null,
+      safeOutcomeN:safeOutcomes,
+      legacyOutcomeN:legacyLive,
+      issues,
+      policies:{
+        liveOutcomeReference:"max(candle_close, feature_ingest_time)",
+        historicalPriceFeatures:"closed 5m candle only",
+        historicalExternalFeatures:"as-of lookup at or before historical timestamp",
+        researchLiveOutcomeSource:"genome_safe_outcomes only"
+      },
+      note:"Legacy live genome outcomes remain for backward compatibility but are excluded from the new discovery governor."
+    };
+  }
+
+  evidenceMaturityReport() {
+    const governor=this.latestResearchGovernor()||this.edgeDiscoveryReport();
+    const map=[];
+    const consume=(dataset,report)=>{
+      for(const x of report?.governor||[]){
+        const n=Number(x?.holdoutN??x?.holdout?.n??0);
+        let maturity="COLLECTING";
+        if(n>=50) maturity="ENOUGH_DATA";
+        if(x.action==="PROMOTE_TO_CHALLENGER_TEST") maturity="HOLDOUT_PASSED";
+        map.push({
+          dataset,feature:x.feature,n,
+          maturity,
+          holdoutAction:x.action,
+          discoveryScore:Number(x.discoveryScore||0),
+          redundantWith:x.redundantWith||[],
+          nextGate:maturity==="HOLDOUT_PASSED"?"SHADOW_TEST":
+            maturity==="ENOUGH_DATA"?"HOLDOUT_STABILITY":"MORE_DATA"
+        });
+      }
+    };
+    consume("HISTORICAL_CORE",governor.historicalCore);
+    consume("LIVE_EXTENDED",governor.liveExtended);
+
+    const shadows=this.shadowStrategyStats().map(s=>{
+      const decided=Number(s.wins||0)+Number(s.losses||0);
+      let maturity="COLLECTING";
+      if(decided>=30) maturity="ENOUGH_DATA";
+      if(decided>=50 && Number(s.avgR)>0) maturity="SHADOW_PASSED";
+      return {
+        dataset:"SHADOW_STRATEGY",feature:s.variant,n:decided,maturity,
+        avgR:s.avgR,hitRate:s.hitRate,
+        nextGate:maturity==="SHADOW_PASSED"?"PROMOTION_CONSTITUTION":"MORE_SHADOW_DATA"
+      };
+    });
+
+    const payload={
+      generatedAt:Date.now(),
+      features:map,
+      strategies:shadows,
+      levels:["COLLECTING","ENOUGH_DATA","HOLDOUT_PASSED","SHADOW_PASSED","ROBUST","DECAYING","REJECTED"],
+      rule:"Implementation status and evidence maturity are separate. LIVE does not mean empirically validated."
+    };
+    this.sql.exec(
+      "INSERT OR REPLACE INTO evidence_maturity_snapshots(ts,payload_json) VALUES(?,?)",
+      payload.generatedAt,JSON.stringify(payload)
+    );
+    return payload;
+  }
+
+  promotionConstitutionReport() {
+    const version="PROMOTION_CONSTITUTION_V1";
+    const parity=this.parityReport(200);
+    const leakage=this.leakageInspectorReport();
+    const validation=this.setupValidationReport();
+    const stability=this.parameterStabilityReport();
+    const drift=this.modelDriftReport();
+    const quality=this.one("SELECT score FROM data_quality_snapshots ORDER BY ts DESC LIMIT 1");
+    const qualityScore=quality?Number(quality.score):null;
+    const replay=this.replayStats();
+    const championHash=this.paramsHash({retestTol:0.0012,stopBuffer:0.0005,minRR:2,maxExtension:0.002});
+    const championReplay=replay.find(x=>x.paramsHash===championHash)||null;
+
+    const gates=[
+      {gate:"PARITY",pass:parity.n>=20&&Number(parity.matchRate)>=0.99,metric:parity.matchRate,requirement:"N>=20 and >=99% match"},
+      {gate:"LEAKAGE",pass:leakage.safe,metric:leakage.unsafeRate,requirement:"no detected future-source violations"},
+      {gate:"DATA_QUALITY",pass:qualityScore!==null&&qualityScore>=75,metric:qualityScore,requirement:">=75/100"},
+      {gate:"REPLAY_SAMPLE",pass:Number(championReplay?.wins||0)+Number(championReplay?.losses||0)>=100,metric:Number(championReplay?.wins||0)+Number(championReplay?.losses||0),requirement:">=100 decided replay outcomes"},
+      {gate:"REPLAY_EXPECTANCY",pass:Number(championReplay?.avgR)>0,metric:championReplay?.avgR??null,requirement:"average replay R > 0"},
+      {gate:"PARAMETER_STABILITY",pass:stability.status==="ACTIVE",metric:stability.status,requirement:"stable parameter neighborhood available"},
+      {gate:"MODEL_DRIFT",pass:drift.status!=="DEGRADING",metric:drift.status,requirement:"not degrading"}
+    ];
+
+    const shadowCandidates=this.shadowStrategyStats().map(s=>{
+      const decided=Number(s.wins||0)+Number(s.losses||0);
+      const candidateGates=[
+        {gate:"SHADOW_SAMPLE",pass:decided>=50,metric:decided,requirement:">=50 decided shadow outcomes"},
+        {gate:"SHADOW_EXPECTANCY",pass:Number(s.avgR)>0,metric:s.avgR,requirement:"average shadow R > 0"},
+        {gate:"GLOBAL_GOVERNANCE",pass:gates.every(x=>x.pass),metric:null,requirement:"all system gates pass"}
+      ];
+      return {
+        variant:s.variant,
+        eligibleForHumanReview:candidateGates.every(x=>x.pass),
+        gates:candidateGates
+      };
+    });
+
+    const payload={
+      generatedAt:Date.now(),
+      constitutionVersion:version,
+      automaticPromotion:false,
+      championRuleChangesRequireHumanReview:true,
+      systemGates:gates,
+      systemPass:gates.every(x=>x.pass),
+      shadowCandidates,
+      researchFeaturePolicy:"Holdout-passed features may enter challenger tests only; they cannot directly alter champion rules.",
+      evidence:this.evidenceMaturityReport()
+    };
+    this.sql.exec(
+      "INSERT OR REPLACE INTO promotion_audits(ts,constitution_version,payload_json) VALUES(?,?,?)",
+      payload.generatedAt,version,JSON.stringify(payload)
+    );
+    return payload;
+  }
+
   edgeDiscoveryReport() {
     const historical=this.rows(
       `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
@@ -2182,10 +2475,12 @@ export class TradingCenter {
         e.mark_index_basis_bps,e.depth_imbalance_01,e.liquidity_shock,e.futures_basis,
         e.vix_change,e.sp500_change,e.nasdaq_change,e.usd_change,
         e.us2y_change_bps,e.us10y_change_bps,e.source_completeness,
-        g.ret_fwd_60m
+        o.ret_fwd_60m
        FROM market_genomes g
        LEFT JOIN market_genome_extensions e ON e.ts=g.ts
-       WHERE g.ret_fwd_60m IS NOT NULL
+       JOIN genome_safe_outcomes o ON o.ts=g.ts
+       JOIN genome_provenance p ON p.ts=g.ts AND p.leakage_safe=1
+       WHERE o.ret_fwd_60m IS NOT NULL
        ORDER BY g.ts ASC LIMIT 5000`
     );
     const liveFeatures=[
@@ -2296,7 +2591,11 @@ export class TradingCenter {
       leadLagNetwork:this.leadLagNetworkReport(),
       counterfactuals:this.matchedCounterfactualReport(),
       falsification:this.hypothesisFalsificationReport(),
-      informationDiscovery:this.latestResearchGovernor()||this.edgeDiscoveryReport()
+      informationDiscovery:this.latestResearchGovernor()||this.edgeDiscoveryReport(),
+      parity:this.parityReport(),
+      leakage:this.leakageInspectorReport(),
+      evidenceMaturity:this.evidenceMaturityReport(),
+      promotionConstitution:this.promotionConstitutionReport()
     };
   }
 
@@ -3217,7 +3516,9 @@ export class TradingCenter {
       macroMarketRows: Number(this.one("SELECT COUNT(*) AS n FROM macro_market_daily")?.n || 0),
       venueSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM venue_snapshots")?.n || 0),
       optionsSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM options_snapshots")?.n || 0),
-      coinbasePremiumRows: Number(this.one("SELECT COUNT(*) AS n FROM coinbase_premium_history")?.n || 0)
+      coinbasePremiumRows: Number(this.one("SELECT COUNT(*) AS n FROM coinbase_premium_history")?.n || 0),
+      parityAudits: Number(this.one("SELECT COUNT(*) AS n FROM parity_audits")?.n || 0),
+      safeGenomeOutcomes: Number(this.one("SELECT COUNT(*) AS n FROM genome_safe_outcomes WHERE ret_fwd_60m IS NOT NULL")?.n || 0)
     };
   }
 
