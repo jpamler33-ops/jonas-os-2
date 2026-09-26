@@ -16,6 +16,16 @@ export class TradingCenter {
         source TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS historical_5m (
+        ts INTEGER PRIMARY KEY,
+        open REAL NOT NULL,
+        high REAL NOT NULL,
+        low REAL NOT NULL,
+        close REAL NOT NULL,
+        volume REAL NOT NULL,
+        source TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS contexts (
         ts INTEGER PRIMARY KEY,
         price REAL NOT NULL,
@@ -183,6 +193,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
       CREATE INDEX IF NOT EXISTS idx_market_minutes_ts ON market_minutes(ts);
+      CREATE INDEX IF NOT EXISTS idx_historical_5m_ts ON historical_5m(ts);
       CREATE INDEX IF NOT EXISTS idx_setup_features_session ON setup_features(session);
       CREATE INDEX IF NOT EXISTS idx_factor_snapshots_ts ON factor_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_oi_ts ON open_interest_history(ts);
@@ -204,34 +215,38 @@ export class TradingCenter {
 
   recordOpenInterest(ts, value, source = "bybit") {
     if (!Number.isFinite(Number(value))) return;
-    this.sql.exec(
+    const cur = this.sql.exec(
       "INSERT OR REPLACE INTO open_interest_history(ts, open_interest, source) VALUES(?,?,?)",
       Number(ts), Number(value), source
     );
+    return Number(cur.rowsWritten || 0);
   }
 
   recordFunding(ts, rate, source = "bybit") {
     if (!Number.isFinite(Number(rate))) return;
-    this.sql.exec(
+    const cur = this.sql.exec(
       "INSERT OR REPLACE INTO funding_history(ts, funding_rate, source) VALUES(?,?,?)",
       Number(ts), Number(rate), source
     );
+    return Number(cur.rowsWritten || 0);
   }
 
   recordLongShort(ts, longRatio, shortRatio, source = "bybit") {
     const l=Number(longRatio), s=Number(shortRatio);
     if (!Number.isFinite(l) || !Number.isFinite(s)) return;
-    this.sql.exec(
+    const cur = this.sql.exec(
       "INSERT OR REPLACE INTO long_short_history(ts, long_ratio, short_ratio, long_short_ratio, source) VALUES(?,?,?,?,?)",
       Number(ts), l, s, s > 0 ? l/s : null, source
     );
+    return Number(cur.rowsWritten || 0);
   }
 
   recordCrossAsset(ts, symbol, ret5m, ret60m, close, source = "bybit") {
-    this.sql.exec(
+    const cur = this.sql.exec(
       "INSERT OR REPLACE INTO cross_asset_history(ts, symbol, ret_5m, ret_60m, close, source) VALUES(?,?,?,?,?,?)",
       Number(ts), String(symbol), ret5m ?? null, ret60m ?? null, close ?? null, source
     );
+    return Number(cur.rowsWritten || 0);
   }
 
   recordLiquidation({ ts, side, size, price, source = "bybit" }) {
@@ -271,6 +286,24 @@ export class TradingCenter {
       crossAssets: cross,
       liquidations1h: liq
     };
+  }
+
+  recordHistorical5m(rows, source = "bybit") {
+    let written = 0;
+    for (const row of rows || []) {
+      const cur = this.sql.exec(
+        `INSERT OR IGNORE INTO historical_5m(ts, open, high, low, close, volume, source)
+         VALUES(?,?,?,?,?,?,?)`,
+        Number(row.t), Number(row.o), Number(row.h), Number(row.l),
+        Number(row.c), Number(row.v), source
+      );
+      written += Number(cur.rowsWritten || 0);
+    }
+    return written;
+  }
+
+  historical5mCount() {
+    return Number(this.one("SELECT COUNT(*) AS n FROM historical_5m")?.n || 0);
   }
 
   recordMinute({ ts, open, high, low, close, volume, source = "binance" }) {
@@ -786,7 +819,12 @@ export class TradingCenter {
       },
       patterns: Number(this.one("SELECT COUNT(*) AS n FROM pattern_occurrences")?.n || 0),
       newsEvents: Number(this.one("SELECT COUNT(*) AS n FROM news_events")?.n || 0),
-      marketMinutes: Number(this.one("SELECT COUNT(*) AS n FROM market_minutes")?.n || 0)
+      marketMinutes: Number(this.one("SELECT COUNT(*) AS n FROM market_minutes")?.n || 0),
+      historical5m: this.historical5mCount(),
+      openInterestRows: Number(this.one("SELECT COUNT(*) AS n FROM open_interest_history")?.n || 0),
+      longShortRows: Number(this.one("SELECT COUNT(*) AS n FROM long_short_history")?.n || 0),
+      fundingRows: Number(this.one("SELECT COUNT(*) AS n FROM funding_history")?.n || 0),
+      crossAssetRows: Number(this.one("SELECT COUNT(*) AS n FROM cross_asset_history")?.n || 0)
     };
   }
 
