@@ -850,12 +850,17 @@ export class TradingCenter {
       "price_structure","volatility","volume","ema_state","support_resistance","session",
       "open_interest","funding","long_short_ratio","liquidations","cross_asset","news_events",
       "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
-      "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay",
+      "historical_twins","walk_forward","cost_model","edge_decay",
       "official_macro_calendar","macro_risk_window","macro_reaction_history",
-      "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation"
+      "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation",
+      "data_quality_lock","parameter_stability"
     ]);
-    const partial=new Set([]);
-    live.add("parameter_stability");
+    const partial=new Set([
+      "counterfactuals","feed_latency_monitor","feed_redundancy",
+      "sequence_outcomes","lead_lag_network","change_point_detection",
+      "failure_attribution","alert_value_tracking","shadow_strategies",
+      "hypothesis_falsification"
+    ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
       return {
