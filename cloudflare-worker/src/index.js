@@ -12,6 +12,7 @@ import {
 import { evaluateReplaySetup, simulateOutcome } from "./replay_engine.js";
 import { fetchOfficialMacroEvents } from "./macro_calendar.js";
 import { fetchKrakenMicrostructure } from "./kraken_analytics.js";
+import { fetchMacroMarketContext } from "./macro_market_context.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -479,7 +480,9 @@ export class RadarDO extends DurableObject {
       lastMacroPoll: 0,
       lastMacroError: null,
       lastKrakenAnalyticsAt: 0,
-      lastKrakenAnalyticsError: null
+      lastKrakenAnalyticsError: null,
+      lastMacroMarketPoll: 0,
+      lastMacroMarketError: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -537,6 +540,12 @@ export class RadarDO extends DurableObject {
         krakenAnalytics: {
           lastOkAt: this.mem.lastKrakenAnalyticsAt || null,
           lastError: this.mem.lastKrakenAnalyticsError || null
+        },
+        macroMarket: {
+          health: this.center.macroMarketHealth(),
+          summary: this.center.macroMarketSummary(),
+          lastPoll: this.mem.lastMacroMarketPoll || null,
+          lastError: this.mem.lastMacroMarketError || null
         },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
@@ -662,6 +671,15 @@ export class RadarDO extends DurableObject {
         summary:this.center.secondaryMicrostructureSummary(),
         lastOkAt:this.mem.lastKrakenAnalyticsAt||null,
         lastError:this.mem.lastKrakenAnalyticsError||null
+      });
+    }
+
+    if (path === "/api/macro-market") {
+      return Response.json({
+        summary:this.center.macroMarketSummary(),
+        health:this.center.macroMarketHealth(),
+        lastPoll:this.mem.lastMacroMarketPoll||null,
+        lastError:this.mem.lastMacroMarketError||null
       });
     }
 
@@ -1140,6 +1158,22 @@ export class RadarDO extends DurableObject {
     await this.ctx.storage.setAlarm(when);
   }
 
+  async pollMacroMarket(force=false) {
+    const now=Date.now();
+    if(!force && now-Number(this.mem.lastMacroMarketPoll||0)<6*60*60_000) return;
+    this.mem.lastMacroMarketPoll=now;
+    try {
+      const result=await fetchMacroMarketContext();
+      this.center.upsertMacroMarketContext(result);
+      this.mem.lastMacroMarketError=result.errors?.length
+        ? result.errors.map(x=>`${x.series}: ${x.error}`).join(" | ")
+        : null;
+    } catch(e) {
+      this.mem.lastMacroMarketError=e?.message||String(e);
+    }
+    await this.persist();
+  }
+
   async pollOfficialMacro(force=false) {
     const now=Date.now();
     if(!force && now-Number(this.mem.lastMacroPoll||0) < 6*60*60_000) {
@@ -1248,6 +1282,7 @@ export class RadarDO extends DurableObject {
       this.center.recordPatterns(this.context);
       this.center.recordFactorSnapshot(this.context);
       await this.pollOfficialMacro(false);
+      await this.pollMacroMarket(false);
 
       try {
         const [derivatives, crossAssets, bookTicker, venue] = await Promise.all([
