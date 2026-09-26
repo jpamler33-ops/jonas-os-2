@@ -38,6 +38,16 @@ import {
   buildInformationFlowGraph,
   graphRegime
 } from "./information_flow.js";
+import {
+  MARKET_GRAMMAR_VERSION,
+  combineBackoffDistributions,
+  empiricalSurprisePercentile,
+  grammarBreakStatus,
+  grammarContexts,
+  grammarDrift,
+  nextStateForecast,
+  scoreObservedToken
+} from "./market_grammar.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -599,6 +609,39 @@ export class TradingCenter {
         payload_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS grammar_transition_counts (
+        order_n INTEGER NOT NULL,
+        context_key TEXT NOT NULL,
+        next_token TEXT NOT NULL,
+        count_n INTEGER NOT NULL DEFAULT 0,
+        first_ts INTEGER NOT NULL,
+        last_ts INTEGER NOT NULL,
+        PRIMARY KEY(order_n,context_key,next_token)
+      );
+
+      CREATE TABLE IF NOT EXISTS grammar_forecasts (
+        origin_ts INTEGER PRIMARY KEY,
+        model_version TEXT NOT NULL,
+        context_json TEXT NOT NULL,
+        top_json TEXT NOT NULL,
+        top1_token TEXT,
+        top1_probability REAL,
+        entropy_bits REAL,
+        normalized_entropy REAL,
+        effective_order INTEGER,
+        support INTEGER,
+        branching_factor INTEGER,
+        resolved_ts INTEGER,
+        actual_token TEXT,
+        actual_probability REAL,
+        actual_rank INTEGER,
+        surprise_bits REAL,
+        surprise_percentile REAL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        hit1 INTEGER,
+        hit3 INTEGER
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -677,6 +720,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_market_tokens_id_ts ON market_tokens(token_id,ts);
       CREATE INDEX IF NOT EXISTS idx_information_flow_ts ON information_flow_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_phase_transition_ts ON phase_transition_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_grammar_transition_context ON grammar_transition_counts(order_n,context_key);
+      CREATE INDEX IF NOT EXISTS idx_grammar_forecast_status ON grammar_forecasts(status,resolved_ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -1413,12 +1458,234 @@ export class TradingCenter {
     return g;
   }
 
+  grammarVocabulary() {
+    return this.rows(
+      `SELECT next_token,count_n FROM grammar_transition_counts
+       WHERE order_n=0 AND context_key='*'
+       ORDER BY count_n DESC`
+    ).map(r=>({token:String(r.next_token),count:Number(r.count_n||0)}));
+  }
+
+  grammarPrediction(history,maxOrder=5) {
+    const vocabRows=this.grammarVocabulary();
+    const vocabulary=vocabRows.map(x=>x.token);
+    if(!vocabulary.length) return combineBackoffDistributions({vocabulary:[]});
+
+    const unigramCounts=Object.fromEntries(vocabRows.map(x=>[x.token,x.count]));
+    const contextCounts=[];
+    for(const ctx of grammarContexts(history,maxOrder)){
+      if(ctx.order===0) continue;
+      const rows=this.rows(
+        `SELECT next_token,count_n FROM grammar_transition_counts
+         WHERE order_n=? AND context_key=?`,
+        Number(ctx.order),String(ctx.key)
+      );
+      if(!rows.length) continue;
+      contextCounts.push({
+        order:ctx.order,
+        key:ctx.key,
+        counts:Object.fromEntries(rows.map(r=>[String(r.next_token),Number(r.count_n||0)]))
+      });
+    }
+    return combineBackoffDistributions({vocabulary,unigramCounts,contextCounts});
+  }
+
+  incrementGrammarCounts(history,nextToken,ts,maxOrder=5) {
+    const token=String(nextToken);
+    for(const ctx of grammarContexts(history,maxOrder)){
+      this.sql.exec(
+        `INSERT INTO grammar_transition_counts(
+          order_n,context_key,next_token,count_n,first_ts,last_ts
+        ) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(order_n,context_key,next_token)
+        DO UPDATE SET count_n=count_n+1,last_ts=excluded.last_ts`,
+        Number(ctx.order),String(ctx.key),token,1,Number(ts),Number(ts)
+      );
+    }
+  }
+
+  ensureGrammarBootstrap(maxRows=5000) {
+    const transitions=Number(this.one(
+      "SELECT COUNT(*) AS n FROM grammar_transition_counts"
+    )?.n||0);
+    if(transitions>0) return {bootstrapped:false,transitions};
+
+    const rows=this.rows(
+      `SELECT ts,token_id FROM market_tokens
+       ORDER BY ts DESC LIMIT ?`,
+      Math.min(10000,Math.max(100,Number(maxRows||5000)))
+    ).reverse();
+    if(rows.length<2) return {bootstrapped:false,transitions:0,tokens:rows.length};
+
+    const history=[];
+    for(const r of rows){
+      this.incrementGrammarCounts(history,String(r.token_id),Number(r.ts),5);
+      history.push(String(r.token_id));
+      if(history.length>5)history.shift();
+    }
+    return{
+      bootstrapped:true,
+      tokens:rows.length,
+      transitions:Number(this.one("SELECT COUNT(*) AS n FROM grammar_transition_counts")?.n||0)
+    };
+  }
+
+  processGrammarObservation(token,ts) {
+    this.ensureGrammarBootstrap();
+    const historyRows=this.rows(
+      `SELECT ts,token_id FROM market_tokens
+       WHERE ts<? ORDER BY ts DESC LIMIT 5`,
+      Number(ts)
+    ).reverse();
+    const history=historyRows.map(r=>String(r.token_id));
+    const previousOrigin=historyRows.at(-1)?.ts??null;
+
+    const pre=this.grammarPrediction(history,5);
+    const totalSeen=this.grammarVocabulary().reduce((s,x)=>s+Number(x.count||0),0);
+    let resolved=null;
+
+    if(pre.vocabulary?.length){
+      const scored=scoreObservedToken(pre,token.tokenId,totalSeen);
+      const surpriseHistory=this.rows(
+        `SELECT surprise_bits FROM grammar_forecasts
+         WHERE surprise_bits IS NOT NULL
+         ORDER BY resolved_ts DESC LIMIT 2000`
+      ).map(r=>Number(r.surprise_bits)).filter(Number.isFinite);
+      const percentile=empiricalSurprisePercentile(scored.surpriseBits,surpriseHistory);
+      const status=grammarBreakStatus({
+        percentile,
+        probability:scored.probability,
+        support:pre.support,
+        resolvedSample:surpriseHistory.length
+      });
+      resolved={
+        ...scored,
+        percentile,
+        status,
+        support:Number(pre.support||0),
+        effectiveOrder:Number(pre.effectiveOrder||0),
+        entropyBits:pre.entropyBits??null
+      };
+
+      if(previousOrigin!==null){
+        this.sql.exec(
+          `UPDATE grammar_forecasts SET
+            resolved_ts=?,actual_token=?,actual_probability=?,actual_rank=?,
+            surprise_bits=?,surprise_percentile=?,status=?,hit1=?,hit3=?
+           WHERE origin_ts=? AND resolved_ts IS NULL`,
+          Number(ts),String(token.tokenId),Number(scored.probability),
+          scored.rank===null?null:Number(scored.rank),
+          Number(scored.surpriseBits),
+          percentile===null?null:Number(percentile),
+          String(status),scored.top1?1:0,scored.top3?1:0,
+          Number(previousOrigin)
+        );
+      }
+    }
+
+    this.incrementGrammarCounts(history,token.tokenId,Number(ts),5);
+
+    const nextHistory=[...history,String(token.tokenId)].slice(-5);
+    const post=this.grammarPrediction(nextHistory,5);
+    const forecast=nextStateForecast(post,10);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO grammar_forecasts(
+        origin_ts,model_version,context_json,top_json,top1_token,top1_probability,
+        entropy_bits,normalized_entropy,effective_order,support,branching_factor,status
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,'PENDING')`,
+      Number(ts),MARKET_GRAMMAR_VERSION,JSON.stringify(nextHistory),
+      JSON.stringify(forecast.top||[]),
+      forecast.top1?.token||null,
+      forecast.top1?.probability===undefined?null:Number(forecast.top1.probability),
+      forecast.entropyBits===null?null:Number(forecast.entropyBits),
+      forecast.normalizedEntropy===null?null:Number(forecast.normalizedEntropy),
+      Number(forecast.effectiveOrder||0),Number(forecast.support||0),
+      Number(forecast.branchingFactor||0)
+    );
+
+    return{resolved,next:forecast};
+  }
+
+  marketGrammarReport(limit=1500) {
+    const resolved=this.rows(
+      `SELECT * FROM grammar_forecasts
+       WHERE resolved_ts IS NOT NULL
+       ORDER BY resolved_ts DESC LIMIT ?`,
+      Math.min(5000,Math.max(50,Number(limit||1500)))
+    ).reverse();
+    const latest=this.one(
+      "SELECT * FROM grammar_forecasts ORDER BY origin_ts DESC LIMIT 1"
+    );
+    const latestResolved=resolved.at(-1)||null;
+    const n=resolved.length;
+    const hit1=n?resolved.filter(r=>Number(r.hit1)===1).length/n:null;
+    const hit3=n?resolved.filter(r=>Number(r.hit3)===1).length/n:null;
+    const surprises=resolved.map(r=>Number(r.surprise_bits)).filter(Number.isFinite);
+    const avgSurprise=surprises.length
+      ?surprises.reduce((a,b)=>a+b,0)/surprises.length:null;
+    const statuses={};
+    for(const r of resolved)statuses[r.status]=(statuses[r.status]||0)+1;
+    const drift=grammarDrift(resolved);
+
+    return{
+      status:n>=100?"ACTIVE":n>=30?"EARLY":"LEARNING",
+      modelVersion:MARKET_GRAMMAR_VERSION,
+      resolvedN:n,
+      top1Accuracy:hit1,
+      top3Accuracy:hit3,
+      avgSurpriseBits:avgSurprise,
+      perplexity:avgSurprise===null?null:Math.pow(2,avgSurprise),
+      statuses,
+      drift,
+      latestForecast:latest?{
+        originTs:Number(latest.origin_ts),
+        top1Token:latest.top1_token,
+        top1Probability:latest.top1_probability===null?null:Number(latest.top1_probability),
+        top:JSON.parse(latest.top_json||"[]"),
+        entropyBits:latest.entropy_bits===null?null:Number(latest.entropy_bits),
+        normalizedEntropy:latest.normalized_entropy===null?null:Number(latest.normalized_entropy),
+        effectiveOrder:Number(latest.effective_order||0),
+        support:Number(latest.support||0),
+        branchingFactor:Number(latest.branching_factor||0),
+        resolvedTs:latest.resolved_ts===null?null:Number(latest.resolved_ts),
+        actualToken:latest.actual_token||null,
+        status:latest.status
+      }:null,
+      latestResolved:latestResolved?{
+        originTs:Number(latestResolved.origin_ts),
+        resolvedTs:Number(latestResolved.resolved_ts),
+        actualToken:latestResolved.actual_token,
+        actualProbability:Number(latestResolved.actual_probability),
+        actualRank:latestResolved.actual_rank===null?null:Number(latestResolved.actual_rank),
+        surpriseBits:Number(latestResolved.surprise_bits),
+        surprisePercentile:latestResolved.surprise_percentile===null?null:Number(latestResolved.surprise_percentile),
+        status:latestResolved.status,
+        hit1:Number(latestResolved.hit1)===1,
+        hit3:Number(latestResolved.hit3)===1
+      }:null,
+      note:"Variable-order token grammar with Bayesian-style backoff. Surprise is calibrated against prior resolved forecasts; it is not a price-direction probability."
+    };
+  }
+
   recordMarketToken(genome) {
     if(!genome?.ts) return null;
+    const existing=this.one("SELECT * FROM market_tokens WHERE ts=?",Number(genome.ts));
+    if(existing) {
+      return{
+        tokenId:existing.token_id,
+        grammar:existing.grammar,
+        version:existing.language_version,
+        components:JSON.parse(existing.components_json||"{}"),
+        existing:true
+      };
+    }
+
     const extension=this.one("SELECT * FROM market_genome_extensions WHERE ts=?",Number(genome.ts))||{};
     const token=tokenizeMarket(genome,extension,this.macroRiskState(Number(genome.ts)+5*60_000));
+    const grammarResult=this.processGrammarObservation(token,Number(genome.ts));
+
     this.sql.exec(
-      `INSERT OR REPLACE INTO market_tokens(
+      `INSERT INTO market_tokens(
         ts,token_id,grammar,language_version,components_json,raw_dimensions,token_dimensions
       ) VALUES(?,?,?,?,?,?,?)`,
       Number(genome.ts),token.tokenId,token.grammar,token.version,
@@ -1426,7 +1693,7 @@ export class TradingCenter {
       Number(token.compression?.rawDimensions||0),
       Number(token.compression?.tokenDimensions||0)
     );
-    return token;
+    return{...token,grammarResult};
   }
 
   updateMarketTokenOutcomes() {
@@ -1597,13 +1864,16 @@ export class TradingCenter {
     const lang=this.marketLanguageReport(500);
     const seq=this.sequenceMemoryReport(4,2500);
     const graph=this.latestInformationFlow()||this.informationFlowReport(1500);
+    const grammar=this.marketGrammarReport(600);
     const tension=lang.tension||{};
     const rarity=Number(seq.currentRarity||0);
     const leaderConcentration=Number(graph.leaderConcentration||0);
+    const grammarSurprise=Number(grammar.latestResolved?.surprisePercentile||0);
     const score=Math.min(1,
-      0.50*Number(tension.score||0)+
-      0.30*rarity+
-      0.20*Math.min(1,leaderConcentration*2)
+      0.38*Number(tension.score||0)+
+      0.24*rarity+
+      0.16*Math.min(1,leaderConcentration*2)+
+      0.22*grammarSurprise
     );
     const status=score>=0.78?"PHASE_TRANSITION":score>=0.58?"TENSION_BUILDING":"STABLE";
     const payload={
@@ -1613,6 +1883,10 @@ export class TradingCenter {
       sequenceRarity:rarity,
       informationLeader:graph.dominantLeader||null,
       informationRegime:graph.regime||null,
+      grammarStatus:grammar.latestResolved?.status||"LEARNING",
+      grammarSurprisePercentile:grammar.latestResolved?.surprisePercentile??null,
+      grammarDrift:grammar.drift||null,
+      nextStateForecast:grammar.latestForecast||null,
       note:"This is a structural instability score, not a directional forecast."
     };
     this.sql.exec(
@@ -3246,6 +3520,7 @@ export class TradingCenter {
       sequenceMemory:this.sequenceMemoryReport(),
       informationFlow:this.latestInformationFlow()||this.informationFlowReport(),
       phaseTransition:this.phaseTransitionReport(),
+      marketGrammar:this.marketGrammarReport(),
       versions:this.versionReport(),
       predictionLedger:this.predictionLedgerAudit(),
       parity:this.parityReport(),
@@ -4225,7 +4500,9 @@ export class TradingCenter {
       parityAudits: Number(this.one("SELECT COUNT(*) AS n FROM parity_audits")?.n || 0),
       safeGenomeOutcomes: Number(this.one("SELECT COUNT(*) AS n FROM genome_safe_outcomes WHERE ret_fwd_60m IS NOT NULL")?.n || 0),
       marketTokens: Number(this.one("SELECT COUNT(*) AS n FROM market_tokens")?.n || 0),
-      informationFlowSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM information_flow_snapshots")?.n || 0)
+      informationFlowSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM information_flow_snapshots")?.n || 0),
+      grammarTransitions: Number(this.one("SELECT COUNT(*) AS n FROM grammar_transition_counts")?.n || 0),
+      grammarForecasts: Number(this.one("SELECT COUNT(*) AS n FROM grammar_forecasts")?.n || 0)
     };
   }
 
