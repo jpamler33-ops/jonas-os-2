@@ -108,10 +108,43 @@ export class TradingCenter {
         ret_1440m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS setup_features (
+        setup_id INTEGER PRIMARY KEY,
+        session TEXT,
+        volatility_regime TEXT,
+        atr_pct REAL,
+        volume_ratio REAL,
+        trend_alignment TEXT,
+        ema_state TEXT,
+        distance_level_pct REAL,
+        pattern_tags TEXT,
+        recent_news_60m INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS factor_snapshots (
+        ts INTEGER PRIMARY KEY,
+        close REAL NOT NULL,
+        session TEXT,
+        volatility_regime TEXT,
+        atr_pct REAL,
+        volume_ratio REAL,
+        trend_alignment TEXT,
+        ema_state TEXT,
+        distance_level_pct REAL,
+        pattern_tags TEXT,
+        recent_news_60m INTEGER NOT NULL DEFAULT 0,
+        ret_15m REAL,
+        ret_60m REAL,
+        ret_240m REAL,
+        ret_1440m REAL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_setups_status ON setups(status);
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
       CREATE INDEX IF NOT EXISTS idx_market_minutes_ts ON market_minutes(ts);
+      CREATE INDEX IF NOT EXISTS idx_setup_features_session ON setup_features(session);
+      CREATE INDEX IF NOT EXISTS idx_factor_snapshots_ts ON factor_snapshots(ts);
     `);
   }
 
@@ -163,6 +196,204 @@ export class TradingCenter {
     );
   }
 
+  sessionFor(ts) {
+    const h = new Date(Number(ts)).getUTCHours();
+    if (h < 7) return "ASIA_00_07_UTC";
+    if (h < 13) return "EUROPE_07_13_UTC";
+    if (h < 16) return "NY_OPEN_13_16_UTC";
+    if (h < 21) return "US_16_21_UTC";
+    return "LATE_21_24_UTC";
+  }
+
+  median(values) {
+    const xs = values.filter(Number.isFinite).sort((a,b) => a-b);
+    if (!xs.length) return 0;
+    const m = Math.floor(xs.length/2);
+    return xs.length % 2 ? xs[m] : (xs[m-1] + xs[m]) / 2;
+  }
+
+  factorsFromContext(ctx) {
+    const c5 = Array.isArray(ctx?.c5) ? ctx.c5 : [];
+    const latest = c5.at(-1);
+    const ts = Number(latest?.t || Date.now());
+    const price = Number(ctx?.price || latest?.c || 0);
+    const recent = c5.slice(-101);
+    const trs = [];
+    for (let i=1;i<recent.length;i++) {
+      const cur=recent[i], prev=recent[i-1];
+      const tr=Math.max(
+        cur.h-cur.l,
+        Math.abs(cur.h-prev.c),
+        Math.abs(cur.l-prev.c)
+      );
+      trs.push(prev.c ? tr/prev.c : 0);
+    }
+    const atr14 = trs.slice(-14).reduce((a,b)=>a+b,0) / Math.max(1, Math.min(14, trs.length));
+    const baseline = this.median(trs.slice(-80));
+    const volRatio = baseline > 0 ? atr14 / baseline : 1;
+    const volatility_regime = volRatio < 0.70 ? "LOW"
+      : volRatio < 1.30 ? "NORMAL"
+      : volRatio < 2.00 ? "HIGH"
+      : "EXTREME";
+
+    const vols = c5.slice(-21,-1).map(x => Number(x.v));
+    const volMedian = this.median(vols);
+    const volume_ratio = volMedian > 0 && latest ? Number(latest.v)/volMedian : 1;
+
+    const t = ctx?.trends || {};
+    const bull = ["4h","1h","15m","5m"].filter(tf => t[tf] === "BULLISH").length;
+    const bear = ["4h","1h","15m","5m"].filter(tf => t[tf] === "BEARISH").length;
+    const trend_alignment = bull === 4 ? "ALL_BULL"
+      : bear === 4 ? "ALL_BEAR"
+      : bull >= 3 ? "BULL_ALIGNED"
+      : bear >= 3 ? "BEAR_ALIGNED"
+      : "MIXED";
+
+    const e20=Number(ctx?.ema20||0), e50=Number(ctx?.ema50||0);
+    const ema_state = price > e20 && price > e50 ? "ABOVE_BOTH"
+      : price < e20 && price < e50 ? "BELOW_BOTH"
+      : "BETWEEN";
+
+    const levels=[ctx?.support,ctx?.resistance]
+      .filter(x => typeof x === "number" && x > 0)
+      .map(x => Math.abs(price-x)/price);
+    const distance_level_pct = levels.length ? Math.min(...levels) : null;
+
+    const patterns = this.detectPatterns(c5).map(x => x[0]);
+    const recentNews = Number(this.one(
+      "SELECT COUNT(*) AS n FROM news_events WHERE published_ts >= ?",
+      ts - 60*60*1000
+    )?.n || 0);
+
+    return {
+      ts,
+      close: price,
+      session: this.sessionFor(ts),
+      volatility_regime,
+      atr_pct: atr14,
+      volume_ratio,
+      trend_alignment,
+      ema_state,
+      distance_level_pct,
+      pattern_tags: patterns.join(","),
+      recent_news_60m: recentNews
+    };
+  }
+
+  recordFactorSnapshot(ctx) {
+    const f = this.factorsFromContext(ctx);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO factor_snapshots(
+        ts, close, session, volatility_regime, atr_pct, volume_ratio,
+        trend_alignment, ema_state, distance_level_pct, pattern_tags, recent_news_60m
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      f.ts, f.close, f.session, f.volatility_regime, f.atr_pct, f.volume_ratio,
+      f.trend_alignment, f.ema_state, f.distance_level_pct, f.pattern_tags, f.recent_news_60m
+    );
+    return f;
+  }
+
+  attachSetupFeatures(setupId, ctx) {
+    const f = this.factorsFromContext(ctx);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO setup_features(
+        setup_id, session, volatility_regime, atr_pct, volume_ratio,
+        trend_alignment, ema_state, distance_level_pct, pattern_tags, recent_news_60m
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      Number(setupId), f.session, f.volatility_regime, f.atr_pct, f.volume_ratio,
+      f.trend_alignment, f.ema_state, f.distance_level_pct, f.pattern_tags, f.recent_news_60m
+    );
+    return f;
+  }
+
+  updateFactorOutcomes(nowTs = Date.now()) {
+    const pending = this.rows(
+      `SELECT ts, close, ret_15m, ret_60m, ret_240m, ret_1440m
+       FROM factor_snapshots WHERE ret_1440m IS NULL
+       ORDER BY ts ASC LIMIT 300`
+    );
+    const horizons=[["ret_15m",15],["ret_60m",60],["ret_240m",240],["ret_1440m",1440]];
+    for (const row of pending) {
+      const updates=[], values=[];
+      for (const [field,min] of horizons) {
+        if (row[field] !== null && row[field] !== undefined) continue;
+        const target=Number(row.ts)+min*60_000;
+        if (nowTs < target) continue;
+        const p=this.nearestClose(target);
+        if (!p) continue;
+        updates.push(`${field}=?`);
+        values.push((Number(p.close)-Number(row.close))/Number(row.close));
+      }
+      if (updates.length) {
+        values.push(row.ts);
+        this.sql.exec(`UPDATE factor_snapshots SET ${updates.join(", ")} WHERE ts=?`,...values);
+      }
+    }
+  }
+
+  matchingSetupHistory(side, ctx) {
+    const f=this.factorsFromContext(ctx);
+    const row=this.one(
+      `SELECT COUNT(*) AS n,
+        SUM(CASE WHEN s.result='TARGET' THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN s.result='STOP' THEN 1 ELSE 0 END) AS losses,
+        AVG(s.realized_r) AS avg_r,
+        AVG(s.mfe_r) AS avg_mfe,
+        AVG(s.mae_r) AS avg_mae
+       FROM setups s JOIN setup_features f ON f.setup_id=s.id
+       WHERE s.side=? AND s.result IN ('TARGET','STOP')
+         AND f.session=? AND f.volatility_regime=?
+         AND f.trend_alignment=? AND f.ema_state=?`,
+      side, f.session, f.volatility_regime, f.trend_alignment, f.ema_state
+    ) || {};
+    const n=Number(row.n||0), wins=Number(row.wins||0), losses=Number(row.losses||0);
+    return {
+      factors:f,
+      n,wins,losses,
+      hitRate:n ? wins/n : null,
+      avgR: row.avg_r === null ? null : Number(row.avg_r),
+      avgMfe: row.avg_mfe === null ? null : Number(row.avg_mfe),
+      avgMae: row.avg_mae === null ? null : Number(row.avg_mae),
+      evidence: n >= 50 ? "STRONG_SAMPLE" : n >= 20 ? "USABLE_SAMPLE" : n >= 8 ? "EARLY_SAMPLE" : "LEARNING"
+    };
+  }
+
+  factorEdgeStats() {
+    return this.rows(
+      `SELECT f.session, f.volatility_regime, f.trend_alignment, f.ema_state, s.side,
+        COUNT(*) AS n,
+        SUM(CASE WHEN s.result='TARGET' THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN s.result='STOP' THEN 1 ELSE 0 END) AS losses,
+        AVG(s.realized_r) AS avg_r,
+        AVG(s.mfe_r) AS avg_mfe,
+        AVG(s.mae_r) AS avg_mae
+       FROM setups s JOIN setup_features f ON f.setup_id=s.id
+       WHERE s.result IN ('TARGET','STOP')
+       GROUP BY f.session, f.volatility_regime, f.trend_alignment, f.ema_state, s.side
+       ORDER BY n DESC, avg_r DESC`
+    );
+  }
+
+  factorSnapshotStats() {
+    return this.rows(
+      `SELECT session, volatility_regime, trend_alignment, ema_state,
+        COUNT(*) AS n,
+        AVG(ret_15m) AS avg_15m,
+        AVG(ret_60m) AS avg_60m,
+        AVG(ABS(ret_60m)) AS avg_abs_60m,
+        AVG(ret_240m) AS avg_240m
+       FROM factor_snapshots
+       GROUP BY session, volatility_regime, trend_alignment, ema_state
+       ORDER BY n DESC`
+    );
+  }
+
+  alertFunnel() {
+    return this.rows(
+      `SELECT stage, COUNT(*) AS n FROM alerts GROUP BY stage ORDER BY n DESC`
+    );
+  }
+
   openSetup(confirmed, ctx) {
     const candleTs = Number(ctx?.c5?.at(-1)?.t || Date.now());
     const levelBucket = Math.round(Number(confirmed.level || confirmed.entry) / 5) * 5;
@@ -189,7 +420,9 @@ export class TradingCenter {
       d.getUTCHours(),
       d.getUTCDay()
     );
-    return this.one("SELECT * FROM setups WHERE signature = ?", signature);
+    const row = this.one("SELECT * FROM setups WHERE signature = ?", signature);
+    if (row?.id) this.attachSetupFeatures(row.id, ctx);
+    return row;
   }
 
   checkOpenSetups({ ts, high, low, close }) {
@@ -479,6 +712,9 @@ export class TradingCenter {
       setupTimeStats: this.setupTimeStats(),
       patternStats: this.patternStats(),
       newsStats: this.newsStats(),
+      factorEdgeStats: this.factorEdgeStats(),
+      factorSnapshotStats: this.factorSnapshotStats(),
+      alertFunnel: this.alertFunnel(),
       recentSetups: this.recentSetups(50),
       recentNews: this.recentNews(50),
       recentPatterns: this.recentPatterns(50)
