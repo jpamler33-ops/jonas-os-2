@@ -13,6 +13,7 @@ import {
   costAdjustedR,
   decayWindows,
   mean as researchMean,
+  numericFeatureContrast,
   sequenceDNA,
   transitionMatrix,
   wilsonInterval
@@ -1201,12 +1202,11 @@ export class TradingCenter {
       "liquidity_sweep_detection","daily_risk_lock","position_sizing",
       "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance",
       "probability_calibration","shadow_strategies",
-      "traditional_risk_assets","usd_rates_context"
+      "traditional_risk_assets","usd_rates_context",
+      "feed_latency_monitor","lead_lag_network","counterfactuals","hypothesis_falsification"
     ]);
     const partial=new Set([
-      "counterfactuals","feed_latency_monitor",
-      "lead_lag_network",
-      "hypothesis_falsification","endpoint_auth","feed_redundancy"
+      "endpoint_auth","feed_redundancy"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
@@ -1650,6 +1650,205 @@ export class TradingCenter {
     };
   }
 
+  feedLatencyReport(nowTs=Date.now()) {
+    const sources=[
+      ["btc_live","SELECT MAX(ts) AS ts FROM market_minutes",2*60_000],
+      ["context","SELECT MAX(ts) AS ts FROM contexts",10*60_000],
+      ["open_interest","SELECT MAX(ts) AS ts FROM open_interest_history",15*60_000],
+      ["funding","SELECT MAX(ts) AS ts FROM funding_history",12*60*60_000],
+      ["long_short","SELECT MAX(ts) AS ts FROM long_short_history",15*60_000],
+      ["cross_asset","SELECT MAX(ts) AS ts FROM cross_asset_history",20*60_000],
+      ["orderflow","SELECT MAX(ts) AS ts FROM orderflow_5m",15*60_000],
+      ["venue","SELECT MAX(ts) AS ts FROM venue_snapshots",15*60_000],
+      ["microstructure","SELECT MAX(ts) AS ts FROM secondary_microstructure",20*60_000],
+      ["macro_calendar","SELECT MAX(captured_ts) AS ts FROM macro_events",24*60*60_000],
+      ["macro_market","SELECT MAX(fetched_ts) AS ts FROM macro_market_daily",12*60*60_000]
+    ];
+    const feeds=sources.map(([name,q,threshold])=>{
+      const ts=Number(this.one(q)?.ts||0);
+      const ageMs=ts?Number(nowTs)-ts:null;
+      return {
+        name,ts:ts||null,ageMs,thresholdMs:threshold,
+        status:!ts?"MISSING":ageMs<=threshold?"FRESH":ageMs<=threshold*2?"DEGRADED":"STALE"
+      };
+    });
+    const fresh=feeds.filter(x=>x.status==="FRESH").length;
+    const missing=feeds.filter(x=>x.status==="MISSING").map(x=>x.name);
+    const stale=feeds.filter(x=>x.status==="STALE").map(x=>x.name);
+    return {
+      feeds,
+      freshFraction:feeds.length?fresh/feeds.length:null,
+      missing,stale,
+      status:missing.length||stale.length?"DEGRADED":"HEALTHY"
+    };
+  }
+
+  leadLagNetworkReport() {
+    const symbols=this.rows("SELECT DISTINCT symbol FROM cross_asset_history").map(r=>String(r.symbol));
+    const lags=[0,15,30,60];
+    const network=[];
+    const corr=(pairs)=>{
+      if(pairs.length<20) return null;
+      const xs=pairs.map(x=>x.x),ys=pairs.map(x=>x.y);
+      const mx=researchMean(xs),my=researchMean(ys);
+      let num=0,dx=0,dy=0;
+      for(let i=0;i<pairs.length;i++){
+        const a=xs[i]-mx,b=ys[i]-my;
+        num+=a*b;dx+=a*a;dy+=b*b;
+      }
+      return dx>0&&dy>0?num/Math.sqrt(dx*dy):null;
+    };
+    for(const symbol of symbols) {
+      const rows=this.rows(
+        `SELECT ts,ret_60m FROM cross_asset_history
+         WHERE symbol=? AND ret_60m IS NOT NULL ORDER BY ts DESC LIMIT 2500`,
+        symbol
+      );
+      for(const lagMin of lags) {
+        const pairs=[];
+        for(const r of rows) {
+          const t=Number(r.ts)+lagMin*60_000;
+          const base=this.one(
+            "SELECT close FROM historical_5m WHERE ts>=? ORDER BY ts ASC LIMIT 1",t
+          );
+          const future=this.one(
+            "SELECT close FROM historical_5m WHERE ts>=? ORDER BY ts ASC LIMIT 1",t+60*60_000
+          );
+          if(!base?.close||!future?.close) continue;
+          const y=Number(future.close)/Number(base.close)-1;
+          const x=Number(r.ret_60m);
+          if(Number.isFinite(x)&&Number.isFinite(y)) pairs.push({x,y});
+        }
+        const r=corr(pairs);
+        if(r!==null) network.push({
+          symbol,lagMinutes:lagMin,n:pairs.length,correlation:r,
+          relation:`${symbol} trailing 60m vs BTC following 60m starting +${lagMin}m`
+        });
+      }
+    }
+    return {
+      status:network.length?"ACTIVE":"LEARNING",
+      edges:network.sort((a,b)=>Math.abs(b.correlation)-Math.abs(a.correlation)),
+      warning:"Lead-lag edges are time-shifted associations, not proof that one market causes another."
+    };
+  }
+
+  matchedCounterfactualReport(limit=150) {
+    const championHash=this.paramsHash({retestTol:0.0012,stopBuffer:0.0005,minRR:2,maxExtension:0.002});
+    const setups=this.rows(
+      `SELECT ts,side,result,realized_r FROM replay_results
+       WHERE params_hash=? AND result IN ('TARGET','STOP')
+       ORDER BY ts DESC LIMIT ?`,
+      championHash,Math.min(300,Math.max(20,Number(limit||150)))
+    );
+    if(setups.length<10) return {status:"WAITING_FOR_REPLAY",n:setups.length};
+
+    const genomes=this.rows(
+      `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
+        oi_change,funding_rate,long_short_ratio,cross_ret_60m,state_label,ret_fwd_60m
+       FROM historical_genomes WHERE ret_fwd_60m IS NOT NULL
+       ORDER BY ts DESC LIMIT 6000`
+    );
+    if(genomes.length<100) return {status:"WAITING_FOR_GENOMES",n:genomes.length};
+
+    const setupTimes=setups.map(s=>Number(s.ts));
+    const isNearSetup=t=>setupTimes.some(x=>Math.abs(Number(t)-x)<=2*60*60_000);
+    const controls=genomes.filter(g=>!isNearSetup(g.ts));
+    const fields=[
+      ["ret_15m",0.008,1.2],["atr_pct",0.004,1],["volume_ratio",1,0.8],
+      ["ema_distance_pct",0.006,0.8],["oi_change",0.01,1],
+      ["funding_rate",0.0005,0.5],["cross_ret_60m",0.02,0.7]
+    ];
+    const distance=(a,b)=>{
+      let s=0,w=0;
+      for(const [k,scale,wt] of fields){
+        const x=Number(a[k]),y=Number(b[k]);
+        if(!Number.isFinite(x)||!Number.isFinite(y)) continue;
+        const d=(x-y)/scale;s+=wt*d*d;w+=wt;
+      }
+      return w?Math.sqrt(s/w):Infinity;
+    };
+
+    const pairs=[];
+    for(const s of setups) {
+      const state=this.one(
+        "SELECT * FROM historical_genomes WHERE ts<=? ORDER BY ts DESC LIMIT 1",
+        Number(s.ts)
+      );
+      if(!state||!Number.isFinite(Number(state.ret_fwd_60m))) continue;
+      let best=null,bestD=Infinity;
+      for(const g of controls) {
+        if(state.state_label&&g.state_label&&state.state_label!==g.state_label) continue;
+        const d=distance(state,g);
+        if(d<bestD){bestD=d;best=g;}
+      }
+      if(!best||!Number.isFinite(Number(best.ret_fwd_60m))) continue;
+      const sideSign=String(s.side)==="LONG"?1:-1;
+      const treated=Number(state.ret_fwd_60m)*sideSign;
+      const control=Number(best.ret_fwd_60m)*sideSign;
+      pairs.push({
+        setupTs:Number(s.ts),side:s.side,result:s.result,
+        treatedDirectional60m:treated,
+        controlDirectional60m:control,
+        difference:treated-control,
+        distance:bestD,
+        controlTs:Number(best.ts)
+      });
+    }
+    return {
+      status:pairs.length>=30?"ACTIVE":pairs.length?"EARLY":"WAITING",
+      n:pairs.length,
+      meanTreated:researchMean(pairs.map(x=>x.treatedDirectional60m)),
+      meanMatchedControl:researchMean(pairs.map(x=>x.controlDirectional60m)),
+      meanDifference:researchMean(pairs.map(x=>x.difference)),
+      medianDistance:(()=>{
+        const xs=pairs.map(x=>x.distance).filter(Number.isFinite).sort((a,b)=>a-b);
+        return xs.length?xs[Math.floor(xs.length/2)]:null;
+      })(),
+      examples:pairs.slice(0,25),
+      warning:"Matched controls reduce obvious context differences but remain observational; this is not causal proof."
+    };
+  }
+
+  hypothesisFalsificationReport() {
+    const rows=this.rows(
+      `SELECT * FROM historical_genomes WHERE ret_fwd_60m IS NOT NULL ORDER BY ts ASC LIMIT 10000`
+    );
+    if(rows.length<120) return {status:"LEARNING",n:rows.length,tests:[]};
+    const split=Math.floor(rows.length*0.7);
+    const train=rows.slice(0,split),test=rows.slice(split);
+    const keys=["volume_ratio","oi_change","funding_rate","long_short_ratio","cross_ret_60m"];
+    const tests=[];
+    for(const key of keys) {
+      const tr=numericFeatureContrast(train,key,"ret_fwd_60m");
+      if(!tr) continue;
+      const valid=test.filter(r=>Number.isFinite(Number(r[key]))&&Number.isFinite(Number(r.ret_fwd_60m)));
+      const lo=valid.filter(r=>Number(r[key])<=tr.median);
+      const hi=valid.filter(r=>Number(r[key])>tr.median);
+      if(lo.length<10||hi.length<10) continue;
+      const loMean=researchMean(lo.map(r=>Number(r.ret_fwd_60m)));
+      const hiMean=researchMean(hi.map(r=>Number(r.ret_fwd_60m)));
+      const holdoutDiff=(hiMean??0)-(loMean??0);
+      const sameSign=Math.sign(holdoutDiff)===Math.sign(Number(tr.difference||0));
+      const retained=Math.abs(Number(tr.difference||0))>0
+        ? Math.abs(holdoutDiff)/Math.abs(Number(tr.difference))
+        : null;
+      tests.push({
+        feature:key,trainN:tr.lowN+tr.highN,holdoutN:valid.length,
+        threshold:tr.median,trainEffect:tr.difference,holdoutEffect:holdoutDiff,
+        sameDirection:sameSign,effectRetention:retained,
+        verdict:sameSign&&retained!==null&&retained>=0.25?"SURVIVED_HOLDOUT":"FAILED_OR_WEAK"
+      });
+    }
+    return {
+      status:tests.length?"ACTIVE":"LEARNING",
+      n:rows.length,trainN:train.length,holdoutN:test.length,
+      tests,
+      survived:tests.filter(x=>x.verdict==="SURVIVED_HOLDOUT").length,
+      warning:"Discovery is separated chronologically from falsification. Surviving a holdout is evidence of robustness, not certainty."
+    };
+  }
+
   fullResearchReport(ctx=null) {
     return {
       generatedAt:Date.now(),
@@ -1679,7 +1878,11 @@ export class TradingCenter {
       crossMarketLead:this.crossMarketLeadResearch(),
       modelDrift:this.modelDriftReport(),
       probabilityCalibration:this.probabilityCalibrationReport(),
-      shadowStrategies:this.shadowStrategyStats()
+      shadowStrategies:this.shadowStrategyStats(),
+      feedLatency:this.feedLatencyReport(),
+      leadLagNetwork:this.leadLagNetworkReport(),
+      counterfactuals:this.matchedCounterfactualReport(),
+      falsification:this.hypothesisFalsificationReport()
     };
   }
 
