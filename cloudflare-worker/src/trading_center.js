@@ -1320,10 +1320,10 @@ export class TradingCenter {
       "probability_calibration","shadow_strategies",
       "traditional_risk_assets","usd_rates_context",
       "options_iv_skew","options_term_structure","coinbase_premium",
+      "latency_cost_model","risk_of_ruin_simulation","endpoint_auth",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
-      "endpoint_auth"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
@@ -1505,6 +1505,110 @@ export class TradingCenter {
       status=(avgDelta!==null&&avgDelta<-0.4)||(hitDelta!==null&&hitDelta<-0.15)?"DEGRADING":"STABLE_OR_MIXED";
     }
     return {status,avgRDelta14d:avgDelta,hitRateDelta14d:hitDelta,windows:result};
+  }
+
+  executionLatencyCostReport() {
+    const rows=this.rows(
+      `SELECT entry,stop,realized_r FROM setups
+       WHERE realized_r IS NOT NULL AND entry>0 AND stop>0
+       ORDER BY closed_ts ASC`
+    );
+    const scenarios=[0,1,2,5,10,20].map(oneWayBps=>{
+      const net=[];
+      for(const r of rows) {
+        const entry=Number(r.entry),stop=Number(r.stop),gross=Number(r.realized_r);
+        const riskPct=Math.abs(entry-stop)/entry;
+        if(!(riskPct>0)||!Number.isFinite(gross)) continue;
+        const dragR=(oneWayBps/10000)/riskPct;
+        net.push(gross-dragR);
+      }
+      return {
+        oneWayEntryDelayBps:oneWayBps,
+        n:net.length,
+        avgAdjustedR:net.length?net.reduce((a,b)=>a+b,0)/net.length:null,
+        totalAdjustedR:net.length?net.reduce((a,b)=>a+b,0):null
+      };
+    });
+    return {
+      n:rows.length,
+      scenarios,
+      note:"Sensitivity model: adverse entry delay/slippage is converted into R using each setup's original stop distance. It is not a measured fill model."
+    };
+  }
+
+  riskOfRuinBootstrap({
+    riskFraction=0.005,
+    paths=500,
+    tradesPerPath=250,
+    ruinEquity=0.5
+  }={}) {
+    const outcomes=this.rows(
+      `SELECT realized_r FROM setups
+       WHERE realized_r IS NOT NULL AND result IN ('TARGET','STOP')
+       ORDER BY closed_ts ASC`
+    ).map(r=>Number(r.realized_r)).filter(Number.isFinite);
+
+    if(outcomes.length<20) {
+      return {
+        status:"LEARNING",
+        n:outcomes.length,
+        required:20,
+        riskFraction,
+        paths,
+        tradesPerPath,
+        ruinEquity,
+        warning:"Not enough resolved paper setups for a useful bootstrap."
+      };
+    }
+
+    let seed=0x9e3779b9;
+    const rand=()=>{
+      seed=(Math.imul(seed^seed>>>16,2246822507)+3266489909)>>>0;
+      seed^=seed>>>13;
+      seed=Math.imul(seed,3266489909)>>>0;
+      return (seed>>>0)/4294967296;
+    };
+
+    const maxDDs=[];
+    const terminal=[];
+    let ruined=0;
+
+    for(let p=0;p<paths;p++) {
+      let equity=1,peak=1,maxDD=0,hitRuin=false;
+      for(let t=0;t<tradesPerPath;t++) {
+        const r=outcomes[Math.min(outcomes.length-1,Math.floor(rand()*outcomes.length))];
+        equity*=Math.max(0.000001,1+riskFraction*r);
+        peak=Math.max(peak,equity);
+        const dd=peak>0?1-equity/peak:0;
+        maxDD=Math.max(maxDD,dd);
+        if(equity<=ruinEquity) hitRuin=true;
+      }
+      if(hitRuin) ruined++;
+      maxDDs.push(maxDD);
+      terminal.push(equity);
+    }
+
+    const quantile=(xs,q)=>{
+      const v=[...xs].sort((a,b)=>a-b);
+      if(!v.length) return null;
+      return v[Math.min(v.length-1,Math.max(0,Math.floor((v.length-1)*q)))];
+    };
+
+    return {
+      status:outcomes.length>=50?"USABLE_SAMPLE":"EARLY_SAMPLE",
+      n:outcomes.length,
+      riskFraction,
+      paths,
+      tradesPerPath,
+      ruinEquity,
+      historicalBootstrapRuinRate:ruined/paths,
+      medianTerminalEquity:quantile(terminal,0.5),
+      terminalEquityP10:quantile(terminal,0.1),
+      terminalEquityP90:quantile(terminal,0.9),
+      medianMaxDrawdown:quantile(maxDDs,0.5),
+      maxDrawdownP90:quantile(maxDDs,0.9),
+      warning:"Bootstrap resamples past paper-trade R outcomes. It is a stress test, not a forecast or guaranteed probability."
+    };
   }
 
   riskPolicyState(nowTs=Date.now()) {
@@ -1998,6 +2102,8 @@ export class TradingCenter {
       modelDrift:this.modelDriftReport(),
       probabilityCalibration:this.probabilityCalibrationReport(),
       shadowStrategies:this.shadowStrategyStats(),
+      latencyCost:this.executionLatencyCostReport(),
+      riskOfRuin:this.riskOfRuinBootstrap(),
       feedLatency:this.feedLatencyReport(),
       leadLagNetwork:this.leadLagNetworkReport(),
       counterfactuals:this.matchedCounterfactualReport(),
