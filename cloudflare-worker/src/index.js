@@ -14,6 +14,7 @@ import { fetchOfficialMacroEvents } from "./macro_calendar.js";
 import { fetchKrakenMicrostructure } from "./kraken_analytics.js";
 import { fetchMacroMarketContext } from "./macro_market_context.js";
 import { fetchDeribitOptionsContext, fetchCoinbasePremium } from "./options_crossmarket.js";
+import { contextFrom5m, evaluateStrategyContext } from "./strategy_core.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -335,105 +336,16 @@ async function fetchBookTicker() {
 }
 
 async function buildContext() {
-  const [c5, c15, c1h, c4h] = await Promise.all([
-    getCandles("5m"),
-    getCandles("15m"),
-    getCandles("1h"),
-    getCandles("4h")
-  ]);
-
-  const trends = {
-    "5m": marketTrend(c5),
-    "15m": marketTrend(c15),
-    "1h": marketTrend(c1h),
-    "4h": marketTrend(c4h)
-  };
-  const score = biasScore(trends);
-  const price = c5[c5.length - 1].c;
-  const closes = c5.map(x => x.c);
-  const ema20 = ema(closes, EMA_FAST).at(-1);
-  const ema50 = ema(closes, EMA_SLOW).at(-1);
-  const { support, resistance } = nearestLevels(c15, price);
-
-  return {
-    updatedAt: Date.now(),
-    price,
-    trends,
-    score,
-    ema20,
-    ema50,
-    support,
-    resistance,
-    c5
-  };
+  // One canonical closed-5m history powers both live and replay contexts.
+  // This removes timeframe-construction drift between production and backtests.
+  const c5=await getCandles("5m",1000);
+  const ctx=contextFrom5m(c5,c5.length-1);
+  if(!ctx) throw new Error("insufficient closed 5m history for canonical context");
+  return {...ctx,updatedAt:Date.now()};
 }
 
 function evaluateConfirmed(ctx, opts = {}) {
-  const { c5, price, ema20, ema50, resistance, support, trends } = ctx;
-  const retestTol = Number(opts.retestTol ?? RETEST_TOL);
-  const stopBuffer = Number(opts.stopBuffer ?? STOP_BUFFER);
-  const minRR = Number(opts.minRR ?? MIN_RR);
-  const maxExtension = Number(opts.maxExtension ?? DO_NOT_CHASE_DISTANCE);
-  const longPattern = findBreakRetest(c5, "LONG", retestTol);
-  const shortPattern = findBreakRetest(c5, "SHORT", retestTol);
-
-  const fresh = p => p && p.retest_i >= c5.length - 2 &&
-    Math.abs(price - p.level) / Math.max(1e-9, p.level) <= maxExtension;
-
-  const macroLong = trends?.["4h"] === "BULLISH" &&
-    trends?.["1h"] === "BULLISH" &&
-    trends?.["15m"] !== "BEARISH";
-  const macroShort = trends?.["4h"] === "BEARISH" &&
-    trends?.["1h"] === "BEARISH" &&
-    trends?.["15m"] !== "BULLISH";
-
-  if (fresh(longPattern) && macroLong && price > ema20 && price > ema50) {
-    const lows = pivots(c5.slice(-80))
-      .filter(p => p.kind === "L" && p.price < price)
-      .map(p => p.price);
-    let baseStop = lows.slice(-3).length ? Math.max(...lows.slice(-3)) : longPattern.retest_low;
-    baseStop = Math.min(baseStop, longPattern.retest_low);
-    const stop = baseStop * (1 - stopBuffer);
-    if (resistance && resistance > price) {
-      const ratio = rr(price, stop, resistance, "LONG");
-      if (ratio >= minRR) {
-        return {
-          decision: "LONG SETUP",
-          side: "LONG",
-          entry: price,
-          stop,
-          target: resistance,
-          rr: ratio,
-          level: longPattern.level
-        };
-      }
-    }
-  }
-
-  if (fresh(shortPattern) && macroShort && price < ema20 && price < ema50) {
-    const highs = pivots(c5.slice(-80))
-      .filter(p => p.kind === "H" && p.price > price)
-      .map(p => p.price);
-    let baseStop = highs.slice(-3).length ? Math.min(...highs.slice(-3)) : shortPattern.retest_high;
-    baseStop = Math.max(baseStop, shortPattern.retest_high);
-    const stop = baseStop * (1 + stopBuffer);
-    if (support && support < price) {
-      const ratio = rr(price, stop, support, "SHORT");
-      if (ratio >= minRR) {
-        return {
-          decision: "SHORT SETUP",
-          side: "SHORT",
-          entry: price,
-          stop,
-          target: support,
-          rr: ratio,
-          level: shortPattern.level
-        };
-      }
-    }
-  }
-
-  return null;
+  return evaluateStrategyContext(ctx,opts);
 }
 
 async function derivedDashboardKey(env) {
@@ -697,6 +609,10 @@ export class RadarDO extends DurableObject {
           lastError: this.mem.lastResearchGovernorError || null,
           latest: this.center.latestResearchGovernor()
         },
+        strategySafety: {
+          parity: this.center.parityReport(100),
+          leakage: this.center.leakageInspectorReport()
+        },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
         macro: {
@@ -855,6 +771,19 @@ export class RadarDO extends DurableObject {
         lastRunAt:this.mem.lastResearchGovernorAt||null,
         lastError:this.mem.lastResearchGovernorError||null
       });
+    }
+
+    if (path === "/api/parity") {
+      return Response.json(this.center.parityReport());
+    }
+    if (path === "/api/leakage") {
+      return Response.json(this.center.leakageInspectorReport());
+    }
+    if (path === "/api/evidence") {
+      return Response.json(this.center.evidenceMaturityReport());
+    }
+    if (path === "/api/promotion") {
+      return Response.json(this.center.promotionConstitutionReport());
     }
 
     if (path === "/api/risk") {
@@ -1341,7 +1270,16 @@ export class RadarDO extends DurableObject {
     this.mem.lastResearchGovernorAt=now;
     try {
       const report=this.center.refreshResearchGovernor();
+      const leakage=this.center.leakageInspectorReport();
+      const evidence=this.center.evidenceMaturityReport();
+      const promotion=this.center.promotionConstitutionReport();
       this.mem.lastResearchGovernorError=null;
+      this.mem.lastGovernanceSummary={
+        leakageSafe:Boolean(leakage.safe),
+        promotionSystemPass:Boolean(promotion.systemPass),
+        evidenceFeatureCount:Number(evidence.features?.length||0),
+        evidenceStrategyCount:Number(evidence.strategies?.length||0)
+      };
 
       const promoted=report?.promotedToChallengerTest||[];
       const signature=promoted.slice(0,8).map(x=>{
@@ -1525,10 +1463,20 @@ export class RadarDO extends DurableObject {
       this.center.recordContext(this.context, reason);
       this.center.recordPatterns(this.context);
       this.center.recordFactorSnapshot(this.context);
+
+      const liveParityDecision=evaluateConfirmed(this.context);
+      const replayParityDecision=evaluateReplaySetup(
+        this.context.c5,
+        this.context.c5.length-1,
+        {retestTol:RETEST_TOL,stopBuffer:STOP_BUFFER,minRR:MIN_RR,maxExtension:DO_NOT_CHASE_DISTANCE}
+      );
+      this.center.recordParityAudit(liveParityDecision,replayParityDecision,{
+        contextTs:Number(this.context.c5.at(-1)?.t||0),
+        reason
+      });
       await this.pollOfficialMacro(false);
       await this.pollMacroMarket(false);
       await this.pollCrossMarketExtensions(false);
-      await this.runResearchGovernor(false);
 
       try {
         const [derivatives, crossAssets, bookTicker, venue] = await Promise.all([
@@ -1566,8 +1514,10 @@ export class RadarDO extends DurableObject {
       this.center.updatePatternOutcomes(Date.now());
       this.center.updateFactorOutcomes(Date.now());
       this.center.updateGenomeOutcomes(Date.now());
+      this.center.updateSafeGenomeOutcomes(Date.now());
       this.center.updateNewsImpacts(Date.now());
       await this.pollNews(false);
+      await this.runResearchGovernor(false);
       const macroRisk = await this.checkMacroWarnings();
       await this.persist();
 
@@ -1793,6 +1743,7 @@ export class RadarDO extends DurableObject {
       this.center.updatePatternOutcomes(closeTime);
       this.center.updateFactorOutcomes(closeTime);
       this.center.updateGenomeOutcomes(closeTime);
+      this.center.updateSafeGenomeOutcomes(closeTime);
       this.center.updateNewsImpacts(closeTime);
       await this.refreshContext("5m-close-backup");
     }
