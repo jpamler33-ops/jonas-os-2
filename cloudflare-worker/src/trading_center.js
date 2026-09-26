@@ -1502,6 +1502,7 @@ export class TradingCenter {
       "latency_cost_model","risk_of_ruin_simulation","endpoint_auth",
       "information_gain_discovery","interaction_synergy_discovery",
       "feature_redundancy_map","research_governor",
+      "evidence_maturity","live_replay_parity","leakage_inspector","promotion_constitution",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
