@@ -569,9 +569,15 @@ def send_telegram(result: dict) -> None:
     rr_text = "—" if result["rr"] is None else f"{result['rr']:.2f}"
     heading = "TEST / AKTUELLER STATUS" if manual_test and not is_signal else result["decision"]
 
+    dist = result.get("distance_to_level_pct")
+    dist_text = "—" if dist is None else f"{dist:.2f}%"
+
     text = (
         f"BTC SIGNALBOT — {heading}\n"
-        f"Status: {result['decision']}\n"
+        f"Stufe: {result.get('stage', result['decision'])}\n"
+        f"AKTION JETZT: {result.get('action', '—')}\n\n"
+        f"Level: {fmt(result.get('breakout_level'))}\n"
+        f"Abstand: {dist_text}\n"
         f"Entry: {fmt(result['entry'])}\n"
         f"Stop: {fmt(result['stop'])}\n"
         f"Target: {fmt(result['target'])}\n"
@@ -579,7 +585,8 @@ def send_telegram(result: dict) -> None:
         f"4H/1H/15m/5m: "
         f"{result['trends']['4h']} / {result['trends']['1h']} / "
         f"{result['trends']['15m']} / {result['trends']['5m']}\n"
-        "Paper-Signal nach festem Regelwerk; keine automatische Order."
+        f"{result.get('warning', '')}\n"
+        "Keine automatische Order."
     )
 
     try:
