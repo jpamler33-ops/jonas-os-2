@@ -1,8 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "btc-live-radar",
+  "name": "jonas-os-2",
   "main": "src/index.js",
   "compatibility_date": "2026-09-26",
+  "keep_vars": true,
+  "secrets": {
+    "required": ["TELEGRAM_BOT_TOKEN"]
+  },
   "observability": {
     "enabled": true
   },
