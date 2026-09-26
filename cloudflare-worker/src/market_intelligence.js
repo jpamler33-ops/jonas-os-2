@@ -60,7 +60,11 @@ export const FEATURE_REGISTRY = [
   { key: "multiple_testing_guard", group: "validation", critical: true },
   { key: "model_drift_monitor", group: "validation", critical: true },
   { key: "source_provenance", group: "system", critical: true },
-  { key: "endpoint_auth", group: "system", critical: true }
+  { key: "endpoint_auth", group: "system", critical: true },
+  { key: "information_gain_discovery", group: "research", critical: true },
+  { key: "interaction_synergy_discovery", group: "research", critical: true },
+  { key: "feature_redundancy_map", group: "research", critical: true },
+  { key: "research_governor", group: "validation", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
