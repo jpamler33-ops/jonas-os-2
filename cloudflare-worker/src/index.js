@@ -4,7 +4,11 @@ const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
 const REST_BASES = [
   "https://data-api.binance.vision",
-  "https://api.binance.com"
+  "https://api.binance.com",
+  "https://api1.binance.com",
+  "https://api2.binance.com",
+  "https://api3.binance.com",
+  "https://api.binance.us"
 ];
 
 const EMA_FAST = 20;
