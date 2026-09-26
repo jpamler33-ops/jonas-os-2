@@ -41,7 +41,9 @@ jobs:
             btc-bot-state-
 
       - name: Engine Selbsttest
-        run: python bot.py --self-test
+        run: |
+          python -m py_compile bot.py live_bot.py macro_guard.py
+          python bot.py --self-test
 
       - name: BTC Regeln pruefen
         env:
