@@ -28,6 +28,16 @@ import {
   fnv1a64,
   manifestId
 } from "./version_manifest.js";
+import {
+  MARKET_LANGUAGE_VERSION,
+  sequenceKey,
+  tokenizeMarket,
+  transitionTension
+} from "./market_language.js";
+import {
+  buildInformationFlowGraph,
+  graphRegime
+} from "./information_flow.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -557,6 +567,38 @@ export class TradingCenter {
         live_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS market_tokens (
+        ts INTEGER PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        grammar TEXT NOT NULL,
+        language_version TEXT NOT NULL,
+        components_json TEXT NOT NULL,
+        raw_dimensions INTEGER,
+        token_dimensions INTEGER,
+        ret_fwd_15m REAL,
+        ret_fwd_60m REAL,
+        ret_fwd_240m REAL
+      );
+
+      CREATE TABLE IF NOT EXISTS information_flow_snapshots (
+        ts INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        dominant_leader TEXT,
+        graph_regime TEXT,
+        leader_concentration REAL,
+        payload_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS phase_transition_snapshots (
+        ts INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        tension_score REAL,
+        switch_rate REAL,
+        unique_ratio REAL,
+        sequence_rarity REAL,
+        payload_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -632,6 +674,9 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_prediction_ledger_subject ON prediction_ledger(subject_type,subject_id);
       CREATE INDEX IF NOT EXISTS idx_prediction_ledger_created ON prediction_ledger(created_ts);
       CREATE INDEX IF NOT EXISTS idx_feature_ablation_ts ON feature_ablation_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_market_tokens_id_ts ON market_tokens(token_id,ts);
+      CREATE INDEX IF NOT EXISTS idx_information_flow_ts ON information_flow_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_phase_transition_ts ON phase_transition_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -1368,6 +1413,218 @@ export class TradingCenter {
     return g;
   }
 
+  recordMarketToken(genome) {
+    if(!genome?.ts) return null;
+    const extension=this.one("SELECT * FROM market_genome_extensions WHERE ts=?",Number(genome.ts))||{};
+    const token=tokenizeMarket(genome,extension,this.macroRiskState(Number(genome.ts)+5*60_000));
+    this.sql.exec(
+      `INSERT OR REPLACE INTO market_tokens(
+        ts,token_id,grammar,language_version,components_json,raw_dimensions,token_dimensions
+      ) VALUES(?,?,?,?,?,?,?)`,
+      Number(genome.ts),token.tokenId,token.grammar,token.version,
+      JSON.stringify(token.components),
+      Number(token.compression?.rawDimensions||0),
+      Number(token.compression?.tokenDimensions||0)
+    );
+    return token;
+  }
+
+  updateMarketTokenOutcomes() {
+    const rows=this.rows(
+      `SELECT t.ts,o.ret_fwd_15m,o.ret_fwd_60m,o.ret_fwd_240m
+       FROM market_tokens t
+       JOIN genome_safe_outcomes o ON o.ts=t.ts
+       WHERE t.ret_fwd_240m IS NULL
+       ORDER BY t.ts ASC LIMIT 500`
+    );
+    for(const r of rows){
+      this.sql.exec(
+        `UPDATE market_tokens SET
+          ret_fwd_15m=COALESCE(?,ret_fwd_15m),
+          ret_fwd_60m=COALESCE(?,ret_fwd_60m),
+          ret_fwd_240m=COALESCE(?,ret_fwd_240m)
+         WHERE ts=?`,
+        r.ret_fwd_15m??null,r.ret_fwd_60m??null,r.ret_fwd_240m??null,Number(r.ts)
+      );
+    }
+  }
+
+  marketLanguageReport(limit=2500) {
+    const rows=this.rows(
+      `SELECT * FROM market_tokens ORDER BY ts DESC LIMIT ?`,
+      Math.min(10000,Math.max(100,Number(limit||2500)))
+    ).reverse();
+    if(!rows.length) return {status:"LEARNING",n:0,languageVersion:MARKET_LANGUAGE_VERSION};
+
+    const tokenMap=new Map();
+    const transitions=new Map();
+    for(const r of rows){
+      const x=tokenMap.get(r.token_id)||{
+        tokenId:r.token_id,grammar:r.grammar,n:0,ret15:[],ret60:[],ret240:[]
+      };
+      x.n++;
+      if(Number.isFinite(Number(r.ret_fwd_15m)))x.ret15.push(Number(r.ret_fwd_15m));
+      if(Number.isFinite(Number(r.ret_fwd_60m)))x.ret60.push(Number(r.ret_fwd_60m));
+      if(Number.isFinite(Number(r.ret_fwd_240m)))x.ret240.push(Number(r.ret_fwd_240m));
+      tokenMap.set(r.token_id,x);
+    }
+    for(let i=1;i<rows.length;i++){
+      const key=`${rows[i-1].token_id}>${rows[i].token_id}`;
+      const x=transitions.get(key)||{from:rows[i-1].token_id,to:rows[i].token_id,n:0,ret60:[]};
+      x.n++;
+      if(Number.isFinite(Number(rows[i].ret_fwd_60m)))x.ret60.push(Number(rows[i].ret_fwd_60m));
+      transitions.set(key,x);
+    }
+    const avg=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+    const tokens=[...tokenMap.values()].map(x=>({
+      tokenId:x.tokenId,grammar:x.grammar,n:x.n,
+      avgForward15m:avg(x.ret15),avgForward60m:avg(x.ret60),avgForward240m:avg(x.ret240)
+    })).sort((a,b)=>b.n-a.n);
+    const transitionRows=[...transitions.values()].map(x=>({
+      from:x.from,to:x.to,n:x.n,avgForward60m:avg(x.ret60)
+    })).sort((a,b)=>b.n-a.n);
+
+    const recent=rows.slice(-12);
+    const tension=transitionTension(recent);
+    return{
+      status:rows.length>=100?"ACTIVE":"LEARNING",
+      languageVersion:MARKET_LANGUAGE_VERSION,
+      n:rows.length,
+      uniqueTokens:tokenMap.size,
+      latest:rows.at(-1)||null,
+      tension,
+      commonTokens:tokens.slice(0,30),
+      commonTransitions:transitionRows.slice(0,40)
+    };
+  }
+
+  sequenceMemoryReport(length=4,limit=4000) {
+    const L=Math.max(2,Math.min(6,Number(length||4)));
+    const rows=this.rows(
+      `SELECT ts,token_id,grammar,ret_fwd_15m,ret_fwd_60m,ret_fwd_240m
+       FROM market_tokens ORDER BY ts DESC LIMIT ?`,
+      Math.min(12000,Math.max(200,Number(limit||4000)))
+    ).reverse();
+    if(rows.length<L+20) return {status:"LEARNING",n:rows.length,length:L,sequences:[]};
+
+    const map=new Map();
+    for(let i=L-1;i<rows.length;i++){
+      const slice=rows.slice(i-L+1,i+1);
+      const key=sequenceKey(slice,L);
+      if(!key) continue;
+      const end=rows[i];
+      const x=map.get(key)||{sequence:key,n:0,r15:[],r60:[],r240:[]};
+      x.n++;
+      if(Number.isFinite(Number(end.ret_fwd_15m)))x.r15.push(Number(end.ret_fwd_15m));
+      if(Number.isFinite(Number(end.ret_fwd_60m)))x.r60.push(Number(end.ret_fwd_60m));
+      if(Number.isFinite(Number(end.ret_fwd_240m)))x.r240.push(Number(end.ret_fwd_240m));
+      map.set(key,x);
+    }
+    const avg=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+    const sequences=[...map.values()].map(x=>({
+      sequence:x.sequence,n:x.n,
+      avgForward15m:avg(x.r15),avgForward60m:avg(x.r60),avgForward240m:avg(x.r240),
+      positive60m:x.r60.length?x.r60.filter(v=>v>0).length/x.r60.length:null
+    })).sort((a,b)=>b.n-a.n);
+
+    const recent=rows.slice(-L);
+    const currentKey=sequenceKey(recent,L);
+    const current=sequences.find(x=>x.sequence===currentKey)||null;
+    const totalWindows=Math.max(1,rows.length-L+1);
+    const currentFrequency=current?current.n/totalWindows:0;
+    const rarity=1-Math.min(1,currentFrequency*20);
+
+    return{
+      status:rows.length>=200?"ACTIVE":"LEARNING",
+      n:rows.length,length:L,
+      uniqueSequences:map.size,
+      currentSequence:currentKey,
+      currentStats:current,
+      currentRarity:rarity,
+      sequences:sequences.slice(0,80),
+      note:"Sequence outcomes describe historical observations after the final token in each sequence."
+    };
+  }
+
+  informationFlowReport(limit=3000) {
+    const rows=this.rows(
+      `SELECT g.ts,g.ret_5m,g.ret_15m,g.atr_pct,g.volume_ratio,g.oi_change,
+        g.funding_rate,g.long_short_ratio,g.liq_imbalance,g.cross_ret_60m,
+        g.flow_delta_ratio,g.book_imbalance,g.agreement,g.entropy,g.novelty,
+        e.coinbase_premium_bps,e.perp_spot_basis_bps,e.depth_imbalance_01,
+        e.liquidity_shock,e.options_iv_30d,e.options_skew_30d,
+        e.vix_change,e.sp500_change,e.nasdaq_change,e.usd_change,
+        e.us2y_change_bps,e.us10y_change_bps
+       FROM market_genomes g
+       LEFT JOIN market_genome_extensions e ON e.ts=g.ts
+       JOIN genome_provenance p ON p.ts=g.ts AND p.leakage_safe=1
+       ORDER BY g.ts DESC LIMIT ?`,
+      Math.min(8000,Math.max(200,Number(limit||3000)))
+    ).reverse();
+
+    const features=[
+      "oi_change","funding_rate","long_short_ratio","liq_imbalance",
+      "cross_ret_60m","flow_delta_ratio","book_imbalance","agreement","entropy","novelty",
+      "coinbase_premium_bps","perp_spot_basis_bps","depth_imbalance_01","liquidity_shock",
+      "options_iv_30d","options_skew_30d","vix_change","sp500_change","nasdaq_change",
+      "usd_change","us2y_change_bps","us10y_change_bps"
+    ];
+    const graph=buildInformationFlowGraph(rows,features,"ret_5m",[1,2,3,6,12]);
+    const regime=graphRegime(graph);
+    return{...graph,regime};
+  }
+
+  refreshInformationFlow() {
+    const graph=this.informationFlowReport();
+    const ts=Date.now();
+    this.sql.exec(
+      `INSERT OR REPLACE INTO information_flow_snapshots(
+        ts,status,dominant_leader,graph_regime,leader_concentration,payload_json
+       ) VALUES(?,?,?,?,?,?)`,
+      ts,graph.status,graph.dominantLeader?.source||null,graph.regime?.status||"UNKNOWN",
+      graph.leaderConcentration??null,JSON.stringify(graph)
+    );
+    return{ts,...graph};
+  }
+
+  latestInformationFlow() {
+    const r=this.one("SELECT * FROM information_flow_snapshots ORDER BY ts DESC LIMIT 1");
+    if(!r)return null;
+    return{ts:Number(r.ts),...JSON.parse(r.payload_json||"{}")};
+  }
+
+  phaseTransitionReport() {
+    const lang=this.marketLanguageReport(500);
+    const seq=this.sequenceMemoryReport(4,2500);
+    const graph=this.latestInformationFlow()||this.informationFlowReport(1500);
+    const tension=lang.tension||{};
+    const rarity=Number(seq.currentRarity||0);
+    const leaderConcentration=Number(graph.leaderConcentration||0);
+    const score=Math.min(1,
+      0.50*Number(tension.score||0)+
+      0.30*rarity+
+      0.20*Math.min(1,leaderConcentration*2)
+    );
+    const status=score>=0.78?"PHASE_TRANSITION":score>=0.58?"TENSION_BUILDING":"STABLE";
+    const payload={
+      generatedAt:Date.now(),status,score,
+      transitionTension:tension,
+      currentSequence:seq.currentSequence,
+      sequenceRarity:rarity,
+      informationLeader:graph.dominantLeader||null,
+      informationRegime:graph.regime||null,
+      note:"This is a structural instability score, not a directional forecast."
+    };
+    this.sql.exec(
+      `INSERT OR REPLACE INTO phase_transition_snapshots(
+        ts,status,tension_score,switch_rate,unique_ratio,sequence_rarity,payload_json
+       ) VALUES(?,?,?,?,?,?,?)`,
+      payload.generatedAt,status,score,tension.switchRate??null,tension.uniqueRatio??null,rarity,
+      JSON.stringify(payload)
+    );
+    return payload;
+  }
+
   buildGenomeExtension(ts) {
     const options=this.latestOptionsContext()||{};
     const premium=this.latestCoinbasePremium()||{};
@@ -1474,6 +1731,7 @@ export class TradingCenter {
       g.volume_surprise,g.oi_surprise,g.liq_surprise,g.flow_surprise,g.state_label,g.fingerprint
     );
     this.recordGenomeExtension(g.ts);
+    this.recordMarketToken(g);
     return g;
   }
 
@@ -2540,6 +2798,7 @@ export class TradingCenter {
         this.sql.exec(`UPDATE genome_safe_outcomes SET ${updates.join(",")} WHERE ts=?`,...vals);
       }
     }
+    this.updateMarketTokenOutcomes();
   }
 
   recordParityAudit(nativeDecision,replayDecision,details={}) {
@@ -2982,6 +3241,10 @@ export class TradingCenter {
       falsification:this.hypothesisFalsificationReport(),
       informationDiscovery:this.latestResearchGovernor()||this.edgeDiscoveryReport(),
       featureAblation:this.latestFeatureAblation()||this.featureAblationResearchReport(),
+      marketLanguage:this.marketLanguageReport(),
+      sequenceMemory:this.sequenceMemoryReport(),
+      informationFlow:this.latestInformationFlow()||this.informationFlowReport(),
+      phaseTransition:this.phaseTransitionReport(),
       versions:this.versionReport(),
       predictionLedger:this.predictionLedgerAudit(),
       parity:this.parityReport(),
@@ -3959,7 +4222,9 @@ export class TradingCenter {
       optionsSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM options_snapshots")?.n || 0),
       coinbasePremiumRows: Number(this.one("SELECT COUNT(*) AS n FROM coinbase_premium_history")?.n || 0),
       parityAudits: Number(this.one("SELECT COUNT(*) AS n FROM parity_audits")?.n || 0),
-      safeGenomeOutcomes: Number(this.one("SELECT COUNT(*) AS n FROM genome_safe_outcomes WHERE ret_fwd_60m IS NOT NULL")?.n || 0)
+      safeGenomeOutcomes: Number(this.one("SELECT COUNT(*) AS n FROM genome_safe_outcomes WHERE ret_fwd_60m IS NOT NULL")?.n || 0),
+      marketTokens: Number(this.one("SELECT COUNT(*) AS n FROM market_tokens")?.n || 0),
+      informationFlowSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM information_flow_snapshots")?.n || 0)
     };
   }
 
