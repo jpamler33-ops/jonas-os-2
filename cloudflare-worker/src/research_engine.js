@@ -3,6 +3,35 @@ export function mean(xs) {
   return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
 }
 
+function erf(x) {
+  const sign=x<0?-1:1;
+  const a=Math.abs(x);
+  const t=1/(1+0.3275911*a);
+  const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-a*a);
+  return sign*y;
+}
+
+function normalCdf(x) {
+  return 0.5*(1+erf(Number(x)/Math.sqrt(2)));
+}
+
+export function benjaminiHochberg(items, pKey="pValue") {
+  const valid=(items||[])
+    .map((x,i)=>({...x,__i:i,p:Number(x[pKey])}))
+    .filter(x=>Number.isFinite(x.p)&&x.p>=0&&x.p<=1)
+    .sort((a,b)=>a.p-b.p);
+  const m=valid.length;
+  let prev=1;
+  for(let i=m-1;i>=0;i--){
+    const rank=i+1;
+    const q=Math.min(prev,valid[i].p*m/rank,1);
+    valid[i].qValue=q;
+    prev=q;
+  }
+  const map=new Map(valid.map(x=>[x.__i,x.qValue]));
+  return (items||[]).map((x,i)=>({...x,qValue:map.get(i)??null}));
+}
+
 export function median(xs) {
   const v=(xs||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
   if(!v.length) return null;
@@ -46,13 +75,23 @@ export function numericFeatureContrast(rows, key, outcomeKey="ret_fwd_60m") {
   const lo=valid.filter(r=>Number(r[key])<=med);
   const hi=valid.filter(r=>Number(r[key])>med);
   if(lo.length<8||hi.length<8) return null;
-  const loMean=mean(lo.map(r=>Number(r[outcomeKey])));
-  const hiMean=mean(hi.map(r=>Number(r[outcomeKey])));
+  const loVals=lo.map(r=>Number(r[outcomeKey]));
+  const hiVals=hi.map(r=>Number(r[outcomeKey]));
+  const loMean=mean(loVals);
+  const hiMean=mean(hiVals);
+  const variance=xs=>{
+    const m=mean(xs);
+    return xs.length>1?xs.reduce((s,x)=>s+(x-m)*(x-m),0)/(xs.length-1):0;
+  };
+  const se=Math.sqrt(variance(loVals)/loVals.length+variance(hiVals)/hiVals.length);
+  const z=se>0?((hiMean??0)-(loMean??0))/se:0;
+  const pValue=Math.min(1,Math.max(0,2*(1-normalCdf(Math.abs(z)))));
   return {
     feature:key,median:med,
     lowN:lo.length,highN:hi.length,
     lowMean:loMean,highMean:hiMean,
-    difference:(hiMean??0)-(loMean??0)
+    difference:(hiMean??0)-(loMean??0),
+    zApprox:z,pValue
   };
 }
 
@@ -88,11 +127,18 @@ export function buildHypotheses(genomes) {
       sample:x.lowN+x.highN,
       effect60m:x.difference,
       strength:magnitude,
+      pValue:x.pValue,
+      zApprox:x.zApprox,
       statement:`High vs low ${key}: forward-60m mean difference ${(x.difference*100).toFixed(3)}pp`,
       status:"RESEARCH_ONLY"
     });
   }
-  return findings.sort((a,b)=>b.strength-a.strength);
+  const corrected=benjaminiHochberg(findings,"pValue");
+  return corrected.sort((a,b)=>{
+    const aq=a.qValue??1,bq=b.qValue??1;
+    if(aq!==bq) return aq-bq;
+    return b.strength-a.strength;
+  });
 }
 
 export function transitionMatrix(rows) {
