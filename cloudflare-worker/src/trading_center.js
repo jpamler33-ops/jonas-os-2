@@ -742,6 +742,24 @@ export function renderTradingCenter(snapshot) {
     <td>${num(r.planned_rr)}R</td><td>${r.realized_r === null ? "—" : num(r.realized_r) + "R"}</td></tr>
   `).join("");
 
+  const edgeRows = (snapshot.factorEdgeStats || []).slice(0, 12).map(r => {
+    const decided=Number(r.wins||0)+Number(r.losses||0);
+    const hit=decided ? Number(r.wins||0)/decided : null;
+    const sample=Number(r.n||0) >= 50 ? "STRONG" : Number(r.n||0) >= 20 ? "USABLE" : Number(r.n||0) >= 8 ? "EARLY" : "LEARNING";
+    return `<tr><td>${r.side}</td><td>${r.session}</td><td>${r.volatility_regime}</td>
+      <td>${r.trend_alignment}</td><td>${r.ema_state}</td><td>${r.n}</td>
+      <td>${pct(hit)}</td><td>${r.avg_r===null?"—":num(r.avg_r)+"R"}</td><td>${sample}</td></tr>`;
+  }).join("");
+
+  const funnelRows = (snapshot.alertFunnel || []).slice(0, 16).map(r => `
+    <tr><td>${r.stage}</td><td>${r.n}</td></tr>
+  `).join("");
+
+  const factorRows = (snapshot.factorSnapshotStats || []).slice(0, 12).map(r => `
+    <tr><td>${r.session}</td><td>${r.volatility_regime}</td><td>${r.trend_alignment}</td>
+    <td>${r.ema_state}</td><td>${r.n}</td><td>${pct(r.avg_60m)}</td><td>${pct(r.avg_abs_60m)}</td></tr>
+  `).join("");
+
   return `<!doctype html>
   <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>BTC Trading Center</title>
@@ -752,6 +770,8 @@ export function renderTradingCenter(snapshot) {
     h1{font-size:28px}h2{margin-top:28px;font-size:19px}table{width:100%;border-collapse:collapse;background:#15181d;border-radius:12px;overflow:hidden}
     th,td{text-align:left;padding:10px;border-bottom:1px solid #272b33;font-size:13px}th{color:#aeb4bf}
     .note{color:#9aa2ad;font-size:13px;line-height:1.5}a{color:#9ecbff}
+    .pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#20242b;color:#c9d0da;font-size:12px;margin-right:6px}
+    .section{overflow-x:auto}.topline{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 18px}
   </style></head><body><main>
     <h1>BTC Trading Center</h1>
     <p class="note">Empirische Datenbank. Trefferquoten und Event-Reaktionen sind historische Beobachtungen, keine Garantie für zukünftige Ergebnisse.</p>
@@ -764,8 +784,27 @@ export function renderTradingCenter(snapshot) {
       <div class="card"><div class="big">${snapshot.summary.newsEvents}</div><div>News-Events</div></div>
     </div>
 
+    <div class="topline">
+      <span class="pill">LIVE + DATABASE</span>
+      <span class="pill">FACTOR INTELLIGENCE</span>
+      <span class="pill">GLOBAL EVENT RADAR</span>
+      <span class="pill">PAPER-TRACKING</span>
+    </div>
+
     <h2>Letzte Setups</h2>
     <table><thead><tr><th>ID</th><th>Side</th><th>Status</th><th>Ergebnis</th><th>Plan</th><th>Realisiert</th></tr></thead><tbody>${setupRows}</tbody></table>
+
+    <h2>Intelligence Layer: Setup-Kombinationen</h2>
+    <p class="note">Session + Volatilitätsregime + Trend-Ausrichtung + EMA-Lage. Aussagekraft wird erst mit größerem N sinnvoll.</p>
+    <div class="section"><table><thead><tr><th>Side</th><th>Session</th><th>Vol</th><th>Trend</th><th>EMA</th><th>N</th><th>TP-Quote</th><th>Ø R</th><th>Sample</th></tr></thead><tbody>${edgeRows}</tbody></table></div>
+
+    <h2>Marktregime: Verhalten ohne Setup</h2>
+    <p class="note">Misst, wie BTC sich in verschiedenen Marktregimen historisch danach bewegt hat.</p>
+    <div class="section"><table><thead><tr><th>Session</th><th>Vol</th><th>Trend</th><th>EMA</th><th>N</th><th>Ø 1h</th><th>Ø |1h|</th></tr></thead><tbody>${factorRows}</tbody></table></div>
+
+    <h2>Signal-Funnel</h2>
+    <p class="note">Zeigt, wie oft RADAR/PREPARE/BREAK/SETUP usw. tatsächlich auftreten.</p>
+    <div class="section"><table><thead><tr><th>Stufe</th><th>Anzahl</th></tr></thead><tbody>${funnelRows}</tbody></table></div>
 
     <h2>Candle-Pattern Statistik</h2>
     <table><thead><tr><th>Pattern</th><th>N</th><th>60m Richtungsquote</th><th>Ø 15m</th><th>Ø 1h</th><th>Ø 4h</th></tr></thead><tbody>${patternRows}</tbody></table>
