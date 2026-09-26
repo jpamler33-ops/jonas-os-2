@@ -9,6 +9,7 @@ import {
   fetchHourlyCrossAssetPage,
   freshBackfillState
 } from "./backfill.js";
+import { evaluateReplaySetup, simulateOutcome } from "./replay_engine.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -404,12 +405,13 @@ export default {
     if (
       url.pathname === "/center" ||
       url.pathname.startsWith("/api/") ||
-      url.pathname.startsWith("/backfill/")
+      url.pathname.startsWith("/backfill/") ||
+      url.pathname.startsWith("/replay/")
     ) {
       return stub.fetch("https://radar" + url.pathname + url.search);
     }
     return new Response(
-      "BTC Live Radar v2.1\n\n/center = Trading Center\n/start = start/reconnect\n/status = current state\n/health = health check\n/backfill/status = 90-day importer status\n",
+      "BTC Live Radar v2.1\n\n/center = Trading Center\n/start = start/reconnect\n/status = current state\n/health = health check\n/backfill/status = 90-day importer status\n/replay/status = no-lookahead replay status\n",
       { headers: { "content-type": "text/plain; charset=utf-8" } }
     );
   },
@@ -437,7 +439,8 @@ export class RadarDO extends DurableObject {
       lastNewsError: null,
       backfill: null,
       flow5m: null,
-      bookTicker: null
+      bookTicker: null,
+      replay: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -490,6 +493,7 @@ export class RadarDO extends DurableObject {
         genomeRows: this.center.summary().genomeRows,
         orderflow5mRows: this.center.summary().orderflow5mRows,
         orderflowMode: "BINANCE_KLINE_TAKER_VOLUME_PLUS_BOOK_SNAPSHOT",
+        replay: this.replayPublicState(),
         selfHealing: true
       });
     }
@@ -570,6 +574,15 @@ export class RadarDO extends DurableObject {
       return Response.json(this.center.fullResearchReport(this.context));
     }
 
+    if (path === "/replay/status") {
+      return Response.json({
+        ok:true,
+        replay:this.replayPublicState(),
+        replayStats:this.center.replayStats(),
+        parameterStability:this.center.parameterStabilityReport()
+      });
+    }
+
     if (path === "/backfill/status") {
       return Response.json({
         ok: true,
@@ -597,6 +610,8 @@ export class RadarDO extends DurableObject {
       await this.ensureHeartbeat();
       await this.ensureBackfillStarted(90, false);
       await this.runBackfillStep();
+      await this.ensureReplayStarted();
+      await this.runReplayStep();
       await this.scheduleNextAlarm();
       return new Response("ok");
     }
@@ -614,8 +629,105 @@ export class RadarDO extends DurableObject {
       await this.ensureHeartbeat();
       await this.ensureBackfillStarted(90, false);
       await this.runBackfillStep();
+      await this.ensureReplayStarted();
+      await this.runReplayStep();
     } finally {
       await this.scheduleNextAlarm();
+    }
+  }
+
+  replayPublicState() {
+    const r=this.mem.replay;
+    if(!r) return {active:false,completed:false,stage:"WAITING_FOR_BACKFILL"};
+    return {...r,variants:undefined};
+  }
+
+  async ensureReplayStarted() {
+    if(!this.mem.backfill?.completed) return;
+    if(this.mem.replay && (this.mem.replay.active || this.mem.replay.completed)) return;
+    const bounds=this.center.historicalBounds();
+    const min=Number(bounds.min_ts),max=Number(bounds.max_ts);
+    if(!Number.isFinite(min)||!Number.isFinite(max)||Number(bounds.n||0)<1500) return;
+
+    const variants=this.center.replayParameterSet();
+    const warmup=8*24*60*60_000;
+    this.mem.replay={
+      active:true,
+      completed:false,
+      stage:"CHAMPION_AND_STABILITY",
+      startedAt:Date.now(),
+      finishedAt:null,
+      minTs:min,
+      maxTs:max,
+      cursor:min+warmup,
+      variantIndex:0,
+      variants,
+      processedBars:0,
+      setupsFound:0,
+      lastStepAt:null,
+      lastError:null
+    };
+    await this.persist();
+  }
+
+  async runReplayStep() {
+    const r=this.mem.replay;
+    if(!r?.active||r.completed) return;
+
+    try{
+      const params=r.variants?.[Number(r.variantIndex||0)];
+      if(!params){
+        r.active=false;r.completed=true;r.stage="DONE";r.finishedAt=Date.now();
+        await this.persist();
+        await this.notifyOnce(
+          "replay-complete-v1",
+          "BTC RESEARCH LAB — REPLAY COMPLETE\nNo-lookahead Champion + Parameter-Stability-Replay ist abgeschlossen. Ergebnisse liegen unter /api/research."
+        );
+        return;
+      }
+
+      const maxUsable=Number(r.maxTs)-24*60*60_000;
+      if(Number(r.cursor)>=maxUsable){
+        r.variantIndex=Number(r.variantIndex||0)+1;
+        if(r.variantIndex>=r.variants.length){
+          r.active=false;r.completed=true;r.stage="DONE";r.finishedAt=Date.now();
+          await this.persist();
+          return;
+        }
+        r.cursor=Number(r.minTs)+8*24*60*60_000;
+        await this.persist();
+        return;
+      }
+
+      const CHUNK_BARS=30;
+      const chunkStart=Number(r.cursor);
+      const chunkEnd=Math.min(maxUsable,chunkStart+CHUNK_BARS*5*60_000);
+      const windowStart=Math.max(Number(r.minTs),chunkStart-30*24*60*60_000);
+      const windowEnd=Math.min(Number(r.maxTs),chunkEnd+30*60*60_000);
+      const candles=this.center.historicalReplayWindow(windowStart,windowEnd);
+
+      let processed=0,found=0;
+      for(let i=0;i<candles.length;i++){
+        const ts=Number(candles[i].t);
+        if(ts<chunkStart||ts>=chunkEnd) continue;
+        processed++;
+        const setup=evaluateReplaySetup(candles,i,params);
+        if(!setup) continue;
+        const outcome=simulateOutcome(candles,i,setup,288);
+        if(!outcome) continue;
+        found+=this.center.recordReplayResult(setup,outcome,params)>0?1:0;
+      }
+
+      r.processedBars=Number(r.processedBars||0)+processed;
+      r.setupsFound=Number(r.setupsFound||0)+found;
+      r.cursor=chunkEnd;
+      r.lastStepAt=Date.now();
+      r.lastError=null;
+      await this.persist();
+    }catch(e){
+      r.lastError=e?.message||String(e);
+      r.lastStepAt=Date.now();
+      await this.persist();
     }
   }
 
@@ -825,6 +937,7 @@ export class RadarDO extends DurableObject {
 
   async scheduleNextAlarm() {
     const b = this.mem.backfill;
+    const r = this.mem.replay;
     let when = Date.now() + 10 * 60 * 1000;
 
     if (b?.active) {
@@ -833,6 +946,8 @@ export class RadarDO extends DurableObject {
       } else {
         when = Date.now() + 5_000;
       }
+    } else if (r?.active) {
+      when = Date.now() + 15_000;
     }
     await this.ctx.storage.setAlarm(when);
   }
