@@ -83,7 +83,11 @@ export const FEATURE_REGISTRY = [
   { key: "next_state_forecast", group: "research", critical: true },
   { key: "adaptive_memory_horizons", group: "research", critical: true },
   { key: "grammar_counterfactuals", group: "research", critical: true },
-  { key: "memory_routing_plan", group: "research", critical: true }
+  { key: "memory_routing_plan", group: "research", critical: true },
+  { key: "market_world_model", group: "research", critical: true },
+  { key: "multi_step_state_rollout", group: "research", critical: true },
+  { key: "world_branch_divergence", group: "research", critical: true },
+  { key: "world_model_calibration", group: "validation", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
