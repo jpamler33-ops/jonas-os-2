@@ -54,6 +54,25 @@ export function grammarCounterfactuals({
   for(const feature of components){
     const actual=current.components?.[feature];
     if(actual===undefined||actual===null||actual==="U")continue;
+    const baselineMatches=[];
+    for(const r of rows){
+      if(String(r.components?.[feature])!==String(actual))continue;
+      const d=hamming(current.components,r.components,keys,feature);
+      if(d.compared<minComparable||d.mismatch>maxMismatch)continue;
+      const weight=Math.exp(-1.15*d.mismatch)*(d.compared/Math.max(minComparable,keys.length-1));
+      baselineMatches.push({...r,weight,mismatch:d.mismatch,compared:d.compared});
+    }
+    baselineMatches.sort((a,b)=>b.weight-a.weight);
+    const baselineBest=baselineMatches.slice(0,200);
+    const baseline={
+      n:baselineBest.length,
+      weightedForward15m:weightedMean(baselineBest,"ret15"),
+      weightedForward60m:weightedMean(baselineBest,"ret60"),
+      weightedForward240m:weightedMean(baselineBest,"ret240"),
+      avgMismatch:mean(baselineBest.map(x=>x.mismatch)),
+      nextStateDistribution:topDistribution(baselineBest)
+    };
+
     const alternatives=[...new Set(
       rows.map(r=>r.components?.[feature])
         .filter(v=>v!==undefined&&v!==null&&v!=="U"&&String(v)!==String(actual))
@@ -87,8 +106,14 @@ export function grammarCounterfactuals({
         weightedForward15m:avg15,
         weightedForward60m:avg60,
         weightedForward240m:avg240,
+        deltaVsActual15m:avg15!==null&&baseline.weightedForward15m!==null
+          ?avg15-baseline.weightedForward15m:null,
+        deltaVsActual60m:avg60!==null&&baseline.weightedForward60m!==null
+          ?avg60-baseline.weightedForward60m:null,
+        deltaVsActual240m:avg240!==null&&baseline.weightedForward240m!==null
+          ?avg240-baseline.weightedForward240m:null,
         nextStateDistribution:next,
-        evidence:best.length>=30?"USABLE":best.length>=10?"EARLY":"LEARNING"
+        evidence:best.length>=30&&baseline.n>=30?"USABLE":best.length>=10&&baseline.n>=10?"EARLY":"LEARNING"
       });
     }
 
@@ -97,8 +122,12 @@ export function grammarCounterfactuals({
     features.push({
       feature,
       actual:String(actual),
+      baseline,
       alternatives:altReports,
-      strongestAlternative:altReports[0]
+      strongestAlternative:altReports[0],
+      largestObservedDelta:[...altReports]
+        .filter(x=>Number.isFinite(Number(x.deltaVsActual60m)))
+        .sort((a,b)=>Math.abs(Number(b.deltaVsActual60m))-Math.abs(Number(a.deltaVsActual60m)))[0]||null
     });
   }
 
