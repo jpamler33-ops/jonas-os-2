@@ -64,7 +64,11 @@ export const FEATURE_REGISTRY = [
   { key: "information_gain_discovery", group: "research", critical: true },
   { key: "interaction_synergy_discovery", group: "research", critical: true },
   { key: "feature_redundancy_map", group: "research", critical: true },
-  { key: "research_governor", group: "validation", critical: true }
+  { key: "research_governor", group: "validation", critical: true },
+  { key: "evidence_maturity", group: "validation", critical: true },
+  { key: "live_replay_parity", group: "validation", critical: true },
+  { key: "leakage_inspector", group: "validation", critical: true },
+  { key: "promotion_constitution", group: "validation", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
