@@ -407,6 +407,16 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const stub = env.RADAR.getByName("btc");
+    const adminToken=env.ADMIN_TOKEN;
+    const supplied=request.headers.get("x-admin-token") ||
+      (request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
+    const isAdmin=Boolean(adminToken && supplied===adminToken);
+    const destructiveBackfill =
+      url.pathname==="/backfill/step" ||
+      (url.pathname==="/backfill/start" && url.searchParams.get("force")==="1");
+    if(destructiveBackfill && !isAdmin) {
+      return Response.json({ok:false,error:"admin_required"},{status:403});
+    }
 
     if (url.pathname === "/health") {
       return stub.fetch("https://radar/health");
@@ -537,6 +547,12 @@ export class RadarDO extends DurableObject {
     }
 
     if (path === "/test-telegram") {
+      const now=Date.now();
+      if(now-Number(this.mem.lastTelegramTestAt||0)<60_000) {
+        return Response.json({ok:false,error:"rate_limited",retryAfterSec:60},{status:429});
+      }
+      this.mem.lastTelegramTestAt=now;
+      await this.persist();
       const ok = await this.sendTelegram(
         "BTC LIVE-RADAR — TEST\nTelegram-Verbindung funktioniert. Der Live-Radar ist aktiv."
       );
@@ -658,7 +674,8 @@ export class RadarDO extends DurableObject {
     if (path === "/backfill/start") {
       const url = new URL(request.url);
       const days = Math.min(180, Math.max(7, Number(url.searchParams.get("days") || 90)));
-      await this.ensureBackfillStarted(days, true);
+      const force=url.searchParams.get("force")==="1";
+      await this.ensureBackfillStarted(days, force);
       await this.runBackfillStep();
       return Response.json({ ok: true, backfill: this.backfillPublicState() });
     }
