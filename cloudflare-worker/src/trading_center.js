@@ -63,6 +63,12 @@ import {
   scoreWorldStep,
   worldCalibration
 } from "./market_world_model.js";
+import {
+  WORLD_OUTCOME_ENGINE_VERSION,
+  attachWorldOutcomeProfiles,
+  buildTokenOutcomeProfiles,
+  trackWorldReality
+} from "./world_outcome_engine.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -695,6 +701,12 @@ export class TradingCenter {
         PRIMARY KEY(origin_ts,step_n)
       );
 
+      CREATE TABLE IF NOT EXISTS world_outcome_snapshots (
+        origin_ts INTEGER PRIMARY KEY,
+        version TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -779,6 +791,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_grammar_counterfactual_ts ON grammar_counterfactual_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_market_world_origin ON market_world_snapshots(origin_ts);
       CREATE INDEX IF NOT EXISTS idx_market_world_resolution_target ON market_world_resolutions(target_ts,resolved_ts);
+      CREATE INDEX IF NOT EXISTS idx_world_outcome_origin ON world_outcome_snapshots(origin_ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -1754,6 +1767,108 @@ export class TradingCenter {
       resolved.push({originTs:Number(row.origin_ts),...scored});
     }
     return resolved;
+  }
+
+  tokenOutcomeProfileReport(limit=5000) {
+    const rows=this.rows(
+      `SELECT t.token_id,t.ret_fwd_15m,t.ret_fwd_60m,t.ret_fwd_240m,
+        g.atr_pct,g.liq_5m
+       FROM market_tokens t
+       LEFT JOIN market_genomes g ON g.ts=t.ts
+       WHERE t.ret_fwd_60m IS NOT NULL
+       ORDER BY t.ts DESC LIMIT ?`,
+      Math.min(12000,Math.max(200,Number(limit||5000)))
+    );
+    return buildTokenOutcomeProfiles(rows);
+  }
+
+  marketWorldOutcomeReport(world=null) {
+    const w=world||this.latestMarketWorld()||this.buildMarketWorldReport();
+    if(!w?.originTs)return{
+      status:"LEARNING",version:WORLD_OUTCOME_ENGINE_VERSION,world:null,worlds:[]
+    };
+    const profiles=this.tokenOutcomeProfileReport(6000);
+    return{
+      ...attachWorldOutcomeProfiles(w,profiles),
+      profileStatus:profiles.status,
+      uniqueProfileTokens:profiles.uniqueTokens||0,
+      thresholds:profiles.thresholds||{}
+    };
+  }
+
+  refreshMarketWorldOutcomes(world=null) {
+    const report=this.marketWorldOutcomeReport(world);
+    if(!report?.originTs)return report;
+    this.sql.exec(
+      `INSERT OR REPLACE INTO world_outcome_snapshots(
+        origin_ts,version,payload_json
+      ) VALUES(?,?,?)`,
+      Number(report.originTs),WORLD_OUTCOME_ENGINE_VERSION,JSON.stringify(report)
+    );
+    return report;
+  }
+
+  latestMarketWorldOutcomes() {
+    const r=this.one(
+      "SELECT * FROM world_outcome_snapshots ORDER BY origin_ts DESC LIMIT 1"
+    );
+    if(!r)return null;
+    return{
+      originTs:Number(r.origin_ts),
+      version:r.version,
+      ...JSON.parse(r.payload_json||"{}")
+    };
+  }
+
+  worldRealityReport(originTs=null) {
+    let origin=originTs===null?null:Number(originTs);
+    if(!Number.isFinite(origin)){
+      const row=this.one(
+        `SELECT s.origin_ts
+         FROM market_world_snapshots s
+         WHERE EXISTS(
+           SELECT 1 FROM market_world_resolutions r
+           WHERE r.origin_ts=s.origin_ts AND r.resolved_ts IS NOT NULL
+         )
+         ORDER BY s.origin_ts DESC LIMIT 1`
+      );
+      origin=row?.origin_ts===undefined?null:Number(row.origin_ts);
+    }
+    if(!Number.isFinite(origin))return{
+      status:"LEARNING",resolvedSteps:0,worlds:[],dominant:null
+    };
+
+    const snap=this.one(
+      "SELECT payload_json FROM market_world_snapshots WHERE origin_ts=?",
+      origin
+    );
+    if(!snap)return{status:"LEARNING",resolvedSteps:0,worlds:[],dominant:null};
+
+    const world=JSON.parse(snap.payload_json||"{}");
+    const resolutions=this.rows(
+      `SELECT step_n,target_ts,resolved_ts,actual_token,actual_probability,
+        actual_rank,surprise_bits,hit1,hit3
+       FROM market_world_resolutions
+       WHERE origin_ts=? AND resolved_ts IS NOT NULL
+       ORDER BY step_n ASC`,
+      origin
+    );
+
+    const tokenRows=this.rows(
+      `SELECT token_id,components_json FROM market_tokens
+       ORDER BY ts DESC LIMIT 8000`
+    );
+    const tokenComponents={};
+    for(const r of tokenRows){
+      const k=String(r.token_id);
+      if(tokenComponents[k])continue;
+      tokenComponents[k]=JSON.parse(r.components_json||"{}");
+    }
+
+    return{
+      originTs:origin,
+      ...trackWorldReality({world,resolutions,tokenComponents})
+    };
   }
 
   marketWorldCalibrationReport(limit=2000) {
@@ -3864,6 +3979,8 @@ export class TradingCenter {
       grammarCounterfactuals:this.latestGrammarCounterfactuals()||this.grammarCounterfactualReport(),
       marketWorld:this.latestMarketWorld()||this.buildMarketWorldReport(),
       marketWorldCalibration:this.marketWorldCalibrationReport(),
+      worldOutcomes:this.latestMarketWorldOutcomes()||this.marketWorldOutcomeReport(),
+      worldReality:this.worldRealityReport(),
       versions:this.versionReport(),
       predictionLedger:this.predictionLedgerAudit(),
       parity:this.parityReport(),
@@ -4849,7 +4966,8 @@ export class TradingCenter {
       adaptiveMemorySnapshots: Number(this.one("SELECT COUNT(*) AS n FROM adaptive_memory_snapshots")?.n || 0),
       grammarCounterfactualSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM grammar_counterfactual_snapshots")?.n || 0),
       marketWorldSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM market_world_snapshots")?.n || 0),
-      marketWorldResolutions: Number(this.one("SELECT COUNT(*) AS n FROM market_world_resolutions WHERE resolved_ts IS NOT NULL")?.n || 0)
+      marketWorldResolutions: Number(this.one("SELECT COUNT(*) AS n FROM market_world_resolutions WHERE resolved_ts IS NOT NULL")?.n || 0),
+      worldOutcomeSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM world_outcome_snapshots")?.n || 0)
     };
   }
 
