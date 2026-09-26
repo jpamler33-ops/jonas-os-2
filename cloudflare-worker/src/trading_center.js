@@ -229,6 +229,19 @@ export class TradingCenter {
         source TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS venue_snapshots (
+        ts INTEGER PRIMARY KEY,
+        binance_spot REAL,
+        bybit_spot REAL,
+        bybit_perp REAL,
+        bybit_mark REAL,
+        bybit_index REAL,
+        spot_cross_diff_bps REAL,
+        perp_spot_basis_bps REAL,
+        mark_index_basis_bps REAL,
+        source TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS orderflow_5m (
         ts INTEGER PRIMARY KEY,
         buy_notional REAL NOT NULL,
@@ -332,6 +345,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_cross_asset_ts ON cross_asset_history(ts);
       CREATE INDEX IF NOT EXISTS idx_liquidations_ts ON liquidations(ts);
       CREATE INDEX IF NOT EXISTS idx_orderflow_5m_ts ON orderflow_5m(ts);
+      CREATE INDEX IF NOT EXISTS idx_venue_snapshots_ts ON venue_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
