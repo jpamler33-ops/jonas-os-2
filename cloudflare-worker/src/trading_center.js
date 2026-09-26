@@ -574,6 +574,7 @@ export class TradingCenter {
     const ls=this.one("SELECT ts FROM long_short_history ORDER BY ts DESC LIMIT 1");
     const cross=this.one("SELECT MAX(ts) AS ts FROM cross_asset_history");
     const flow=this.one("SELECT ts FROM orderflow_5m ORDER BY ts DESC LIMIT 1");
+    const venue=this.one("SELECT ts FROM venue_snapshots ORDER BY ts DESC LIMIT 1");
     const macro=this.macroCalendarHealth(now);
 
     mark("open_interest",oi,15*60_000);
@@ -581,6 +582,7 @@ export class TradingCenter {
     mark("long_short_ratio",ls,15*60_000);
     mark("cross_asset",cross,20*60_000);
     mark("orderflow",flow,15*60_000);
+    mark("venue_confirmation",venue,15*60_000);
     if(!macro.lastCapturedAt) {
       missing.push("official_macro_calendar");
       details.official_macro_calendar={status:"missing"};
@@ -605,7 +607,7 @@ export class TradingCenter {
     }
     details.live_gaps_30m=gaps;
 
-    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar"];
+    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar","venue_confirmation"];
     const criticalPenalty=missing.filter(x=>critical.includes(x)).length*14 +
       stale.filter(x=>critical.includes(x)).length*9;
     const otherPenalty=missing.filter(x=>!critical.includes(x)).length*7 +
@@ -850,7 +852,7 @@ export class TradingCenter {
       "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
       "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay",
       "official_macro_calendar","macro_risk_window","macro_reaction_history",
-      "historical_gap_audit"
+      "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation"
     ]);
     const partial=new Set([]);
     live.add("parameter_stability");
@@ -863,7 +865,8 @@ export class TradingCenter {
     });
     return {
       features,summary,genomeCount,flowCount,currentQuality,
-      historicalIntegrity:this.historicalIntegrityAudit()
+      historicalIntegrity:this.historicalIntegrityAudit(),
+      venue:this.venueStats()
     };
   }
 
@@ -1739,7 +1742,8 @@ export class TradingCenter {
       genomeRows: Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n || 0),
       timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0),
       replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0),
-      macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0)
+      macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0),
+      venueSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM venue_snapshots")?.n || 0)
     };
   }
 
