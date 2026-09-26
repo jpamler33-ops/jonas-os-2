@@ -51,7 +51,16 @@ export const FEATURE_REGISTRY = [
   { key: "options_term_structure", group: "options", critical: false },
   { key: "traditional_risk_assets", group: "cross_market", critical: true },
   { key: "usd_rates_context", group: "cross_market", critical: true },
-  { key: "coinbase_premium", group: "cross_market", critical: false }
+  { key: "coinbase_premium", group: "cross_market", critical: false },
+  { key: "daily_risk_lock", group: "risk", critical: true },
+  { key: "position_sizing", group: "risk", critical: true },
+  { key: "drawdown_monitor", group: "risk", critical: true },
+  { key: "risk_of_ruin_simulation", group: "risk", critical: false },
+  { key: "portfolio_exposure_guard", group: "risk", critical: false },
+  { key: "multiple_testing_guard", group: "validation", critical: true },
+  { key: "model_drift_monitor", group: "validation", critical: true },
+  { key: "source_provenance", group: "system", critical: true },
+  { key: "endpoint_auth", group: "system", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
