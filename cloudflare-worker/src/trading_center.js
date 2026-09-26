@@ -2696,6 +2696,7 @@ export class TradingCenter {
       "adaptive_memory_horizons","grammar_counterfactuals","memory_routing_plan",
       "market_world_model","multi_step_state_rollout","world_branch_divergence","world_model_calibration",
       "world_outcome_engine","world_reality_tracker","world_risk_projection",
+      "world_mutation_engine","branch_tipping_map","mutation_analog_evidence",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
