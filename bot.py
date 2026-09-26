@@ -170,6 +170,8 @@ def rr(entry: float, stop: float, target: float, side: str) -> float:
 
 
 PREPARE_DISTANCE = 0.0035  # 0.35 % vor relevantem Level
+MAX_CONFIRM_AGE_BARS = 1    # nur frischer Retest: aktuelle/letzte 5m-Kerze
+MAX_ENTRY_DISTANCE = 0.0020 # 0.20 % vom Break-Level: sonst nicht hinterherjagen
 
 
 def fresh_break(c: List[Candle], side: str) -> Optional[dict]:
@@ -264,6 +266,26 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
     # 1) Hoechste Prioritaet: voll bestaetigtes Setup.
     if long_pattern and score >= 1 and price >= min(e20, e50):
         entry = price
+        age_bars = (len(c5) - 1) - int(long_pattern["retest_i"])
+        entry_distance = abs(entry - long_pattern["level"]) / long_pattern["level"]
+        if age_bars > MAX_CONFIRM_AGE_BARS or entry_distance > MAX_ENTRY_DISTANCE:
+            return {
+                **base,
+                "decision": "LATE LONG",
+                "stage": "DO NOT CHASE",
+                "action": "Long-Setup wurde erkannt, ist fuer unseren Entry aber nicht mehr frisch. Nicht hinterherjagen; neuen Pullback/Retest abwarten.",
+                "side": "LONG",
+                "entry": None,
+                "stop": None,
+                "target": resistance,
+                "rr": None,
+                "breakout_level": long_pattern["level"],
+                "reasons": reasons + [
+                    f"Retest-Alter={age_bars} 5m-Kerzen",
+                    f"Abstand zum Break-Level={entry_distance*100:.2f}%",
+                ],
+                "warning": "Verpasstes/zu spaetes Setup wird bewusst NICHT als Entry freigegeben.",
+            }
         swing_lows = [p.price for p in pivots(c5[-80:]) if p.kind == "L" and p.price < entry]
         base_stop = max(swing_lows[-3:] or [long_pattern["retest_low"]])
         base_stop = min(base_stop, long_pattern["retest_low"])
@@ -294,6 +316,26 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
 
     if short_pattern and score <= -1 and price <= max(e20, e50):
         entry = price
+        age_bars = (len(c5) - 1) - int(short_pattern["retest_i"])
+        entry_distance = abs(entry - short_pattern["level"]) / short_pattern["level"]
+        if age_bars > MAX_CONFIRM_AGE_BARS or entry_distance > MAX_ENTRY_DISTANCE:
+            return {
+                **base,
+                "decision": "LATE SHORT",
+                "stage": "DO NOT CHASE",
+                "action": "Short-Setup wurde erkannt, ist fuer unseren Entry aber nicht mehr frisch. Nicht hinterherjagen; neuen Pullback/Retest abwarten.",
+                "side": "SHORT",
+                "entry": None,
+                "stop": None,
+                "target": support,
+                "rr": None,
+                "breakout_level": short_pattern["level"],
+                "reasons": reasons + [
+                    f"Retest-Alter={age_bars} 5m-Kerzen",
+                    f"Abstand zum Break-Level={entry_distance*100:.2f}%",
+                ],
+                "warning": "Verpasstes/zu spaetes Setup wird bewusst NICHT als Entry freigegeben.",
+            }
         swing_highs = [p.price for p in pivots(c5[-80:]) if p.kind == "H" and p.price > entry]
         base_stop = min(swing_highs[-3:] or [short_pattern["retest_high"]])
         base_stop = max(base_stop, short_pattern["retest_high"])
