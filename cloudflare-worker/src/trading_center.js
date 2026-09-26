@@ -19,6 +19,7 @@ import {
   wilsonInterval
 } from "./research_engine.js";
 import { parameterGrid } from "./replay_engine.js";
+import { discoverInformationEdges } from "./edge_discovery.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -414,6 +415,36 @@ export class TradingCenter {
         ret_fwd_240m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS market_genome_extensions (
+        ts INTEGER PRIMARY KEY,
+        options_iv_30d REAL,
+        options_skew_30d REAL,
+        options_term_30m7 REAL,
+        coinbase_premium_bps REAL,
+        venue_spot_diff_bps REAL,
+        perp_spot_basis_bps REAL,
+        mark_index_basis_bps REAL,
+        depth_imbalance_01 REAL,
+        liquidity_shock REAL,
+        futures_basis REAL,
+        vix_change REAL,
+        sp500_change REAL,
+        nasdaq_change REAL,
+        usd_change REAL,
+        us2y_change_bps REAL,
+        us10y_change_bps REAL,
+        source_completeness REAL
+      );
+
+      CREATE TABLE IF NOT EXISTS research_governor_snapshots (
+        ts INTEGER PRIMARY KEY,
+        historical_n INTEGER NOT NULL,
+        live_n INTEGER NOT NULL,
+        historical_json TEXT NOT NULL,
+        live_json TEXT NOT NULL,
+        promoted_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -480,6 +511,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_options_snapshots_ts ON options_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_coinbase_premium_ts ON coinbase_premium_history(ts);
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
+      CREATE INDEX IF NOT EXISTS idx_market_genome_extensions_ts ON market_genome_extensions(ts);
+      CREATE INDEX IF NOT EXISTS idx_research_governor_ts ON research_governor_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -1028,6 +1061,58 @@ export class TradingCenter {
     return g;
   }
 
+  buildGenomeExtension(ts) {
+    const options=this.latestOptionsContext()||{};
+    const premium=this.latestCoinbasePremium()||{};
+    const venue=this.latestVenueSnapshot()||{};
+    const micro=this.latestSecondaryMicrostructure()||{};
+    const macro=this.macroMarketSummary();
+    const rows=macro?.rows||[];
+    const by=Object.fromEntries(rows.map(r=>[r.series,r]));
+
+    const ext={
+      ts:Number(ts),
+      options_iv_30d:options.iv_30d===null||options.iv_30d===undefined?null:Number(options.iv_30d),
+      options_skew_30d:options.skew_30d===null||options.skew_30d===undefined?null:Number(options.skew_30d),
+      options_term_30m7:options.term_30m7===null||options.term_30m7===undefined?null:Number(options.term_30m7),
+      coinbase_premium_bps:premium.premium_bps===null||premium.premium_bps===undefined?null:Number(premium.premium_bps),
+      venue_spot_diff_bps:venue.spot_cross_diff_bps===null||venue.spot_cross_diff_bps===undefined?null:Number(venue.spot_cross_diff_bps),
+      perp_spot_basis_bps:venue.perp_spot_basis_bps===null||venue.perp_spot_basis_bps===undefined?null:Number(venue.perp_spot_basis_bps),
+      mark_index_basis_bps:venue.mark_index_basis_bps===null||venue.mark_index_basis_bps===undefined?null:Number(venue.mark_index_basis_bps),
+      depth_imbalance_01:micro.depth_imbalance_01===null||micro.depth_imbalance_01===undefined?null:Number(micro.depth_imbalance_01),
+      liquidity_shock:micro.liquidity_shock===null||micro.liquidity_shock===undefined?null:Number(micro.liquidity_shock),
+      futures_basis:micro.future_basis===null||micro.future_basis===undefined?null:Number(micro.future_basis),
+      vix_change:by.VIXCLS?.change===null||by.VIXCLS?.change===undefined?null:Number(by.VIXCLS.change),
+      sp500_change:by.SP500?.change===null||by.SP500?.change===undefined?null:Number(by.SP500.change),
+      nasdaq_change:by.NASDAQCOM?.change===null||by.NASDAQCOM?.change===undefined?null:Number(by.NASDAQCOM.change),
+      usd_change:by.DTWEXBGS?.change===null||by.DTWEXBGS?.change===undefined?null:Number(by.DTWEXBGS.change),
+      us2y_change_bps:by.DGS2?.change===null||by.DGS2?.change===undefined?null:Number(by.DGS2.change),
+      us10y_change_bps:by.DGS10?.change===null||by.DGS10?.change===undefined?null:Number(by.DGS10.change)
+    };
+    const fields=Object.entries(ext).filter(([k])=>k!=="ts").map(([,v])=>v);
+    ext.source_completeness=fields.length?fields.filter(Number.isFinite).length/fields.length:0;
+    return ext;
+  }
+
+  recordGenomeExtension(ts) {
+    const x=this.buildGenomeExtension(ts);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO market_genome_extensions(
+        ts,options_iv_30d,options_skew_30d,options_term_30m7,coinbase_premium_bps,
+        venue_spot_diff_bps,perp_spot_basis_bps,mark_index_basis_bps,
+        depth_imbalance_01,liquidity_shock,futures_basis,
+        vix_change,sp500_change,nasdaq_change,usd_change,
+        us2y_change_bps,us10y_change_bps,source_completeness
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      x.ts,x.options_iv_30d,x.options_skew_30d,x.options_term_30m7,x.coinbase_premium_bps,
+      x.venue_spot_diff_bps,x.perp_spot_basis_bps,x.mark_index_basis_bps,
+      x.depth_imbalance_01,x.liquidity_shock,x.futures_basis,
+      x.vix_change,x.sp500_change,x.nasdaq_change,x.usd_change,
+      x.us2y_change_bps,x.us10y_change_bps,x.source_completeness
+    );
+    return x;
+  }
+
   recordMarketGenome(ctx) {
     const g=this.buildMarketGenome(ctx);
     this.sql.exec(
@@ -1042,6 +1127,7 @@ export class TradingCenter {
       g.flow_delta_ratio,g.spread_bps,g.book_imbalance,g.agreement,g.entropy,g.novelty,g.data_quality,
       g.volume_surprise,g.oi_surprise,g.liq_surprise,g.flow_surprise,g.state_label,g.fingerprint
     );
+    this.recordGenomeExtension(g.ts);
     return g;
   }
 
@@ -1321,6 +1407,8 @@ export class TradingCenter {
       "traditional_risk_assets","usd_rates_context",
       "options_iv_skew","options_term_structure","coinbase_premium",
       "latency_cost_model","risk_of_ruin_simulation","endpoint_auth",
+      "information_gain_discovery","interaction_synergy_discovery",
+      "feature_redundancy_map","research_governor",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
@@ -2070,6 +2158,106 @@ export class TradingCenter {
     };
   }
 
+  edgeDiscoveryReport() {
+    const historical=this.rows(
+      `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
+        oi_change,funding_rate,long_short_ratio,cross_ret_60m,data_completeness,
+        ret_fwd_60m
+       FROM historical_genomes
+       WHERE ret_fwd_60m IS NOT NULL
+       ORDER BY ts ASC LIMIT 10000`
+    );
+    const historicalFeatures=[
+      "ret_5m","ret_15m","atr_pct","volume_ratio","ema_distance_pct",
+      "oi_change","funding_rate","long_short_ratio","cross_ret_60m","data_completeness"
+    ];
+
+    const live=this.rows(
+      `SELECT g.ts,g.ret_5m,g.ret_15m,g.atr_pct,g.volume_ratio,g.ema_distance_pct,
+        g.level_distance_pct,g.bias_score,g.oi_change,g.funding_rate,g.long_short_ratio,
+        g.liq_5m,g.liq_imbalance,g.cross_ret_60m,g.flow_delta_ratio,g.spread_bps,
+        g.book_imbalance,g.agreement,g.entropy,g.novelty,g.data_quality,
+        e.options_iv_30d,e.options_skew_30d,e.options_term_30m7,
+        e.coinbase_premium_bps,e.venue_spot_diff_bps,e.perp_spot_basis_bps,
+        e.mark_index_basis_bps,e.depth_imbalance_01,e.liquidity_shock,e.futures_basis,
+        e.vix_change,e.sp500_change,e.nasdaq_change,e.usd_change,
+        e.us2y_change_bps,e.us10y_change_bps,e.source_completeness,
+        g.ret_fwd_60m
+       FROM market_genomes g
+       LEFT JOIN market_genome_extensions e ON e.ts=g.ts
+       WHERE g.ret_fwd_60m IS NOT NULL
+       ORDER BY g.ts ASC LIMIT 5000`
+    );
+    const liveFeatures=[
+      "ret_5m","ret_15m","atr_pct","volume_ratio","ema_distance_pct","level_distance_pct",
+      "bias_score","oi_change","funding_rate","long_short_ratio","liq_5m","liq_imbalance",
+      "cross_ret_60m","flow_delta_ratio","spread_bps","book_imbalance","agreement","entropy",
+      "novelty","data_quality","options_iv_30d","options_skew_30d","options_term_30m7",
+      "coinbase_premium_bps","venue_spot_diff_bps","perp_spot_basis_bps","mark_index_basis_bps",
+      "depth_imbalance_01","liquidity_shock","futures_basis","vix_change","sp500_change",
+      "nasdaq_change","usd_change","us2y_change_bps","us10y_change_bps","source_completeness"
+    ];
+
+    const historicalReport=discoverInformationEdges(historical,historicalFeatures,"ret_fwd_60m");
+    const liveReport=discoverInformationEdges(live,liveFeatures,"ret_fwd_60m");
+
+    const promoted=[
+      ...(historicalReport.governor||[])
+        .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST")
+        .map(x=>({dataset:"HISTORICAL_CORE",type:"FEATURE",...x})),
+      ...(historicalReport.interactionGovernor||[])
+        .map(x=>({dataset:"HISTORICAL_CORE",type:"INTERACTION",...x})),
+      ...(liveReport.governor||[])
+        .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST")
+        .map(x=>({dataset:"LIVE_EXTENDED",type:"FEATURE",...x})),
+      ...(liveReport.interactionGovernor||[])
+        .map(x=>({dataset:"LIVE_EXTENDED",type:"INTERACTION",...x}))
+    ].sort((a,b)=>Number(b.discoveryScore||0)-Number(a.discoveryScore||0));
+
+    return {
+      generatedAt:Date.now(),
+      historicalCore:historicalReport,
+      liveExtended:liveReport,
+      promotedToChallengerTest:promoted.slice(0,30),
+      policy:{
+        automaticChampionChanges:false,
+        liveTradeRulesUntouched:true,
+        objective:"Identify incremental information and interaction synergy while penalizing redundancy and requiring chronological holdout survival."
+      }
+    };
+  }
+
+  refreshResearchGovernor() {
+    const report=this.edgeDiscoveryReport();
+    const ts=Date.now();
+    const promoted=report.promotedToChallengerTest||[];
+    this.sql.exec(
+      `INSERT OR REPLACE INTO research_governor_snapshots(
+        ts,historical_n,live_n,historical_json,live_json,promoted_json
+      ) VALUES(?,?,?,?,?,?)`,
+      ts,
+      Number(report.historicalCore?.n||0),
+      Number(report.liveExtended?.n||0),
+      JSON.stringify(report.historicalCore),
+      JSON.stringify(report.liveExtended),
+      JSON.stringify(promoted)
+    );
+    return {ts,...report};
+  }
+
+  latestResearchGovernor() {
+    const r=this.one("SELECT * FROM research_governor_snapshots ORDER BY ts DESC LIMIT 1");
+    if(!r) return null;
+    return {
+      ts:Number(r.ts),
+      historicalN:Number(r.historical_n||0),
+      liveN:Number(r.live_n||0),
+      historicalCore:JSON.parse(r.historical_json||"{}"),
+      liveExtended:JSON.parse(r.live_json||"{}"),
+      promotedToChallengerTest:JSON.parse(r.promoted_json||"[]")
+    };
+  }
+
   fullResearchReport(ctx=null) {
     return {
       generatedAt:Date.now(),
@@ -2107,7 +2295,8 @@ export class TradingCenter {
       feedLatency:this.feedLatencyReport(),
       leadLagNetwork:this.leadLagNetworkReport(),
       counterfactuals:this.matchedCounterfactualReport(),
-      falsification:this.hypothesisFalsificationReport()
+      falsification:this.hypothesisFalsificationReport(),
+      informationDiscovery:this.latestResearchGovernor()||this.edgeDiscoveryReport()
     };
   }
 
