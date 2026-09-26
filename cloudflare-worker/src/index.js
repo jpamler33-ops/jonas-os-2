@@ -517,7 +517,11 @@ export class RadarDO extends DurableObject {
       lastWorldOutcomeAt: 0,
       lastWorldOutcomeError: null,
       lastWorldRealitySignature: null,
-      lastWorldRealityAlertAt: 0
+      lastWorldRealityAlertAt: 0,
+      lastWorldMutationAt: 0,
+      lastWorldMutationError: null,
+      lastWorldMutationSignature: null,
+      lastWorldMutationAlertAt: 0
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -658,6 +662,11 @@ export class RadarDO extends DurableObject {
           reality:this.center.worldRealityReport(),
           lastRunAt:this.mem.lastWorldOutcomeAt||null,
           lastError:this.mem.lastWorldOutcomeError||null
+        },
+        worldMutations: {
+          latest:this.center.latestWorldMutations(),
+          lastRunAt:this.mem.lastWorldMutationAt||null,
+          lastError:this.mem.lastWorldMutationError||null
         },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
@@ -826,6 +835,14 @@ export class RadarDO extends DurableObject {
     }
     if (path === "/api/world-reality") {
       return Response.json(this.center.worldRealityReport());
+    }
+
+    if (path === "/api/world-mutations" || path === "/api/tipping-map") {
+      return Response.json({
+        latest:this.center.latestWorldMutations()||this.center.worldMutationReport(),
+        lastRunAt:this.mem.lastWorldMutationAt||null,
+        lastError:this.mem.lastWorldMutationError||null
+      });
     }
 
     if (path === "/api/macro") {
@@ -1416,6 +1433,55 @@ export class RadarDO extends DurableObject {
             this.mem.lastWorldOutcomeError=null;
           } catch(e) {
             this.mem.lastWorldOutcomeError=e?.message||String(e);
+          }
+
+          try {
+            const mutations=this.center.refreshWorldMutations(world);
+            this.mem.lastWorldMutationAt=now;
+            this.mem.lastWorldMutationError=null;
+
+            const strongest=mutations?.strongestMutationPressure||null;
+            const analogN=Math.min(
+              Number(strongest?.historicalAnalogs?.dominant?.n||0),
+              Number(strongest?.historicalAnalogs?.challenger?.n||0)
+            );
+            const pressure=Number(strongest?.takeoverPressure||0);
+            const mutationSignature=strongest
+              ? `${mutations.originTs}|${strongest.challengerWorldRank}|${strongest.status}|${Math.round(pressure*20)}`
+              : null;
+            const mutationChanged=mutationSignature && mutationSignature!==this.mem.lastWorldMutationSignature;
+            const mutationCooldown=now-Number(this.mem.lastWorldMutationAlertAt||0)>=2*60*60_000;
+
+            if(
+              strongest?.status==="TAKEOVER_PRESSURE" &&
+              pressure>=0.72 &&
+              analogN>=10 &&
+              mutationChanged &&
+              mutationCooldown
+            ) {
+              const switches=(strongest.switchSets?.[0]?.changes||[])
+                .slice(0,4)
+                .map(x=>`${x.component}: ${x.from} → ${x.to}`)
+                .join(" | ");
+              await this.notifyOnce(
+                `world-mutation|${mutationSignature}`,
+                [
+                  "BTC — WORLD TIPPING PRESSURE",
+                  `Challenger World: #${strongest.challengerWorldRank}`,
+                  `Abzweigung: ~${strongest.divergenceMinutes} Minuten`,
+                  `Takeover pressure: ${(pressure*100).toFixed(0)}%`,
+                  `Minimum state flips: ${strongest.minimumFlipCount}`,
+                  switches ? `Kleinster beobachtbarer Switch: ${switches}` : "Aktueller Zustand liegt bereits nahe am Challenger-Fingerprint.",
+                  `Historische Analog-Samples: dominant N=${strongest.historicalAnalogs?.dominant?.n||0}, challenger N=${strongest.historicalAnalogs?.challenger?.n||0}`,
+                  "Bedeutung: Der aktuelle Zustands-Fingerprint nähert sich einer konkurrierenden vorher generierten Marktwelt.",
+                  "Das ist ein struktureller Szenario-Wechsel, keine Kausalbehauptung und kein Entry-Signal."
+                ].join("\n")
+              );
+              this.mem.lastWorldMutationAlertAt=now;
+            }
+            this.mem.lastWorldMutationSignature=mutationSignature;
+          } catch(e) {
+            this.mem.lastWorldMutationError=e?.message||String(e);
           }
 
           const reality=this.center.worldRealityReport();
