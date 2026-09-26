@@ -26,11 +26,12 @@ Alle ca. 5 Minuten schreibt GitHub Actions eine Summary mit:
 - Begruendung, welche Regeln erfuellt oder abgelehnt wurden
 
 ## Telegram optional
-Repository-Secrets:
+Fuer iPhone-Push reicht jetzt ein Repository-Secret:
 - TELEGRAM_BOT_TOKEN
-- TELEGRAM_CHAT_ID
 
-Ohne diese Secrets laeuft der Bot trotzdem. Telegram wird nur bei einem bestaetigten LONG/SHORT-Setup gesendet.
+Nach dem Erstellen des Telegram-Bots einmal den Bot-Chat oeffnen und **/start** senden. Der Bot erkennt deine Chat-ID dann automatisch.
+
+Bei normalen 5-Minuten-Laeufen wird Telegram nur bei einem bestaetigten LONG/SHORT-Setup gesendet. Wenn du den GitHub-Workflow manuell startest, sendet er einmal den aktuellen Status als Testnachricht.
 
 ## Sicherheitsgrenze
 Der Bot erzeugt nur technische Paper-Signale. Er fuehrt keine Trades aus und hat aktuell keinen automatischen News-/Makro-Kalenderfilter.
