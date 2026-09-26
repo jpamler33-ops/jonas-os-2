@@ -435,6 +435,38 @@ function evaluateConfirmed(ctx, opts = {}) {
   return null;
 }
 
+async function derivedDashboardKey(env) {
+  const secret=String(env.TELEGRAM_BOT_TOKEN||"").trim();
+  if(!secret) return null;
+  const bytes=new TextEncoder().encode("jonas-os-private-center-v1:"+secret);
+  const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",bytes));
+  let binary="";
+  for(const b of digest) binary+=String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+
+function parseCookies(header="") {
+  const out={};
+  for(const part of String(header||"").split(";")) {
+    const i=part.indexOf("=");
+    if(i<0) continue;
+    out[part.slice(0,i).trim()]=decodeURIComponent(part.slice(i+1).trim());
+  }
+  return out;
+}
+
+function protectedDashboardPath(path) {
+  return path==="/center" ||
+    path==="/status" ||
+    path==="/health" ||
+    path==="/test-telegram" ||
+    path==="/start" ||
+    path.startsWith("/api/") ||
+    path.startsWith("/backfill/") ||
+    path.startsWith("/replay/") ||
+    path.startsWith("/genome-backfill/");
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -443,6 +475,44 @@ export default {
     const supplied=request.headers.get("x-admin-token") ||
       (request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
     const isAdmin=Boolean(adminToken && supplied===adminToken);
+    const dashboardKey=await derivedDashboardKey(env);
+    const cookies=parseCookies(request.headers.get("cookie")||"");
+    const dashboardAuthorized=Boolean(
+      dashboardKey && (
+        cookies.jonas_center===dashboardKey ||
+        request.headers.get("x-dashboard-token")===dashboardKey
+      )
+    );
+
+    if(url.pathname==="/request-access") {
+      if(!dashboardKey) {
+        return Response.json({ok:false,error:"telegram_secret_required"},{status:503});
+      }
+      const loginUrl=`${url.origin}/login?key=${encodeURIComponent(dashboardKey)}`;
+      return stub.fetch("https://radar/send-access-link?link="+encodeURIComponent(loginUrl));
+    }
+
+    if(url.pathname==="/login") {
+      const suppliedKey=url.searchParams.get("key")||"";
+      if(!dashboardKey || suppliedKey!==dashboardKey) {
+        return new Response("Access denied",{status:403});
+      }
+      return new Response(null,{
+        status:302,
+        headers:{
+          location:"/center",
+          "set-cookie":`jonas_center=${encodeURIComponent(dashboardKey)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`,
+          "cache-control":"no-store"
+        }
+      });
+    }
+
+    if(protectedDashboardPath(url.pathname) && !dashboardAuthorized) {
+      return new Response(
+        "Private BTC Trading Center\n\nOpen /request-access once. The private login link is sent to your Telegram bot chat.",
+        {status:401,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}}
+      );
+    }
     const destructiveBackfill =
       url.pathname==="/backfill/step" ||
       (url.pathname==="/backfill/start" && url.searchParams.get("force")==="1");
@@ -527,6 +597,29 @@ export class RadarDO extends DurableObject {
 
   async fetch(request) {
     const path = new URL(request.url).pathname;
+
+    if (path === "/send-access-link") {
+      const now=Date.now();
+      if(now-Number(this.mem.lastAccessLinkAt||0)<5*60_000) {
+        return Response.json({ok:false,error:"rate_limited",retryAfterSec:300},{status:429});
+      }
+      const link=new URL(request.url).searchParams.get("link");
+      if(!link || !link.startsWith("https://")) {
+        return Response.json({ok:false,error:"invalid_link"},{status:400});
+      }
+      const ok=await this.sendTelegram(
+        [
+          "BTC TRADING CENTER — PRIVATE ACCESS",
+          "Einmal öffnen; danach bleibt der Browser per sicherem Cookie angemeldet.",
+          link
+        ].join("\n")
+      );
+      if(ok) {
+        this.mem.lastAccessLinkAt=now;
+        await this.persist();
+      }
+      return Response.json({ok,telegramConfigured:Boolean(this.env.TELEGRAM_BOT_TOKEN)});
+    }
 
     if (path === "/health") {
       // Self-healing health check: after a deploy or Durable Object restart,
