@@ -274,6 +274,35 @@ export class TradingCenter {
         source TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS options_snapshots (
+        ts INTEGER PRIMARY KEY,
+        contracts INTEGER,
+        expiry_count INTEGER,
+        iv_7d REAL,
+        iv_30d REAL,
+        iv_90d REAL,
+        skew_7d REAL,
+        skew_30d REAL,
+        skew_90d REAL,
+        term_30m7 REAL,
+        term_90m30 REAL,
+        oi_7d REAL,
+        oi_30d REAL,
+        oi_90d REAL,
+        source TEXT NOT NULL,
+        payload_json TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS coinbase_premium_history (
+        ts INTEGER PRIMARY KEY,
+        coinbase_price REAL NOT NULL,
+        reference_price REAL NOT NULL,
+        premium_bps REAL NOT NULL,
+        trade_time TEXT,
+        trade_id TEXT,
+        source TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS venue_snapshots (
         ts INTEGER PRIMARY KEY,
         binance_spot REAL,
@@ -448,6 +477,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_orderflow_5m_ts ON orderflow_5m(ts);
       CREATE INDEX IF NOT EXISTS idx_secondary_microstructure_ts ON secondary_microstructure(ts);
       CREATE INDEX IF NOT EXISTS idx_venue_snapshots_ts ON venue_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_options_snapshots_ts ON options_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_coinbase_premium_ts ON coinbase_premium_history(ts);
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
@@ -543,6 +574,87 @@ export class TradingCenter {
       } : null,
       crossAssets: cross,
       liquidations1h: liq
+    };
+  }
+
+  recordOptionsContext(x) {
+    if(!x || !Number.isFinite(Number(x.ts))) return 0;
+    const t7=x.tenor7d||{},t30=x.tenor30d||{},t90=x.tenor90d||{};
+    const cur=this.sql.exec(
+      `INSERT OR REPLACE INTO options_snapshots(
+        ts,contracts,expiry_count,iv_7d,iv_30d,iv_90d,
+        skew_7d,skew_30d,skew_90d,term_30m7,term_90m30,
+        oi_7d,oi_30d,oi_90d,source,payload_json
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      Number(x.ts),Number(x.contracts||0),Number(x.expiryCount||0),
+      t7.atmIv??null,t30.atmIv??null,t90.atmIv??null,
+      t7.putCallSkewIvPoints??null,t30.putCallSkewIvPoints??null,t90.putCallSkewIvPoints??null,
+      x.termSlope30m7??null,x.termSlope90m30??null,
+      t7.openInterest??null,t30.openInterest??null,t90.openInterest??null,
+      x.source||"deribit",JSON.stringify(x)
+    );
+    return Number(cur.rowsWritten||0);
+  }
+
+  latestOptionsContext() {
+    return this.one("SELECT * FROM options_snapshots ORDER BY ts DESC LIMIT 1");
+  }
+
+  optionsResearchSummary(limit=576) {
+    const rows=this.rows(
+      "SELECT * FROM options_snapshots ORDER BY ts DESC LIMIT ?",
+      Math.min(5000,Math.max(1,Number(limit||576)))
+    );
+    if(!rows.length) return {n:0,latest:null};
+    const vals=k=>rows.map(r=>Number(r[k])).filter(Number.isFinite);
+    const avg=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+    const latest=rows[0];
+    return {
+      n:rows.length,
+      latest,
+      avgIv7d:avg(vals("iv_7d")),
+      avgIv30d:avg(vals("iv_30d")),
+      avgIv90d:avg(vals("iv_90d")),
+      avgSkew30d:avg(vals("skew_30d")),
+      avgTerm30m7:avg(vals("term_30m7")),
+      avgTerm90m30:avg(vals("term_90m30"))
+    };
+  }
+
+  recordCoinbasePremium(x) {
+    if(!x || !Number.isFinite(Number(x.ts)) || !Number.isFinite(Number(x.premiumBps))) return 0;
+    const cur=this.sql.exec(
+      `INSERT OR REPLACE INTO coinbase_premium_history(
+        ts,coinbase_price,reference_price,premium_bps,trade_time,trade_id,source
+      ) VALUES(?,?,?,?,?,?,?)`,
+      Number(x.ts),Number(x.coinbasePrice),Number(x.referencePrice),Number(x.premiumBps),
+      x.tradeTime||null,x.tradeId===null||x.tradeId===undefined?null:String(x.tradeId),
+      x.source||"coinbase_exchange"
+    );
+    return Number(cur.rowsWritten||0);
+  }
+
+  latestCoinbasePremium() {
+    return this.one("SELECT * FROM coinbase_premium_history ORDER BY ts DESC LIMIT 1");
+  }
+
+  coinbasePremiumSummary(limit=576) {
+    const rows=this.rows(
+      "SELECT * FROM coinbase_premium_history ORDER BY ts DESC LIMIT ?",
+      Math.min(5000,Math.max(1,Number(limit||576)))
+    );
+    if(!rows.length) return {n:0,latest:null};
+    const xs=rows.map(r=>Number(r.premium_bps)).filter(Number.isFinite);
+    const avg=xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+    const sorted=[...xs].sort((a,b)=>a-b);
+    const median=sorted.length?sorted[Math.floor(sorted.length/2)]:null;
+    return {
+      n:rows.length,
+      latest:rows[0],
+      avgPremiumBps:avg,
+      medianPremiumBps:median,
+      maxPremiumBps:xs.length?Math.max(...xs):null,
+      minPremiumBps:xs.length?Math.min(...xs):null
     };
   }
 
@@ -754,6 +866,8 @@ export class TradingCenter {
     const flow=this.one("SELECT ts FROM orderflow_5m ORDER BY ts DESC LIMIT 1");
     const micro=this.one("SELECT ts FROM secondary_microstructure ORDER BY ts DESC LIMIT 1");
     const venue=this.one("SELECT ts FROM venue_snapshots ORDER BY ts DESC LIMIT 1");
+    const options=this.one("SELECT ts FROM options_snapshots ORDER BY ts DESC LIMIT 1");
+    const coinbase=this.one("SELECT ts FROM coinbase_premium_history ORDER BY ts DESC LIMIT 1");
     const macro=this.macroCalendarHealth(now);
     const macroMarket=this.macroMarketHealth(now);
 
@@ -764,6 +878,8 @@ export class TradingCenter {
     mark("orderflow",flow,15*60_000);
     mark("secondary_microstructure",micro,20*60_000);
     mark("venue_confirmation",venue,15*60_000);
+    mark("options_surface",options,45*60_000);
+    mark("coinbase_premium",coinbase,20*60_000);
     if(!macro.lastCapturedAt) {
       missing.push("official_macro_calendar");
       details.official_macro_calendar={status:"missing"};
@@ -1203,6 +1319,7 @@ export class TradingCenter {
       "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance",
       "probability_calibration","shadow_strategies",
       "traditional_risk_assets","usd_rates_context",
+      "options_iv_skew","options_term_structure","coinbase_premium",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
@@ -1868,6 +1985,8 @@ export class TradingCenter {
       venue:this.venueStats(),
       microstructure:this.secondaryMicrostructureSummary(),
       macroMarket:this.macroMarketSummary(),
+      options:this.optionsResearchSummary(),
+      coinbasePremium:this.coinbasePremiumSummary(),
       risk:this.riskPolicyState(),
       equity:this.equityResearch(),
       alertValue:this.alertValueReport(),
@@ -2801,7 +2920,9 @@ export class TradingCenter {
       shadowSetups: Number(this.one("SELECT COUNT(*) AS n FROM shadow_setups")?.n || 0),
       macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0),
       macroMarketRows: Number(this.one("SELECT COUNT(*) AS n FROM macro_market_daily")?.n || 0),
-      venueSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM venue_snapshots")?.n || 0)
+      venueSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM venue_snapshots")?.n || 0),
+      optionsSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM options_snapshots")?.n || 0),
+      coinbasePremiumRows: Number(this.one("SELECT COUNT(*) AS n FROM coinbase_premium_history")?.n || 0)
     };
   }
 
