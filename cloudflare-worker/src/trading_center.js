@@ -2603,6 +2603,7 @@ export class TradingCenter {
       "market_grammar_predictor","grammar_surprise_detector","grammar_drift_monitor","next_state_forecast",
       "adaptive_memory_horizons","grammar_counterfactuals","memory_routing_plan",
       "market_world_model","multi_step_state_rollout","world_branch_divergence","world_model_calibration",
+      "world_outcome_engine","world_reality_tracker","world_risk_projection",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
