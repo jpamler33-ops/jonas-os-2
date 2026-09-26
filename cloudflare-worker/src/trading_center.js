@@ -1026,7 +1026,7 @@ export class TradingCenter {
       "historical_twins","walk_forward","cost_model","edge_decay",
       "official_macro_calendar","macro_risk_window","macro_reaction_history",
       "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation",
-      "data_quality_lock","parameter_stability"
+      "data_quality_lock","parameter_stability","historical_genome_bootstrap"
     ]);
     const partial=new Set([
       "counterfactuals","feed_latency_monitor","feed_redundancy",
