@@ -424,7 +424,8 @@ export default {
       url.pathname === "/center" ||
       url.pathname.startsWith("/api/") ||
       url.pathname.startsWith("/backfill/") ||
-      url.pathname.startsWith("/replay/")
+      url.pathname.startsWith("/replay/") ||
+      url.pathname.startsWith("/genome-backfill/")
     ) {
       return stub.fetch("https://radar" + url.pathname + url.search);
     }
@@ -459,6 +460,7 @@ export class RadarDO extends DurableObject {
       flow5m: null,
       bookTicker: null,
       replay: null,
+      genomeBackfill: null,
       lastMacroPoll: 0,
       lastMacroError: null
     };
@@ -515,6 +517,7 @@ export class RadarDO extends DurableObject {
         orderflowMode: "BINANCE_KLINE_TAKER_VOLUME_PLUS_BOOK_SNAPSHOT",
         venue: this.center.latestVenueSnapshot(),
         replay: this.replayPublicState(),
+        genomeBackfill: this.genomeBackfillPublicState(),
         macro: {
           risk: this.center.macroRiskState(),
           calendar: this.center.macroCalendarHealth(),
@@ -621,6 +624,14 @@ export class RadarDO extends DurableObject {
       return Response.json(this.center.venueStats());
     }
 
+    if (path === "/genome-backfill/status") {
+      return Response.json({
+        ok:true,
+        genomeBackfill:this.genomeBackfillPublicState(),
+        historicalGenomeRows:this.center.historicalGenomeCount()
+      });
+    }
+
     if (path === "/replay/status") {
       return Response.json({
         ok:true,
@@ -657,6 +668,8 @@ export class RadarDO extends DurableObject {
       await this.ensureHeartbeat();
       await this.ensureBackfillStarted(90, false);
       await this.runBackfillStep();
+      await this.ensureGenomeBackfillStarted();
+      await this.runGenomeBackfillStep();
       await this.ensureReplayStarted();
       await this.runReplayStep();
       await this.scheduleNextAlarm();
@@ -676,10 +689,77 @@ export class RadarDO extends DurableObject {
       await this.ensureHeartbeat();
       await this.ensureBackfillStarted(90, false);
       await this.runBackfillStep();
+      await this.ensureGenomeBackfillStarted();
+      await this.runGenomeBackfillStep();
       await this.ensureReplayStarted();
       await this.runReplayStep();
     } finally {
       await this.scheduleNextAlarm();
+    }
+  }
+
+  genomeBackfillPublicState() {
+    const g=this.mem.genomeBackfill;
+    if(!g) return {active:false,completed:false,stage:"WAITING_FOR_HISTORY"};
+    return {...g};
+  }
+
+  async ensureGenomeBackfillStarted() {
+    if(!this.mem.backfill?.completed) return;
+    if(this.mem.genomeBackfill && (this.mem.genomeBackfill.active || this.mem.genomeBackfill.completed)) return;
+    const b=this.center.historicalBounds();
+    const min=Number(b.min_ts),max=Number(b.max_ts);
+    if(!Number.isFinite(min)||!Number.isFinite(max)||Number(b.n||0)<1500) return;
+    this.mem.genomeBackfill={
+      active:true,
+      completed:false,
+      stage:"HISTORICAL_GENOMES_15M",
+      startedAt:Date.now(),
+      finishedAt:null,
+      start:min+12*60*60_000,
+      end:max-4*60*60_000,
+      cursor:min+12*60*60_000,
+      processed:0,
+      written:0,
+      lastStepAt:null,
+      lastError:null
+    };
+    await this.persist();
+  }
+
+  async runGenomeBackfillStep() {
+    const g=this.mem.genomeBackfill;
+    if(!g?.active||g.completed) return;
+    try {
+      if(Number(g.cursor)>=Number(g.end)) {
+        g.active=false;
+        g.completed=true;
+        g.stage="DONE";
+        g.finishedAt=Date.now();
+        await this.persist();
+        await this.notifyOnce(
+          "historical-genomes-complete-v1",
+          [
+            "BTC RESEARCH LAB — HISTORICAL GENOMES COMPLETE",
+            `Historische Market-DNA Samples: ${this.center.historicalGenomeCount()}`,
+            "Twin-Suche kann jetzt Live-Zustände mit der importierten Historie vergleichen.",
+            "Historische Samples ohne damaliges Tick-Orderflow werden als PARTIAL behandelt und im Distanzmodell bestraft."
+          ].join("\n")
+        );
+        return;
+      }
+      const chunkEnd=Math.min(Number(g.end),Number(g.cursor)+12*60*60_000);
+      const result=this.center.bootstrapHistoricalGenomeChunk(Number(g.cursor),chunkEnd);
+      g.processed=Number(g.processed||0)+Number(result.processed||0);
+      g.written=Number(g.written||0)+Number(result.written||0);
+      g.cursor=chunkEnd;
+      g.lastStepAt=Date.now();
+      g.lastError=null;
+      await this.persist();
+    } catch(e) {
+      g.lastError=e?.message||String(e);
+      g.lastStepAt=Date.now();
+      await this.persist();
     }
   }
 
@@ -691,6 +771,7 @@ export class RadarDO extends DurableObject {
 
   async ensureReplayStarted() {
     if(!this.mem.backfill?.completed) return;
+    if(!this.mem.genomeBackfill?.completed) return;
     if(this.mem.replay && (this.mem.replay.active || this.mem.replay.completed)) return;
     const bounds=this.center.historicalBounds();
     const min=Number(bounds.min_ts),max=Number(bounds.max_ts);
@@ -984,6 +1065,7 @@ export class RadarDO extends DurableObject {
 
   async scheduleNextAlarm() {
     const b = this.mem.backfill;
+    const g = this.mem.genomeBackfill;
     const r = this.mem.replay;
     let when = Date.now() + 10 * 60 * 1000;
 
@@ -993,6 +1075,8 @@ export class RadarDO extends DurableObject {
       } else {
         when = Date.now() + 5_000;
       }
+    } else if (g?.active) {
+      when = Date.now() + 10_000;
     } else if (r?.active) {
       when = Date.now() + 15_000;
     }
