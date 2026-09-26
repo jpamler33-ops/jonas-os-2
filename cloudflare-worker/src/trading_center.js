@@ -158,6 +158,18 @@ export class TradingCenter {
         ret_240m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS setup_predictions (
+        setup_id INTEGER PRIMARY KEY,
+        created_ts INTEGER NOT NULL,
+        raw_score REAL,
+        sample_n INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL,
+        data_quality REAL,
+        novelty REAL,
+        outcome INTEGER,
+        resolved_ts INTEGER
+      );
+
       CREATE TABLE IF NOT EXISTS setup_features (
         setup_id INTEGER PRIMARY KEY,
         session TEXT,
@@ -390,6 +402,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_market_minutes_ts ON market_minutes(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_5m_ts ON historical_5m(ts);
       CREATE INDEX IF NOT EXISTS idx_setup_features_session ON setup_features(session);
+      CREATE INDEX IF NOT EXISTS idx_setup_predictions_created ON setup_predictions(created_ts);
       CREATE INDEX IF NOT EXISTS idx_factor_snapshots_ts ON factor_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_oi_ts ON open_interest_history(ts);
       CREATE INDEX IF NOT EXISTS idx_funding_ts ON funding_history(ts);
@@ -1139,7 +1152,8 @@ export class TradingCenter {
       "sequence_outcomes","change_point_detection","missed_opportunity_analysis",
       "failure_attribution","alert_value_tracking","orderbook_depth","slippage_model",
       "liquidity_sweep_detection","daily_risk_lock","position_sizing",
-      "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance"
+      "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance",
+      "probability_calibration"
     ]);
     const partial=new Set([
       "counterfactuals","feed_latency_monitor",
@@ -1614,7 +1628,8 @@ export class TradingCenter {
       changePoint:this.changePointReport(),
       missedOpportunities:this.missedOpportunityReport(),
       crossMarketLead:this.crossMarketLeadResearch(),
-      modelDrift:this.modelDriftReport()
+      modelDrift:this.modelDriftReport(),
+      probabilityCalibration:this.probabilityCalibrationReport()
     };
   }
 
@@ -1885,6 +1900,81 @@ export class TradingCenter {
     );
   }
 
+  recordSetupPrediction({setupId,rawScore=null,sampleN=0,source="empirical_reference",dataQuality=null,novelty=null}) {
+    const id=Number(setupId);
+    if(!Number.isFinite(id)||id<=0) return 0;
+    const score=Number(rawScore);
+    const safeScore=Number.isFinite(score)?Math.max(0.01,Math.min(0.99,score)):null;
+    const cur=this.sql.exec(
+      `INSERT OR REPLACE INTO setup_predictions(
+        setup_id,created_ts,raw_score,sample_n,source,data_quality,novelty,outcome,resolved_ts
+      ) VALUES(
+        ?,?,
+        ?,?,?,?,?,
+        COALESCE((SELECT outcome FROM setup_predictions WHERE setup_id=?),NULL),
+        COALESCE((SELECT resolved_ts FROM setup_predictions WHERE setup_id=?),NULL)
+      )`,
+      id,Date.now(),safeScore,Number(sampleN||0),String(source),
+      dataQuality===null?null:Number(dataQuality),
+      novelty===null?null:Number(novelty),
+      id,id
+    );
+    return Number(cur.rowsWritten||0);
+  }
+
+  resolveSetupPrediction(setupId,result,resolvedTs=Date.now()) {
+    const outcome=result==="TARGET"?1:result==="STOP"?0:null;
+    if(outcome===null) return;
+    this.sql.exec(
+      "UPDATE setup_predictions SET outcome=?,resolved_ts=? WHERE setup_id=?",
+      outcome,Number(resolvedTs),Number(setupId)
+    );
+  }
+
+  probabilityCalibrationReport() {
+    const rows=this.rows(
+      `SELECT raw_score,outcome,sample_n,data_quality,novelty
+       FROM setup_predictions
+       WHERE raw_score IS NOT NULL AND outcome IN (0,1)
+       ORDER BY created_ts ASC`
+    ).map(r=>({
+      score:Number(r.raw_score),outcome:Number(r.outcome),
+      sampleN:Number(r.sample_n||0),quality:r.data_quality===null?null:Number(r.data_quality),
+      novelty:r.novelty===null?null:Number(r.novelty)
+    })).filter(r=>Number.isFinite(r.score)&&Number.isFinite(r.outcome));
+
+    const bins=[];
+    for(let lo=0;lo<1;lo+=0.1) {
+      const hi=lo+0.1;
+      const xs=rows.filter(r=>r.score>=lo && (hi>=1?r.score<=hi:r.score<hi));
+      if(!xs.length) continue;
+      const predicted=xs.reduce((s,r)=>s+r.score,0)/xs.length;
+      const observed=xs.reduce((s,r)=>s+r.outcome,0)/xs.length;
+      bins.push({
+        low:Number(lo.toFixed(1)),
+        high:Number(hi.toFixed(1)),
+        n:xs.length,
+        meanRawScore:predicted,
+        observedTargetRate:observed,
+        calibrationError:observed-predicted
+      });
+    }
+    const brier=rows.length
+      ? rows.reduce((s,r)=>s+(r.score-r.outcome)*(r.score-r.outcome),0)/rows.length
+      : null;
+    const meanScore=rows.length?rows.reduce((s,r)=>s+r.score,0)/rows.length:null;
+    const baseRate=rows.length?rows.reduce((s,r)=>s+r.outcome,0)/rows.length:null;
+    return {
+      status:rows.length>=100?"USABLE":rows.length>=30?"EARLY":rows.length?"LEARNING":"WAITING",
+      n:rows.length,
+      brierScore:brier,
+      meanRawScore:meanScore,
+      observedTargetRate:baseRate,
+      bins,
+      warning:"Raw score is an empirical reference score. It is not treated as a calibrated probability until enough resolved samples exist."
+    };
+  }
+
   openSetup(confirmed, ctx) {
     const candleTs = Number(ctx?.c5?.at(-1)?.t || Date.now());
     const levelBucket = Math.round(Number(confirmed.level || confirmed.entry) / 5) * 5;
@@ -1945,6 +2035,7 @@ export class TradingCenter {
            exit_price=?, realized_r=?, mfe_r=?, mae_r=? WHERE id=?`,
           ts, s.target, s.planned_rr, mfe, mae, s.id
         );
+        this.resolveSetupPrediction(s.id,"TARGET",ts);
         closed.push({ ...s, result: "TARGET", exit_price: s.target, realized_r: s.planned_rr, mfe_r: mfe, mae_r: mae });
       } else if (stopHit) {
         this.sql.exec(
@@ -1952,6 +2043,7 @@ export class TradingCenter {
            exit_price=?, realized_r=-1, mfe_r=?, mae_r=? WHERE id=?`,
           ts, s.stop, mfe, mae, s.id
         );
+        this.resolveSetupPrediction(s.id,"STOP",ts);
         closed.push({ ...s, result: "STOP", exit_price: s.stop, realized_r: -1, mfe_r: mfe, mae_r: mae });
       } else {
         this.sql.exec("UPDATE setups SET mfe_r=?, mae_r=? WHERE id=?", mfe, mae, s.id);
