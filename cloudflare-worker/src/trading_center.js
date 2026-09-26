@@ -713,11 +713,18 @@ export class TradingCenter {
     };
   }
 
+  latestGenome() {
+    return this.one("SELECT * FROM market_genomes ORDER BY ts DESC LIMIT 1");
+  }
+
   coverageReport(ctx=null) {
     const summary=this.summary();
     const genomeCount=Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n||0);
     const flowCount=Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n||0);
-    const currentQuality=ctx?this.dataQuality(ctx):null;
+    const currentQuality=ctx
+      ? this.dataQuality(ctx)
+      : (()=>{const q=this.one("SELECT * FROM data_quality_snapshots ORDER BY ts DESC LIMIT 1");
+          return q?{score:Number(q.score),missing:JSON.parse(q.missing_json||"[]"),stale:JSON.parse(q.stale_json||"[]")} : null;})();
     const live=new Set([
       "price_structure","volatility","volume","ema_state","support_resistance","session",
       "open_interest","funding","long_short_ratio","liquidations","cross_asset","news_events",
@@ -1548,7 +1555,10 @@ export class TradingCenter {
       externalMarket: this.externalMarketSummary(),
       coverage: this.coverageReport(),
       recentTimeline: this.recentTimeline(50),
-      validation: this.setupValidationReport()
+      validation: this.setupValidationReport(),
+      latestGenome: this.latestGenome(),
+      replayStats: this.replayStats(),
+      parameterStability: this.parameterStabilityReport()
     };
   }
 }
@@ -1557,6 +1567,17 @@ export function renderTradingCenter(snapshot) {
   const pct = x => x === null || x === undefined ? "—" : (Number(x) * 100).toFixed(1) + "%";
   const num = x => x === null || x === undefined ? "—" : Number(x).toFixed(2);
   const s = snapshot.summary.setups;
+
+  const g = snapshot.latestGenome || {};
+  const quality = snapshot.coverage?.currentQuality?.score ?? g.data_quality ?? null;
+  const replayRows = (snapshot.replayStats || []).slice(0,10).map(r => `
+    <tr><td>${r.paramsHash}</td><td>${r.n}</td><td>${pct(r.hitRate)}</td>
+    <td>${r.avgR===null?"—":num(r.avgR)+"R"}</td><td>${r.avgMfe===null?"—":num(r.avgMfe)+"R"}</td>
+    <td>${r.avgMae===null?"—":num(r.avgMae)+"R"}</td></tr>
+  `).join("");
+  const coverageRows = (snapshot.coverage?.features || []).map(f => `
+    <tr><td>${f.group}</td><td>${f.key}</td><td>${f.status}</td><td>${f.critical?"critical":"support"}</td></tr>
+  `).join("");
 
   const patternRows = snapshot.patternStats.slice(0, 12).map(r => `
     <tr><td>${r.pattern}</td><td>${r.n}</td><td>${pct(r.directional_hit_60m)}</td>
@@ -1613,6 +1634,11 @@ export function renderTradingCenter(snapshot) {
       <div class="card"><div class="big">${s.avgR === null ? "—" : num(s.avgR)+"R"}</div><div>Ø realisiertes R</div></div>
       <div class="card"><div class="big">${snapshot.summary.patterns}</div><div>Candle-Patterns</div></div>
       <div class="card"><div class="big">${snapshot.summary.newsEvents}</div><div>News-Events</div></div>
+      <div class="card"><div class="big">${quality===null?"—":Number(quality).toFixed(0)+"/100"}</div><div>Datenqualität</div></div>
+      <div class="card"><div class="big">${g.novelty===null||g.novelty===undefined?"—":pct(g.novelty)}</div><div>Market Novelty</div></div>
+      <div class="card"><div class="big">${g.agreement===null||g.agreement===undefined?"—":pct(g.agreement)}</div><div>Signal Agreement</div></div>
+      <div class="card"><div class="big">${snapshot.summary.genomeRows||0}</div><div>Market Genomes</div></div>
+      <div class="card"><div class="big">${snapshot.summary.replayResults||0}</div><div>Replay-Ergebnisse</div></div>
     </div>
 
     <div class="topline">
@@ -1620,7 +1646,28 @@ export function renderTradingCenter(snapshot) {
       <span class="pill">FACTOR INTELLIGENCE</span>
       <span class="pill">GLOBAL EVENT RADAR</span>
       <span class="pill">PAPER-TRACKING</span>
+      <span class="pill">MARKET GENOME</span>
+      <span class="pill">NO-LOOKAHEAD REPLAY</span>
+      <span class="pill">FALSIFICATION LAB</span>
     </div>
+
+    <h2>Market Genome · aktueller Zustand</h2>
+    <div class="grid">
+      <div class="card"><div class="big">${g.state_label || "—"}</div><div>State DNA</div></div>
+      <div class="card"><div class="big">${g.entropy===null||g.entropy===undefined?"—":num(g.entropy)}</div><div>Informationsentropie</div></div>
+      <div class="card"><div class="big">${g.flow_delta_ratio===null||g.flow_delta_ratio===undefined?"—":pct(g.flow_delta_ratio)}</div><div>Taker Flow Delta</div></div>
+      <div class="card"><div class="big">${g.oi_change===null||g.oi_change===undefined?"—":pct(g.oi_change)}</div><div>OI Δ</div></div>
+      <div class="card"><div class="big">${g.liq_5m===null||g.liq_5m===undefined?"—":Number(g.liq_5m).toLocaleString("en-US",{maximumFractionDigits:0})}</div><div>Liquidationen 5m · USDT</div></div>
+    </div>
+    <p class="note">Novelty misst historische Unähnlichkeit. Agreement/Entropie beschreiben, wie stark unabhängige Datenquellen übereinstimmen; sie sind keine Gewinnwahrscheinlichkeit.</p>
+
+    <h2>No-Lookahead Replay & Parameter-Stabilität</h2>
+    <p class="note">Die Replay Engine sieht pro historischem Zeitpunkt nur Daten, die damals bereits geschlossen waren. Varianten werden nicht automatisch zur Live-Regel befördert.</p>
+    <div class="section"><table><thead><tr><th>Parameter</th><th>N</th><th>TP-Quote</th><th>Ø R</th><th>Ø MFE</th><th>Ø MAE</th></tr></thead><tbody>${replayRows}</tbody></table></div>
+
+    <h2>Feature Coverage</h2>
+    <p class="note">Fehlende kritische Datenquellen bleiben explizit sichtbar, statt stillschweigend als Null behandelt zu werden.</p>
+    <div class="section"><table><thead><tr><th>Gruppe</th><th>Feature</th><th>Status</th><th>Priorität</th></tr></thead><tbody>${coverageRows}</tbody></table></div>
 
     <h2>Letzte Setups</h2>
     <table><thead><tr><th>ID</th><th>Side</th><th>Status</th><th>Ergebnis</th><th>Plan</th><th>Realisiert</th></tr></thead><tbody>${setupRows}</tbody></table>
