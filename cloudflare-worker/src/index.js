@@ -105,7 +105,7 @@ function rr(entry, stop, target, side) {
   return reward / risk;
 }
 
-function findBreakRetest(c, side) {
+function findBreakRetest(c, side, retestTol = RETEST_TOL) {
   const n = c.length;
   if (n < 40) return null;
 
@@ -119,8 +119,8 @@ function findBreakRetest(c, side) {
       if ((c[b].c - level) / level < 0.00015) continue;
 
       for (let r = b + 1; r < Math.min(n, b + 7); r++) {
-        const touched = c[r].l <= level * (1 + RETEST_TOL);
-        const held = c[r].c >= level * (1 - RETEST_TOL);
+        const touched = c[r].l <= level * (1 + retestTol);
+        const held = c[r].c >= level * (1 - retestTol);
         if (touched && held && c[n - 1].c >= level) {
           return { side, level, break_i: b, retest_i: r, retest_low: c[r].l };
         }
@@ -131,8 +131,8 @@ function findBreakRetest(c, side) {
       if ((level - c[b].c) / level < 0.00015) continue;
 
       for (let r = b + 1; r < Math.min(n, b + 7); r++) {
-        const touched = c[r].h >= level * (1 - RETEST_TOL);
-        const held = c[r].c <= level * (1 + RETEST_TOL);
+        const touched = c[r].h >= level * (1 - retestTol);
+        const held = c[r].c <= level * (1 + retestTol);
         if (touched && held && c[n - 1].c <= level) {
           return { side, level, break_i: b, retest_i: r, retest_high: c[r].h };
         }
@@ -340,13 +340,17 @@ async function buildContext() {
   };
 }
 
-function evaluateConfirmed(ctx) {
+function evaluateConfirmed(ctx, opts = {}) {
   const { c5, price, ema20, ema50, resistance, support, trends } = ctx;
-  const longPattern = findBreakRetest(c5, "LONG");
-  const shortPattern = findBreakRetest(c5, "SHORT");
+  const retestTol = Number(opts.retestTol ?? RETEST_TOL);
+  const stopBuffer = Number(opts.stopBuffer ?? STOP_BUFFER);
+  const minRR = Number(opts.minRR ?? MIN_RR);
+  const maxExtension = Number(opts.maxExtension ?? DO_NOT_CHASE_DISTANCE);
+  const longPattern = findBreakRetest(c5, "LONG", retestTol);
+  const shortPattern = findBreakRetest(c5, "SHORT", retestTol);
 
   const fresh = p => p && p.retest_i >= c5.length - 2 &&
-    Math.abs(price - p.level) / Math.max(1e-9, p.level) <= DO_NOT_CHASE_DISTANCE;
+    Math.abs(price - p.level) / Math.max(1e-9, p.level) <= maxExtension;
 
   const macroLong = trends?.["4h"] === "BULLISH" &&
     trends?.["1h"] === "BULLISH" &&
@@ -361,10 +365,10 @@ function evaluateConfirmed(ctx) {
       .map(p => p.price);
     let baseStop = lows.slice(-3).length ? Math.max(...lows.slice(-3)) : longPattern.retest_low;
     baseStop = Math.min(baseStop, longPattern.retest_low);
-    const stop = baseStop * (1 - STOP_BUFFER);
+    const stop = baseStop * (1 - stopBuffer);
     if (resistance && resistance > price) {
       const ratio = rr(price, stop, resistance, "LONG");
-      if (ratio >= MIN_RR) {
+      if (ratio >= minRR) {
         return {
           decision: "LONG SETUP",
           side: "LONG",
@@ -384,10 +388,10 @@ function evaluateConfirmed(ctx) {
       .map(p => p.price);
     let baseStop = highs.slice(-3).length ? Math.min(...highs.slice(-3)) : shortPattern.retest_high;
     baseStop = Math.max(baseStop, shortPattern.retest_high);
-    const stop = baseStop * (1 + STOP_BUFFER);
+    const stop = baseStop * (1 + stopBuffer);
     if (support && support < price) {
       const ratio = rr(price, stop, support, "SHORT");
-      if (ratio >= MIN_RR) {
+      if (ratio >= minRR) {
         return {
           decision: "SHORT SETUP",
           side: "SHORT",
