@@ -668,6 +668,10 @@ export class RadarDO extends DurableObject {
       });
     }
 
+    if (path === "/api/calibration") {
+      return Response.json(this.center.probabilityCalibrationReport());
+    }
+
     if (path === "/genome-backfill/status") {
       return Response.json({
         ok:true,
@@ -1307,6 +1311,32 @@ export class RadarDO extends DurableObject {
         const twinText = twins.outcomeSample >= 8
           ? `Genome-Twins: N=${twins.outcomeSample} | Ø 60m ${((twins.avgForward60m||0)*100).toFixed(2)}% | Novelty ${((g.novelty||0)*100).toFixed(0)}%`
           : `Genome-Twins: N=${twins.outcomeSample} | noch zu wenig Outcome-Daten`;
+
+        // Store the empirical reference score before the outcome is known.
+        // Shrink small historical samples toward neutral so they cannot dominate.
+        const factorN=Number(hist.n||0);
+        const twinN=Number(twins.outcomeSample||0);
+        const factorRate=Number(hist.hitRate);
+        const twinDirectionRate=Number(twins.sameDirectionRate);
+        const factorShrunk=Number.isFinite(factorRate)
+          ? (factorRate*factorN + 0.5*20)/(factorN+20) : null;
+        const twinShrunk=Number.isFinite(twinDirectionRate)
+          ? (twinDirectionRate*twinN + 0.5*20)/(twinN+20) : null;
+        const rawParts=[factorShrunk,twinShrunk].filter(Number.isFinite);
+        const rawScore=rawParts.length
+          ? rawParts.reduce((a,b)=>a+b,0)/rawParts.length
+          : null;
+        if(setup?.id) {
+          this.center.recordSetupPrediction({
+            setupId:setup.id,
+            rawScore,
+            sampleN:factorN+twinN,
+            source:"shrunk_factor_plus_twin_reference",
+            dataQuality:g.data_quality??null,
+            novelty:g.novelty??null
+          });
+        }
+
         await this.notifyOnce(
           `setup|${setup?.id || "new"}|${confirmed.side}`,
           [
