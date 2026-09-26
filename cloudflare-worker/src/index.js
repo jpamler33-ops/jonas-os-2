@@ -499,7 +499,11 @@ export class RadarDO extends DurableObject {
       lastCoinbaseError: null,
       lastResearchGovernorAt: 0,
       lastResearchGovernorError: null,
-      lastResearchGovernorSignature: null
+      lastResearchGovernorSignature: null,
+      lastInformationFlowAt: 0,
+      lastInformationFlowError: null,
+      lastPhaseStatus: null,
+      lastPhaseAlertAt: 0
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -615,6 +619,9 @@ export class RadarDO extends DurableObject {
           ledger: this.center.predictionLedgerAudit(500),
           versions: this.center.versionReport()
         },
+        marketLanguage: this.center.marketLanguageReport(500),
+        informationFlow: this.center.latestInformationFlow(),
+        phaseTransition: this.center.phaseTransitionReport(),
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
         macro: {
@@ -717,6 +724,25 @@ export class RadarDO extends DurableObject {
     }
     if (path === "/api/research") {
       return Response.json(this.center.fullResearchReport(this.context));
+    }
+
+    if (path === "/api/language") {
+      return Response.json(this.center.marketLanguageReport());
+    }
+    if (path === "/api/sequences") {
+      const url=new URL(request.url);
+      const length=Math.min(6,Math.max(2,Number(url.searchParams.get("length")||4)));
+      return Response.json(this.center.sequenceMemoryReport(length));
+    }
+    if (path === "/api/info-flow") {
+      return Response.json({
+        latest:this.center.latestInformationFlow()||this.center.informationFlowReport(),
+        lastRunAt:this.mem.lastInformationFlowAt||null,
+        lastError:this.mem.lastInformationFlowError||null
+      });
+    }
+    if (path === "/api/phase-transition") {
+      return Response.json(this.center.phaseTransitionReport());
     }
 
     if (path === "/api/macro") {
@@ -1275,6 +1301,47 @@ export class RadarDO extends DurableObject {
     await this.ctx.storage.setAlarm(when);
   }
 
+  async runMarketLanguageIntelligence(force=false) {
+    const now=Date.now();
+    try {
+      let flow=this.center.latestInformationFlow();
+      if(force || !flow || now-Number(this.mem.lastInformationFlowAt||0)>=30*60_000) {
+        flow=this.center.refreshInformationFlow();
+        this.mem.lastInformationFlowAt=now;
+        this.mem.lastInformationFlowError=null;
+      }
+
+      const phase=this.center.phaseTransitionReport();
+      const previous=this.mem.lastPhaseStatus||null;
+      this.mem.lastPhaseStatus=phase.status;
+
+      const significant=(phase.status==="PHASE_TRANSITION"||phase.status==="TENSION_BUILDING");
+      const changed=previous!==phase.status;
+      const cooldown=now-Number(this.mem.lastPhaseAlertAt||0)>=60*60_000;
+
+      if(significant && changed && cooldown) {
+        const leader=phase.informationLeader?.source||"noch kein stabiler Leader";
+        const rarity=Number(phase.sequenceRarity||0);
+        await this.notifyOnce(
+          `phase|${phase.status}|${Math.floor(now/(60*60_000))}`,
+          [
+            "BTC — MARKET PHASE RADAR",
+            `Status: ${phase.status}`,
+            `Instabilitäts-Score: ${(Number(phase.score||0)*100).toFixed(0)}/100`,
+            `Sequenz-Rarität: ${(rarity*100).toFixed(0)}%`,
+            `Aktueller Information-Leader: ${leader}`,
+            `Market Sequence: ${phase.currentSequence||"noch nicht genug Daten"}`,
+            "Bedeutung: Marktstruktur verändert sich ungewöhnlich stark. Das ist keine Richtungsprognose und kein Entry-Signal."
+          ].join("\n")
+        );
+        this.mem.lastPhaseAlertAt=now;
+      }
+    } catch(e) {
+      this.mem.lastInformationFlowError=e?.message||String(e);
+    }
+    await this.persist();
+  }
+
   async runResearchGovernor(force=false) {
     const now=Date.now();
     if(!force && now-Number(this.mem.lastResearchGovernorAt||0)<6*60*60_000) return;
@@ -1532,6 +1599,7 @@ export class RadarDO extends DurableObject {
       this.center.updateSafeGenomeOutcomes(Date.now());
       this.center.updateNewsImpacts(Date.now());
       await this.pollNews(false);
+      await this.runMarketLanguageIntelligence(false);
       await this.runResearchGovernor(false);
       const macroRisk = await this.checkMacroWarnings();
       await this.persist();
