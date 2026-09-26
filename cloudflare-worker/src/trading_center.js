@@ -2713,6 +2713,83 @@ export class TradingCenter {
     return payload;
   }
 
+  featureAblationResearchReport() {
+    const historical=this.rows(
+      `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
+        oi_change,funding_rate,long_short_ratio,cross_ret_60m,data_completeness,
+        ret_fwd_60m
+       FROM historical_genomes
+       WHERE ret_fwd_60m IS NOT NULL
+       ORDER BY ts ASC LIMIT 10000`
+    );
+    const historicalFeatures=[
+      "ret_5m","ret_15m","atr_pct","volume_ratio","ema_distance_pct",
+      "oi_change","funding_rate","long_short_ratio","cross_ret_60m","data_completeness"
+    ];
+
+    const live=this.rows(
+      `SELECT g.ts,g.ret_5m,g.ret_15m,g.atr_pct,g.volume_ratio,g.ema_distance_pct,
+        g.level_distance_pct,g.bias_score,g.oi_change,g.funding_rate,g.long_short_ratio,
+        g.liq_5m,g.liq_imbalance,g.cross_ret_60m,g.flow_delta_ratio,g.spread_bps,
+        g.book_imbalance,g.agreement,g.entropy,g.novelty,g.data_quality,
+        e.options_iv_30d,e.options_skew_30d,e.options_term_30m7,
+        e.coinbase_premium_bps,e.venue_spot_diff_bps,e.perp_spot_basis_bps,
+        e.mark_index_basis_bps,e.depth_imbalance_01,e.liquidity_shock,e.futures_basis,
+        e.vix_change,e.sp500_change,e.nasdaq_change,e.usd_change,
+        e.us2y_change_bps,e.us10y_change_bps,e.source_completeness,
+        o.ret_fwd_60m
+       FROM market_genomes g
+       LEFT JOIN market_genome_extensions e ON e.ts=g.ts
+       JOIN genome_safe_outcomes o ON o.ts=g.ts
+       JOIN genome_provenance p ON p.ts=g.ts AND p.leakage_safe=1
+       WHERE o.ret_fwd_60m IS NOT NULL
+       ORDER BY g.ts ASC LIMIT 5000`
+    );
+    const liveFeatures=[
+      "ret_5m","ret_15m","atr_pct","volume_ratio","ema_distance_pct","level_distance_pct",
+      "bias_score","oi_change","funding_rate","long_short_ratio","liq_5m","liq_imbalance",
+      "cross_ret_60m","flow_delta_ratio","spread_bps","book_imbalance","agreement","entropy",
+      "novelty","data_quality","options_iv_30d","options_skew_30d","options_term_30m7",
+      "coinbase_premium_bps","venue_spot_diff_bps","perp_spot_basis_bps","mark_index_basis_bps",
+      "depth_imbalance_01","liquidity_shock","futures_basis","vix_change","sp500_change",
+      "nasdaq_change","usd_change","us2y_change_bps","us10y_change_bps","source_completeness"
+    ];
+
+    return {
+      generatedAt:Date.now(),
+      historicalCore:featureAblationReport(historical,historicalFeatures,"ret_fwd_60m"),
+      liveExtended:featureAblationReport(live,liveFeatures,"ret_fwd_60m"),
+      policy:{
+        automaticRemoval:false,
+        automaticLiveWeighting:false,
+        action:"Features with low or negative incremental holdout value are deprioritized for research, not silently removed from raw data collection."
+      }
+    };
+  }
+
+  refreshFeatureAblation() {
+    const report=this.featureAblationResearchReport();
+    const ts=Date.now();
+    this.sql.exec(
+      `INSERT OR REPLACE INTO feature_ablation_snapshots(ts,historical_json,live_json)
+       VALUES(?,?,?)`,
+      ts,
+      JSON.stringify(report.historicalCore),
+      JSON.stringify(report.liveExtended)
+    );
+    return {ts,...report};
+  }
+
+  latestFeatureAblation() {
+    const r=this.one("SELECT * FROM feature_ablation_snapshots ORDER BY ts DESC LIMIT 1");
+    if(!r) return null;
+    return {
+      ts:Number(r.ts),
+      historicalCore:JSON.parse(r.historical_json||"{}"),
+      liveExtended:JSON.parse(r.live_json||"{}")
+    };
+  }
+
   edgeDiscoveryReport() {
     const historical=this.rows(
       `SELECT ts,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
@@ -2758,15 +2835,28 @@ export class TradingCenter {
     const historicalReport=discoverInformationEdges(historical,historicalFeatures,"ret_fwd_60m");
     const liveReport=discoverInformationEdges(live,liveFeatures,"ret_fwd_60m");
 
+    const ablation=this.latestFeatureAblation()||this.featureAblationResearchReport();
+    const historicalAblation=new Map(
+      (ablation.historicalCore?.features||[]).map(x=>[x.feature,x])
+    );
+    const liveAblation=new Map(
+      (ablation.liveExtended?.features||[]).map(x=>[x.feature,x])
+    );
+    const abstinencePass=(dataset,feature)=>{
+      const x=(dataset==="HISTORICAL_CORE"?historicalAblation:liveAblation).get(feature);
+      if(!x) return true;
+      return x.verdict!=="POSSIBLE_NOISE";
+    };
+
     const promoted=[
       ...(historicalReport.governor||[])
-        .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST")
-        .map(x=>({dataset:"HISTORICAL_CORE",type:"FEATURE",...x})),
+        .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST" && abstinencePass("HISTORICAL_CORE",x.feature))
+        .map(x=>({dataset:"HISTORICAL_CORE",type:"FEATURE",ablation:historicalAblation.get(x.feature)||null,...x})),
       ...(historicalReport.interactionGovernor||[])
         .map(x=>({dataset:"HISTORICAL_CORE",type:"INTERACTION",...x})),
       ...(liveReport.governor||[])
-        .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST")
-        .map(x=>({dataset:"LIVE_EXTENDED",type:"FEATURE",...x})),
+        .filter(x=>x.action==="PROMOTE_TO_CHALLENGER_TEST" && abstinencePass("LIVE_EXTENDED",x.feature))
+        .map(x=>({dataset:"LIVE_EXTENDED",type:"FEATURE",ablation:liveAblation.get(x.feature)||null,...x})),
       ...(liveReport.interactionGovernor||[])
         .map(x=>({dataset:"LIVE_EXTENDED",type:"INTERACTION",...x}))
     ].sort((a,b)=>Number(b.discoveryScore||0)-Number(a.discoveryScore||0));
@@ -2775,6 +2865,7 @@ export class TradingCenter {
       generatedAt:Date.now(),
       historicalCore:historicalReport,
       liveExtended:liveReport,
+      featureAblation:ablation,
       promotedToChallengerTest:promoted.slice(0,30),
       policy:{
         automaticChampionChanges:false,
@@ -2854,6 +2945,9 @@ export class TradingCenter {
       counterfactuals:this.matchedCounterfactualReport(),
       falsification:this.hypothesisFalsificationReport(),
       informationDiscovery:this.latestResearchGovernor()||this.edgeDiscoveryReport(),
+      featureAblation:this.latestFeatureAblation()||this.featureAblationResearchReport(),
+      versions:this.versionReport(),
+      predictionLedger:this.predictionLedgerAudit(),
       parity:this.parityReport(),
       leakage:this.leakageInspectorReport(),
       evidenceMaturity:this.evidenceMaturityReport(),
