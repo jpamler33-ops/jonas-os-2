@@ -785,10 +785,23 @@ export class TradingCenter {
 
   currentGenomeIntelligence(ctx, limit=20) {
     const current=this.buildMarketGenome(ctx);
-    const rows=this.rows(
-      "SELECT * FROM market_genomes WHERE ts<? ORDER BY ts DESC LIMIT 1500",
+    const liveRows=this.rows(
+      "SELECT *, 'LIVE_GENOME' AS genome_source FROM market_genomes WHERE ts<? ORDER BY ts DESC LIMIT 1500",
       current.ts
     );
+    const historicalRows=this.rows(
+      `SELECT ts,price,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
+        NULL AS level_distance_pct,NULL AS bias_score,oi_change,funding_rate,long_short_ratio,
+        NULL AS liq_5m,NULL AS liq_imbalance,cross_ret_60m,NULL AS flow_delta_ratio,
+        NULL AS spread_bps,NULL AS book_imbalance,NULL AS agreement,NULL AS entropy,
+        NULL AS novelty,data_completeness*100 AS data_quality,
+        NULL AS volume_surprise,NULL AS oi_surprise,NULL AS liq_surprise,NULL AS flow_surprise,
+        state_label,fingerprint,ret_fwd_15m,ret_fwd_60m,ret_fwd_240m,
+        'HISTORICAL_PARTIAL' AS genome_source
+       FROM historical_genomes WHERE ts<? ORDER BY ts DESC LIMIT 5000`,
+      current.ts
+    );
+    const rows=[...liveRows,...historicalRows];
     const scored=rows.map(r=>({
       ...r,
       distance:weightedDistance(current,r,GENOME_DISTANCE_FIELDS)
@@ -817,6 +830,144 @@ export class TradingCenter {
 
   latestGenome() {
     return this.one("SELECT * FROM market_genomes ORDER BY ts DESC LIMIT 1");
+  }
+
+  historicalGenomeCount() {
+    return Number(this.one("SELECT COUNT(*) AS n FROM historical_genomes")?.n||0);
+  }
+
+  bootstrapHistoricalGenomeChunk(startTs,endTs) {
+    const start=Number(startTs),end=Number(endTs);
+    if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start) return {written:0,processed:0,lastTs:null};
+
+    const warmup=12*60*60_000;
+    const forward=4*60*60_000+5*60_000;
+    const candles=this.rows(
+      `SELECT ts AS t,open AS o,high AS h,low AS l,close AS c,volume AS v
+       FROM historical_5m WHERE ts>=? AND ts<=? ORDER BY ts ASC`,
+      start-warmup,end+forward
+    ).map(x=>({t:Number(x.t),o:Number(x.o),h:Number(x.h),l:Number(x.l),c:Number(x.c),v:Number(x.v)}));
+    if(candles.length<60) return {written:0,processed:0,lastTs:null};
+
+    const closes=candles.map(x=>x.c);
+    const emaSeries=(period)=>{
+      const a=2/(period+1),out=[closes[0]];
+      for(let i=1;i<closes.length;i++) out.push(a*closes[i]+(1-a)*out[i-1]);
+      return out;
+    };
+    const e20=emaSeries(20),e50=emaSeries(50);
+
+    const oi=this.rows(
+      "SELECT ts,open_interest FROM open_interest_history WHERE ts>=? AND ts<=? ORDER BY ts ASC",
+      start-warmup,end
+    );
+    const funding=this.rows(
+      "SELECT ts,funding_rate FROM funding_history WHERE ts>=? AND ts<=? ORDER BY ts ASC",
+      start-24*60*60_000,end
+    );
+    const ls=this.rows(
+      "SELECT ts,long_short_ratio FROM long_short_history WHERE ts>=? AND ts<=? ORDER BY ts ASC",
+      start-warmup,end
+    );
+    const crossRows=this.rows(
+      "SELECT ts,symbol,ret_60m FROM cross_asset_history WHERE ts>=? AND ts<=? ORDER BY ts ASC",
+      start-warmup,end
+    );
+    const crossBy={};
+    for(const r of crossRows){
+      if(!crossBy[r.symbol]) crossBy[r.symbol]=[];
+      crossBy[r.symbol].push(r);
+    }
+
+    const latestIndex=(arr,ts)=>{
+      let lo=0,hi=arr.length-1,best=-1;
+      while(lo<=hi){
+        const mid=(lo+hi)>>1;
+        if(Number(arr[mid].ts)<=ts){best=mid;lo=mid+1;} else hi=mid-1;
+      }
+      return best;
+    };
+    const median=xs=>{
+      const v=xs.filter(Number.isFinite).sort((a,b)=>a-b);
+      if(!v.length)return null;
+      const m=Math.floor(v.length/2);
+      return v.length%2?v[m]:(v[m-1]+v[m])/2;
+    };
+
+    let written=0,processed=0,lastTs=null;
+    const atrValues=[];
+    for(let i=1;i<candles.length;i++){
+      const x=candles[i],prev=candles[i-1];
+      const tr=Math.max(x.h-x.l,Math.abs(x.h-prev.c),Math.abs(x.l-prev.c));
+      atrValues[i]=prev.c?tr/prev.c:0;
+    }
+
+    for(let i=50;i<candles.length-48;i++){
+      const x=candles[i];
+      if(x.t<start||x.t>=end) continue;
+      if(x.t%(15*60_000)!==0) continue;
+      processed++;
+      lastTs=x.t;
+
+      const ret5=candles[i-1]?.c?x.c/candles[i-1].c-1:null;
+      const ret15=candles[i-3]?.c?x.c/candles[i-3].c-1:null;
+      const atr14=atrValues.slice(Math.max(1,i-13),i+1).filter(Number.isFinite);
+      const atr=atr14.length?atr14.reduce((a,b)=>a+b,0)/atr14.length:null;
+      const atrBase=median(atrValues.slice(Math.max(1,i-80),i).filter(Number.isFinite));
+      const volReg=atr!==null&&atrBase
+        ? (atr/atrBase<0.7?"LOW":atr/atrBase<1.3?"NORMAL":atr/atrBase<2?"HIGH":"EXTREME")
+        : "UNKNOWN";
+      const volBase=median(candles.slice(Math.max(0,i-20),i).map(z=>z.v));
+      const volumeRatio=volBase?x.v/volBase:null;
+      const emaMid=(e20[i]+e50[i])/2;
+      const emaDist=x.c? (x.c-emaMid)/x.c:null;
+
+      const oiIdx=latestIndex(oi,x.t);
+      const oiNow=oiIdx>=0?Number(oi[oiIdx].open_interest):null;
+      const oiPrev=oiIdx>0?Number(oi[oiIdx-1].open_interest):null;
+      const oiChange=Number.isFinite(oiNow)&&Number.isFinite(oiPrev)&&oiPrev
+        ? (oiNow-oiPrev)/oiPrev:null;
+
+      const fIdx=latestIndex(funding,x.t);
+      const fundingRate=fIdx>=0?Number(funding[fIdx].funding_rate):null;
+      const lIdx=latestIndex(ls,x.t);
+      const longShort=lIdx>=0?Number(ls[lIdx].long_short_ratio):null;
+
+      const cv=[];
+      for(const arr of Object.values(crossBy)){
+        const j=latestIndex(arr,x.t);
+        const v=j>=0?Number(arr[j].ret_60m):null;
+        if(Number.isFinite(v)) cv.push(v);
+      }
+      const cross60=cv.length?cv.reduce((a,b)=>a+b,0)/cv.length:null;
+
+      const fields=[oiChange,fundingRate,longShort,cross60];
+      const completeness=fields.filter(Number.isFinite).length/fields.length;
+      const direction=ret15===null?"FLAT":ret15>0.001?"UP":ret15<-0.001?"DOWN":"FLAT";
+      const leverage=oiChange===null?"OI?":oiChange>0.003?"OI_BUILD":oiChange<-0.003?"OI_UNWIND":"OI_FLAT";
+      const state=`HIST_${direction}|${volReg}|${leverage}`;
+      const fp=[direction,volReg,leverage,
+        volumeRatio===null?"V?":Math.round(Math.min(9,Math.max(0,volumeRatio*3))),
+        oiChange===null?"O?":Math.round(Math.min(9,Math.max(0,5+oiChange*500)))
+      ].join(":");
+
+      const r15=candles[i+3]?.c?candles[i+3].c/x.c-1:null;
+      const r60=candles[i+12]?.c?candles[i+12].c/x.c-1:null;
+      const r240=candles[i+48]?.c?candles[i+48].c/x.c-1:null;
+
+      const cur=this.sql.exec(
+        `INSERT OR IGNORE INTO historical_genomes(
+          ts,price,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,
+          oi_change,funding_rate,long_short_ratio,cross_ret_60m,data_completeness,
+          state_label,fingerprint,ret_fwd_15m,ret_fwd_60m,ret_fwd_240m,source
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        x.t,x.c,ret5,ret15,atr,volumeRatio,emaDist,
+        oiChange,fundingRate,longShort,cross60,completeness,
+        state,fp,r15,r60,r240,"historical_backfill"
+      );
+      written+=Number(cur.rowsWritten||0);
+    }
+    return {written,processed,lastTs};
   }
 
   historicalIntegrityAudit() {
@@ -1767,6 +1918,7 @@ export class TradingCenter {
       crossAssetRows: Number(this.one("SELECT COUNT(*) AS n FROM cross_asset_history")?.n || 0),
       orderflow5mRows: Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n || 0),
       genomeRows: Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n || 0),
+      historicalGenomeRows: this.historicalGenomeCount(),
       timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0),
       replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0),
       macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0),
