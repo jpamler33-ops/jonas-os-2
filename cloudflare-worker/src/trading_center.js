@@ -7,6 +7,16 @@ import {
   percentileRank,
   weightedDistance
 } from "./market_intelligence.js";
+import {
+  buildHypotheses,
+  chronologicalBuckets,
+  costAdjustedR,
+  decayWindows,
+  mean as researchMean,
+  sequenceDNA,
+  transitionMatrix,
+  wilsonInterval
+} from "./research_engine.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -682,18 +692,90 @@ export class TradingCenter {
     const genomeCount=Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n||0);
     const flowCount=Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n||0);
     const currentQuality=ctx?this.dataQuality(ctx):null;
-    const implemented=new Set([
+    const live=new Set([
       "price_structure","volatility","volume","ema_state","support_resistance","session",
       "open_interest","funding","long_short_ratio","liquidations","cross_asset","news_events",
       "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
-      "historical_twins"
+      "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay"
     ]);
-    const features=FEATURE_REGISTRY.map(f=>({
-      ...f,
-      status:implemented.has(f.key)?"LIVE":"PLANNED",
-      disadvantageIfMissing:Boolean(f.critical&& !implemented.has(f.key))
-    }));
+    const partial=new Set(["parameter_stability"]);
+    const features=FEATURE_REGISTRY.map(f=>{
+      const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
+      return {
+        ...f,status,
+        disadvantageIfMissing:Boolean(f.critical&&status==="PLANNED")
+      };
+    });
     return {features,summary,genomeCount,flowCount,currentQuality};
+  }
+
+  setupValidationReport() {
+    const closed=this.rows(
+      `SELECT * FROM setups WHERE result IN ('TARGET','STOP') ORDER BY opened_ts ASC`
+    );
+    const wins=closed.filter(x=>x.result==="TARGET").length;
+    const interval=wilsonInterval(wins,closed.length);
+    const grossAvg=researchMean(closed.map(x=>Number(x.realized_r)).filter(Number.isFinite));
+    const costScenarios=[4,8,12,20].map(bps=>({
+      roundTripBps:bps,
+      avgNetR:researchMean(closed.map(x=>costAdjustedR(x,bps)).filter(Number.isFinite))
+    }));
+    const walkForward=chronologicalBuckets(closed,4).map((bucket,i)=>{
+      const w=bucket.filter(x=>x.result==="TARGET").length;
+      const ci=wilsonInterval(w,bucket.length);
+      return {
+        fold:i+1,
+        n:bucket.length,
+        hitRate:ci.p,
+        hitLow95:ci.low,
+        hitHigh95:ci.high,
+        avgR:researchMean(bucket.map(x=>Number(x.realized_r)).filter(Number.isFinite)),
+        startTs:bucket[0]?.opened_ts||null,
+        endTs:bucket.at(-1)?.opened_ts||null
+      };
+    });
+    return {
+      n:closed.length,
+      wins,
+      losses:closed.length-wins,
+      hitRate:interval.p,
+      hitLow95:interval.low,
+      hitHigh95:interval.high,
+      grossAvgR:grossAvg,
+      costScenarios,
+      walkForward,
+      decay:decayWindows(closed),
+      note:"Cost scenarios are sensitivity tests, not assumed broker/exchange fees."
+    };
+  }
+
+  genomeResearchReport(limit=5000) {
+    const rows=this.rows(
+      `SELECT * FROM market_genomes WHERE ret_fwd_60m IS NOT NULL
+       ORDER BY ts DESC LIMIT ?`,
+      Math.min(10000,Math.max(100,Number(limit||5000)))
+    );
+    const hypotheses=buildHypotheses(rows).slice(0,30);
+    const transitions=transitionMatrix(rows).slice(0,40);
+    const events=this.recentTimeline(1000);
+    const sequences=sequenceDNA(events,5).slice(0,30);
+    return {
+      sample:rows.length,
+      hypotheses,
+      transitions,
+      sequenceDNA:sequences,
+      warning:"Exploratory findings are hypotheses only. They require out-of-sample confirmation before being promoted to a rule."
+    };
+  }
+
+  fullResearchReport(ctx=null) {
+    return {
+      generatedAt:Date.now(),
+      validation:this.setupValidationReport(),
+      genomeResearch:this.genomeResearchReport(),
+      currentGenome:ctx?this.currentGenomeIntelligence(ctx,30):null,
+      coverage:this.coverageReport(ctx)
+    };
   }
 
   recentTimeline(limit=100) {
@@ -1328,7 +1410,8 @@ export class TradingCenter {
       recentPatterns: this.recentPatterns(50),
       externalMarket: this.externalMarketSummary(),
       coverage: this.coverageReport(),
-      recentTimeline: this.recentTimeline(50)
+      recentTimeline: this.recentTimeline(50),
+      validation: this.setupValidationReport()
     };
   }
 }
