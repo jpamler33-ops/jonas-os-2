@@ -242,6 +242,37 @@ export class TradingCenter {
         source TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS secondary_microstructure (
+        ts INTEGER PRIMARY KEY,
+        bid_best REAL,
+        ask_best REAL,
+        bid_liq_005 REAL,
+        ask_liq_005 REAL,
+        bid_liq_01 REAL,
+        ask_liq_01 REAL,
+        bid_liq_025 REAL,
+        ask_liq_025 REAL,
+        bid_liq_05 REAL,
+        ask_liq_05 REAL,
+        bid_liq_10 REAL,
+        ask_liq_10 REAL,
+        bid_slip_1k REAL,
+        ask_slip_1k REAL,
+        bid_slip_10k REAL,
+        ask_slip_10k REAL,
+        bid_slip_100k REAL,
+        ask_slip_100k REAL,
+        bid_slip_1m REAL,
+        ask_slip_1m REAL,
+        buy_volume REAL,
+        sell_volume REAL,
+        cvd REAL,
+        future_basis REAL,
+        depth_imbalance_01 REAL,
+        liquidity_shock REAL,
+        source TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS orderflow_5m (
         ts INTEGER PRIMARY KEY,
         buy_notional REAL NOT NULL,
@@ -366,6 +397,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_cross_asset_ts ON cross_asset_history(ts);
       CREATE INDEX IF NOT EXISTS idx_liquidations_ts ON liquidations(ts);
       CREATE INDEX IF NOT EXISTS idx_orderflow_5m_ts ON orderflow_5m(ts);
+      CREATE INDEX IF NOT EXISTS idx_secondary_microstructure_ts ON secondary_microstructure(ts);
       CREATE INDEX IF NOT EXISTS idx_venue_snapshots_ts ON venue_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
@@ -498,6 +530,81 @@ export class TradingCenter {
     return {n:rows.length,latest:rows[0],avgSpotCrossDiffBps:avg(cross),maxAbsSpotCrossDiffBps:maxAbs(cross),avgPerpSpotBasisBps:avg(basis),maxAbsPerpSpotBasisBps:maxAbs(basis),avgMarkIndexBasisBps:avg(mark)};
   }
 
+  recordSecondaryMicrostructure(row) {
+    if(!row || !Number.isFinite(Number(row.ts))) return 0;
+    const bid=row.bid||{}, ask=row.ask||{};
+    const currentDepth=Number(bid.liquidity01||0)+Number(ask.liquidity01||0);
+    const prev=this.one("SELECT bid_liq_01,ask_liq_01 FROM secondary_microstructure ORDER BY ts DESC LIMIT 1");
+    const prevDepth=prev ? Number(prev.bid_liq_01||0)+Number(prev.ask_liq_01||0) : 0;
+    const shock=prevDepth>0 ? (currentDepth-prevDepth)/prevDepth : null;
+    const depthImbalance=currentDepth>0
+      ? (Number(bid.liquidity01||0)-Number(ask.liquidity01||0))/currentDepth
+      : null;
+
+    const cur=this.sql.exec(
+      `INSERT OR REPLACE INTO secondary_microstructure(
+        ts,bid_best,ask_best,
+        bid_liq_005,ask_liq_005,bid_liq_01,ask_liq_01,bid_liq_025,ask_liq_025,
+        bid_liq_05,ask_liq_05,bid_liq_10,ask_liq_10,
+        bid_slip_1k,ask_slip_1k,bid_slip_10k,ask_slip_10k,
+        bid_slip_100k,ask_slip_100k,bid_slip_1m,ask_slip_1m,
+        buy_volume,sell_volume,cvd,future_basis,depth_imbalance_01,liquidity_shock,source
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      Number(row.ts),
+      bid.bestPrice??null,ask.bestPrice??null,
+      bid.liquidity005??null,ask.liquidity005??null,
+      bid.liquidity01??null,ask.liquidity01??null,
+      bid.liquidity025??null,ask.liquidity025??null,
+      bid.liquidity05??null,ask.liquidity05??null,
+      bid.liquidity10??null,ask.liquidity10??null,
+      bid.slippage1k??null,ask.slippage1k??null,
+      bid.slippage10k??null,ask.slippage10k??null,
+      bid.slippage100k??null,ask.slippage100k??null,
+      bid.slippage1m??null,ask.slippage1m??null,
+      row.buyVolume??null,row.sellVolume??null,row.cvd??null,row.futureBasis??null,
+      depthImbalance,shock,row.source||"kraken_futures_analytics"
+    );
+
+    if(Number.isFinite(shock) && Math.abs(shock)>=0.25) {
+      this.recordTimeline({
+        ts:Number(row.ts),
+        eventType:"LIQUIDITY_SHIFT",
+        subtype:shock<0?"DEPTH_DROP":"DEPTH_BUILD",
+        direction:depthImbalance,
+        magnitude:Math.abs(shock),
+        source:row.source||"kraken_futures_analytics",
+        payload:{liquidityShock:shock,depthImbalance01:depthImbalance,currentDepth,prevDepth}
+      });
+    }
+    return Number(cur.rowsWritten||0);
+  }
+
+  latestSecondaryMicrostructure() {
+    return this.one("SELECT * FROM secondary_microstructure ORDER BY ts DESC LIMIT 1");
+  }
+
+  secondaryMicrostructureSummary(limit=288) {
+    const rows=this.rows(
+      "SELECT * FROM secondary_microstructure ORDER BY ts DESC LIMIT ?",
+      Math.min(2000,Math.max(1,Number(limit||288)))
+    );
+    if(!rows.length) return {n:0,latest:null};
+    const latest=rows[0];
+    const vals=k=>rows.map(r=>Number(r[k])).filter(Number.isFinite);
+    const avg=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+    return {
+      n:rows.length,
+      latest,
+      avgDepthImbalance01:avg(vals("depth_imbalance_01")),
+      avgLiquidityShock:avg(vals("liquidity_shock")),
+      maxAbsLiquidityShock:vals("liquidity_shock").length
+        ? Math.max(...vals("liquidity_shock").map(Math.abs)):null,
+      avgBidSlippage100k:avg(vals("bid_slip_100k")),
+      avgAskSlippage100k:avg(vals("ask_slip_100k")),
+      avgFutureBasis:avg(vals("future_basis"))
+    };
+  }
+
   recordOrderflow5m({
     ts, buyNotional, sellNotional, tradeCount,
     spreadBps = null, bookImbalance = null, source = "binance"
@@ -596,6 +703,7 @@ export class TradingCenter {
     const ls=this.one("SELECT ts FROM long_short_history ORDER BY ts DESC LIMIT 1");
     const cross=this.one("SELECT MAX(ts) AS ts FROM cross_asset_history");
     const flow=this.one("SELECT ts FROM orderflow_5m ORDER BY ts DESC LIMIT 1");
+    const micro=this.one("SELECT ts FROM secondary_microstructure ORDER BY ts DESC LIMIT 1");
     const venue=this.one("SELECT ts FROM venue_snapshots ORDER BY ts DESC LIMIT 1");
     const macro=this.macroCalendarHealth(now);
 
@@ -604,6 +712,7 @@ export class TradingCenter {
     mark("long_short_ratio",ls,15*60_000);
     mark("cross_asset",cross,20*60_000);
     mark("orderflow",flow,15*60_000);
+    mark("secondary_microstructure",micro,20*60_000);
     mark("venue_confirmation",venue,15*60_000);
     if(!macro.lastCapturedAt) {
       missing.push("official_macro_calendar");
@@ -629,7 +738,7 @@ export class TradingCenter {
     }
     details.live_gaps_30m=gaps;
 
-    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar","venue_confirmation"];
+    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar","venue_confirmation","secondary_microstructure"];
     const criticalPenalty=missing.filter(x=>critical.includes(x)).length*14 +
       stale.filter(x=>critical.includes(x)).length*9;
     const otherPenalty=missing.filter(x=>!critical.includes(x)).length*7 +
@@ -1028,13 +1137,14 @@ export class TradingCenter {
       "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation",
       "data_quality_lock","parameter_stability","historical_genome_bootstrap",
       "sequence_outcomes","change_point_detection","missed_opportunity_analysis",
-      "failure_attribution","alert_value_tracking","daily_risk_lock","position_sizing",
+      "failure_attribution","alert_value_tracking","orderbook_depth","slippage_model",
+      "liquidity_sweep_detection","daily_risk_lock","position_sizing",
       "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance"
     ]);
     const partial=new Set([
-      "counterfactuals","feed_latency_monitor","feed_redundancy",
+      "counterfactuals","feed_latency_monitor",
       "lead_lag_network","shadow_strategies",
-      "hypothesis_falsification","slippage_model","endpoint_auth"
+      "hypothesis_falsification","endpoint_auth","feed_redundancy"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
@@ -1495,6 +1605,7 @@ export class TradingCenter {
       },
       historicalIntegrity:this.historicalIntegrityAudit(),
       venue:this.venueStats(),
+      microstructure:this.secondaryMicrostructureSummary(),
       risk:this.riskPolicyState(),
       equity:this.equityResearch(),
       alertValue:this.alertValueReport(),
@@ -2191,6 +2302,7 @@ export class TradingCenter {
       fundingRows: Number(this.one("SELECT COUNT(*) AS n FROM funding_history")?.n || 0),
       crossAssetRows: Number(this.one("SELECT COUNT(*) AS n FROM cross_asset_history")?.n || 0),
       orderflow5mRows: Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n || 0),
+      secondaryMicrostructureRows: Number(this.one("SELECT COUNT(*) AS n FROM secondary_microstructure")?.n || 0),
       genomeRows: Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n || 0),
       historicalGenomeRows: this.historicalGenomeCount(),
       timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0),
