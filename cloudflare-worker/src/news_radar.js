@@ -37,6 +37,16 @@ export function classifyHeadline(title = "") {
   return "other";
 }
 
+export function isCriticalHeadline(title = "", category = "") {
+  const t = title.toLowerCase();
+  if (category === "central_bank" && /(emergency|decision|rate cut|rate hike|unexpected)/.test(t)) return true;
+  if (category === "banking" && /(failure|collapse|bank run|insolvent|bailout)/.test(t)) return true;
+  if (category === "geopolitics" && /(attack|missile|invasion|nuclear|war begins|airstrike)/.test(t)) return true;
+  if (category === "crypto" && /(hack|exploit|etf|ban|sec |liquidat|bankrupt|outage)/.test(t)) return true;
+  if (category === "markets_macro" && /(crash|circuit breaker|recession|emergency)/.test(t)) return true;
+  return false;
+}
+
 export async function fetchGlobalMarketNews() {
   const query = [
     "bitcoin","cryptocurrency","Federal Reserve","inflation","interest rate",
@@ -68,7 +78,8 @@ export async function fetchGlobalMarketNews() {
       url: articleUrl,
       domain: a.domain || null,
       country: a.sourcecountry || a.sourceCountry || null,
-      category: classifyHeadline(title)
+      category: classifyHeadline(title),
+      critical: isCriticalHeadline(title, classifyHeadline(title))
     };
   }).filter(x => x.title);
 }
