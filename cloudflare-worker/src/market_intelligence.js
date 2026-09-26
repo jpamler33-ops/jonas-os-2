@@ -80,7 +80,10 @@ export const FEATURE_REGISTRY = [
   { key: "market_grammar_predictor", group: "research", critical: true },
   { key: "grammar_surprise_detector", group: "research", critical: true },
   { key: "grammar_drift_monitor", group: "validation", critical: true },
-  { key: "next_state_forecast", group: "research", critical: true }
+  { key: "next_state_forecast", group: "research", critical: true },
+  { key: "adaptive_memory_horizons", group: "research", critical: true },
+  { key: "grammar_counterfactuals", group: "research", critical: true },
+  { key: "memory_routing_plan", group: "research", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
