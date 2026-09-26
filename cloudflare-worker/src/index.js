@@ -509,7 +509,11 @@ export class RadarDO extends DurableObject {
       lastAdaptiveMemoryAt: 0,
       lastAdaptiveMemoryError: null,
       lastGrammarCounterfactualAt: 0,
-      lastGrammarCounterfactualError: null
+      lastGrammarCounterfactualError: null,
+      lastWorldModelAt: 0,
+      lastWorldModelError: null,
+      lastWorldDivergenceSignature: null,
+      lastWorldDivergenceAlertAt: 0
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -638,6 +642,12 @@ export class RadarDO extends DurableObject {
           latest:this.center.latestGrammarCounterfactuals(),
           lastRunAt:this.mem.lastGrammarCounterfactualAt||null,
           lastError:this.mem.lastGrammarCounterfactualError||null
+        },
+        marketWorld: {
+          latest:this.center.latestMarketWorld(),
+          calibration:this.center.marketWorldCalibrationReport(1000),
+          lastRunAt:this.mem.lastWorldModelAt||null,
+          lastError:this.mem.lastWorldModelError||null
         },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
@@ -778,6 +788,21 @@ export class RadarDO extends DurableObject {
         latest:this.center.latestGrammarCounterfactuals()||this.center.grammarCounterfactualReport(),
         lastRunAt:this.mem.lastGrammarCounterfactualAt||null,
         lastError:this.mem.lastGrammarCounterfactualError||null
+      });
+    }
+
+    if (path === "/api/world-model" || path === "/api/worlds") {
+      const url=new URL(request.url);
+      const horizon=Math.min(24,Math.max(6,Number(url.searchParams.get("horizon")||12)));
+      const beamWidth=Math.min(60,Math.max(8,Number(url.searchParams.get("beam")||24)));
+      const branchWidth=Math.min(6,Math.max(2,Number(url.searchParams.get("branches")||4)));
+      return Response.json({
+        world:this.center.buildMarketWorldReport({horizon,beamWidth,branchWidth}),
+        latestStored:this.center.latestMarketWorld(),
+        calibration:this.center.marketWorldCalibrationReport(),
+        history:this.center.marketWorldHistory(20),
+        lastRunAt:this.mem.lastWorldModelAt||null,
+        lastError:this.mem.lastWorldModelError||null
       });
     }
 
@@ -1354,6 +1379,41 @@ export class RadarDO extends DurableObject {
           this.mem.lastGrammarCounterfactualError=null;
         } catch(e) {
           this.mem.lastGrammarCounterfactualError=e?.message||String(e);
+        }
+      }
+
+      if(force || now-Number(this.mem.lastWorldModelAt||0)>=30*60_000) {
+        try {
+          const world=this.center.refreshMarketWorldModel({horizon:12,beamWidth:24,branchWidth:4});
+          this.mem.lastWorldModelAt=now;
+          this.mem.lastWorldModelError=null;
+
+          const div=world?.divergence||null;
+          const uncertainty=Number(world?.worldUncertainty||0);
+          const signature=div
+            ? `${div.step}|${div.top1?.token||"-"}|${div.top2?.token||"-"}|${Math.round(uncertainty*10)}`
+            : null;
+          const changed=signature && signature!==this.mem.lastWorldDivergenceSignature;
+          const cooldown=now-Number(this.mem.lastWorldDivergenceAlertAt||0)>=2*60*60_000;
+          const calibrated=Number(world?.calibration?.n||0)>=30;
+
+          if(div && Number(div.step)<=2 && uncertainty>=0.70 && changed && cooldown && calibrated) {
+            await this.notifyOnce(
+              `world-split|${signature}|${Math.floor(now/(2*60*60_000))}`,
+              [
+                "BTC — MARKET WORLD SPLIT",
+                `Die zukünftige Zustandsstruktur verzweigt sich bereits in Schritt ${div.step} (~${div.step*5} Minuten).`,
+                `World uncertainty: ${(uncertainty*100).toFixed(0)}%`,
+                `Pfad A: ${div.top1?.token||"—"} ${div.top1?.probability===undefined?"":(Number(div.top1.probability)*100).toFixed(1)+"%"}`,
+                `Pfad B: ${div.top2?.token||"—"} ${div.top2?.probability===undefined?"":(Number(div.top2.probability)*100).toFixed(1)+"%"}`,
+                "Bedeutung: Mehrere Marktwelten sind kurzfristig ähnlich plausibel. Kein Richtungs- oder Entry-Signal."
+              ].join("\n")
+            );
+            this.mem.lastWorldDivergenceAlertAt=now;
+          }
+          this.mem.lastWorldDivergenceSignature=signature;
+        } catch(e) {
+          this.mem.lastWorldModelError=e?.message||String(e);
         }
       }
 
