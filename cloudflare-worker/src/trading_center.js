@@ -1034,8 +1034,7 @@ export class TradingCenter {
     const partial=new Set([
       "counterfactuals","feed_latency_monitor","feed_redundancy",
       "lead_lag_network","shadow_strategies",
-      "hypothesis_falsification","slippage_model","feed_latency_monitor",
-      "feed_redundancy","endpoint_auth"
+      "hypothesis_falsification","slippage_model","endpoint_auth"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
@@ -1044,19 +1043,27 @@ export class TradingCenter {
         disadvantageIfMissing:Boolean(f.critical&&status==="PLANNED")
       };
     });
+    const critical=features.filter(f=>f.critical);
+    const criticalLive=critical.filter(f=>f.status==="LIVE").length;
+    const criticalPartial=critical.filter(f=>f.status==="PARTIAL").length;
+    const criticalMissing=critical.filter(f=>f.status==="PLANNED").map(f=>f.key);
+    const weighted=features.reduce((s,f)=>s+(f.status==="LIVE"?1:f.status==="PARTIAL"?0.5:0),0);
     return {
       features,summary,genomeCount,flowCount,currentQuality,
       historicalIntegrity:this.historicalIntegrityAudit(),
-      venue:this.venueStats(),
-      risk:this.riskPolicyState(),
-      equity:this.equityResearch(),
-      alertValue:this.alertValueReport(),
-      failureAttribution:this.failureAttributionReport(),
-      sequenceOutcomes:this.sequenceOutcomeReport(),
-      changePoint:this.changePointReport(),
-      missedOpportunities:this.missedOpportunityReport(),
-      crossMarketLead:this.crossMarketLeadResearch(),
-      modelDrift:this.modelDriftReport()
+      capabilityAudit:{
+        total:features.length,
+        live:features.filter(f=>f.status==="LIVE").length,
+        partial:features.filter(f=>f.status==="PARTIAL").length,
+        planned:features.filter(f=>f.status==="PLANNED").length,
+        weightedCoverage:features.length?weighted/features.length:null,
+        criticalTotal:critical.length,
+        criticalLive,
+        criticalPartial,
+        criticalMissing,
+        criticalCoverage:critical.length?(criticalLive+0.5*criticalPartial)/critical.length:null,
+        complete:criticalMissing.length===0&&criticalPartial===0
+      }
     };
   }
 
@@ -1486,7 +1493,17 @@ export class TradingCenter {
         stats:this.macroStats(),
         health:this.macroCalendarHealth()
       },
-      historicalIntegrity:this.historicalIntegrityAudit()
+      historicalIntegrity:this.historicalIntegrityAudit(),
+      venue:this.venueStats(),
+      risk:this.riskPolicyState(),
+      equity:this.equityResearch(),
+      alertValue:this.alertValueReport(),
+      failureAttribution:this.failureAttributionReport(),
+      sequenceOutcomes:this.sequenceOutcomeReport(),
+      changePoint:this.changePointReport(),
+      missedOpportunities:this.missedOpportunityReport(),
+      crossMarketLead:this.crossMarketLeadResearch(),
+      modelDrift:this.modelDriftReport()
     };
   }
 
