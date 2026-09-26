@@ -324,7 +324,7 @@ export class TradingCenter {
   }
 
   upsertNews(event) {
-    this.sql.exec(
+    const cursor = this.sql.exec(
       `INSERT OR IGNORE INTO news_events(
         fingerprint, published_ts, captured_ts, title, url, domain, country, category
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -337,6 +337,7 @@ export class TradingCenter {
       event.country || null,
       event.category || "other"
     );
+    return Number(cursor.rowsWritten || 0) > 0;
   }
 
   updateNewsImpacts(nowTs = Date.now()) {
