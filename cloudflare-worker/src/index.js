@@ -505,7 +505,11 @@ export class RadarDO extends DurableObject {
       lastPhaseStatus: null,
       lastPhaseAlertAt: 0,
       lastGrammarStatus: null,
-      lastGrammarAlertAt: 0
+      lastGrammarAlertAt: 0,
+      lastAdaptiveMemoryAt: 0,
+      lastAdaptiveMemoryError: null,
+      lastGrammarCounterfactualAt: 0,
+      lastGrammarCounterfactualError: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -625,6 +629,16 @@ export class RadarDO extends DurableObject {
         informationFlow: this.center.latestInformationFlow(),
         phaseTransition: this.center.phaseTransitionReport(),
         marketGrammar: this.center.marketGrammarReport(600),
+        adaptiveMemory: {
+          latest:this.center.latestAdaptiveMemory(),
+          lastRunAt:this.mem.lastAdaptiveMemoryAt||null,
+          lastError:this.mem.lastAdaptiveMemoryError||null
+        },
+        grammarCounterfactuals: {
+          latest:this.center.latestGrammarCounterfactuals(),
+          lastRunAt:this.mem.lastGrammarCounterfactualAt||null,
+          lastError:this.mem.lastGrammarCounterfactualError||null
+        },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
         macro: {
@@ -750,6 +764,21 @@ export class RadarDO extends DurableObject {
 
     if (path === "/api/grammar" || path === "/api/next-state") {
       return Response.json(this.center.marketGrammarReport());
+    }
+
+    if (path === "/api/adaptive-memory") {
+      return Response.json({
+        latest:this.center.latestAdaptiveMemory()||this.center.adaptiveMemoryReport(),
+        lastRunAt:this.mem.lastAdaptiveMemoryAt||null,
+        lastError:this.mem.lastAdaptiveMemoryError||null
+      });
+    }
+    if (path === "/api/grammar-counterfactuals") {
+      return Response.json({
+        latest:this.center.latestGrammarCounterfactuals()||this.center.grammarCounterfactualReport(),
+        lastRunAt:this.mem.lastGrammarCounterfactualAt||null,
+        lastError:this.mem.lastGrammarCounterfactualError||null
+      });
     }
 
     if (path === "/api/macro") {
@@ -1318,6 +1347,16 @@ export class RadarDO extends DurableObject {
         this.mem.lastInformationFlowError=null;
       }
 
+      if(force || now-Number(this.mem.lastGrammarCounterfactualAt||0)>=30*60_000) {
+        try {
+          this.center.refreshGrammarCounterfactuals();
+          this.mem.lastGrammarCounterfactualAt=now;
+          this.mem.lastGrammarCounterfactualError=null;
+        } catch(e) {
+          this.mem.lastGrammarCounterfactualError=e?.message||String(e);
+        }
+      }
+
       const grammar=this.center.marketGrammarReport(1000);
       const latestGrammar=grammar.latestResolved||null;
       const previousGrammar=this.mem.lastGrammarStatus||null;
@@ -1390,6 +1429,14 @@ export class RadarDO extends DurableObject {
 
     this.mem.lastResearchGovernorAt=now;
     try {
+      let adaptiveMemory=null;
+      try {
+        adaptiveMemory=this.center.refreshAdaptiveMemory();
+        this.mem.lastAdaptiveMemoryAt=now;
+        this.mem.lastAdaptiveMemoryError=null;
+      } catch(e) {
+        this.mem.lastAdaptiveMemoryError=e?.message||String(e);
+      }
       const ablation=this.center.refreshFeatureAblation();
       const report=this.center.refreshResearchGovernor();
       const leakage=this.center.leakageInspectorReport();
@@ -1402,7 +1449,9 @@ export class RadarDO extends DurableObject {
         evidenceFeatureCount:Number(evidence.features?.length||0),
         evidenceStrategyCount:Number(evidence.strategies?.length||0),
         ablationHistoricalStatus:ablation.historicalCore?.status||null,
-        ablationLiveStatus:ablation.liveExtended?.status||null
+        ablationLiveStatus:ablation.liveExtended?.status||null,
+        adaptiveMemoryHistoricalStatus:adaptiveMemory?.historicalCore?.status||null,
+        adaptiveMemoryLiveStatus:adaptiveMemory?.liveExtended?.status||null
       };
 
       const promoted=report?.promotedToChallengerTest||[];
