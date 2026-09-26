@@ -268,6 +268,9 @@ export default {
     if (url.pathname === "/status") {
       return stub.fetch("https://radar/status");
     }
+    if (url.pathname === "/test-telegram") {
+      return stub.fetch("https://radar/test-telegram");
+    }
     return new Response(
       "BTC Live Radar\n\n/start = start/reconnect\n/status = current state\n/health = health check\n",
       { headers: { "content-type": "text/plain; charset=utf-8" } }
@@ -316,7 +319,10 @@ export class RadarDO extends DurableObject {
         contextUpdatedAt: this.context?.updatedAt || null,
         lastStageKey: this.mem.lastStageKey || null,
         lastContextError: this.mem.lastContextError || null,
-        lastContextAttempt: this.mem.lastContextAttempt || null
+        lastContextAttempt: this.mem.lastContextAttempt || null,
+        telegramConfigured: Boolean(this.env.TELEGRAM_BOT_TOKEN),
+        lastTelegramOkAt: this.mem.lastTelegramOkAt || null,
+        lastTelegramError: this.mem.lastTelegramError || null
       });
     }
 
@@ -326,6 +332,13 @@ export class RadarDO extends DurableObject {
         context: this.context,
         state: this.mem
       });
+    }
+
+    if (path === "/test-telegram") {
+      const ok = await this.sendTelegram(
+        "BTC LIVE-RADAR — TEST\nTelegram-Verbindung funktioniert. Der Live-Radar ist aktiv."
+      );
+      return Response.json({ ok });
     }
 
     if (path === "/start" || path === "/tick") {
@@ -603,8 +616,18 @@ export class RadarDO extends DurableObject {
           text
         })
       });
-      return r.ok;
-    } catch {
+      if (r.ok) {
+        this.mem.lastTelegramOkAt = Date.now();
+        this.mem.lastTelegramError = null;
+        await this.persist();
+        return true;
+      }
+      this.mem.lastTelegramError = `HTTP ${r.status}`;
+      await this.persist();
+      return false;
+    } catch (e) {
+      this.mem.lastTelegramError = e?.message || "telegram fetch failed";
+      await this.persist();
       return false;
     }
   }
