@@ -1044,7 +1044,9 @@ export class TradingCenter {
     return {
       features,summary,genomeCount,flowCount,currentQuality,
       historicalIntegrity:this.historicalIntegrityAudit(),
-      venue:this.venueStats()
+      venue:this.venueStats(),
+      risk:this.riskPolicyState(),
+      equity:this.equityResearch()
     };
   }
 
@@ -1153,6 +1155,57 @@ export class TradingCenter {
       neighborhood,
       warning:"A single best parameter is not promoted automatically; stable neighborhoods matter more than an isolated optimum."
     };
+  }
+
+  riskPolicyState(nowTs=Date.now()) {
+    const d=new Date(Number(nowTs));
+    const start=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
+    const day=this.one(
+      `SELECT COUNT(*) AS setups,
+        SUM(CASE WHEN realized_r IS NOT NULL THEN realized_r ELSE 0 END) AS realized_r,
+        SUM(CASE WHEN result='STOP' THEN 1 ELSE 0 END) AS stops,
+        SUM(CASE WHEN result='TARGET' THEN 1 ELSE 0 END) AS targets
+       FROM setups WHERE opened_ts>=?`,
+      start
+    )||{};
+    const setups=Number(day.setups||0),realizedR=Number(day.realized_r||0);
+    const reasons=[];
+    if(setups>=3) reasons.push("MAX_3_SETUPS_UTC_DAY");
+    if(realizedR<=-2) reasons.push("DAILY_STOP_MINUS_2R");
+    return {
+      locked:reasons.length>0,
+      reasons,
+      dayStartUtc:start,
+      setups,
+      realizedR,
+      stops:Number(day.stops||0),
+      targets:Number(day.targets||0),
+      policy:{
+        paperRiskFraction:0.005,
+        hardMaxRiskFraction:0.01,
+        maxSetupsPerUtcDay:3,
+        dailyStopR:-2,
+        minimumPlannedRR:2
+      }
+    };
+  }
+
+  equityResearch() {
+    const rows=this.rows(
+      `SELECT closed_ts,realized_r FROM setups
+       WHERE realized_r IS NOT NULL ORDER BY closed_ts ASC`
+    );
+    let equity=0,peak=0,maxDrawdown=0,lossStreak=0,maxLossStreak=0;
+    for(const r of rows){
+      const x=Number(r.realized_r);
+      if(!Number.isFinite(x)) continue;
+      equity+=x;
+      peak=Math.max(peak,equity);
+      maxDrawdown=Math.max(maxDrawdown,peak-equity);
+      lossStreak=x<0?lossStreak+1:0;
+      maxLossStreak=Math.max(maxLossStreak,lossStreak);
+    }
+    return {n:rows.length,cumulativeR:equity,maxDrawdownR:maxDrawdown,maxLossStreak};
   }
 
   setupValidationReport() {
@@ -2010,7 +2063,9 @@ export class TradingCenter {
       parameterStability: this.parameterStabilityReport(),
       macroRisk: this.macroRiskState(),
       upcomingMacro: this.upcomingMacro(12),
-      macroStats: this.macroStats()
+      macroStats: this.macroStats(),
+      riskPolicy: this.riskPolicyState(),
+      equityResearch: this.equityResearch()
     };
   }
 }
