@@ -1,3 +1,13 @@
+import {
+  FEATURE_REGISTRY,
+  GENOME_DISTANCE_FIELDS,
+  agreementFromSignals,
+  directionSign,
+  noveltyFromDistances,
+  percentileRank,
+  weightedDistance
+} from "./market_intelligence.js";
+
 export class TradingCenter {
   constructor(sql) {
     this.sql = sql;
@@ -189,6 +199,71 @@ export class TradingCenter {
         source TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS orderflow_5m (
+        ts INTEGER PRIMARY KEY,
+        buy_notional REAL NOT NULL,
+        sell_notional REAL NOT NULL,
+        delta_notional REAL NOT NULL,
+        delta_ratio REAL,
+        trade_count INTEGER NOT NULL,
+        spread_bps REAL,
+        book_imbalance REAL,
+        source TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS market_genomes (
+        ts INTEGER PRIMARY KEY,
+        price REAL NOT NULL,
+        ret_5m REAL,
+        ret_15m REAL,
+        atr_pct REAL,
+        volume_ratio REAL,
+        ema_distance_pct REAL,
+        level_distance_pct REAL,
+        bias_score REAL,
+        oi_change REAL,
+        funding_rate REAL,
+        long_short_ratio REAL,
+        liq_5m REAL,
+        liq_imbalance REAL,
+        cross_ret_60m REAL,
+        flow_delta_ratio REAL,
+        spread_bps REAL,
+        book_imbalance REAL,
+        agreement REAL,
+        entropy REAL,
+        novelty REAL,
+        data_quality REAL,
+        volume_surprise REAL,
+        oi_surprise REAL,
+        liq_surprise REAL,
+        flow_surprise REAL,
+        state_label TEXT,
+        fingerprint TEXT,
+        ret_fwd_15m REAL,
+        ret_fwd_60m REAL,
+        ret_fwd_240m REAL
+      );
+
+      CREATE TABLE IF NOT EXISTS data_quality_snapshots (
+        ts INTEGER PRIMARY KEY,
+        score REAL NOT NULL,
+        missing_json TEXT,
+        stale_json TEXT,
+        details_json TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS market_timeline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        subtype TEXT,
+        direction REAL,
+        magnitude REAL,
+        source TEXT,
+        payload_json TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_setups_status ON setups(status);
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
@@ -201,6 +276,10 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_long_short_ts ON long_short_history(ts);
       CREATE INDEX IF NOT EXISTS idx_cross_asset_ts ON cross_asset_history(ts);
       CREATE INDEX IF NOT EXISTS idx_liquidations_ts ON liquidations(ts);
+      CREATE INDEX IF NOT EXISTS idx_orderflow_5m_ts ON orderflow_5m(ts);
+      CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
+      CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
+      CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
     `);
   }
 
@@ -256,6 +335,11 @@ export class TradingCenter {
       "INSERT INTO liquidations(ts, position_side, size, price, notional_usdt, source) VALUES(?,?,?,?,?,?)",
       Number(ts), String(side), q, p, q*p, source
     );
+    this.recordTimeline({
+      ts:Number(ts),eventType:"LIQUIDATION",subtype:String(side),
+      direction:String(side).toUpperCase()==="BUY"?1:String(side).toUpperCase()==="SELL"?-1:null,
+      magnitude:q*p,source,payload:{size:q,price:p,notional:q*p}
+    });
   }
 
   externalMarketSummary() {
@@ -286,6 +370,337 @@ export class TradingCenter {
       crossAssets: cross,
       liquidations1h: liq
     };
+  }
+
+  recordOrderflow5m({
+    ts, buyNotional, sellNotional, tradeCount,
+    spreadBps = null, bookImbalance = null, source = "binance"
+  }) {
+    const buy=Number(buyNotional||0), sell=Number(sellNotional||0);
+    const total=buy+sell;
+    const delta=buy-sell;
+    const ratio=total>0 ? delta/total : null;
+    const cur=this.sql.exec(
+      `INSERT OR REPLACE INTO orderflow_5m(
+        ts,buy_notional,sell_notional,delta_notional,delta_ratio,
+        trade_count,spread_bps,book_imbalance,source
+      ) VALUES(?,?,?,?,?,?,?,?,?)`,
+      Number(ts),buy,sell,delta,ratio,Number(tradeCount||0),
+      spreadBps===null?null:Number(spreadBps),
+      bookImbalance===null?null:Number(bookImbalance),
+      source
+    );
+    this.recordTimeline({
+      ts:Number(ts), eventType:"ORDERFLOW_5M",
+      subtype: ratio===null ? "NO_FLOW" : ratio>0.15 ? "BUY_HEAVY" : ratio<-0.15 ? "SELL_HEAVY" : "BALANCED",
+      direction: ratio, magnitude: Math.abs(delta), source,
+      payload:{buy,sell,delta,ratio,spreadBps,bookImbalance,tradeCount}
+    });
+    return Number(cur.rowsWritten||0);
+  }
+
+  recordTimeline({ts=Date.now(),eventType,subtype=null,direction=null,magnitude=null,source=null,payload=null}) {
+    if (!eventType) return;
+    this.sql.exec(
+      `INSERT INTO market_timeline(ts,event_type,subtype,direction,magnitude,source,payload_json)
+       VALUES(?,?,?,?,?,?,?)`,
+      Number(ts),String(eventType),subtype===null?null:String(subtype),
+      direction===null?null:Number(direction),
+      magnitude===null?null:Number(magnitude),
+      source===null?null:String(source),
+      payload?JSON.stringify(payload):null
+    );
+  }
+
+  latestOrderflow() {
+    return this.one("SELECT * FROM orderflow_5m ORDER BY ts DESC LIMIT 1");
+  }
+
+  recentLiquidationSummary(minutes=5) {
+    const since=Date.now()-Number(minutes)*60_000;
+    const rows=this.rows(
+      `SELECT position_side, SUM(notional_usdt) AS notional, COUNT(*) AS n
+       FROM liquidations WHERE ts>=? GROUP BY position_side`,
+      since
+    );
+    let buy=0,sell=0,total=0;
+    for (const r of rows) {
+      const n=Number(r.notional||0);
+      total+=n;
+      const side=String(r.position_side||"").toUpperCase();
+      if(side==="BUY") buy+=n;
+      else if(side==="SELL") sell+=n;
+    }
+    return {
+      total,
+      buy,
+      sell,
+      imbalance: total>0 ? (buy-sell)/total : 0,
+      rows
+    };
+  }
+
+  nearestAnyClose(targetTs) {
+    return this.one(
+      `SELECT close,ts FROM (
+         SELECT close,ts FROM market_minutes WHERE ts>=?
+         UNION ALL
+         SELECT close,ts FROM historical_5m WHERE ts>=?
+       ) ORDER BY ts ASC LIMIT 1`,
+      Number(targetTs),Number(targetTs)
+    );
+  }
+
+  dataQuality(ctx) {
+    const now=Date.now();
+    const missing=[], stale=[];
+    const details={};
+
+    const mark=(name,row,maxAgeMs)=>{
+      if(!row || !Number.isFinite(Number(row.ts))) {
+        missing.push(name); details[name]={status:"missing"}; return;
+      }
+      const age=now-Number(row.ts);
+      details[name]={status:age<=maxAgeMs?"fresh":"stale",ageMs:age,ts:Number(row.ts)};
+      if(age>maxAgeMs) stale.push(name);
+    };
+
+    const oi=this.one("SELECT ts FROM open_interest_history ORDER BY ts DESC LIMIT 1");
+    const funding=this.one("SELECT ts FROM funding_history ORDER BY ts DESC LIMIT 1");
+    const ls=this.one("SELECT ts FROM long_short_history ORDER BY ts DESC LIMIT 1");
+    const cross=this.one("SELECT MAX(ts) AS ts FROM cross_asset_history");
+    const flow=this.one("SELECT ts FROM orderflow_5m ORDER BY ts DESC LIMIT 1");
+
+    mark("open_interest",oi,15*60_000);
+    mark("funding",funding,12*60*60_000);
+    mark("long_short_ratio",ls,15*60_000);
+    mark("cross_asset",cross,20*60_000);
+    mark("orderflow",flow,15*60_000);
+
+    const c5=Array.isArray(ctx?.c5)?ctx.c5:[];
+    if(c5.length<100) missing.push("price_history");
+    else details.price_history={status:"fresh",bars:c5.length};
+
+    const recent=this.rows(
+      "SELECT ts FROM market_minutes WHERE ts>=? ORDER BY ts ASC",
+      now-30*60_000
+    );
+    let gaps=0;
+    for(let i=1;i<recent.length;i++){
+      if(Number(recent[i].ts)-Number(recent[i-1].ts)>125_000) gaps++;
+    }
+    details.live_gaps_30m=gaps;
+
+    const critical=["open_interest","cross_asset","orderflow","price_history"];
+    const criticalPenalty=missing.filter(x=>critical.includes(x)).length*14 +
+      stale.filter(x=>critical.includes(x)).length*9;
+    const otherPenalty=missing.filter(x=>!critical.includes(x)).length*7 +
+      stale.filter(x=>!critical.includes(x)).length*4;
+    const gapPenalty=Math.min(20,gaps*4);
+    const score=Math.max(0,100-criticalPenalty-otherPenalty-gapPenalty);
+
+    const ts=Number(ctx?.c5?.at(-1)?.t||now);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO data_quality_snapshots(ts,score,missing_json,stale_json,details_json)
+       VALUES(?,?,?,?,?)`,
+      ts,score,JSON.stringify(missing),JSON.stringify(stale),JSON.stringify(details)
+    );
+    return {score,missing,stale,details};
+  }
+
+  buildMarketGenome(ctx) {
+    const f=this.factorsFromContext(ctx);
+    const c5=Array.isArray(ctx?.c5)?ctx.c5:[];
+    const last=c5.at(-1), prev=c5.at(-2), prev3=c5.at(-4);
+    const price=Number(ctx?.price||last?.c||0);
+    const ret5=prev?.c ? price/Number(prev.c)-1 : null;
+    const ret15=prev3?.c ? price/Number(prev3.c)-1 : null;
+    const emaMid=(Number(ctx?.ema20||0)+Number(ctx?.ema50||0))/2;
+    const emaDistance=price && emaMid ? (price-emaMid)/price : null;
+    const levelDistance=f.distance_level_pct;
+
+    const oi=this.one("SELECT * FROM open_interest_history ORDER BY ts DESC LIMIT 1");
+    const prevOi=oi?this.one("SELECT * FROM open_interest_history WHERE ts<? ORDER BY ts DESC LIMIT 1",oi.ts):null;
+    const oiChange=oi&&prevOi&&Number(prevOi.open_interest)
+      ? (Number(oi.open_interest)-Number(prevOi.open_interest))/Number(prevOi.open_interest):null;
+    const funding=this.one("SELECT * FROM funding_history ORDER BY ts DESC LIMIT 1");
+    const ls=this.one("SELECT * FROM long_short_history ORDER BY ts DESC LIMIT 1");
+    const flow=this.latestOrderflow();
+    const liq=this.recentLiquidationSummary(5);
+    const crossRows=this.rows(
+      "SELECT * FROM cross_asset_history WHERE ts=(SELECT MAX(ts) FROM cross_asset_history)"
+    );
+    const crossVals=crossRows.map(r=>Number(r.ret_60m)).filter(Number.isFinite);
+    const crossRet=crossVals.length?crossVals.reduce((a,b)=>a+b,0)/crossVals.length:null;
+
+    const history=this.rows(
+      `SELECT volume_ratio,oi_change,liq_5m,flow_delta_ratio
+       FROM market_genomes ORDER BY ts DESC LIMIT 576`
+    );
+    const volumeSample=history.map(r=>Number(r.volume_ratio)).filter(Number.isFinite);
+    const oiSample=history.map(r=>Number(r.oi_change)).filter(Number.isFinite);
+    const liqSample=history.map(r=>Number(r.liq_5m)).filter(Number.isFinite);
+    const flowSample=history.map(r=>Number(r.flow_delta_ratio)).filter(Number.isFinite);
+
+    const directional=[
+      directionSign(ret5,0.0001),
+      directionSign(ret15,0.0002),
+      directionSign(ctx?.score,0),
+      directionSign(emaDistance,0.0002),
+      directionSign(crossRet,0.001),
+      directionSign(flow?.delta_ratio,0.05),
+      directionSign(flow?.book_imbalance,0.05),
+      directionSign((ls?.long_short_ratio??1)-1,0.03)
+    ];
+    const agree=agreementFromSignals(directional);
+    const quality=this.dataQuality(ctx);
+
+    const g={
+      ts:Number(last?.t||Date.now()),
+      price,
+      ret_5m:ret5,
+      ret_15m:ret15,
+      atr_pct:f.atr_pct,
+      volume_ratio:f.volume_ratio,
+      ema_distance_pct:emaDistance,
+      level_distance_pct:levelDistance,
+      bias_score:Number(ctx?.score||0),
+      oi_change:oiChange,
+      funding_rate:funding?Number(funding.funding_rate):null,
+      long_short_ratio:ls?.long_short_ratio===null||ls?.long_short_ratio===undefined?null:Number(ls.long_short_ratio),
+      liq_5m:Number(liq.total||0),
+      liq_imbalance:Number(liq.imbalance||0),
+      cross_ret_60m:crossRet,
+      flow_delta_ratio:flow?.delta_ratio===null||flow?.delta_ratio===undefined?null:Number(flow.delta_ratio),
+      spread_bps:flow?.spread_bps===null||flow?.spread_bps===undefined?null:Number(flow.spread_bps),
+      book_imbalance:flow?.book_imbalance===null||flow?.book_imbalance===undefined?null:Number(flow.book_imbalance),
+      agreement:agree.agreement,
+      entropy:agree.entropy,
+      novelty:null,
+      data_quality:quality.score,
+      volume_surprise:percentileRank(f.volume_ratio,volumeSample),
+      oi_surprise:percentileRank(Math.abs(oiChange??0),oiSample.map(Math.abs)),
+      liq_surprise:percentileRank(liq.total,liqSample),
+      flow_surprise:percentileRank(Math.abs(flow?.delta_ratio??0),flowSample.map(Math.abs))
+    };
+
+    const peers=this.rows("SELECT * FROM market_genomes ORDER BY ts DESC LIMIT 1000");
+    const distances=peers.map(x=>weightedDistance(g,x,GENOME_DISTANCE_FIELDS)).filter(Number.isFinite);
+    g.novelty=noveltyFromDistances(distances);
+
+    const trend=f.trend_alignment;
+    const leverage=oiChange===null?"OI?":oiChange>0.003?"OI_BUILD":oiChange<-0.003?"OI_UNWIND":"OI_FLAT";
+    const flowState=g.flow_delta_ratio===null?"FLOW?":g.flow_delta_ratio>0.15?"BUY_FLOW":g.flow_delta_ratio<-0.15?"SELL_FLOW":"FLOW_BAL";
+    g.state_label=`${trend}|${f.volatility_regime}|${leverage}|${flowState}`;
+    g.fingerprint=[
+      trend,f.volatility_regime,
+      Math.round((g.volume_surprise??0.5)*10),
+      Math.round((g.oi_surprise??0.5)*10),
+      Math.round((g.liq_surprise??0.5)*10),
+      Math.round((g.flow_surprise??0.5)*10),
+      Math.round((g.agreement??0)*10),
+      Math.round((g.novelty??0)*10)
+    ].join(":");
+    return g;
+  }
+
+  recordMarketGenome(ctx) {
+    const g=this.buildMarketGenome(ctx);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO market_genomes(
+        ts,price,ret_5m,ret_15m,atr_pct,volume_ratio,ema_distance_pct,level_distance_pct,
+        bias_score,oi_change,funding_rate,long_short_ratio,liq_5m,liq_imbalance,cross_ret_60m,
+        flow_delta_ratio,spread_bps,book_imbalance,agreement,entropy,novelty,data_quality,
+        volume_surprise,oi_surprise,liq_surprise,flow_surprise,state_label,fingerprint
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      g.ts,g.price,g.ret_5m,g.ret_15m,g.atr_pct,g.volume_ratio,g.ema_distance_pct,g.level_distance_pct,
+      g.bias_score,g.oi_change,g.funding_rate,g.long_short_ratio,g.liq_5m,g.liq_imbalance,g.cross_ret_60m,
+      g.flow_delta_ratio,g.spread_bps,g.book_imbalance,g.agreement,g.entropy,g.novelty,g.data_quality,
+      g.volume_surprise,g.oi_surprise,g.liq_surprise,g.flow_surprise,g.state_label,g.fingerprint
+    );
+    return g;
+  }
+
+  updateGenomeOutcomes(nowTs=Date.now()) {
+    const rows=this.rows(
+      `SELECT ts,price,ret_fwd_15m,ret_fwd_60m,ret_fwd_240m
+       FROM market_genomes WHERE ret_fwd_240m IS NULL ORDER BY ts ASC LIMIT 250`
+    );
+    const horizons=[["ret_fwd_15m",15],["ret_fwd_60m",60],["ret_fwd_240m",240]];
+    for(const row of rows){
+      const updates=[],vals=[];
+      for(const [field,min] of horizons){
+        if(row[field]!==null&&row[field]!==undefined) continue;
+        const target=Number(row.ts)+min*60_000;
+        if(nowTs<target) continue;
+        const p=this.nearestAnyClose(target);
+        if(!p) continue;
+        updates.push(`${field}=?`);
+        vals.push((Number(p.close)-Number(row.price))/Number(row.price));
+      }
+      if(updates.length){
+        vals.push(row.ts);
+        this.sql.exec(`UPDATE market_genomes SET ${updates.join(",")} WHERE ts=?`,...vals);
+      }
+    }
+  }
+
+  currentGenomeIntelligence(ctx, limit=20) {
+    const current=this.buildMarketGenome(ctx);
+    const rows=this.rows(
+      "SELECT * FROM market_genomes WHERE ts<? ORDER BY ts DESC LIMIT 1500",
+      current.ts
+    );
+    const scored=rows.map(r=>({
+      ...r,
+      distance:weightedDistance(current,r,GENOME_DISTANCE_FIELDS)
+    })).filter(x=>Number.isFinite(x.distance)).sort((a,b)=>a.distance-b.distance);
+
+    const twins=scored.slice(0,Math.max(1,Number(limit||20)));
+    const withOutcome=twins.filter(x=>Number.isFinite(Number(x.ret_fwd_60m)));
+    const avg60=withOutcome.length
+      ? withOutcome.reduce((s,x)=>s+Number(x.ret_fwd_60m),0)/withOutcome.length:null;
+    const sameDir=withOutcome.length
+      ? withOutcome.filter(x=>Math.sign(Number(x.ret_fwd_60m))===Math.sign(Number(current.ret_15m||current.ret_5m||0))).length/withOutcome.length:null;
+
+    const failure=withOutcome.length
+      ? withOutcome.find(x=>Math.sign(Number(x.ret_fwd_60m))!==Math.sign(Number(current.ret_15m||current.ret_5m||0)))||null:null;
+
+    return {
+      current,
+      sample:twins.length,
+      outcomeSample:withOutcome.length,
+      avgForward60m:avg60,
+      sameDirectionRate:sameDir,
+      nearestTwins:twins.slice(0,10),
+      nearestFailureTwin:failure
+    };
+  }
+
+  coverageReport(ctx=null) {
+    const summary=this.summary();
+    const genomeCount=Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n||0);
+    const flowCount=Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n||0);
+    const currentQuality=ctx?this.dataQuality(ctx):null;
+    const implemented=new Set([
+      "price_structure","volatility","volume","ema_state","support_resistance","session",
+      "open_interest","funding","long_short_ratio","liquidations","cross_asset","news_events",
+      "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
+      "historical_twins"
+    ]);
+    const features=FEATURE_REGISTRY.map(f=>({
+      ...f,
+      status:implemented.has(f.key)?"LIVE":"PLANNED",
+      disadvantageIfMissing:Boolean(f.critical&& !implemented.has(f.key))
+    }));
+    return {features,summary,genomeCount,flowCount,currentQuality};
+  }
+
+  recentTimeline(limit=100) {
+    return this.rows(
+      "SELECT * FROM market_timeline ORDER BY ts DESC LIMIT ?",
+      Math.min(500,Math.max(1,Number(limit||100)))
+    );
   }
 
   recordHistorical5m(rows, source = "bybit") {
@@ -337,12 +752,17 @@ export class TradingCenter {
   }
 
   recordAlert({ key, stage, side = null, level = null, price = null, payload = null }) {
+    const ts=Date.now();
     this.sql.exec(
       `INSERT INTO alerts(ts, alert_key, stage, side, level, price, payload_json)
        VALUES(?, ?, ?, ?, ?, ?, ?)`,
-      Date.now(), key, stage, side, level, price,
+      ts, key, stage, side, level, price,
       payload ? JSON.stringify(payload) : null
     );
+    this.recordTimeline({
+      ts,eventType:"ALERT",subtype:stage,direction:side==="LONG"?1:side==="SHORT"?-1:null,
+      magnitude:level,source:"system",payload:{key,price,...(payload||{})}
+    });
   }
 
   sessionFor(ts) {
@@ -824,7 +1244,10 @@ export class TradingCenter {
       openInterestRows: Number(this.one("SELECT COUNT(*) AS n FROM open_interest_history")?.n || 0),
       longShortRows: Number(this.one("SELECT COUNT(*) AS n FROM long_short_history")?.n || 0),
       fundingRows: Number(this.one("SELECT COUNT(*) AS n FROM funding_history")?.n || 0),
-      crossAssetRows: Number(this.one("SELECT COUNT(*) AS n FROM cross_asset_history")?.n || 0)
+      crossAssetRows: Number(this.one("SELECT COUNT(*) AS n FROM cross_asset_history")?.n || 0),
+      orderflow5mRows: Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n || 0),
+      genomeRows: Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n || 0),
+      timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0)
     };
   }
 
@@ -903,7 +1326,9 @@ export class TradingCenter {
       recentSetups: this.recentSetups(50),
       recentNews: this.recentNews(50),
       recentPatterns: this.recentPatterns(50),
-      externalMarket: this.externalMarketSummary()
+      externalMarket: this.externalMarketSummary(),
+      coverage: this.coverageReport(),
+      recentTimeline: this.recentTimeline(50)
     };
   }
 }
