@@ -516,6 +516,37 @@ export class TradingCenter {
     }
   }
 
+  bootstrapPatternHistory(candles) {
+    if (!Array.isArray(candles) || candles.length < 300) return 0;
+    let inserted = 0;
+    const retAt = (i, bars) => {
+      const j=i+bars;
+      if (j >= candles.length) return null;
+      const base=Number(candles[i].c);
+      return base ? (Number(candles[j].c)-base)/base : null;
+    };
+
+    for (let i=2;i<candles.length;i++) {
+      const slice=candles.slice(Math.max(0,i-2),i+1);
+      const candle=candles[i];
+      for (const [pattern,direction] of this.detectPatterns(slice)) {
+        const cur=this.sql.exec(
+          `INSERT OR IGNORE INTO pattern_occurrences(
+            candle_ts, pattern, direction, open, high, low, close, volume,
+            trend_5m, trend_15m, trend_1h, trend_4h, bias_score,
+            ret_15m, ret_60m, ret_240m, ret_1440m
+          ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          Number(candle.t), pattern, direction,
+          Number(candle.o), Number(candle.h), Number(candle.l), Number(candle.c), Number(candle.v),
+          null,null,null,null,null,
+          retAt(i,3), retAt(i,12), retAt(i,48), retAt(i,288)
+        );
+        inserted += Number(cur.rowsWritten || 0);
+      }
+    }
+    return inserted;
+  }
+
   nearestClose(targetTs) {
     return this.one(
       "SELECT close, ts FROM market_minutes WHERE ts >= ? ORDER BY ts ASC LIMIT 1",
