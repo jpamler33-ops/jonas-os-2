@@ -1028,12 +1028,14 @@ export class TradingCenter {
       "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation",
       "data_quality_lock","parameter_stability","historical_genome_bootstrap",
       "sequence_outcomes","change_point_detection","missed_opportunity_analysis",
-      "failure_attribution","alert_value_tracking"
+      "failure_attribution","alert_value_tracking","daily_risk_lock","position_sizing",
+      "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance"
     ]);
     const partial=new Set([
       "counterfactuals","feed_latency_monitor","feed_redundancy",
       "lead_lag_network","shadow_strategies",
-      "hypothesis_falsification"
+      "hypothesis_falsification","slippage_model","feed_latency_monitor",
+      "feed_redundancy","endpoint_auth"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
@@ -1053,7 +1055,8 @@ export class TradingCenter {
       sequenceOutcomes:this.sequenceOutcomeReport(),
       changePoint:this.changePointReport(),
       missedOpportunities:this.missedOpportunityReport(),
-      crossMarketLead:this.crossMarketLeadResearch()
+      crossMarketLead:this.crossMarketLeadResearch(),
+      modelDrift:this.modelDriftReport()
     };
   }
 
@@ -1162,6 +1165,50 @@ export class TradingCenter {
       neighborhood,
       warning:"A single best parameter is not promoted automatically; stable neighborhoods matter more than an isolated optimum."
     };
+  }
+
+  positionSizing({balance,entry,stop,riskFraction=0.005}) {
+    const bal=Number(balance),e=Number(entry),s=Number(stop);
+    const rf=Math.min(0.01,Math.max(0,Number(riskFraction||0.005)));
+    if(!(bal>0)||!(e>0)||!(s>0)||e===s) return null;
+    const riskPerUnit=Math.abs(e-s);
+    const riskAmount=bal*rf;
+    const units=riskAmount/riskPerUnit;
+    return {
+      balance:bal,riskFraction:rf,riskAmount,entry:e,stop:s,
+      riskPerUnit,units,notional:units*e,
+      note:"Mechanical sizing only; leverage, fees and slippage are not included in this number."
+    };
+  }
+
+  modelDriftReport() {
+    const now=Date.now();
+    const windows=[
+      {name:"LAST_14D",start:now-14*86400000,end:now},
+      {name:"PREV_14D",start:now-28*86400000,end:now-14*86400000},
+      {name:"LAST_30D",start:now-30*86400000,end:now},
+      {name:"PREV_30D",start:now-60*86400000,end:now-30*86400000}
+    ];
+    const result=windows.map(w=>{
+      const r=this.one(
+        `SELECT COUNT(*) AS n,
+          AVG(realized_r) AS avg_r,
+          SUM(CASE WHEN result='TARGET' THEN 1 ELSE 0 END) AS wins,
+          SUM(CASE WHEN result='STOP' THEN 1 ELSE 0 END) AS losses
+         FROM setups WHERE opened_ts>=? AND opened_ts<? AND result IN ('TARGET','STOP')`,
+        w.start,w.end
+      )||{};
+      const wins=Number(r.wins||0),losses=Number(r.losses||0),n=wins+losses;
+      return {name:w.name,n,avgR:r.avg_r===null?null:Number(r.avg_r),hitRate:n?wins/n:null};
+    });
+    const a=result.find(x=>x.name==="LAST_14D"),b=result.find(x=>x.name==="PREV_14D");
+    const avgDelta=a?.avgR!==null&&b?.avgR!==null&&a?.avgR!==undefined&&b?.avgR!==undefined?a.avgR-b.avgR:null;
+    const hitDelta=a?.hitRate!==null&&b?.hitRate!==null&&a?.hitRate!==undefined&&b?.hitRate!==undefined?a.hitRate-b.hitRate:null;
+    let status="LEARNING";
+    if((a?.n||0)>=8&&(b?.n||0)>=8) {
+      status=(avgDelta!==null&&avgDelta<-0.4)||(hitDelta!==null&&hitDelta<-0.15)?"DEGRADING":"STABLE_OR_MIXED";
+    }
+    return {status,avgRDelta14d:avgDelta,hitRateDelta14d:hitDelta,windows:result};
   }
 
   riskPolicyState(nowTs=Date.now()) {
