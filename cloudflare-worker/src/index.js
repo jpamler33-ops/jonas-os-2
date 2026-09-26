@@ -1157,6 +1157,7 @@ export class RadarDO extends DurableObject {
         const hist = this.center.matchingSetupHistory(confirmed.side, this.context);
         const twins = this.center.currentGenomeIntelligence(this.context, 20);
         const g = twins.current || {};
+        const dataQualityLock = Number(g.data_quality||0) < 75;
         const histText = hist.n >= 8
           ? `Historischer Match: N=${hist.n} | TP-Quote ${(hist.hitRate*100).toFixed(1)}% | Ø ${hist.avgR?.toFixed(2) ?? "—"}R | ${hist.evidence}`
           : `Historischer Match: N=${hist.n} | noch Lernphase, keine belastbare Aussage`;
@@ -1179,7 +1180,10 @@ export class RadarDO extends DurableObject {
             twinText,
             (g.novelty||0) >= 0.7 ? "WARNUNG: Ungewöhnlicher Markt-Zustand; historische Vergleiche schwächer." : "",
             macroRisk?.active ? "MACRO LOCK: offizielles Event-Risikofenster aktiv — Setup nur als Forschungsbeobachtung behandeln." : "",
-            macroRisk?.active ? "AKTION: Kein neuer Entry während der definierten Event-Risikozone." : "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
+            dataQualityLock ? "DATA QUALITY LOCK: mindestens eine wichtige Datenquelle fehlt oder ist veraltet." : "",
+            (macroRisk?.active || dataQualityLock)
+              ? "AKTION: Setup nur protokollieren; keine neue Entry-Freigabe aus diesem System."
+              : "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
             "Historische Statistik beschreibt Vergangenheitsdaten und ist keine Gewinnwahrscheinlichkeit."
           ].join("\n")
         );
