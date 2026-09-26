@@ -277,11 +277,36 @@ async function getCandles(interval, limit = 260) {
         h: Number(k[2]),
         l: Number(k[3]),
         c: Number(k[4]),
-        v: Number(k[5])
+        v: Number(k[5]),
+        source:"binance"
       }));
     } catch (e) {
       lastError = e;
     }
+  }
+
+  // Independent REST fallback. Context construction keeps working even if
+  // every Binance REST hostname is unavailable from the Worker region.
+  try {
+    const bybitIntervals={"5m":"5","15m":"15","1h":"60","4h":"240"};
+    const intervalValue=bybitIntervals[interval];
+    if(!intervalValue) throw new Error(`unsupported Bybit interval ${interval}`);
+    const result=await bybitJson("/v5/market/kline",{
+      category:"spot",symbol:SYMBOL,interval:intervalValue,
+      limit:String(Math.min(1000,Math.max(50,limit+1)))
+    });
+    const rows=Array.isArray(result?.list)?result.list:[];
+    const durationMs={"5m":5,"15m":15,"1h":60,"4h":240}[interval]*60_000;
+    const now=Date.now();
+    const closed=rows.map(k=>({
+      t:Number(k[0]),o:Number(k[1]),h:Number(k[2]),l:Number(k[3]),
+      c:Number(k[4]),v:Number(k[5]),source:"bybit_spot_fallback"
+    })).filter(x=>Number.isFinite(x.t)&&x.t+durationMs<=now)
+      .sort((a,b)=>a.t-b.t);
+    if(closed.length) return closed.slice(-limit);
+    throw new Error("Bybit fallback returned no closed candles");
+  } catch(e) {
+    lastError=e;
   }
   throw lastError || new Error("market data unavailable");
 }
