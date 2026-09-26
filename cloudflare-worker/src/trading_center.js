@@ -33,6 +33,7 @@ export class TradingCenter {
   constructor(sql) {
     this.sql = sql;
     this.init();
+    this.ensureVersionManifest();
   }
 
   init() {
@@ -646,6 +647,194 @@ export class TradingCenter {
   one(query, ...params) {
     const rows = this.rows(query, ...params);
     return rows.length ? rows[0] : null;
+  }
+
+  ensureVersionManifest() {
+    const m=currentVersionManifest();
+    const id=manifestId(m);
+    this.sql.exec(
+      `INSERT OR IGNORE INTO version_manifests(
+        manifest_id,created_ts,system_version,strategy_version,research_model_version,
+        feature_schema_version,governance_version,data_schema_version,payload_json
+      ) VALUES(?,?,?,?,?,?,?,?,?)`,
+      id,Date.now(),m.systemVersion,m.strategyVersion,m.researchModelVersion,
+      m.featureSchemaVersion,m.governanceVersion,m.dataSchemaVersion,
+      canonicalStringify(m)
+    );
+    return {manifestId:id,...m};
+  }
+
+  linkDecisionVersion(subjectType,subjectId,params=null) {
+    if(subjectId===null||subjectId===undefined) return null;
+    const v=this.ensureVersionManifest();
+    this.sql.exec(
+      `INSERT OR IGNORE INTO decision_version_links(
+        subject_type,subject_id,created_ts,manifest_id,strategy_version,
+        research_model_version,feature_schema_version,governance_version,params_json
+      ) VALUES(?,?,?,?,?,?,?,?,?)`,
+      String(subjectType),String(subjectId),Date.now(),v.manifestId,v.strategyVersion,
+      v.researchModelVersion,v.featureSchemaVersion,v.governanceVersion,
+      params?canonicalStringify(params):null
+    );
+    return this.one(
+      "SELECT * FROM decision_version_links WHERE subject_type=? AND subject_id=?",
+      String(subjectType),String(subjectId)
+    );
+  }
+
+  versionReport() {
+    const current=this.ensureVersionManifest();
+    const manifests=this.rows(
+      `SELECT manifest_id,MIN(created_ts) AS first_seen,MAX(created_ts) AS last_seen,
+        COUNT(*) AS n
+       FROM decision_version_links
+       GROUP BY manifest_id ORDER BY last_seen DESC`
+    );
+    const subjects=this.rows(
+      `SELECT subject_type,manifest_id,COUNT(*) AS n
+       FROM decision_version_links
+       GROUP BY subject_type,manifest_id
+       ORDER BY subject_type,n DESC`
+    );
+    return {
+      current,
+      manifests,
+      subjects,
+      strategyCoreVersion:STRATEGY_CORE_VERSION,
+      note:"Every new setup, shadow setup and replay result is linked to an explicit version manifest."
+    };
+  }
+
+  appendLedgerEvent({
+    eventType,subjectType,subjectId,contextTs=null,decision=null,score=null,
+    dataQuality=null,novelty=null,payload={}
+  }) {
+    if(!eventType||subjectId===null||subjectId===undefined) return null;
+    const v=this.ensureVersionManifest();
+    const createdTs=Date.now();
+    const last=this.one("SELECT fingerprint FROM prediction_ledger ORDER BY id DESC LIMIT 1");
+    const prior=last?.fingerprint||"GENESIS";
+    const core={
+      createdTs,eventType:String(eventType),subjectType:String(subjectType),
+      subjectId:String(subjectId),contextTs:contextTs===null?null:Number(contextTs),
+      decision:decision===null?null:String(decision),
+      score:score===null||score===undefined||!Number.isFinite(Number(score))?null:Number(score),
+      dataQuality:dataQuality===null||dataQuality===undefined||!Number.isFinite(Number(dataQuality))?null:Number(dataQuality),
+      novelty:novelty===null||novelty===undefined||!Number.isFinite(Number(novelty))?null:Number(novelty),
+      manifestId:v.manifestId,
+      strategyVersion:v.strategyVersion,
+      researchModelVersion:v.researchModelVersion,
+      featureSchemaVersion:v.featureSchemaVersion,
+      governanceVersion:v.governanceVersion,
+      payload
+    };
+    const canonical=canonicalStringify(core);
+    const fingerprint=fnv1a64(prior+"|"+canonical);
+    const eventId=fnv1a64(
+      [core.eventType,core.subjectType,core.subjectId,core.contextTs??"",fingerprint].join("|")
+    );
+    const cur=this.sql.exec(
+      `INSERT OR IGNORE INTO prediction_ledger(
+        event_id,created_ts,event_type,subject_type,subject_id,context_ts,
+        decision,score,data_quality,novelty,manifest_id,strategy_version,
+        research_model_version,feature_schema_version,governance_version,
+        prior_fingerprint,fingerprint,payload_json
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      eventId,createdTs,core.eventType,core.subjectType,core.subjectId,core.contextTs,
+      core.decision,core.score,core.dataQuality,core.novelty,
+      core.manifestId,core.strategyVersion,core.researchModelVersion,
+      core.featureSchemaVersion,core.governanceVersion,
+      prior,fingerprint,canonicalStringify(payload||{})
+    );
+    if(Number(cur.rowsWritten||0)===0) {
+      return this.one("SELECT * FROM prediction_ledger WHERE event_id=?",eventId);
+    }
+    return this.one("SELECT * FROM prediction_ledger WHERE event_id=?",eventId);
+  }
+
+  ledgerPredictionForSubject(subjectType,subjectId) {
+    return this.one(
+      `SELECT * FROM prediction_ledger
+       WHERE subject_type=? AND subject_id=? AND event_type='PREDICTION'
+       ORDER BY id ASC LIMIT 1`,
+      String(subjectType),String(subjectId)
+    );
+  }
+
+  appendPredictionResolution(subjectType,subjectId,result,payload={}) {
+    const pred=this.ledgerPredictionForSubject(subjectType,subjectId);
+    if(!pred) return null;
+    const exists=this.one(
+      `SELECT * FROM prediction_ledger
+       WHERE subject_type=? AND subject_id=? AND event_type='RESOLUTION'
+       ORDER BY id ASC LIMIT 1`,
+      String(subjectType),String(subjectId)
+    );
+    if(exists) return exists;
+    return this.appendLedgerEvent({
+      eventType:"RESOLUTION",
+      subjectType,subjectId,
+      contextTs:Date.now(),
+      decision:String(result),
+      payload:{predictionEventId:pred.event_id,result,...(payload||{})}
+    });
+  }
+
+  predictionLedgerAudit(limit=5000) {
+    const rows=this.rows(
+      "SELECT * FROM prediction_ledger ORDER BY id ASC LIMIT ?",
+      Math.min(20000,Math.max(1,Number(limit||5000)))
+    );
+    let prior="GENESIS",valid=0;
+    const issues=[];
+    const predictions=new Map(),resolutions=new Map();
+    for(const r of rows){
+      const payload=JSON.parse(r.payload_json||"{}");
+      const core={
+        createdTs:Number(r.created_ts),
+        eventType:r.event_type,
+        subjectType:r.subject_type,
+        subjectId:r.subject_id,
+        contextTs:r.context_ts===null?null:Number(r.context_ts),
+        decision:r.decision===null?null:r.decision,
+        score:r.score===null?null:Number(r.score),
+        dataQuality:r.data_quality===null?null:Number(r.data_quality),
+        novelty:r.novelty===null?null:Number(r.novelty),
+        manifestId:r.manifest_id,
+        strategyVersion:r.strategy_version,
+        researchModelVersion:r.research_model_version,
+        featureSchemaVersion:r.feature_schema_version,
+        governanceVersion:r.governance_version,
+        payload
+      };
+      const expected=fnv1a64(prior+"|"+canonicalStringify(core));
+      const chainOk=String(r.prior_fingerprint)===prior && String(r.fingerprint)===expected;
+      if(chainOk) valid++;
+      else issues.push({id:Number(r.id),eventId:r.event_id,reason:"CHAIN_MISMATCH"});
+      prior=String(r.fingerprint);
+      const key=`${r.subject_type}|${r.subject_id}`;
+      if(r.event_type==="PREDICTION"){
+        if(predictions.has(key)) issues.push({id:Number(r.id),reason:"DUPLICATE_PREDICTION",subject:key});
+        predictions.set(key,r);
+      }
+      if(r.event_type==="RESOLUTION"){
+        resolutions.set(key,(resolutions.get(key)||0)+1);
+        if((resolutions.get(key)||0)>1) issues.push({id:Number(r.id),reason:"DUPLICATE_RESOLUTION",subject:key});
+      }
+    }
+    const unresolved=[...predictions.keys()].filter(k=>!resolutions.has(k));
+    return {
+      n:rows.length,
+      validChainRows:valid,
+      chainValid:rows.length===valid,
+      issueCount:issues.length,
+      issues:issues.slice(0,50),
+      predictions:predictions.size,
+      resolved:[...resolutions.keys()].length,
+      unresolved:unresolved.length,
+      latestFingerprint:rows.at(-1)?.fingerprint||null,
+      ledgerPolicy:"Append-only application ledger; resolutions are separate events and prediction rows are never updated."
+    };
   }
 
   recordOpenInterest(ts, value, source = "bybit") {
