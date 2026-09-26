@@ -167,6 +167,23 @@ async function bybitJson(path, params = {}) {
   return data?.result || {};
 }
 
+async function fetchVenueSnapshot(binanceSpot) {
+  const [spot,linear]=await Promise.all([
+    bybitJson("/v5/market/tickers",{category:"spot",symbol:"BTCUSDT"}),
+    bybitJson("/v5/market/tickers",{category:"linear",symbol:"BTCUSDT"})
+  ]);
+  const s=Array.isArray(spot?.list)?spot.list[0]:null;
+  const p=Array.isArray(linear?.list)?linear.list[0]:null;
+  return {
+    ts:Date.now(),
+    binanceSpot:Number(binanceSpot),
+    bybitSpot:Number(s?.lastPrice),
+    bybitPerp:Number(p?.lastPrice),
+    bybitMark:Number(p?.markPrice),
+    bybitIndex:Number(p?.indexPrice)
+  };
+}
+
 async function fetchDerivativesData() {
   const [oi, funding, ratio] = await Promise.all([
     bybitJson("/v5/market/open-interest", {
@@ -496,6 +513,7 @@ export class RadarDO extends DurableObject {
         genomeRows: this.center.summary().genomeRows,
         orderflow5mRows: this.center.summary().orderflow5mRows,
         orderflowMode: "BINANCE_KLINE_TAKER_VOLUME_PLUS_BOOK_SNAPSHOT",
+        venue: this.center.latestVenueSnapshot(),
         replay: this.replayPublicState(),
         macro: {
           risk: this.center.macroRiskState(),
@@ -597,6 +615,10 @@ export class RadarDO extends DurableObject {
         lastPoll:this.mem.lastMacroPoll||null,
         lastError:this.mem.lastMacroError||null
       });
+    }
+
+    if (path === "/api/venues") {
+      return Response.json(this.center.venueStats());
     }
 
     if (path === "/replay/status") {
@@ -1087,10 +1109,11 @@ export class RadarDO extends DurableObject {
       await this.pollOfficialMacro(false);
 
       try {
-        const [derivatives, crossAssets, bookTicker] = await Promise.all([
+        const [derivatives, crossAssets, bookTicker, venue] = await Promise.all([
           fetchDerivativesData(),
           fetchCrossAssets(),
-          fetchBookTicker()
+          fetchBookTicker(),
+          fetchVenueSnapshot(this.context.price)
         ]);
 
         for (const row of derivatives.openInterest) this.center.recordOpenInterest(row.ts, row.value);
@@ -1100,6 +1123,7 @@ export class RadarDO extends DurableObject {
           this.center.recordCrossAsset(row.ts, row.symbol, row.ret5m, row.ret60m, row.close);
         }
         this.mem.bookTicker = bookTicker;
+        this.center.recordVenueSnapshot(venue);
         this.mem.lastExternalDataError = null;
       } catch (e) {
         this.mem.lastExternalDataError = e?.message || String(e);
