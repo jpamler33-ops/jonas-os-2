@@ -411,6 +411,23 @@ export class RadarDO extends DurableObject {
     const path = new URL(request.url).pathname;
 
     if (path === "/health") {
+      // Self-healing health check: after a deploy or Durable Object restart,
+      // immediately restore both market WebSockets instead of waiting for cron/alarm.
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        await this.ensureConnected();
+      }
+      if (!this.liqWs || this.liqWs.readyState !== WebSocket.OPEN) {
+        await this.ensureLiquidationConnected();
+      }
+
+      // Give newly-created sockets a short moment to transition from CONNECTING -> OPEN.
+      if (
+        this.ws?.readyState === WebSocket.CONNECTING ||
+        this.liqWs?.readyState === WebSocket.CONNECTING
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+
       return Response.json({
         ok: true,
         connected: this.ws?.readyState === WebSocket.OPEN,
@@ -421,7 +438,8 @@ export class RadarDO extends DurableObject {
         lastContextAttempt: this.mem.lastContextAttempt || null,
         telegramConfigured: Boolean(this.env.TELEGRAM_BOT_TOKEN),
         lastTelegramOkAt: this.mem.lastTelegramOkAt || null,
-        lastTelegramError: this.mem.lastTelegramError || null
+        lastTelegramError: this.mem.lastTelegramError || null,
+        selfHealing: true
       });
     }
 
