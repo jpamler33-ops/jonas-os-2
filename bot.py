@@ -169,6 +169,60 @@ def rr(entry: float, stop: float, target: float, side: str) -> float:
     return reward / risk
 
 
+PREPARE_DISTANCE = 0.0035  # 0.35 % vor relevantem Level
+
+
+def fresh_break(c: List[Candle], side: str) -> Optional[dict]:
+    if len(c) < 25:
+        return None
+    latest = c[-1]
+    history = c[-17:-1]
+    if side == "LONG":
+        level = max(x.h for x in history)
+        if c[-2].c <= level and latest.c > level:
+            return {"side": side, "level": level}
+    else:
+        level = min(x.l for x in history)
+        if c[-2].c >= level and latest.c < level:
+            return {"side": side, "level": level}
+    return None
+
+
+def prepare_cross(
+    c: List[Candle],
+    side: str,
+    level: Optional[float],
+    score: int,
+    trend5: str,
+    e20: float,
+) -> Optional[dict]:
+    if level is None or len(c) < 3:
+        return None
+
+    price = c[-1].c
+    prev = c[-2].c
+
+    if side == "LONG":
+        if score < 1 or trend5 == "BEARISH" or price < e20 or price >= level:
+            return None
+        dist = (level - price) / price
+        prev_dist = (level - prev) / prev if prev < level else -1
+    else:
+        if score > -1 or trend5 == "BULLISH" or price > e20 or price <= level:
+            return None
+        dist = (price - level) / price
+        prev_dist = (prev - level) / prev if prev > level else -1
+
+    # Nur beim frischen Eintritt in die Vorwarn-Zone melden, damit Telegram nicht spammt.
+    if 0 <= dist <= PREPARE_DISTANCE and prev_dist > PREPARE_DISTANCE:
+        return {
+            "side": side,
+            "level": level,
+            "distance_pct": dist * 100.0,
+        }
+    return None
+
+
 def evaluate(data: Dict[str, List[Candle]]) -> dict:
     trends = {tf: market_trend(candles) for tf, candles in data.items()}
     score = bias_score(trends)
@@ -179,6 +233,19 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
     e50 = ema(closes, EMA_SLOW)[-1]
     support, resistance = nearest_levels(data["15m"], price)
     structure = last_structure(c5)
+
+    base = {
+        "support": support,
+        "resistance": resistance,
+        "trends": trends,
+        "bias_score": score,
+        "ema20": e20,
+        "ema50": e50,
+        "structure": structure,
+        "distance_to_level_pct": None,
+        "stage": "WAIT",
+        "action": "Nichts tun. Auf ein sauberes Setup warten.",
+    }
 
     reasons = [
         f"4H={trends['4h']}",
@@ -193,6 +260,7 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
     long_pattern = find_break_retest(c5, "LONG")
     short_pattern = find_break_retest(c5, "SHORT")
 
+    # 1) Hoechste Prioritaet: voll bestaetigtes Setup.
     if long_pattern and score >= 1 and price >= min(e20, e50):
         entry = price
         swing_lows = [p.price for p in pivots(c5[-80:]) if p.kind == "L" and p.price < entry]
@@ -205,20 +273,16 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
             ratio = rr(entry, stop, target, "LONG")
             if ratio >= MIN_RR:
                 return {
+                    **base,
                     "decision": "LONG SETUP",
+                    "stage": "CONFIRMED LONG",
+                    "action": "Setup vollstaendig. Nur innerhalb der geplanten Entry-Zone handeln; nicht hinterherjagen.",
                     "side": "LONG",
                     "entry": entry,
                     "stop": stop,
                     "target": target,
                     "rr": ratio,
                     "breakout_level": long_pattern["level"],
-                    "support": support,
-                    "resistance": resistance,
-                    "trends": trends,
-                    "bias_score": score,
-                    "ema20": e20,
-                    "ema50": e50,
-                    "structure": structure,
                     "reasons": reasons + [
                         "Break + Candle-Close + Retest erkannt",
                         f"CRV={ratio:.2f} >= {MIN_RR}",
@@ -226,8 +290,6 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
                     "warning": "Technisches Signal, keine Kursgarantie. Kein automatischer News-Filter.",
                 }
             reasons.append(f"Long abgelehnt: CRV {ratio:.2f} < {MIN_RR}")
-        else:
-            reasons.append("Long abgelehnt: kein klares 15m-Ziel oberhalb")
 
     if short_pattern and score <= -1 and price <= max(e20, e50):
         entry = price
@@ -241,20 +303,16 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
             ratio = rr(entry, stop, target, "SHORT")
             if ratio >= MIN_RR:
                 return {
+                    **base,
                     "decision": "SHORT SETUP",
+                    "stage": "CONFIRMED SHORT",
+                    "action": "Setup vollstaendig. Nur innerhalb der geplanten Entry-Zone handeln; nicht hinterherjagen.",
                     "side": "SHORT",
                     "entry": entry,
                     "stop": stop,
                     "target": target,
                     "rr": ratio,
                     "breakout_level": short_pattern["level"],
-                    "support": support,
-                    "resistance": resistance,
-                    "trends": trends,
-                    "bias_score": score,
-                    "ema20": e20,
-                    "ema50": e50,
-                    "structure": structure,
                     "reasons": reasons + [
                         "Breakdown + Candle-Close + Retest erkannt",
                         f"CRV={ratio:.2f} >= {MIN_RR}",
@@ -262,17 +320,100 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
                     "warning": "Technisches Signal, keine Kursgarantie. Kein automatischer News-Filter.",
                 }
             reasons.append(f"Short abgelehnt: CRV {ratio:.2f} < {MIN_RR}")
-        else:
-            reasons.append("Short abgelehnt: kein klares 15m-Ziel unterhalb")
+
+    # 2) Frischer Breakout/Breakdown: jetzt soll der Nutzer sich bereit machen.
+    fb_long = fresh_break(c5, "LONG")
+    if fb_long and score >= 1 and price >= min(e20, e50):
+        return {
+            **base,
+            "decision": "RETEST WATCH LONG",
+            "stage": "ARMED LONG",
+            "action": f"Chart oeffnen. Noch NICHT einsteigen. Auf Retest von ca. {fb_long['level']:.2f} und Halt warten.",
+            "side": "LONG",
+            "entry": None,
+            "stop": None,
+            "target": resistance,
+            "rr": None,
+            "breakout_level": fb_long["level"],
+            "reasons": reasons + [
+                "Frischer 5m Breakout per Candle-Close erkannt",
+                "Naechster Pflichtschritt: Retest + Bestaetigung",
+            ],
+            "warning": "Vorwarnung, noch kein Entry-Signal.",
+        }
+
+    fb_short = fresh_break(c5, "SHORT")
+    if fb_short and score <= -1 and price <= max(e20, e50):
+        return {
+            **base,
+            "decision": "RETEST WATCH SHORT",
+            "stage": "ARMED SHORT",
+            "action": f"Chart oeffnen. Noch NICHT einsteigen. Auf Retest von ca. {fb_short['level']:.2f} und Ablehnung warten.",
+            "side": "SHORT",
+            "entry": None,
+            "stop": None,
+            "target": support,
+            "rr": None,
+            "breakout_level": fb_short["level"],
+            "reasons": reasons + [
+                "Frischer 5m Breakdown per Candle-Close erkannt",
+                "Naechster Pflichtschritt: Retest + Bestaetigung",
+            ],
+            "warning": "Vorwarnung, noch kein Entry-Signal.",
+        }
+
+    # 3) Fruehe Vorwarnung: Preis kommt in die Naehe eines relevanten Levels.
+    prep_long = prepare_cross(c5, "LONG", resistance, score, trends["5m"], e20)
+    if prep_long:
+        return {
+            **base,
+            "decision": "PREPARE LONG",
+            "stage": "WATCH LONG",
+            "action": "Chart bereithalten. Noch NICHT einsteigen. Auf 5m-Close ueber dem Level warten; danach Retest.",
+            "side": "LONG",
+            "entry": None,
+            "stop": None,
+            "target": resistance,
+            "rr": None,
+            "breakout_level": resistance,
+            "distance_to_level_pct": prep_long["distance_pct"],
+            "reasons": reasons + [
+                f"Preis nur noch {prep_long['distance_pct']:.2f}% unter relevantem Widerstand",
+                "Higher-Timeframe-Bias passt zur Long-Richtung",
+            ],
+            "warning": "Fruehe Vorwarnung. Noch kein Trade.",
+        }
+
+    prep_short = prepare_cross(c5, "SHORT", support, score, trends["5m"], e20)
+    if prep_short:
+        return {
+            **base,
+            "decision": "PREPARE SHORT",
+            "stage": "WATCH SHORT",
+            "action": "Chart bereithalten. Noch NICHT einsteigen. Auf 5m-Close unter dem Level warten; danach Retest.",
+            "side": "SHORT",
+            "entry": None,
+            "stop": None,
+            "target": support,
+            "rr": None,
+            "breakout_level": support,
+            "distance_to_level_pct": prep_short["distance_pct"],
+            "reasons": reasons + [
+                f"Preis nur noch {prep_short['distance_pct']:.2f}% ueber relevantem Support",
+                "Higher-Timeframe-Bias passt zur Short-Richtung",
+            ],
+            "warning": "Fruehe Vorwarnung. Noch kein Trade.",
+        }
 
     if long_pattern:
         reasons.append("Long-Muster vorhanden, aber Filter nicht komplett erfuellt")
     if short_pattern:
         reasons.append("Short-Muster vorhanden, aber Filter nicht komplett erfuellt")
     if not long_pattern and not short_pattern:
-        reasons.append("Kein frischer Break + Retest in den letzten 5m-Kerzen")
+        reasons.append("Kein voll bestaetigter Break + Retest")
 
     return {
+        **base,
         "decision": "WAIT / NO TRADE",
         "side": None,
         "entry": None,
@@ -280,13 +421,6 @@ def evaluate(data: Dict[str, List[Candle]]) -> dict:
         "target": None,
         "rr": None,
         "breakout_level": None,
-        "support": support,
-        "resistance": resistance,
-        "trends": trends,
-        "bias_score": score,
-        "ema20": e20,
-        "ema50": e50,
-        "structure": structure,
         "reasons": reasons,
         "warning": "Technisches Regelwerk; kein automatischer News-Filter und keine echten Orders.",
     }
