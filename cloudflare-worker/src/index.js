@@ -10,6 +10,7 @@ import {
   freshBackfillState
 } from "./backfill.js";
 import { evaluateReplaySetup, simulateOutcome } from "./replay_engine.js";
+import { fetchOfficialMacroEvents } from "./macro_calendar.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -440,7 +441,9 @@ export class RadarDO extends DurableObject {
       backfill: null,
       flow5m: null,
       bookTicker: null,
-      replay: null
+      replay: null,
+      lastMacroPoll: 0,
+      lastMacroError: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -494,6 +497,12 @@ export class RadarDO extends DurableObject {
         orderflow5mRows: this.center.summary().orderflow5mRows,
         orderflowMode: "BINANCE_KLINE_TAKER_VOLUME_PLUS_BOOK_SNAPSHOT",
         replay: this.replayPublicState(),
+        macro: {
+          risk: this.center.macroRiskState(),
+          calendar: this.center.macroCalendarHealth(),
+          lastPoll: this.mem.lastMacroPoll || null,
+          lastError: this.mem.lastMacroError || null
+        },
         selfHealing: true
       });
     }
@@ -519,7 +528,12 @@ export class RadarDO extends DurableObject {
         lastNewsPoll: this.mem.lastNewsPoll || null,
         lastNewsError: this.mem.lastNewsError || null,
         database: this.center.summary(),
-        externalMarket: this.center.externalMarketSummary()
+        externalMarket: this.center.externalMarketSummary(),
+        macro: {
+          risk:this.center.macroRiskState(),
+          calendar:this.center.macroCalendarHealth(),
+          lastError:this.mem.lastMacroError||null
+        }
       });
     }
 
@@ -572,6 +586,17 @@ export class RadarDO extends DurableObject {
     }
     if (path === "/api/research") {
       return Response.json(this.center.fullResearchReport(this.context));
+    }
+
+    if (path === "/api/macro") {
+      return Response.json({
+        risk:this.center.macroRiskState(),
+        upcoming:this.center.upcomingMacro(30),
+        stats:this.center.macroStats(),
+        health:this.center.macroCalendarHealth(),
+        lastPoll:this.mem.lastMacroPoll||null,
+        lastError:this.mem.lastMacroError||null
+      });
     }
 
     if (path === "/replay/status") {
@@ -952,6 +977,59 @@ export class RadarDO extends DurableObject {
     await this.ctx.storage.setAlarm(when);
   }
 
+  async pollOfficialMacro(force=false) {
+    const now=Date.now();
+    if(!force && now-Number(this.mem.lastMacroPoll||0) < 6*60*60_000) {
+      this.center.updateMacroImpacts(now);
+      return;
+    }
+    this.mem.lastMacroPoll=now;
+    try {
+      const result=await fetchOfficialMacroEvents();
+      this.center.upsertMacroEvents(result.events,result.fetchedAt);
+      this.mem.lastMacroError=result.blsError||null;
+      this.center.updateMacroImpacts(now);
+    } catch(e) {
+      this.mem.lastMacroError=e?.message||String(e);
+    }
+    await this.persist();
+  }
+
+  async checkMacroWarnings() {
+    const risk=this.center.macroRiskState();
+    const next=risk.nextEvent;
+    const now=Date.now();
+    if(next) {
+      const mins=(Number(next.event_ts)-now)/60000;
+      if(mins>=0 && mins<=90) {
+        const bucket=mins<=15?"15M":mins<=30?"30M":mins<=60?"60M":"90M";
+        await this.notifyOnce(
+          `macro-ahead|${next.event_key}|${bucket}`,
+          [
+            "BTC — OFFICIAL MACRO RADAR",
+            `${next.category}: ${next.name}`,
+            `in ca. ${Math.max(0,Math.round(mins))} Minuten`,
+            `Quelle: ${next.source}`,
+            "AKTION: Kein neuer Blind-Entry in der Event-Risikozone. Bestehende Struktur weiter beobachten."
+          ].join("\n")
+        );
+      }
+    }
+    if(risk.active && risk.activeEvents.length) {
+      const e=risk.activeEvents[0];
+      await this.notifyOnce(
+        `macro-lock|${e.event_key}`,
+        [
+          "BTC — MACRO RISK WINDOW ACTIVE",
+          `${e.category}: ${e.name}`,
+          "Neue Setups werden weiter für Forschung erfasst, aber als Event-Risiko gekennzeichnet.",
+          "Historische Reaktion wird nach 5m/15m/1h/4h vermessen."
+        ].join("\n")
+      );
+    }
+    return risk;
+  }
+
   async pollNews(force = false) {
     const now = Date.now();
     if (!force && now - Number(this.mem.lastNewsPoll || 0) < 10 * 60 * 1000) return;
@@ -1006,6 +1084,7 @@ export class RadarDO extends DurableObject {
       this.center.recordContext(this.context, reason);
       this.center.recordPatterns(this.context);
       this.center.recordFactorSnapshot(this.context);
+      await this.pollOfficialMacro(false);
 
       try {
         const [derivatives, crossAssets, bookTicker] = await Promise.all([
@@ -1031,6 +1110,7 @@ export class RadarDO extends DurableObject {
       this.center.updateGenomeOutcomes(Date.now());
       this.center.updateNewsImpacts(Date.now());
       await this.pollNews(false);
+      const macroRisk = await this.checkMacroWarnings();
       await this.persist();
 
       if (oldTrends) {
@@ -1074,7 +1154,8 @@ export class RadarDO extends DurableObject {
             histText,
             twinText,
             (g.novelty||0) >= 0.7 ? "WARNUNG: Ungewöhnlicher Markt-Zustand; historische Vergleiche schwächer." : "",
-            "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
+            macroRisk?.active ? "MACRO LOCK: offizielles Event-Risikofenster aktiv — Setup nur als Forschungsbeobachtung behandeln." : "",
+            macroRisk?.active ? "AKTION: Kein neuer Entry während der definierten Event-Risikozone." : "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
             "Historische Statistik beschreibt Vergangenheitsdaten und ist keine Gewinnwahrscheinlichkeit."
           ].join("\n")
         );
