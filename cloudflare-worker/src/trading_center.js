@@ -139,12 +139,57 @@ export class TradingCenter {
         ret_1440m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS open_interest_history (
+        ts INTEGER PRIMARY KEY,
+        open_interest REAL NOT NULL,
+        source TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS funding_history (
+        ts INTEGER PRIMARY KEY,
+        funding_rate REAL NOT NULL,
+        source TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS long_short_history (
+        ts INTEGER PRIMARY KEY,
+        long_ratio REAL NOT NULL,
+        short_ratio REAL NOT NULL,
+        long_short_ratio REAL,
+        source TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS cross_asset_history (
+        ts INTEGER NOT NULL,
+        symbol TEXT NOT NULL,
+        ret_5m REAL,
+        ret_60m REAL,
+        close REAL,
+        source TEXT NOT NULL,
+        PRIMARY KEY(ts, symbol)
+      );
+
+      CREATE TABLE IF NOT EXISTS liquidations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        position_side TEXT NOT NULL,
+        size REAL NOT NULL,
+        price REAL NOT NULL,
+        notional_usdt REAL NOT NULL,
+        source TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_setups_status ON setups(status);
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
       CREATE INDEX IF NOT EXISTS idx_market_minutes_ts ON market_minutes(ts);
       CREATE INDEX IF NOT EXISTS idx_setup_features_session ON setup_features(session);
       CREATE INDEX IF NOT EXISTS idx_factor_snapshots_ts ON factor_snapshots(ts);
+      CREATE INDEX IF NOT EXISTS idx_oi_ts ON open_interest_history(ts);
+      CREATE INDEX IF NOT EXISTS idx_funding_ts ON funding_history(ts);
+      CREATE INDEX IF NOT EXISTS idx_long_short_ts ON long_short_history(ts);
+      CREATE INDEX IF NOT EXISTS idx_cross_asset_ts ON cross_asset_history(ts);
+      CREATE INDEX IF NOT EXISTS idx_liquidations_ts ON liquidations(ts);
     `);
   }
 
@@ -155,6 +200,77 @@ export class TradingCenter {
   one(query, ...params) {
     const rows = this.rows(query, ...params);
     return rows.length ? rows[0] : null;
+  }
+
+  recordOpenInterest(ts, value, source = "bybit") {
+    if (!Number.isFinite(Number(value))) return;
+    this.sql.exec(
+      "INSERT OR REPLACE INTO open_interest_history(ts, open_interest, source) VALUES(?,?,?)",
+      Number(ts), Number(value), source
+    );
+  }
+
+  recordFunding(ts, rate, source = "bybit") {
+    if (!Number.isFinite(Number(rate))) return;
+    this.sql.exec(
+      "INSERT OR REPLACE INTO funding_history(ts, funding_rate, source) VALUES(?,?,?)",
+      Number(ts), Number(rate), source
+    );
+  }
+
+  recordLongShort(ts, longRatio, shortRatio, source = "bybit") {
+    const l=Number(longRatio), s=Number(shortRatio);
+    if (!Number.isFinite(l) || !Number.isFinite(s)) return;
+    this.sql.exec(
+      "INSERT OR REPLACE INTO long_short_history(ts, long_ratio, short_ratio, long_short_ratio, source) VALUES(?,?,?,?,?)",
+      Number(ts), l, s, s > 0 ? l/s : null, source
+    );
+  }
+
+  recordCrossAsset(ts, symbol, ret5m, ret60m, close, source = "bybit") {
+    this.sql.exec(
+      "INSERT OR REPLACE INTO cross_asset_history(ts, symbol, ret_5m, ret_60m, close, source) VALUES(?,?,?,?,?,?)",
+      Number(ts), String(symbol), ret5m ?? null, ret60m ?? null, close ?? null, source
+    );
+  }
+
+  recordLiquidation({ ts, side, size, price, source = "bybit" }) {
+    const q=Number(size), p=Number(price);
+    if (!Number.isFinite(q) || !Number.isFinite(p) || q <= 0 || p <= 0) return;
+    this.sql.exec(
+      "INSERT INTO liquidations(ts, position_side, size, price, notional_usdt, source) VALUES(?,?,?,?,?,?)",
+      Number(ts), String(side), q, p, q*p, source
+    );
+  }
+
+  externalMarketSummary() {
+    const latestOI=this.one("SELECT * FROM open_interest_history ORDER BY ts DESC LIMIT 1");
+    const prevOI=this.one("SELECT * FROM open_interest_history WHERE ts < ? ORDER BY ts DESC LIMIT 1", latestOI?.ts || 0);
+    const latestFunding=this.one("SELECT * FROM funding_history ORDER BY ts DESC LIMIT 1");
+    const latestLS=this.one("SELECT * FROM long_short_history ORDER BY ts DESC LIMIT 1");
+    const cross=this.rows("SELECT * FROM cross_asset_history WHERE ts=(SELECT MAX(ts) FROM cross_asset_history) ORDER BY symbol");
+    const since=Date.now()-60*60*1000;
+    const liq=this.rows(
+      `SELECT position_side, COUNT(*) AS n, SUM(notional_usdt) AS notional
+       FROM liquidations WHERE ts>=? GROUP BY position_side`,
+      since
+    );
+    return {
+      openInterest: latestOI ? {
+        ts: latestOI.ts,
+        value: Number(latestOI.open_interest),
+        change5m: prevOI && Number(prevOI.open_interest) ? (Number(latestOI.open_interest)-Number(prevOI.open_interest))/Number(prevOI.open_interest) : null
+      } : null,
+      funding: latestFunding ? { ts: latestFunding.ts, rate: Number(latestFunding.funding_rate) } : null,
+      longShort: latestLS ? {
+        ts: latestLS.ts,
+        longRatio: Number(latestLS.long_ratio),
+        shortRatio: Number(latestLS.short_ratio),
+        ratio: latestLS.long_short_ratio === null ? null : Number(latestLS.long_short_ratio)
+      } : null,
+      crossAssets: cross,
+      liquidations1h: liq
+    };
   }
 
   recordMinute({ ts, open, high, low, close, volume, source = "binance" }) {
@@ -748,7 +864,8 @@ export class TradingCenter {
       alertFunnel: this.alertFunnel(),
       recentSetups: this.recentSetups(50),
       recentNews: this.recentNews(50),
-      recentPatterns: this.recentPatterns(50)
+      recentPatterns: this.recentPatterns(50),
+      externalMarket: this.externalMarketSummary()
     };
   }
 }
