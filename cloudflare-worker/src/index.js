@@ -384,6 +384,14 @@ export class RadarDO extends DurableObject {
     if (path === "/api/times") {
       return Response.json(this.center.setupTimeStats());
     }
+    if (path === "/api/intelligence") {
+      return Response.json({
+        factorEdges: this.center.factorEdgeStats(),
+        factorSnapshots: this.center.factorSnapshotStats(),
+        alertFunnel: this.center.alertFunnel(),
+        currentFactors: this.context ? this.center.factorsFromContext(this.context) : null
+      });
+    }
 
     if (path === "/start" || path === "/tick") {
       await this.refreshContext(path.slice(1));
@@ -449,7 +457,9 @@ export class RadarDO extends DurableObject {
       this.mem.lastContextError = null;
       this.center.recordContext(this.context, reason);
       this.center.recordPatterns(this.context);
+      this.center.recordFactorSnapshot(this.context);
       this.center.updatePatternOutcomes(Date.now());
+      this.center.updateFactorOutcomes(Date.now());
       this.center.updateNewsImpacts(Date.now());
       await this.pollNews(false);
       await this.persist();
@@ -471,6 +481,10 @@ export class RadarDO extends DurableObject {
       const confirmed = evaluateConfirmed(this.context);
       if (confirmed) {
         const setup = this.center.openSetup(confirmed, this.context);
+        const hist = this.center.matchingSetupHistory(confirmed.side, this.context);
+        const histText = hist.n >= 8
+          ? `Historischer Match: N=${hist.n} | TP-Quote ${(hist.hitRate*100).toFixed(1)}% | Ø ${hist.avgR?.toFixed(2) ?? "—"}R | ${hist.evidence}`
+          : `Historischer Match: N=${hist.n} | noch Lernphase, keine belastbare Aussage`;
         await this.notifyOnce(
           `setup|${setup?.id || "new"}|${confirmed.side}`,
           [
@@ -481,8 +495,10 @@ export class RadarDO extends DurableObject {
             `Target: ${fmt(confirmed.target)}`,
             `CRV: ${confirmed.rr.toFixed(2)}R`,
             `4H/1H/15m/5m: ${this.context.trends["4h"]} / ${this.context.trends["1h"]} / ${this.context.trends["15m"]} / ${this.context.trends["5m"]}`,
+            `Session: ${hist.factors.session} | Volatilität: ${hist.factors.volatility_regime} | Trend: ${hist.factors.trend_alignment}`,
+            histText,
             "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
-            "Paper-Signal, keine automatische Order."
+            "Historische Statistik beschreibt Vergangenheitsdaten und ist keine Gewinnwahrscheinlichkeit."
           ].join("\n")
         );
       }
@@ -674,6 +690,7 @@ export class RadarDO extends DurableObject {
       const d = new Date(closeTime);
       if ((d.getUTCMinutes() + 1) % 5 === 0) {
         this.center.updatePatternOutcomes(closeTime);
+        this.center.updateFactorOutcomes(closeTime);
         this.center.updateNewsImpacts(closeTime);
         await this.refreshContext("5m-close");
       }
