@@ -21,6 +21,13 @@ import {
 import { parameterGrid } from "./replay_engine.js";
 import { discoverInformationEdges } from "./edge_discovery.js";
 import { compareDecisions, STRATEGY_CORE_VERSION } from "./strategy_core.js";
+import { featureAblationReport } from "./feature_ablation.js";
+import {
+  canonicalStringify,
+  currentVersionManifest,
+  fnv1a64,
+  manifestId
+} from "./version_manifest.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -496,6 +503,59 @@ export class TradingCenter {
         payload_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS version_manifests (
+        manifest_id TEXT PRIMARY KEY,
+        created_ts INTEGER NOT NULL,
+        system_version TEXT NOT NULL,
+        strategy_version TEXT NOT NULL,
+        research_model_version TEXT NOT NULL,
+        feature_schema_version TEXT NOT NULL,
+        governance_version TEXT NOT NULL,
+        data_schema_version TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS decision_version_links (
+        subject_type TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        created_ts INTEGER NOT NULL,
+        manifest_id TEXT NOT NULL,
+        strategy_version TEXT NOT NULL,
+        research_model_version TEXT NOT NULL,
+        feature_schema_version TEXT NOT NULL,
+        governance_version TEXT NOT NULL,
+        params_json TEXT,
+        PRIMARY KEY(subject_type,subject_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS prediction_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        created_ts INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        subject_type TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        context_ts INTEGER,
+        decision TEXT,
+        score REAL,
+        data_quality REAL,
+        novelty REAL,
+        manifest_id TEXT NOT NULL,
+        strategy_version TEXT NOT NULL,
+        research_model_version TEXT NOT NULL,
+        feature_schema_version TEXT NOT NULL,
+        governance_version TEXT NOT NULL,
+        prior_fingerprint TEXT,
+        fingerprint TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS feature_ablation_snapshots (
+        ts INTEGER PRIMARY KEY,
+        historical_json TEXT NOT NULL,
+        live_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -567,6 +627,10 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_genome_provenance_recorded ON genome_provenance(recorded_at_ts);
       CREATE INDEX IF NOT EXISTS idx_safe_outcomes_reference ON genome_safe_outcomes(reference_ts);
       CREATE INDEX IF NOT EXISTS idx_parity_audits_ts ON parity_audits(ts);
+      CREATE INDEX IF NOT EXISTS idx_decision_version_links_manifest ON decision_version_links(manifest_id);
+      CREATE INDEX IF NOT EXISTS idx_prediction_ledger_subject ON prediction_ledger(subject_type,subject_id);
+      CREATE INDEX IF NOT EXISTS idx_prediction_ledger_created ON prediction_ledger(created_ts);
+      CREATE INDEX IF NOT EXISTS idx_feature_ablation_ts ON feature_ablation_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
