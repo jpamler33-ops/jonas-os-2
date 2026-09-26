@@ -277,7 +277,7 @@ export default {
       return stub.fetch("https://radar" + url.pathname + url.search);
     }
     return new Response(
-      "BTC Live Radar v1.1\n\n/start = start/reconnect\n/status = current state\n/health = health check\n",
+      "BTC Live Radar v2.0\n\n/center = Trading Center\n/start = start/reconnect\n/status = current state\n/health = health check\n",
       { headers: { "content-type": "text/plain; charset=utf-8" } }
     );
   },
@@ -351,7 +351,10 @@ export class RadarDO extends DurableObject {
         telegramConfigured: Boolean(this.env.TELEGRAM_BOT_TOKEN),
         hasCachedChatId: Boolean(this.mem.lastTelegramChat),
         lastTelegramError: this.mem.lastTelegramError || null,
-        lastTelegramOkAt: this.mem.lastTelegramOkAt || null
+        lastTelegramOkAt: this.mem.lastTelegramOkAt || null,
+        lastNewsPoll: this.mem.lastNewsPoll || null,
+        lastNewsError: this.mem.lastNewsError || null,
+        database: this.center.summary()
       });
     }
 
@@ -411,7 +414,23 @@ export class RadarDO extends DurableObject {
     this.mem.lastNewsPoll = now;
     try {
       const events = await fetchGlobalMarketNews();
-      for (const event of events) this.center.upsertNews(event);
+      let criticalSent = 0;
+      for (const event of events) {
+        const isNew = this.center.upsertNews(event);
+        if (isNew && event.critical && criticalSent < 2) {
+          criticalSent += 1;
+          await this.notifyOnce(
+            `news|${event.fingerprint}`,
+            [
+              "BTC — GLOBAL EVENT RADAR",
+              event.title,
+              `Kategorie: ${event.category}`,
+              event.domain ? `Quelle: ${event.domain}` : "",
+              "AKTION: Kein Blind-Entry. Preisreaktion beobachten; 5m/15m/1h/4h-Auswirkung wird automatisch in der Datenbank vermessen."
+            ].filter(Boolean).join("\n")
+          );
+        }
+      }
       this.center.updateNewsImpacts(now);
       this.mem.lastNewsError = null;
     } catch (e) {
