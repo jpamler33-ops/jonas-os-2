@@ -1,10 +1,10 @@
 import { STRATEGY_CORE_VERSION } from "./strategy_core.js";
 
-export const SYSTEM_VERSION="3.1.0";
-export const RESEARCH_MODEL_VERSION="3.0.0";
-export const FEATURE_SCHEMA_VERSION="3.0.0";
+export const SYSTEM_VERSION="3.2.0";
+export const RESEARCH_MODEL_VERSION="3.1.0";
+export const FEATURE_SCHEMA_VERSION="3.1.0";
 export const GOVERNANCE_VERSION="2.0.0";
-export const DATA_SCHEMA_VERSION="5";
+export const DATA_SCHEMA_VERSION="6";
 export const PREDICTION_LEDGER_VERSION="1.0.0";
 
 export function currentVersionManifest(){
