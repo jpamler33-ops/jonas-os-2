@@ -1,4 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
+import { TradingCenter, renderTradingCenter } from "./trading_center.js";
+import { fetchGlobalMarketNews } from "./news_radar.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -271,6 +273,9 @@ export default {
     if (url.pathname === "/test-telegram") {
       return stub.fetch("https://radar/test-telegram");
     }
+    if (url.pathname === "/center" || url.pathname.startsWith("/api/")) {
+      return stub.fetch("https://radar" + url.pathname + url.search);
+    }
     return new Response(
       "BTC Live Radar v1.1\n\n/start = start/reconnect\n/status = current state\n/health = health check\n",
       { headers: { "content-type": "text/plain; charset=utf-8" } }
@@ -290,10 +295,13 @@ export class RadarDO extends DurableObject {
     this.env = env;
     this.ws = null;
     this.context = null;
+    this.center = new TradingCenter(ctx.storage.sql);
     this.mem = {
       lastStageKey: null,
       lastHeartbeat: 0,
-      lastTelegramChat: null
+      lastTelegramChat: null,
+      lastNewsPoll: 0,
+      lastNewsError: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -347,6 +355,33 @@ export class RadarDO extends DurableObject {
       });
     }
 
+    if (path === "/center") {
+      return new Response(renderTradingCenter(this.center.exportSnapshot()), {
+        headers: { "content-type": "text/html; charset=utf-8" }
+      });
+    }
+    if (path === "/api/center") {
+      return Response.json(this.center.exportSnapshot());
+    }
+    if (path === "/api/setups") {
+      return Response.json(this.center.recentSetups(100));
+    }
+    if (path === "/api/patterns") {
+      return Response.json({
+        stats: this.center.patternStats(),
+        recent: this.center.recentPatterns(100)
+      });
+    }
+    if (path === "/api/news") {
+      return Response.json({
+        stats: this.center.newsStats(),
+        recent: this.center.recentNews(100)
+      });
+    }
+    if (path === "/api/times") {
+      return Response.json(this.center.setupTimeStats());
+    }
+
     if (path === "/start" || path === "/tick") {
       await this.refreshContext(path.slice(1));
       await this.ensureConnected();
@@ -370,6 +405,22 @@ export class RadarDO extends DurableObject {
     }
   }
 
+  async pollNews(force = false) {
+    const now = Date.now();
+    if (!force && now - Number(this.mem.lastNewsPoll || 0) < 10 * 60 * 1000) return;
+    this.mem.lastNewsPoll = now;
+    try {
+      const events = await fetchGlobalMarketNews();
+      for (const event of events) this.center.upsertNews(event);
+      this.center.updateNewsImpacts(now);
+      this.mem.lastNewsError = null;
+    } catch (e) {
+      this.mem.lastNewsError = e?.message || String(e);
+      console.log("news radar failed", this.mem.lastNewsError);
+    }
+    await this.persist();
+  }
+
   async refreshContext(reason) {
     this.mem.lastContextAttempt = Date.now();
     try {
@@ -377,6 +428,11 @@ export class RadarDO extends DurableObject {
       this.context = await buildContext();
       this.context.reason = reason;
       this.mem.lastContextError = null;
+      this.center.recordContext(this.context, reason);
+      this.center.recordPatterns(this.context);
+      this.center.updatePatternOutcomes(Date.now());
+      this.center.updateNewsImpacts(Date.now());
+      await this.pollNews(false);
       await this.persist();
 
       if (oldTrends) {
@@ -395,10 +451,12 @@ export class RadarDO extends DurableObject {
 
       const confirmed = evaluateConfirmed(this.context);
       if (confirmed) {
+        const setup = this.center.openSetup(confirmed, this.context);
         await this.notifyOnce(
-          stageKey(confirmed.decision, confirmed.side, confirmed.level),
+          `setup|${setup?.id || "new"}|${confirmed.side}`,
           [
             `BTC — ${confirmed.decision}`,
+            `SETUP #${setup?.id || "?"}`,
             `Entry: ${fmt(confirmed.entry)}`,
             `Stop: ${fmt(confirmed.stop)}`,
             `Target: ${fmt(confirmed.target)}`,
@@ -560,8 +618,44 @@ export class RadarDO extends DurableObject {
 
     if (Boolean(k.x)) {
       const closeTime = Number(k.T || eventTime);
+      this.center.recordMinute({
+        ts: closeTime,
+        open: Number(k.o),
+        high,
+        low,
+        close: price,
+        volume,
+        source: "binance"
+      });
+
+      const closedSetups = this.center.checkOpenSetups({
+        ts: closeTime,
+        high,
+        low,
+        close: price
+      });
+      for (const s of closedSetups) {
+        const resultText = s.result === "TARGET"
+          ? `TARGET HIT (+${Number(s.realized_r || s.planned_rr).toFixed(2)}R)`
+          : s.result === "STOP"
+            ? "STOP HIT (-1.00R)"
+            : "AMBIGUOUS: Stop und Target in derselben 1m-Kerze";
+        await this.notifyOnce(
+          `setup-result|${s.id}|${s.result}`,
+          [
+            `BTC — SETUP #${s.id} CLOSED`,
+            resultText,
+            `MFE: ${Number(s.mfe_r || 0).toFixed(2)}R`,
+            `MAE: ${Number(s.mae_r || 0).toFixed(2)}R`,
+            "Die Trading-Center-Datenbank wurde aktualisiert."
+          ].join("\n")
+        );
+      }
+
       const d = new Date(closeTime);
       if ((d.getUTCMinutes() + 1) % 5 === 0) {
+        this.center.updatePatternOutcomes(closeTime);
+        this.center.updateNewsImpacts(closeTime);
         await this.refreshContext("5m-close");
       }
     }
@@ -580,6 +674,15 @@ export class RadarDO extends DurableObject {
     if (!allowMinuteRepeat && this.mem.lastStageKey === key) return false;
     if (await this.sendTelegram(text)) {
       this.mem.lastStageKey = key;
+      const parts = String(key).split("|");
+      this.center.recordAlert({
+        key,
+        stage: parts[0] || key,
+        side: parts[1] === "LONG" || parts[1] === "SHORT" ? parts[1] : null,
+        level: Number.isFinite(Number(parts[2])) ? Number(parts[2]) : null,
+        price: this.context?.price ?? null,
+        payload: { text }
+      });
       await this.persist();
       return true;
     }
