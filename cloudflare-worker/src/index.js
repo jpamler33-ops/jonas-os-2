@@ -611,7 +611,9 @@ export class RadarDO extends DurableObject {
         },
         strategySafety: {
           parity: this.center.parityReport(100),
-          leakage: this.center.leakageInspectorReport()
+          leakage: this.center.leakageInspectorReport(),
+          ledger: this.center.predictionLedgerAudit(500),
+          versions: this.center.versionReport()
         },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
@@ -784,6 +786,16 @@ export class RadarDO extends DurableObject {
     }
     if (path === "/api/promotion") {
       return Response.json(this.center.promotionConstitutionReport());
+    }
+
+    if (path === "/api/ledger") {
+      return Response.json(this.center.predictionLedgerAudit());
+    }
+    if (path === "/api/versions") {
+      return Response.json(this.center.versionReport());
+    }
+    if (path === "/api/ablation") {
+      return Response.json(this.center.latestFeatureAblation()||this.center.featureAblationResearchReport());
     }
 
     if (path === "/api/risk") {
@@ -1269,6 +1281,7 @@ export class RadarDO extends DurableObject {
 
     this.mem.lastResearchGovernorAt=now;
     try {
+      const ablation=this.center.refreshFeatureAblation();
       const report=this.center.refreshResearchGovernor();
       const leakage=this.center.leakageInspectorReport();
       const evidence=this.center.evidenceMaturityReport();
@@ -1278,7 +1291,9 @@ export class RadarDO extends DurableObject {
         leakageSafe:Boolean(leakage.safe),
         promotionSystemPass:Boolean(promotion.systemPass),
         evidenceFeatureCount:Number(evidence.features?.length||0),
-        evidenceStrategyCount:Number(evidence.strategies?.length||0)
+        evidenceStrategyCount:Number(evidence.strategies?.length||0),
+        ablationHistoricalStatus:ablation.historicalCore?.status||null,
+        ablationLiveStatus:ablation.liveExtended?.status||null
       };
 
       const promoted=report?.promotedToChallengerTest||[];
@@ -1574,6 +1589,31 @@ export class RadarDO extends DurableObject {
             dataQuality:g.data_quality??null,
             novelty:g.novelty??null
           });
+          if(!this.center.ledgerPredictionForSubject("SETUP",setup.id)) {
+            this.center.appendLedgerEvent({
+              eventType:"PREDICTION",
+              subjectType:"SETUP",
+              subjectId:setup.id,
+              contextTs:Number(this.context.c5.at(-1)?.t||Date.now()),
+              decision:confirmed.side,
+              score:rawScore,
+              dataQuality:g.data_quality??null,
+              novelty:g.novelty??null,
+              payload:{
+                entry:Number(confirmed.entry),
+                stop:Number(confirmed.stop),
+                target:Number(confirmed.target),
+                plannedRR:Number(confirmed.rr),
+                level:confirmed.level??null,
+                factorSampleN:factorN,
+                twinSampleN:twinN,
+                macroRiskActive:Boolean(macroRisk?.active),
+                dataQualityLock,
+                dailyRiskLock,
+                trends:this.context.trends
+              }
+            });
+          }
         }
 
         await this.notifyOnce(
