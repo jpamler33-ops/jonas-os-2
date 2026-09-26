@@ -310,7 +310,9 @@ export class RadarDO extends DurableObject {
         ok: true,
         connected: this.ws?.readyState === WebSocket.OPEN,
         contextUpdatedAt: this.context?.updatedAt || null,
-        lastStageKey: this.mem.lastStageKey || null
+        lastStageKey: this.mem.lastStageKey || null,
+        lastContextError: this.mem.lastContextError || null,
+        lastContextAttempt: this.mem.lastContextAttempt || null
       });
     }
 
@@ -346,10 +348,12 @@ export class RadarDO extends DurableObject {
   }
 
   async refreshContext(reason) {
+    this.mem.lastContextAttempt = Date.now();
     try {
       const oldTrends = this.context?.trends || null;
       this.context = await buildContext();
       this.context.reason = reason;
+      this.mem.lastContextError = null;
       await this.persist();
 
       if (oldTrends) {
@@ -383,7 +387,10 @@ export class RadarDO extends DurableObject {
         );
       }
     } catch (e) {
-      console.log("refreshContext failed", e?.message || String(e));
+      const msg = e?.message || String(e);
+      this.mem.lastContextError = msg;
+      await this.persist();
+      console.log("refreshContext failed", msg);
     }
   }
 
