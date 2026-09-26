@@ -4,6 +4,8 @@ import { fetchGlobalMarketNews } from "./news_radar.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
+const BYBIT_REST = "https://api.bybit.com";
+const BYBIT_WS_LINEAR = "wss://stream.bybit.com/v5/public/linear";
 const REST_BASES = [
   "https://data-api.binance.vision",
   "https://api.binance.com",
@@ -144,6 +146,93 @@ async function fetchJson(url, init = {}) {
   const r = await fetch(url, init);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
+}
+
+async function bybitJson(path, params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  const data = await fetchJson(`${BYBIT_REST}${path}?${qs}`);
+  if (Number(data?.retCode || 0) !== 0) {
+    throw new Error(`Bybit ${data?.retCode}: ${data?.retMsg || "error"}`);
+  }
+  return data?.result || {};
+}
+
+async function fetchDerivativesData() {
+  const [oi, funding, ratio] = await Promise.all([
+    bybitJson("/v5/market/open-interest", {
+      category: "linear",
+      symbol: "BTCUSDT",
+      intervalTime: "5min",
+      limit: "2"
+    }),
+    bybitJson("/v5/market/funding/history", {
+      category: "linear",
+      symbol: "BTCUSDT",
+      limit: "1"
+    }),
+    bybitJson("/v5/market/account-ratio", {
+      category: "linear",
+      symbol: "BTCUSDT",
+      period: "5min",
+      limit: "2"
+    })
+  ]);
+
+  const oiRows = Array.isArray(oi?.list) ? oi.list : [];
+  const fundRows = Array.isArray(funding?.list) ? funding.list : [];
+  const ratioRows = Array.isArray(ratio?.list) ? ratio.list : [];
+
+  return {
+    openInterest: oiRows.map(x => ({
+      ts: Number(x.timestamp),
+      value: Number(x.openInterest)
+    })).filter(x => Number.isFinite(x.ts) && Number.isFinite(x.value)),
+    funding: fundRows.map(x => ({
+      ts: Number(x.fundingRateTimestamp),
+      rate: Number(x.fundingRate)
+    })).filter(x => Number.isFinite(x.ts) && Number.isFinite(x.rate)),
+    ratios: ratioRows.map(x => ({
+      ts: Number(x.timestamp),
+      longRatio: Number(x.buyRatio),
+      shortRatio: Number(x.sellRatio)
+    })).filter(x => Number.isFinite(x.ts) && Number.isFinite(x.longRatio) && Number.isFinite(x.shortRatio))
+  };
+}
+
+async function fetchCrossAssets() {
+  const symbols = ["ETHUSDT", "SOLUSDT", "BNBUSDT"];
+  const now = Date.now();
+  const out = [];
+
+  for (const symbol of symbols) {
+    const result = await bybitJson("/v5/market/kline", {
+      category: "spot",
+      symbol,
+      interval: "5",
+      limit: "20"
+    });
+    const rows = Array.isArray(result?.list) ? result.list : [];
+    const candles = rows
+      .map(k => ({
+        ts: Number(k[0]),
+        close: Number(k[4])
+      }))
+      .filter(x => Number.isFinite(x.ts) && Number.isFinite(x.close) && x.ts + 5*60_000 <= now)
+      .sort((a,b) => a.ts-b.ts);
+
+    if (candles.length < 13) continue;
+    const last = candles.at(-1);
+    const prev = candles.at(-2);
+    const hourAgo = candles.at(-13);
+    out.push({
+      ts: last.ts,
+      symbol,
+      close: last.close,
+      ret5m: prev?.close ? last.close/prev.close - 1 : null,
+      ret60m: hourAgo?.close ? last.close/hourAgo.close - 1 : null
+    });
+  }
+  return out;
 }
 
 async function getCandles(interval, limit = 260) {
@@ -294,6 +383,7 @@ export class RadarDO extends DurableObject {
     this.ctx = ctx;
     this.env = env;
     this.ws = null;
+    this.liqWs = null;
     this.context = null;
     this.center = new TradingCenter(ctx.storage.sql);
     this.mem = {
@@ -324,6 +414,7 @@ export class RadarDO extends DurableObject {
       return Response.json({
         ok: true,
         connected: this.ws?.readyState === WebSocket.OPEN,
+        liquidationConnected: this.liqWs?.readyState === WebSocket.OPEN,
         contextUpdatedAt: this.context?.updatedAt || null,
         lastStageKey: this.mem.lastStageKey || null,
         lastContextError: this.mem.lastContextError || null,
@@ -354,7 +445,8 @@ export class RadarDO extends DurableObject {
         lastTelegramOkAt: this.mem.lastTelegramOkAt || null,
         lastNewsPoll: this.mem.lastNewsPoll || null,
         lastNewsError: this.mem.lastNewsError || null,
-        database: this.center.summary()
+        database: this.center.summary(),
+        externalMarket: this.center.externalMarketSummary()
       });
     }
 
@@ -396,6 +488,7 @@ export class RadarDO extends DurableObject {
     if (path === "/start" || path === "/tick") {
       await this.refreshContext(path.slice(1));
       await this.ensureConnected();
+      await this.ensureLiquidationConnected();
       await this.ensureHeartbeat();
       await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000);
       return new Response("ok");
@@ -410,6 +503,7 @@ export class RadarDO extends DurableObject {
         await this.refreshContext("alarm");
       }
       await this.ensureConnected();
+      await this.ensureLiquidationConnected();
       await this.ensureHeartbeat();
     } finally {
       await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000);
@@ -470,6 +564,23 @@ export class RadarDO extends DurableObject {
       this.center.recordContext(this.context, reason);
       this.center.recordPatterns(this.context);
       this.center.recordFactorSnapshot(this.context);
+
+      try {
+        const [derivatives, crossAssets] = await Promise.all([
+          fetchDerivativesData(),
+          fetchCrossAssets()
+        ]);
+
+        for (const row of derivatives.openInterest) this.center.recordOpenInterest(row.ts, row.value);
+        for (const row of derivatives.funding) this.center.recordFunding(row.ts, row.rate);
+        for (const row of derivatives.ratios) this.center.recordLongShort(row.ts, row.longRatio, row.shortRatio);
+        for (const row of crossAssets) {
+          this.center.recordCrossAsset(row.ts, row.symbol, row.ret5m, row.ret60m, row.close);
+        }
+        this.mem.lastExternalDataError = null;
+      } catch (e) {
+        this.mem.lastExternalDataError = e?.message || String(e);
+      }
       this.center.updatePatternOutcomes(Date.now());
       this.center.updateFactorOutcomes(Date.now());
       this.center.updateNewsImpacts(Date.now());
@@ -707,6 +818,56 @@ export class RadarDO extends DurableObject {
         await this.refreshContext("5m-close");
       }
     }
+  }
+
+  async ensureLiquidationConnected() {
+    if (this.liqWs && (this.liqWs.readyState === WebSocket.OPEN || this.liqWs.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    const ws = new WebSocket(BYBIT_WS_LINEAR);
+    this.liqWs = ws;
+
+    ws.addEventListener("open", () => {
+      try {
+        ws.send(JSON.stringify({
+          op: "subscribe",
+          args: ["allLiquidation.BTCUSDT"]
+        }));
+      } catch {}
+    });
+
+    ws.addEventListener("message", event => {
+      this.ctx.waitUntil((async () => {
+        let payload;
+        try {
+          payload = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
+        } catch {
+          return;
+        }
+        if (payload?.topic !== "allLiquidation.BTCUSDT") return;
+        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        for (const row of rows) {
+          this.center.recordLiquidation({
+            ts: Number(row.T || payload.ts || Date.now()),
+            side: String(row.S || "UNKNOWN"),
+            size: Number(row.v),
+            price: Number(row.p),
+            source: "bybit"
+          });
+        }
+      })());
+    });
+
+    ws.addEventListener("close", () => {
+      this.liqWs = null;
+      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + 5_000));
+    });
+
+    ws.addEventListener("error", () => {
+      this.liqWs = null;
+      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + 5_000));
+    });
   }
 
   async ensureHeartbeat() {
