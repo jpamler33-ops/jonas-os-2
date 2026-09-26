@@ -338,7 +338,13 @@ export class RadarDO extends DurableObject {
       const ok = await this.sendTelegram(
         "BTC LIVE-RADAR — TEST\nTelegram-Verbindung funktioniert. Der Live-Radar ist aktiv."
       );
-      return Response.json({ ok });
+      return Response.json({
+        ok,
+        telegramConfigured: Boolean(this.env.TELEGRAM_BOT_TOKEN),
+        hasCachedChatId: Boolean(this.mem.lastTelegramChat),
+        lastTelegramError: this.mem.lastTelegramError || null,
+        lastTelegramOkAt: this.mem.lastTelegramOkAt || null
+      });
     }
 
     if (path === "/start" || path === "/tick") {
@@ -602,10 +608,18 @@ export class RadarDO extends DurableObject {
 
   async sendTelegram(text) {
     const token = String(this.env.TELEGRAM_BOT_TOKEN || "").trim();
-    if (!token) return false;
+    if (!token) {
+      this.mem.lastTelegramError = "TELEGRAM_BOT_TOKEN fehlt";
+      await this.persist();
+      return false;
+    }
 
     const chatId = await this.resolveChatId(token);
-    if (!chatId) return false;
+    if (!chatId) {
+      this.mem.lastTelegramError = "Kein Telegram-Chat gefunden. Dem Bot zuerst /start senden.";
+      await this.persist();
+      return false;
+    }
 
     try {
       const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
