@@ -1203,10 +1203,10 @@ export class TradingCenter {
       "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance",
       "probability_calibration","shadow_strategies",
       "traditional_risk_assets","usd_rates_context",
-      "feed_latency_monitor","lead_lag_network","counterfactuals","hypothesis_falsification"
+      "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification"
     ]);
     const partial=new Set([
-      "endpoint_auth","feed_redundancy"
+      "endpoint_auth"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
