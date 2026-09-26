@@ -272,7 +272,7 @@ export default {
       return stub.fetch("https://radar/test-telegram");
     }
     return new Response(
-      "BTC Live Radar\n\n/start = start/reconnect\n/status = current state\n/health = health check\n",
+      "BTC Live Radar v1.1\n\n/start = start/reconnect\n/status = current state\n/health = health check\n",
       { headers: { "content-type": "text/plain; charset=utf-8" } }
     );
   },
