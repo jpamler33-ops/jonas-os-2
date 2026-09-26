@@ -624,6 +624,13 @@ export class RadarDO extends DurableObject {
       return Response.json(this.center.venueStats());
     }
 
+    if (path === "/api/risk") {
+      return Response.json({
+        policy:this.center.riskPolicyState(),
+        equity:this.center.equityResearch()
+      });
+    }
+
     if (path === "/genome-backfill/status") {
       return Response.json({
         ok:true,
@@ -1237,11 +1244,13 @@ export class RadarDO extends DurableObject {
 
       const confirmed = evaluateConfirmed(this.context);
       if (confirmed) {
+        const riskPolicy = this.center.riskPolicyState();
         const setup = this.center.openSetup(confirmed, this.context);
         const hist = this.center.matchingSetupHistory(confirmed.side, this.context);
         const twins = this.center.currentGenomeIntelligence(this.context, 20);
         const g = twins.current || {};
         const dataQualityLock = Number(g.data_quality||0) < 75;
+        const dailyRiskLock = Boolean(riskPolicy?.locked);
         const histText = hist.n >= 8
           ? `Historischer Match: N=${hist.n} | TP-Quote ${(hist.hitRate*100).toFixed(1)}% | Ø ${hist.avgR?.toFixed(2) ?? "—"}R | ${hist.evidence}`
           : `Historischer Match: N=${hist.n} | noch Lernphase, keine belastbare Aussage`;
@@ -1265,7 +1274,8 @@ export class RadarDO extends DurableObject {
             (g.novelty||0) >= 0.7 ? "WARNUNG: Ungewöhnlicher Markt-Zustand; historische Vergleiche schwächer." : "",
             macroRisk?.active ? "MACRO LOCK: offizielles Event-Risikofenster aktiv — Setup nur als Forschungsbeobachtung behandeln." : "",
             dataQualityLock ? "DATA QUALITY LOCK: mindestens eine wichtige Datenquelle fehlt oder ist veraltet." : "",
-            (macroRisk?.active || dataQualityLock)
+            dailyRiskLock ? `DAILY RISK LOCK: ${riskPolicy.reasons.join(", ")} | Heute: ${riskPolicy.setups} Setups, ${riskPolicy.realizedR.toFixed(2)}R realisiert.` : "",
+            (macroRisk?.active || dataQualityLock || dailyRiskLock)
               ? "AKTION: Setup nur protokollieren; keine neue Entry-Freigabe aus diesem System."
               : "AKTION: Nur frisches Setup handeln; nicht hinterherjagen.",
             "Historische Statistik beschreibt Vergangenheitsdaten und ist keine Gewinnwahrscheinlichkeit."
