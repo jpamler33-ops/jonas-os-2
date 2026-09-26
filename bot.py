@@ -877,7 +877,7 @@ def send_telegram(result: dict) -> None:
         return
 
     manual_test = (os.getenv("GITHUB_EVENT_NAME", "") == "workflow_dispatch" or os.getenv("FORCE_TELEGRAM_TEST", "") == "1")
-    is_signal = result["decision"] in ("PREPARE LONG", "PREPARE SHORT", "RETEST WATCH LONG", "RETEST WATCH SHORT", "LONG SETUP", "SHORT SETUP")
+    is_signal = bool(result.get("_notify", False))
 
     if not is_signal and not manual_test:
         return
@@ -941,10 +941,45 @@ def main() -> int:
         self_test()
         return 0
 
+    state = load_state()
     data = Market().all()
     result = evaluate(data)
-    md = markdown(result)
+    result = apply_state_logic(result, data, state)
 
+    alert_decisions = {
+        "RADAR LONG",
+        "RADAR SHORT",
+        "PREPARE LONG",
+        "PREPARE SHORT",
+        "RETEST WATCH LONG",
+        "RETEST WATCH SHORT",
+        "LONG SETUP",
+        "SHORT SETUP",
+        "INVALIDATED LONG",
+        "INVALIDATED SHORT",
+        "TARGET HIT",
+        "STOP HIT",
+        "PLAN OUTCOME AMBIGUOUS",
+        "CONTEXT CHANGE",
+        "FAST MARKET",
+        "BOT ALIVE",
+    }
+
+    key = alert_key(result)
+    if result.get("decision") in alert_decisions:
+        should_notify = key != state.get("last_alert_key")
+        result["_notify"] = should_notify
+        if should_notify:
+            state["last_alert_key"] = key
+    else:
+        result["_notify"] = False
+        # Reset erlaubt, dass dasselbe Setup-Level spaeter erneut warnen kann.
+        state["last_alert_key"] = key
+
+    update_state_after_result(result, state, data)
+    save_state(state)
+
+    md = markdown(result)
     print(md)
 
     summary = os.getenv("GITHUB_STEP_SUMMARY")
@@ -952,8 +987,10 @@ def main() -> int:
         with open(summary, "a", encoding="utf-8") as f:
             f.write(md + "\n")
 
+    public_result = dict(result)
+    public_result.pop("_notify", None)
     with open("latest_status.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(public_result, f, ensure_ascii=False, indent=2)
 
     send_telegram(result)
     return 0
