@@ -1848,7 +1848,15 @@ export class TradingCenter {
       Number(outcome.mfe_r||0),Number(outcome.mae_r||0),outcome.closed_ts??null,
       t["5m"]||null,t["15m"]||null,t["1h"]||null,t["4h"]||null
     );
-    return Number(cur.rowsWritten||0);
+    const written=Number(cur.rowsWritten||0);
+    const row=this.one("SELECT id FROM replay_results WHERE signature=?",signature);
+    if(row?.id) {
+      this.linkDecisionVersion("REPLAY_RESULT",row.id,{
+        params,
+        strategyVersion:setup.strategyVersion||STRATEGY_CORE_VERSION
+      });
+    }
+    return written;
   }
 
   replayStats() {
@@ -3133,7 +3141,31 @@ export class TradingCenter {
       Number(confirmed.entry),Number(confirmed.stop),Number(confirmed.target),
       Number(confirmed.rr),confirmed.level??null
     );
-    return this.one("SELECT * FROM shadow_setups WHERE signature=?",signature);
+    const row=this.one("SELECT * FROM shadow_setups WHERE signature=?",signature);
+    if(row?.id) {
+      this.linkDecisionVersion("SHADOW_SETUP",row.id,{
+        variant:String(variant),
+        strategyVersion:confirmed.strategyVersion||STRATEGY_CORE_VERSION
+      });
+      if(!this.ledgerPredictionForSubject("SHADOW_SETUP",row.id)) {
+        this.appendLedgerEvent({
+          eventType:"PREDICTION",
+          subjectType:"SHADOW_SETUP",
+          subjectId:row.id,
+          contextTs:candleTs,
+          decision:confirmed.side,
+          payload:{
+            variant:String(variant),
+            entry:Number(confirmed.entry),
+            stop:Number(confirmed.stop),
+            target:Number(confirmed.target),
+            plannedRR:Number(confirmed.rr),
+            level:confirmed.level??null
+          }
+        });
+      }
+    }
+    return row;
   }
 
   checkOpenShadowSetups({ts,high,low}) {
@@ -3153,18 +3185,27 @@ export class TradingCenter {
           "UPDATE shadow_setups SET status='CLOSED',result='AMBIGUOUS',closed_ts=?,mfe_r=?,mae_r=? WHERE id=?",
           Number(ts),mfe,mae,s.id
         );
+        this.appendPredictionResolution("SHADOW_SETUP",s.id,"AMBIGUOUS",{
+          closedTs:Number(ts),mfeR:mfe,maeR:mae
+        });
         closed.push({...s,result:"AMBIGUOUS"});
       } else if(targetHit) {
         this.sql.exec(
           "UPDATE shadow_setups SET status='CLOSED',result='TARGET',closed_ts=?,realized_r=?,mfe_r=?,mae_r=? WHERE id=?",
           Number(ts),Number(s.planned_rr),mfe,mae,s.id
         );
+        this.appendPredictionResolution("SHADOW_SETUP",s.id,"TARGET",{
+          closedTs:Number(ts),realizedR:Number(s.planned_rr),mfeR:mfe,maeR:mae
+        });
         closed.push({...s,result:"TARGET",realized_r:Number(s.planned_rr)});
       } else if(stopHit) {
         this.sql.exec(
           "UPDATE shadow_setups SET status='CLOSED',result='STOP',closed_ts=?,realized_r=-1,mfe_r=?,mae_r=? WHERE id=?",
           Number(ts),mfe,mae,s.id
         );
+        this.appendPredictionResolution("SHADOW_SETUP",s.id,"STOP",{
+          closedTs:Number(ts),realizedR:-1,mfeR:mfe,maeR:mae
+        });
         closed.push({...s,result:"STOP",realized_r:-1});
       } else {
         this.sql.exec("UPDATE shadow_setups SET mfe_r=?,mae_r=? WHERE id=?",mfe,mae,s.id);
@@ -3301,7 +3342,14 @@ export class TradingCenter {
       d.getUTCDay()
     );
     const row = this.one("SELECT * FROM setups WHERE signature = ?", signature);
-    if (row?.id) this.attachSetupFeatures(row.id, ctx);
+    if (row?.id) {
+      this.attachSetupFeatures(row.id, ctx);
+      this.linkDecisionVersion("SETUP",row.id,{
+        strategyVersion:confirmed.strategyVersion||STRATEGY_CORE_VERSION,
+        side:confirmed.side,
+        plannedRR:Number(confirmed.rr)
+      });
+    }
     return row;
   }
 
@@ -3327,6 +3375,9 @@ export class TradingCenter {
            exit_price=?, realized_r=NULL, mfe_r=?, mae_r=? WHERE id=?`,
           ts, close, mfe, mae, s.id
         );
+        this.appendPredictionResolution("SETUP",s.id,"AMBIGUOUS",{
+          closedTs:Number(ts),exitPrice:Number(close),mfeR:mfe,maeR:mae
+        });
         closed.push({ ...s, result: "AMBIGUOUS", exit_price: close, mfe_r: mfe, mae_r: mae });
       } else if (targetHit) {
         this.sql.exec(
@@ -3335,6 +3386,9 @@ export class TradingCenter {
           ts, s.target, s.planned_rr, mfe, mae, s.id
         );
         this.resolveSetupPrediction(s.id,"TARGET",ts);
+        this.appendPredictionResolution("SETUP",s.id,"TARGET",{
+          closedTs:Number(ts),exitPrice:Number(s.target),realizedR:Number(s.planned_rr),mfeR:mfe,maeR:mae
+        });
         closed.push({ ...s, result: "TARGET", exit_price: s.target, realized_r: s.planned_rr, mfe_r: mfe, mae_r: mae });
       } else if (stopHit) {
         this.sql.exec(
@@ -3343,6 +3397,9 @@ export class TradingCenter {
           ts, s.stop, mfe, mae, s.id
         );
         this.resolveSetupPrediction(s.id,"STOP",ts);
+        this.appendPredictionResolution("SETUP",s.id,"STOP",{
+          closedTs:Number(ts),exitPrice:Number(s.stop),realizedR:-1,mfeR:mfe,maeR:mae
+        });
         closed.push({ ...s, result: "STOP", exit_price: s.stop, realized_r: -1, mfe_r: mfe, mae_r: mae });
       } else {
         this.sql.exec("UPDATE setups SET mfe_r=?, mae_r=? WHERE id=?", mfe, mae, s.id);
