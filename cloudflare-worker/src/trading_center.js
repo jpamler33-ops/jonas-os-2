@@ -1756,6 +1756,7 @@ export class TradingCenter {
       "information_gain_discovery","interaction_synergy_discovery",
       "feature_redundancy_map","research_governor",
       "evidence_maturity","live_replay_parity","leakage_inspector","promotion_constitution",
+      "immutable_prediction_ledger","model_rule_versioning","feature_abstinence","ledger_integrity_audit",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
@@ -2611,20 +2612,30 @@ export class TradingCenter {
 
   evidenceMaturityReport() {
     const governor=this.latestResearchGovernor()||this.edgeDiscoveryReport();
+    const ablation=this.latestFeatureAblation()||this.featureAblationResearchReport();
+    const histA=new Map((ablation.historicalCore?.features||[]).map(x=>[x.feature,x]));
+    const liveA=new Map((ablation.liveExtended?.features||[]).map(x=>[x.feature,x]));
     const map=[];
     const consume=(dataset,report)=>{
+      const aMap=dataset==="HISTORICAL_CORE"?histA:liveA;
       for(const x of report?.governor||[]){
         const n=Number(x?.holdoutN??x?.holdout?.n??0);
+        const ab=aMap.get(x.feature)||null;
         let maturity="COLLECTING";
         if(n>=50) maturity="ENOUGH_DATA";
-        if(x.action==="PROMOTE_TO_CHALLENGER_TEST") maturity="HOLDOUT_PASSED";
+        if(ab?.verdict==="POSSIBLE_NOISE" && n>=50) maturity="REJECTED";
+        else if(x.action==="PROMOTE_TO_CHALLENGER_TEST" && ab?.verdict!=="POSSIBLE_NOISE") maturity="HOLDOUT_PASSED";
         map.push({
           dataset,feature:x.feature,n,
           maturity,
           holdoutAction:x.action,
+          ablationVerdict:ab?.verdict||null,
+          ablationDeltaBrier:ab?.deltaBrier??null,
+          ablationDeltaAccuracy:ab?.deltaAccuracy??null,
           discoveryScore:Number(x.discoveryScore||0),
           redundantWith:x.redundantWith||[],
           nextGate:maturity==="HOLDOUT_PASSED"?"SHADOW_TEST":
+            maturity==="REJECTED"?"RESEARCH_REVIEW":
             maturity==="ENOUGH_DATA"?"HOLDOUT_STABILITY":"MORE_DATA"
         });
       }
@@ -2659,10 +2670,12 @@ export class TradingCenter {
   }
 
   promotionConstitutionReport() {
-    const version="PROMOTION_CONSTITUTION_V1";
+    const version="PROMOTION_CONSTITUTION_V2";
     const parity=this.parityReport(200);
     const leakage=this.leakageInspectorReport();
-    const validation=this.setupValidationReport();
+    const ledger=this.predictionLedgerAudit(5000);
+    const versions=this.versionReport();
+    const ablation=this.latestFeatureAblation()||this.featureAblationResearchReport();
     const stability=this.parameterStabilityReport();
     const drift=this.modelDriftReport();
     const quality=this.one("SELECT score FROM data_quality_snapshots ORDER BY ts DESC LIMIT 1");
@@ -2672,8 +2685,10 @@ export class TradingCenter {
     const championReplay=replay.find(x=>x.paramsHash===championHash)||null;
 
     const gates=[
-      {gate:"PARITY",pass:parity.n>=20&&Number(parity.matchRate)>=0.99,metric:parity.matchRate,requirement:"N>=20 and >=99% match"},
+      {gate:"PARITY",pass:parity.n>=20&&Number(parity.matchRate)>=0.99,metric:parity.matchRate,requirement:"N>=20 and >=99% live/replay match"},
       {gate:"LEAKAGE",pass:leakage.safe,metric:leakage.unsafeRate,requirement:"no detected future-source violations"},
+      {gate:"LEDGER_INTEGRITY",pass:ledger.chainValid&&ledger.issueCount===0,metric:ledger.issueCount,requirement:"append-only prediction chain validates with zero integrity issues"},
+      {gate:"VERSION_MANIFEST",pass:Boolean(versions.current?.manifestId)&&versions.current?.strategyVersion===STRATEGY_CORE_VERSION,metric:versions.current?.manifestId||null,requirement:"all decisions linked to explicit current manifest"},
       {gate:"DATA_QUALITY",pass:qualityScore!==null&&qualityScore>=75,metric:qualityScore,requirement:">=75/100"},
       {gate:"REPLAY_SAMPLE",pass:Number(championReplay?.wins||0)+Number(championReplay?.losses||0)>=100,metric:Number(championReplay?.wins||0)+Number(championReplay?.losses||0),requirement:">=100 decided replay outcomes"},
       {gate:"REPLAY_EXPECTANCY",pass:Number(championReplay?.avgR)>0,metric:championReplay?.avgR??null,requirement:"average replay R > 0"},
@@ -2695,6 +2710,25 @@ export class TradingCenter {
       };
     });
 
+    const featureCandidates=[];
+    const addFeatures=(dataset,report)=>{
+      for(const f of report?.features||[]){
+        if(f.verdict!=="USEFUL_INCREMENT") continue;
+        featureCandidates.push({
+          dataset,
+          feature:f.feature,
+          eligibleForChallengerTest:f.holdoutN>=100 && Number(f.deltaBrier)>0,
+          gates:[
+            {gate:"HOLDOUT_SAMPLE",pass:f.holdoutN>=100,metric:f.holdoutN,requirement:">=100 holdout observations"},
+            {gate:"ABSTINENCE_VALUE",pass:Number(f.deltaBrier)>0,metric:f.deltaBrier,requirement:"removing feature worsens holdout Brier"},
+            {gate:"NO_AUTOPROMOTION",pass:true,metric:false,requirement:"challenger test only; no direct champion mutation"}
+          ]
+        });
+      }
+    };
+    addFeatures("HISTORICAL_CORE",ablation.historicalCore);
+    addFeatures("LIVE_EXTENDED",ablation.liveExtended);
+
     const payload={
       generatedAt:Date.now(),
       constitutionVersion:version,
@@ -2703,8 +2737,10 @@ export class TradingCenter {
       systemGates:gates,
       systemPass:gates.every(x=>x.pass),
       shadowCandidates,
-      researchFeaturePolicy:"Holdout-passed features may enter challenger tests only; they cannot directly alter champion rules.",
-      evidence:this.evidenceMaturityReport()
+      featureCandidates:featureCandidates.slice(0,50),
+      researchFeaturePolicy:"A feature must survive holdout and abstinence testing before challenger evaluation. No feature can directly alter champion rules.",
+      evidence:this.evidenceMaturityReport(),
+      versionManifest:versions.current
     };
     this.sql.exec(
       "INSERT OR REPLACE INTO promotion_audits(ts,constitution_version,payload_json) VALUES(?,?,?)",
