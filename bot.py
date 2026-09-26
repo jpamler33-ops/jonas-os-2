@@ -386,12 +386,18 @@ def _telegram_chat_id(token: str) -> Optional[str]:
     if configured:
         return configured
 
-    r = requests.get(
-        f"https://api.telegram.org/bot{token}/getUpdates",
-        timeout=10,
-    )
-    r.raise_for_status()
-    payload = r.json()
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{token}/getUpdates",
+            timeout=10,
+        )
+        if r.status_code != 200:
+            print(f"Telegram getUpdates fehlgeschlagen (HTTP {r.status_code}).")
+            return None
+        payload = r.json()
+    except Exception:
+        print("Telegram getUpdates technisch fehlgeschlagen.")
+        return None
     updates = payload.get("result", [])
 
     for update in reversed(updates):
@@ -442,11 +448,18 @@ def send_telegram(result: dict) -> None:
         "Paper-Signal nach festem Regelwerk; keine automatische Order."
     )
 
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat, "text": text},
-        timeout=10,
-    ).raise_for_status()
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat, "text": text},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            print("Telegram-Nachricht erfolgreich gesendet.")
+        else:
+            print(f"Telegram sendMessage fehlgeschlagen (HTTP {r.status_code}).")
+    except Exception:
+        print("Telegram sendMessage technisch fehlgeschlagen.")
 
 
 def self_test() -> None:
