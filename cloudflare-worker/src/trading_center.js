@@ -139,6 +139,25 @@ export class TradingCenter {
         ret_1440m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS macro_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT NOT NULL UNIQUE,
+        event_ts INTEGER NOT NULL,
+        captured_ts INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        importance TEXT NOT NULL,
+        source TEXT NOT NULL,
+        source_url TEXT,
+        before_min INTEGER NOT NULL,
+        after_min INTEGER NOT NULL,
+        base_price REAL,
+        ret_5m REAL,
+        ret_15m REAL,
+        ret_60m REAL,
+        ret_240m REAL
+      );
+
       CREATE TABLE IF NOT EXISTS setup_features (
         setup_id INTEGER PRIMARY KEY,
         session TEXT,
@@ -301,6 +320,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_setups_status ON setups(status);
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
+      CREATE INDEX IF NOT EXISTS idx_macro_events_ts ON macro_events(event_ts);
+      CREATE INDEX IF NOT EXISTS idx_macro_events_category ON macro_events(category);
       CREATE INDEX IF NOT EXISTS idx_market_minutes_ts ON market_minutes(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_5m_ts ON historical_5m(ts);
       CREATE INDEX IF NOT EXISTS idx_setup_features_session ON setup_features(session);
@@ -506,12 +527,22 @@ export class TradingCenter {
     const ls=this.one("SELECT ts FROM long_short_history ORDER BY ts DESC LIMIT 1");
     const cross=this.one("SELECT MAX(ts) AS ts FROM cross_asset_history");
     const flow=this.one("SELECT ts FROM orderflow_5m ORDER BY ts DESC LIMIT 1");
+    const macro=this.macroCalendarHealth(now);
 
     mark("open_interest",oi,15*60_000);
     mark("funding",funding,12*60*60_000);
     mark("long_short_ratio",ls,15*60_000);
     mark("cross_asset",cross,20*60_000);
     mark("orderflow",flow,15*60_000);
+    if(!macro.lastCapturedAt) {
+      missing.push("official_macro_calendar");
+      details.official_macro_calendar={status:"missing"};
+    } else if(!macro.fresh) {
+      stale.push("official_macro_calendar");
+      details.official_macro_calendar={status:"stale",ageMs:macro.ageMs};
+    } else {
+      details.official_macro_calendar={status:"fresh",ageMs:macro.ageMs,nextEvent:macro.nextEvent?.event_ts||null};
+    }
 
     const c5=Array.isArray(ctx?.c5)?ctx.c5:[];
     if(c5.length<100) missing.push("price_history");
@@ -527,7 +558,7 @@ export class TradingCenter {
     }
     details.live_gaps_30m=gaps;
 
-    const critical=["open_interest","cross_asset","orderflow","price_history"];
+    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar"];
     const criticalPenalty=missing.filter(x=>critical.includes(x)).length*14 +
       stale.filter(x=>critical.includes(x)).length*9;
     const otherPenalty=missing.filter(x=>!critical.includes(x)).length*7 +
@@ -729,7 +760,8 @@ export class TradingCenter {
       "price_structure","volatility","volume","ema_state","support_resistance","session",
       "open_interest","funding","long_short_ratio","liquidations","cross_asset","news_events",
       "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
-      "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay"
+      "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay",
+      "official_macro_calendar","macro_risk_window","macro_reaction_history"
     ]);
     const partial=new Set([]);
     live.add("parameter_stability");
@@ -917,7 +949,13 @@ export class TradingCenter {
       currentGenome:ctx?this.currentGenomeIntelligence(ctx,30):null,
       coverage:this.coverageReport(ctx),
       replay:this.replayStats(),
-      parameterStability:this.parameterStabilityReport()
+      parameterStability:this.parameterStabilityReport(),
+      macro:{
+        risk:this.macroRiskState(),
+        upcoming:this.upcomingMacro(20),
+        stats:this.macroStats(),
+        health:this.macroCalendarHealth()
+      }
     };
   }
 
@@ -1381,6 +1419,128 @@ export class TradingCenter {
     }
   }
 
+  upsertMacroEvents(events, capturedTs=Date.now()) {
+    let written=0;
+    for(const e of events||[]) {
+      const cur=this.sql.exec(
+        `INSERT INTO macro_events(
+          event_key,event_ts,captured_ts,name,category,importance,source,source_url,before_min,after_min
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(event_key) DO UPDATE SET
+          event_ts=excluded.event_ts,
+          captured_ts=excluded.captured_ts,
+          name=excluded.name,
+          category=excluded.category,
+          importance=excluded.importance,
+          source=excluded.source,
+          source_url=excluded.source_url,
+          before_min=excluded.before_min,
+          after_min=excluded.after_min`,
+        String(e.eventKey),Number(e.eventTs),Number(capturedTs),
+        String(e.name),String(e.category),String(e.importance),String(e.source),
+        e.sourceUrl||null,Number(e.beforeMin||30),Number(e.afterMin||30)
+      );
+      written+=Number(cur.rowsWritten||0);
+    }
+    return written;
+  }
+
+  macroRiskState(nowTs=Date.now()) {
+    const active=this.rows(
+      `SELECT * FROM macro_events
+       WHERE ? >= event_ts - before_min*60000
+         AND ? <= event_ts + after_min*60000
+       ORDER BY ABS(event_ts-?) ASC`,
+      Number(nowTs),Number(nowTs),Number(nowTs)
+    );
+    const next=this.one(
+      "SELECT * FROM macro_events WHERE event_ts>=? ORDER BY event_ts ASC LIMIT 1",
+      Number(nowTs)
+    );
+    const nearest=this.one(
+      "SELECT * FROM macro_events ORDER BY ABS(event_ts-?) ASC LIMIT 1",
+      Number(nowTs)
+    );
+    return {
+      active:active.length>0,
+      activeEvents:active,
+      nextEvent:next||null,
+      nearest:nearest||null
+    };
+  }
+
+  updateMacroImpacts(nowTs=Date.now()) {
+    const pending=this.rows(
+      `SELECT * FROM macro_events
+       WHERE event_ts<=? AND ret_240m IS NULL
+       ORDER BY event_ts ASC LIMIT 100`,
+      Number(nowTs)
+    );
+    const horizons=[["ret_5m",5],["ret_15m",15],["ret_60m",60],["ret_240m",240]];
+    for(const row of pending) {
+      let base=Number(row.base_price);
+      if(!(base>0)) {
+        const p=this.nearestAnyClose(Number(row.event_ts));
+        if(p?.close) {
+          base=Number(p.close);
+          this.sql.exec("UPDATE macro_events SET base_price=? WHERE id=?",base,row.id);
+        }
+      }
+      if(!(base>0)) continue;
+      const updates=[],vals=[];
+      for(const [field,min] of horizons) {
+        if(row[field]!==null&&row[field]!==undefined) continue;
+        const target=Number(row.event_ts)+min*60_000;
+        if(nowTs<target) continue;
+        const p=this.nearestAnyClose(target);
+        if(!p?.close) continue;
+        updates.push(`${field}=?`);
+        vals.push((Number(p.close)-base)/base);
+      }
+      if(updates.length) {
+        vals.push(row.id);
+        this.sql.exec(`UPDATE macro_events SET ${updates.join(",")} WHERE id=?`,...vals);
+      }
+    }
+  }
+
+  macroStats() {
+    return this.rows(
+      `SELECT category,importance,COUNT(*) AS n,
+        AVG(ret_5m) AS avg_5m,AVG(ABS(ret_5m)) AS avg_abs_5m,
+        AVG(ret_15m) AS avg_15m,AVG(ABS(ret_15m)) AS avg_abs_15m,
+        AVG(ret_60m) AS avg_60m,AVG(ABS(ret_60m)) AS avg_abs_60m,
+        AVG(ret_240m) AS avg_240m,AVG(ABS(ret_240m)) AS avg_abs_240m
+       FROM macro_events
+       WHERE event_ts<=?
+       GROUP BY category,importance
+       ORDER BY n DESC,category ASC`,
+      Date.now()
+    );
+  }
+
+  upcomingMacro(limit=20) {
+    return this.rows(
+      "SELECT * FROM macro_events WHERE event_ts>=? ORDER BY event_ts ASC LIMIT ?",
+      Date.now(),Math.min(100,Math.max(1,Number(limit||20)))
+    );
+  }
+
+  macroCalendarHealth(nowTs=Date.now()) {
+    const latestCapture=this.one("SELECT MAX(captured_ts) AS ts FROM macro_events");
+    const next=this.one(
+      "SELECT * FROM macro_events WHERE event_ts>=? ORDER BY event_ts ASC LIMIT 1",
+      Number(nowTs)
+    );
+    const captureTs=Number(latestCapture?.ts||0);
+    return {
+      lastCapturedAt:captureTs||null,
+      ageMs:captureTs?Number(nowTs)-captureTs:null,
+      nextEvent:next||null,
+      fresh:Boolean(captureTs && Number(nowTs)-captureTs<24*60*60_000)
+    };
+  }
+
   upsertNews(event) {
     const cursor = this.sql.exec(
       `INSERT OR IGNORE INTO news_events(
@@ -1395,7 +1555,19 @@ export class TradingCenter {
       event.country || null,
       event.category || "other"
     );
-    return Number(cursor.rowsWritten || 0) > 0;
+    const inserted=Number(cursor.rowsWritten || 0) > 0;
+    if(inserted) {
+      this.recordTimeline({
+        ts:Number(event.publishedTs),
+        eventType:"NEWS",
+        subtype:event.category||"other",
+        direction:null,
+        magnitude:event.critical?1:0.5,
+        source:event.domain||"gdelt",
+        payload:{title:event.title,url:event.url||null}
+      });
+    }
+    return inserted;
   }
 
   updateNewsImpacts(nowTs = Date.now()) {
@@ -1473,7 +1645,8 @@ export class TradingCenter {
       orderflow5mRows: Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n || 0),
       genomeRows: Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n || 0),
       timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0),
-      replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0)
+      replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0),
+      macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0)
     };
   }
 
@@ -1558,7 +1731,10 @@ export class TradingCenter {
       validation: this.setupValidationReport(),
       latestGenome: this.latestGenome(),
       replayStats: this.replayStats(),
-      parameterStability: this.parameterStabilityReport()
+      parameterStability: this.parameterStabilityReport(),
+      macroRisk: this.macroRiskState(),
+      upcomingMacro: this.upcomingMacro(12),
+      macroStats: this.macroStats()
     };
   }
 }
