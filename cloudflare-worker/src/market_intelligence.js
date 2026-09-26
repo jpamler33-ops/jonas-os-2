@@ -29,7 +29,29 @@ export const FEATURE_REGISTRY = [
   { key: "walk_forward", group: "validation", critical: true },
   { key: "cost_model", group: "validation", critical: true },
   { key: "parameter_stability", group: "validation", critical: true },
-  { key: "edge_decay", group: "validation", critical: true }
+  { key: "edge_decay", group: "validation", critical: true },
+  { key: "data_quality_lock", group: "system", critical: true },
+  { key: "feed_latency_monitor", group: "system", critical: true },
+  { key: "feed_redundancy", group: "system", critical: true },
+  { key: "historical_genome_bootstrap", group: "research", critical: true },
+  { key: "sequence_outcomes", group: "research", critical: true },
+  { key: "lead_lag_network", group: "research", critical: true },
+  { key: "change_point_detection", group: "research", critical: true },
+  { key: "missed_opportunity_analysis", group: "research", critical: true },
+  { key: "failure_attribution", group: "research", critical: true },
+  { key: "alert_value_tracking", group: "research", critical: false },
+  { key: "shadow_strategies", group: "validation", critical: true },
+  { key: "hypothesis_falsification", group: "validation", critical: true },
+  { key: "probability_calibration", group: "validation", critical: true },
+  { key: "slippage_model", group: "execution", critical: true },
+  { key: "latency_cost_model", group: "execution", critical: false },
+  { key: "orderbook_depth", group: "microstructure", critical: true },
+  { key: "liquidity_sweep_detection", group: "microstructure", critical: true },
+  { key: "options_iv_skew", group: "options", critical: false },
+  { key: "options_term_structure", group: "options", critical: false },
+  { key: "traditional_risk_assets", group: "cross_market", critical: true },
+  { key: "usd_rates_context", group: "cross_market", critical: true },
+  { key: "coinbase_premium", group: "cross_market", critical: false }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
@@ -89,17 +111,29 @@ export function agreementFromSignals(signals = []) {
 }
 
 export function weightedDistance(a, b, fields) {
-  let sum = 0, wsum = 0;
+  let sum = 0, wsum = 0, missingWeight = 0, availableWeight = 0;
   for (const f of fields) {
     const x = Number(a?.[f.key]), y = Number(b?.[f.key]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const scale = Number(f.scale || 1);
+    const xOk=Number.isFinite(x), yOk=Number.isFinite(y);
     const w = Number(f.weight || 1);
+    if (!xOk && !yOk) continue;
+    availableWeight += w;
+    if (!xOk || !yOk) {
+      const missingPenalty=1.5;
+      sum += w*missingPenalty*missingPenalty;
+      wsum += w;
+      missingWeight += w;
+      continue;
+    }
+    const scale = Number(f.scale || 1);
     const d = (x-y)/Math.max(1e-9,scale);
     sum += w*d*d;
     wsum += w;
   }
-  return wsum ? Math.sqrt(sum/wsum) : null;
+  if(!wsum) return null;
+  const base=Math.sqrt(sum/wsum);
+  const missingShare=availableWeight?missingWeight/availableWeight:0;
+  return base*(1+0.5*missingShare);
 }
 
 export const GENOME_DISTANCE_FIELDS = [
