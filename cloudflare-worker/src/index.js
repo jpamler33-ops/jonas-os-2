@@ -18,6 +18,7 @@ const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
 const BYBIT_REST = "https://api.bybit.com";
 const BYBIT_WS_LINEAR = "wss://stream.bybit.com/v5/public/linear";
+const BYBIT_WS_SPOT = "wss://stream.bybit.com/v5/public/spot";
 const REST_BASES = [
   "https://data-api.binance.vision",
   "https://api.binance.com",
@@ -488,6 +489,7 @@ export class RadarDO extends DurableObject {
     this.ctx = ctx;
     this.env = env;
     this.ws = null;
+    this.backupWs = null;
     this.liqWs = null;
     this.context = null;
     this.center = new TradingCenter(ctx.storage.sql);
@@ -535,11 +537,15 @@ export class RadarDO extends DurableObject {
       if (!this.liqWs || this.liqWs.readyState !== WebSocket.OPEN) {
         await this.ensureLiquidationConnected();
       }
+      if (!this.backupWs || this.backupWs.readyState !== WebSocket.OPEN) {
+        await this.ensureBackupPriceConnected();
+      }
 
       // Give newly-created sockets a short moment to transition from CONNECTING -> OPEN.
       if (
         this.ws?.readyState === WebSocket.CONNECTING ||
-        this.liqWs?.readyState === WebSocket.CONNECTING
+        this.liqWs?.readyState === WebSocket.CONNECTING ||
+        this.backupWs?.readyState === WebSocket.CONNECTING
       ) {
         await new Promise(resolve => setTimeout(resolve, 350));
       }
@@ -547,6 +553,9 @@ export class RadarDO extends DurableObject {
       return Response.json({
         ok: true,
         connected: this.ws?.readyState === WebSocket.OPEN,
+        backupPriceConnected: this.backupWs?.readyState === WebSocket.OPEN,
+        activePriceFeed: this.ws?.readyState === WebSocket.OPEN ? "binance" :
+          this.backupWs?.readyState === WebSocket.OPEN ? "bybit_spot_backup" : "none",
         liquidationConnected: this.liqWs?.readyState === WebSocket.OPEN,
         contextUpdatedAt: this.context?.updatedAt || null,
         lastStageKey: this.mem.lastStageKey || null,
@@ -764,6 +773,7 @@ export class RadarDO extends DurableObject {
     if (path === "/start" || path === "/tick") {
       await this.refreshContext(path.slice(1));
       await this.ensureConnected();
+      await this.ensureBackupPriceConnected();
       await this.ensureLiquidationConnected();
       await this.ensureHeartbeat();
       await this.ensureBackfillStarted(90, false);
@@ -785,6 +795,7 @@ export class RadarDO extends DurableObject {
         await this.refreshContext("alarm");
       }
       await this.ensureConnected();
+      await this.ensureBackupPriceConnected();
       await this.ensureLiquidationConnected();
       await this.ensureHeartbeat();
       await this.ensureBackfillStarted(90, false);
@@ -1482,6 +1493,99 @@ export class RadarDO extends DurableObject {
       bookImbalance:Number.isFinite(Number(book.imbalance))?Number(book.imbalance):null,
       source:"binance"
     });
+  }
+
+  async ensureBackupPriceConnected() {
+    if(this.backupWs && (
+      this.backupWs.readyState===WebSocket.OPEN ||
+      this.backupWs.readyState===WebSocket.CONNECTING
+    )) return;
+
+    const ws=new WebSocket(BYBIT_WS_SPOT);
+    this.backupWs=ws;
+
+    ws.addEventListener("open",()=>{
+      try {
+        ws.send(JSON.stringify({op:"subscribe",args:["kline.1.BTCUSDT"]}));
+      } catch {}
+    });
+
+    ws.addEventListener("message",event=>{
+      this.ctx.waitUntil(this.handleBackupPriceMessage(event.data));
+    });
+
+    ws.addEventListener("close",()=>{
+      this.backupWs=null;
+      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now()+5_000));
+    });
+    ws.addEventListener("error",()=>{
+      this.backupWs=null;
+      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now()+5_000));
+    });
+  }
+
+  async handleBackupPriceMessage(raw) {
+    let payload;
+    try {
+      payload=JSON.parse(typeof raw==="string"?raw:new TextDecoder().decode(raw));
+    } catch { return; }
+    if(payload?.topic!=="kline.1.BTCUSDT") return;
+
+    const rows=Array.isArray(payload?.data)?payload.data:[];
+    const row=rows.at(-1);
+    if(!row) return;
+
+    this.mem.lastBackupPriceAt=Date.now();
+    this.mem.lastBackupPrice=Number(row.close);
+
+    // Primary stream remains authoritative while healthy.
+    if(this.ws?.readyState===WebSocket.OPEN) return;
+    if(row.confirm!==true) return;
+
+    const closeTime=Number(row.end||row.timestamp||Date.now());
+    const price=Number(row.close);
+    const high=Number(row.high);
+    const low=Number(row.low);
+    const volume=Number(row.volume||0);
+    if(![price,high,low].every(Number.isFinite)) return;
+
+    await this.notifyOnce(
+      "price-feed-backup-active",
+      "BTC — PRICE FEED FAILOVER\nBinance Live-Feed ist nicht offen. Bybit Spot übernimmt geschlossene 1m-Kerzen, bis der Primärfeed zurück ist."
+    );
+
+    this.center.recordMinute({
+      ts:closeTime,
+      open:Number(row.open),
+      high,low,close:price,volume,
+      source:"bybit_spot_backup"
+    });
+
+    const closed=this.center.checkOpenSetups({ts:closeTime,high,low,close:price});
+    this.center.checkOpenShadowSetups({ts:closeTime,high,low});
+    for(const s of closed) {
+      const resultText=s.result==="TARGET"
+        ? `TARGET HIT (+${Number(s.realized_r||s.planned_rr).toFixed(2)}R)`
+        : s.result==="STOP" ? "STOP HIT (-1.00R)" : "AMBIGUOUS";
+      await this.notifyOnce(
+        `setup-result|${s.id}|${s.result}`,
+        [
+          `BTC — SETUP #${s.id} CLOSED`,
+          resultText,
+          "Quelle: Bybit Spot Backup-Feed",
+          "Die Datenbank wurde aktualisiert."
+        ].join("\n")
+      );
+    }
+
+    const d=new Date(closeTime);
+    if((d.getUTCMinutes()+1)%5===0) {
+      this.center.updatePatternOutcomes(closeTime);
+      this.center.updateFactorOutcomes(closeTime);
+      this.center.updateGenomeOutcomes(closeTime);
+      this.center.updateNewsImpacts(closeTime);
+      await this.refreshContext("5m-close-backup");
+    }
   }
 
   async ensureConnected() {
