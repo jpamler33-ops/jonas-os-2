@@ -405,7 +405,13 @@ def _telegram_chat_id(token: str) -> Optional[str]:
 
 
 def send_telegram(result: dict) -> None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    raw = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    token = ""
+    for line in raw.splitlines():
+        compact = line.replace(" ", "").strip()
+        if ":" in compact and compact.split(":", 1)[0].isdigit():
+            token = compact
+            break
     if not token:
         return
 
