@@ -2290,6 +2290,7 @@ export class TradingCenter {
       "evidence_maturity","live_replay_parity","leakage_inspector","promotion_constitution",
       "immutable_prediction_ledger","model_rule_versioning","feature_abstinence","ledger_integrity_audit",
       "market_language","sequence_memory","dynamic_information_flow_graph","phase_transition_radar",
+      "market_grammar_predictor","grammar_surprise_detector","grammar_drift_monitor","next_state_forecast",
       "feed_latency_monitor","feed_redundancy","lead_lag_network","counterfactuals","hypothesis_falsification",
           ]);
     const partial=new Set([
