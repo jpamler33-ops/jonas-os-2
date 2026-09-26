@@ -443,6 +443,39 @@ export class TradingCenter {
     };
   }
 
+  recordVenueSnapshot({ts=Date.now(),binanceSpot=null,bybitSpot=null,bybitPerp=null,bybitMark=null,bybitIndex=null,source="binance+bybit"}) {
+    const b=Number(binanceSpot),s=Number(bybitSpot),p=Number(bybitPerp);
+    const mark=Number(bybitMark),index=Number(bybitIndex);
+    const cross=Number.isFinite(b)&&b>0&&Number.isFinite(s)?(s-b)/b*10000:null;
+    const basis=Number.isFinite(s)&&s>0&&Number.isFinite(p)?(p-s)/s*10000:null;
+    const markBasis=Number.isFinite(index)&&index>0&&Number.isFinite(mark)?(mark-index)/index*10000:null;
+    this.sql.exec(
+      `INSERT OR REPLACE INTO venue_snapshots(
+        ts,binance_spot,bybit_spot,bybit_perp,bybit_mark,bybit_index,
+        spot_cross_diff_bps,perp_spot_basis_bps,mark_index_basis_bps,source
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      Number(ts),
+      Number.isFinite(b)?b:null,Number.isFinite(s)?s:null,Number.isFinite(p)?p:null,
+      Number.isFinite(mark)?mark:null,Number.isFinite(index)?index:null,
+      cross,basis,markBasis,source
+    );
+    return {ts:Number(ts),spotCrossDiffBps:cross,perpSpotBasisBps:basis,markIndexBasisBps:markBasis};
+  }
+
+  latestVenueSnapshot() {
+    return this.one("SELECT * FROM venue_snapshots ORDER BY ts DESC LIMIT 1");
+  }
+
+  venueStats(limit=576) {
+    const rows=this.rows("SELECT * FROM venue_snapshots ORDER BY ts DESC LIMIT ?",Math.min(5000,Math.max(1,Number(limit||576))));
+    if(!rows.length) return {n:0};
+    const vals=k=>rows.map(r=>Number(r[k])).filter(Number.isFinite);
+    const avg=xs=>xs.length?xs.reduce((x,y)=>x+y,0)/xs.length:null;
+    const maxAbs=xs=>xs.length?Math.max(...xs.map(Math.abs)):null;
+    const cross=vals("spot_cross_diff_bps"),basis=vals("perp_spot_basis_bps"),mark=vals("mark_index_basis_bps");
+    return {n:rows.length,latest:rows[0],avgSpotCrossDiffBps:avg(cross),maxAbsSpotCrossDiffBps:maxAbs(cross),avgPerpSpotBasisBps:avg(basis),maxAbsPerpSpotBasisBps:maxAbs(basis),avgMarkIndexBasisBps:avg(mark)};
+  }
+
   recordOrderflow5m({
     ts, buyNotional, sellNotional, tradeCount,
     spreadBps = null, bookImbalance = null, source = "binance"
