@@ -1,6 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import { TradingCenter, renderTradingCenter } from "./trading_center.js";
 import { fetchGlobalMarketNews } from "./news_radar.js";
+import {
+  fetch5mPage,
+  fetchOpenInterestPage,
+  fetchLongShortPage,
+  fetchFundingPage,
+  fetchHourlyCrossAssetPage,
+  freshBackfillState
+} from "./backfill.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -362,11 +370,15 @@ export default {
     if (url.pathname === "/test-telegram") {
       return stub.fetch("https://radar/test-telegram");
     }
-    if (url.pathname === "/center" || url.pathname.startsWith("/api/")) {
+    if (
+      url.pathname === "/center" ||
+      url.pathname.startsWith("/api/") ||
+      url.pathname.startsWith("/backfill/")
+    ) {
       return stub.fetch("https://radar" + url.pathname + url.search);
     }
     return new Response(
-      "BTC Live Radar v2.0\n\n/center = Trading Center\n/start = start/reconnect\n/status = current state\n/health = health check\n",
+      "BTC Live Radar v2.1\n\n/center = Trading Center\n/start = start/reconnect\n/status = current state\n/health = health check\n/backfill/status = 90-day importer status\n",
       { headers: { "content-type": "text/plain; charset=utf-8" } }
     );
   },
@@ -391,7 +403,8 @@ export class RadarDO extends DurableObject {
       lastHeartbeat: 0,
       lastTelegramChat: null,
       lastNewsPoll: 0,
-      lastNewsError: null
+      lastNewsError: null,
+      backfill: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -439,6 +452,7 @@ export class RadarDO extends DurableObject {
         telegramConfigured: Boolean(this.env.TELEGRAM_BOT_TOKEN),
         lastTelegramOkAt: this.mem.lastTelegramOkAt || null,
         lastTelegramError: this.mem.lastTelegramError || null,
+        backfill: this.backfillPublicState(),
         selfHealing: true
       });
     }
@@ -503,12 +517,34 @@ export class RadarDO extends DurableObject {
       });
     }
 
+    if (path === "/backfill/status") {
+      return Response.json({
+        ok: true,
+        backfill: this.backfillPublicState(),
+        database: this.center.summary()
+      });
+    }
+    if (path === "/backfill/start") {
+      const url = new URL(request.url);
+      const days = Math.min(180, Math.max(7, Number(url.searchParams.get("days") || 90)));
+      await this.ensureBackfillStarted(days, true);
+      await this.runBackfillStep();
+      return Response.json({ ok: true, backfill: this.backfillPublicState() });
+    }
+    if (path === "/backfill/step") {
+      await this.ensureBackfillStarted(90, false);
+      await this.runBackfillStep(true);
+      return Response.json({ ok: true, backfill: this.backfillPublicState() });
+    }
+
     if (path === "/start" || path === "/tick") {
       await this.refreshContext(path.slice(1));
       await this.ensureConnected();
       await this.ensureLiquidationConnected();
       await this.ensureHeartbeat();
-      await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000);
+      await this.ensureBackfillStarted(90, false);
+      await this.runBackfillStep();
+      await this.scheduleNextAlarm();
       return new Response("ok");
     }
 
@@ -523,9 +559,229 @@ export class RadarDO extends DurableObject {
       await this.ensureConnected();
       await this.ensureLiquidationConnected();
       await this.ensureHeartbeat();
+      await this.ensureBackfillStarted(90, false);
+      await this.runBackfillStep();
     } finally {
-      await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000);
+      await this.scheduleNextAlarm();
     }
+  }
+
+  backfillPublicState() {
+    const b = this.mem.backfill;
+    if (!b) return { active: false, completed: false, stage: "NOT_STARTED" };
+    const copy = { ...b };
+    delete copy.futureOverlap;
+    return copy;
+  }
+
+  async ensureBackfillStarted(days = 90, force = false) {
+    const existing = this.mem.backfill;
+    if (
+      !force &&
+      existing &&
+      (existing.active || existing.completed)
+    ) {
+      return;
+    }
+
+    this.mem.backfill = freshBackfillState(days);
+    await this.persist();
+
+    await this.notifyOnce(
+      `backfill-start|${days}`,
+      [
+        "BTC TRADING CENTER — HISTORY IMPORT START",
+        `${days} Tage historische Daten werden stufenweise geladen.`,
+        "Priorität: BTC 5m + Candle-Patterns + Open Interest + Long/Short + Funding + ETH/SOL/BNB 1h.",
+        "Der Import begrenzt sich selbst, damit der Cloudflare-Free-Tier nicht unnötig überschritten wird."
+      ].join("\n")
+    );
+  }
+
+  resetBackfillBudgetIfNeeded() {
+    const b = this.mem.backfill;
+    if (!b) return;
+    const day = new Date().toISOString().slice(0,10);
+    if (b.writeDay !== day) {
+      b.writeDay = day;
+      b.writesToday = 0;
+      b.pauseUntil = null;
+    }
+  }
+
+  nextUtcResetMs() {
+    const d = new Date();
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 2, 0);
+  }
+
+  advanceBackfillStage(next) {
+    const b = this.mem.backfill;
+    if (!b) return;
+    b.stage = next;
+    b.cursor = b.end;
+    b.pages = Number(b.pages || 0) + 1;
+    b.futureOverlap = [];
+    if (next === "crossAssets") b.crossSymbolIndex = 0;
+  }
+
+  async runBackfillStep(force = false) {
+    const b = this.mem.backfill;
+    if (!b || !b.active || b.completed) return;
+
+    this.resetBackfillBudgetIfNeeded();
+    const now = Date.now();
+
+    if (b.pauseUntil && now < b.pauseUntil && !force) return;
+
+    const DAILY_WRITE_BUDGET = 70000;
+    if (Number(b.writesToday || 0) >= DAILY_WRITE_BUDGET && !force) {
+      b.pauseUntil = this.nextUtcResetMs();
+      await this.persist();
+      return;
+    }
+
+    try {
+      let writes = 0;
+      let rows = [];
+
+      if (b.stage === "candles") {
+        rows = await fetch5mPage(b.start, b.cursor, 1000);
+        const current = rows.filter(x => x.t >= b.start && x.t <= b.end);
+
+        if (!current.length) {
+          this.advanceBackfillStage("openInterest");
+        } else {
+          writes += this.center.recordHistorical5m(current, "bybit");
+
+          const future = Array.isArray(b.futureOverlap) ? b.futureOverlap : [];
+          const combined = [...current, ...future]
+            .filter((x,i,a) => i === 0 || x.t !== a[i-1]?.t)
+            .sort((a,b) => a.t-b.t);
+          const patternWrites = this.center.bootstrapPatternHistory(combined);
+          writes += patternWrites;
+          b.rows.candles += current.length;
+          b.rows.patterns += patternWrites;
+
+          const oldest = current[0].t;
+          b.futureOverlap = current.slice(0, 288);
+          b.cursor = oldest - 1;
+          b.pages += 1;
+          if (oldest <= b.start + 5*60_000) this.advanceBackfillStage("openInterest");
+        }
+      } else if (b.stage === "openInterest") {
+        rows = await fetchOpenInterestPage(b.start, b.cursor, 200);
+        const current = rows.filter(x => x.ts >= b.start && x.ts <= b.end);
+        if (!current.length) {
+          this.advanceBackfillStage("longShort");
+        } else {
+          for (const row of current) writes += Number(this.center.recordOpenInterest(row.ts, row.value, "bybit") || 0);
+          b.rows.openInterest += current.length;
+          const oldest = current[0].ts;
+          b.cursor = oldest - 1;
+          b.pages += 1;
+          if (oldest <= b.start + 5*60_000) this.advanceBackfillStage("longShort");
+        }
+      } else if (b.stage === "longShort") {
+        rows = await fetchLongShortPage(b.start, b.cursor, 500);
+        const current = rows.filter(x => x.ts >= b.start && x.ts <= b.end);
+        if (!current.length) {
+          this.advanceBackfillStage("funding");
+        } else {
+          for (const row of current) writes += Number(this.center.recordLongShort(row.ts, row.longRatio, row.shortRatio, "bybit") || 0);
+          b.rows.longShort += current.length;
+          const oldest = current[0].ts;
+          b.cursor = oldest - 1;
+          b.pages += 1;
+          if (oldest <= b.start + 5*60_000) this.advanceBackfillStage("funding");
+        }
+      } else if (b.stage === "funding") {
+        rows = await fetchFundingPage(b.start, b.cursor, 200);
+        const current = rows.filter(x => x.ts >= b.start && x.ts <= b.end);
+        if (!current.length) {
+          this.advanceBackfillStage("crossAssets");
+        } else {
+          for (const row of current) writes += Number(this.center.recordFunding(row.ts, row.rate, "bybit") || 0);
+          b.rows.funding += current.length;
+          const oldest = current[0].ts;
+          b.cursor = oldest - 1;
+          b.pages += 1;
+          if (oldest <= b.start + 8*60*60_000) this.advanceBackfillStage("crossAssets");
+        }
+      } else if (b.stage === "crossAssets") {
+        const symbols = ["ETHUSDT","SOLUSDT","BNBUSDT"];
+        const symbol = symbols[Number(b.crossSymbolIndex || 0)];
+
+        if (!symbol) {
+          b.active = false;
+          b.completed = true;
+          b.finishedAt = Date.now();
+          b.stage = "DONE";
+          await this.notifyOnce(
+            `backfill-done|${b.days}`,
+            [
+              "BTC TRADING CENTER — HISTORY IMPORT COMPLETE",
+              `${b.days} Tage Backfill abgeschlossen.`,
+              `BTC 5m: ${b.rows.candles}`,
+              `Patterns: ${b.rows.patterns}`,
+              `Open Interest: ${b.rows.openInterest}`,
+              `Long/Short: ${b.rows.longShort}`,
+              `Funding: ${b.rows.funding}`,
+              `Cross-Asset: ${b.rows.crossAssets}`
+            ].join("\n")
+          );
+        } else {
+          rows = await fetchHourlyCrossAssetPage(symbol, b.start, b.cursor, 1000);
+          const current = rows.filter(x => x.ts >= b.start && x.ts <= b.end);
+          if (!current.length) {
+            b.crossSymbolIndex = Number(b.crossSymbolIndex || 0) + 1;
+            b.cursor = b.end;
+          } else {
+            for (const row of current) {
+              writes += Number(this.center.recordCrossAsset(
+                row.ts, row.symbol, row.ret5m, row.ret60m, row.close, "bybit"
+              ) || 0);
+            }
+            b.rows.crossAssets += current.length;
+            const oldest = current[0].ts;
+            b.cursor = oldest - 1;
+            b.pages += 1;
+            if (oldest <= b.start + 60*60_000) {
+              b.crossSymbolIndex = Number(b.crossSymbolIndex || 0) + 1;
+              b.cursor = b.end;
+            }
+          }
+        }
+      }
+
+      b.writesToday = Number(b.writesToday || 0) + writes;
+      b.lastStepAt = Date.now();
+      b.lastError = null;
+
+      if (b.active && b.writesToday >= DAILY_WRITE_BUDGET && !force) {
+        b.pauseUntil = this.nextUtcResetMs();
+      }
+
+      await this.persist();
+    } catch (e) {
+      b.lastError = e?.message || String(e);
+      b.lastStepAt = Date.now();
+      b.pauseUntil = Date.now() + 10 * 60 * 1000;
+      await this.persist();
+    }
+  }
+
+  async scheduleNextAlarm() {
+    const b = this.mem.backfill;
+    let when = Date.now() + 10 * 60 * 1000;
+
+    if (b?.active) {
+      if (b.pauseUntil && Date.now() < b.pauseUntil) {
+        when = b.pauseUntil;
+      } else {
+        when = Date.now() + 5_000;
+      }
+    }
+    await this.ctx.storage.setAlarm(when);
   }
 
   async pollNews(force = false) {
