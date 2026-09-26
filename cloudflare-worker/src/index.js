@@ -676,6 +676,10 @@ export class RadarDO extends DurableObject {
       return Response.json(this.center.probabilityCalibrationReport());
     }
 
+    if (path === "/api/shadows") {
+      return Response.json(this.center.shadowStrategyStats());
+    }
+
     if (path === "/genome-backfill/status") {
       return Response.json({
         ok:true,
@@ -1366,6 +1370,20 @@ export class RadarDO extends DurableObject {
           ].join("\n")
         );
       }
+
+      // Live paper challengers: same closed market data, different parameters.
+      // They never create a user-facing trade instruction; they exist to test
+      // whether the champion rules are robust or being outperformed.
+      const shadowVariants = [
+        ["STRICT", {retestTol:0.0010,stopBuffer:0.0005,minRR:2.5,maxExtension:0.0015}],
+        ["WIDE_RETEST", {retestTol:0.0016,stopBuffer:0.0005,minRR:2.0,maxExtension:0.0020}],
+        ["WIDER_STOP", {retestTol:0.0012,stopBuffer:0.0008,minRR:2.0,maxExtension:0.0020}],
+        ["LOWER_RR_RESEARCH", {retestTol:0.0012,stopBuffer:0.0005,minRR:1.5,maxExtension:0.0020}]
+      ];
+      for(const [variant,params] of shadowVariants) {
+        const candidate=evaluateConfirmed(this.context,params);
+        if(candidate) this.center.openShadowSetup(variant,candidate,this.context);
+      }
     } catch (e) {
       const msg = e?.message || String(e);
       this.mem.lastContextError = msg;
@@ -1565,6 +1583,11 @@ export class RadarDO extends DurableObject {
         high,
         low,
         close: price
+      });
+      this.center.checkOpenShadowSetups({
+        ts: closeTime,
+        high,
+        low
       });
       for (const s of closedSetups) {
         const resultText = s.result === "TARGET"
