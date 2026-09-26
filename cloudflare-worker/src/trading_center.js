@@ -139,6 +139,19 @@ export class TradingCenter {
         ret_1440m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS macro_market_daily (
+        series TEXT NOT NULL,
+        observation_ts INTEGER NOT NULL,
+        fetched_ts INTEGER NOT NULL,
+        label TEXT,
+        kind TEXT NOT NULL,
+        value REAL NOT NULL,
+        previous_value REAL,
+        change_value REAL,
+        source TEXT NOT NULL,
+        PRIMARY KEY(series, observation_ts)
+      );
+
       CREATE TABLE IF NOT EXISTS macro_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_key TEXT NOT NULL UNIQUE,
@@ -417,6 +430,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
       CREATE INDEX IF NOT EXISTS idx_macro_events_ts ON macro_events(event_ts);
+      CREATE INDEX IF NOT EXISTS idx_macro_market_series_ts ON macro_market_daily(series,observation_ts);
       CREATE INDEX IF NOT EXISTS idx_macro_events_category ON macro_events(category);
       CREATE INDEX IF NOT EXISTS idx_market_minutes_ts ON market_minutes(ts);
       CREATE INDEX IF NOT EXISTS idx_historical_5m_ts ON historical_5m(ts);
@@ -740,6 +754,7 @@ export class TradingCenter {
     const micro=this.one("SELECT ts FROM secondary_microstructure ORDER BY ts DESC LIMIT 1");
     const venue=this.one("SELECT ts FROM venue_snapshots ORDER BY ts DESC LIMIT 1");
     const macro=this.macroCalendarHealth(now);
+    const macroMarket=this.macroMarketHealth(now);
 
     mark("open_interest",oi,15*60_000);
     mark("funding",funding,12*60*60_000);
@@ -757,6 +772,17 @@ export class TradingCenter {
     } else {
       details.official_macro_calendar={status:"fresh",ageMs:macro.ageMs,nextEvent:macro.nextEvent?.event_ts||null};
     }
+    if(!macroMarket.fresh || macroMarket.missing.length) {
+      if(!macroMarket.seriesCount) missing.push("macro_market_context");
+      else stale.push("macro_market_context");
+      details.macro_market_context={
+        status:macroMarket.seriesCount?(macroMarket.fresh?"partial":"stale"):"missing",
+        ageMs:macroMarket.ageMs,
+        missing:macroMarket.missing
+      };
+    } else {
+      details.macro_market_context={status:"fresh",ageMs:macroMarket.ageMs,missing:[]};
+    }
 
     const c5=Array.isArray(ctx?.c5)?ctx.c5:[];
     if(c5.length<100) missing.push("price_history");
@@ -772,7 +798,7 @@ export class TradingCenter {
     }
     details.live_gaps_30m=gaps;
 
-    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar","venue_confirmation","secondary_microstructure"];
+    const critical=["open_interest","cross_asset","orderflow","price_history","official_macro_calendar","macro_market_context","venue_confirmation","secondary_microstructure"];
     const criticalPenalty=missing.filter(x=>critical.includes(x)).length*14 +
       stale.filter(x=>critical.includes(x)).length*9;
     const otherPenalty=missing.filter(x=>!critical.includes(x)).length*7 +
@@ -1174,7 +1200,8 @@ export class TradingCenter {
       "failure_attribution","alert_value_tracking","orderbook_depth","slippage_model",
       "liquidity_sweep_detection","daily_risk_lock","position_sizing",
       "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance",
-      "probability_calibration","shadow_strategies"
+      "probability_calibration","shadow_strategies",
+      "traditional_risk_assets","usd_rates_context"
     ]);
     const partial=new Set([
       "counterfactuals","feed_latency_monitor",
@@ -1641,6 +1668,7 @@ export class TradingCenter {
       historicalIntegrity:this.historicalIntegrityAudit(),
       venue:this.venueStats(),
       microstructure:this.secondaryMicrostructureSummary(),
+      macroMarket:this.macroMarketSummary(),
       risk:this.riskPolicyState(),
       equity:this.equityResearch(),
       alertValue:this.alertValueReport(),
@@ -2271,6 +2299,73 @@ export class TradingCenter {
     }
   }
 
+  upsertMacroMarketContext(result) {
+    let written=0;
+    const fetchedTs=Number(result?.fetchedAt||Date.now());
+    for(const row of result?.rows||[]) {
+      if(!row?.series||!Number.isFinite(Number(row.observationTs))||!Number.isFinite(Number(row.value))) continue;
+      const cur=this.sql.exec(
+        `INSERT OR REPLACE INTO macro_market_daily(
+          series,observation_ts,fetched_ts,label,kind,value,previous_value,change_value,source
+        ) VALUES(?,?,?,?,?,?,?,?,?)`,
+        String(row.series),Number(row.observationTs),fetchedTs,row.label||null,
+        String(row.kind||"other"),Number(row.value),
+        row.previousValue===null||row.previousValue===undefined?null:Number(row.previousValue),
+        row.change===null||row.change===undefined?null:Number(row.change),
+        row.source||"fred"
+      );
+      written+=Number(cur.rowsWritten||0);
+    }
+    return written;
+  }
+
+  macroMarketSummary() {
+    const rows=this.rows(
+      `SELECT m.* FROM macro_market_daily m
+       JOIN (
+         SELECT series,MAX(observation_ts) AS max_ts
+         FROM macro_market_daily GROUP BY series
+       ) x ON x.series=m.series AND x.max_ts=m.observation_ts
+       ORDER BY m.series`
+    );
+    const map=Object.fromEntries(rows.map(r=>[r.series,{
+      series:r.series,label:r.label,kind:r.kind,
+      observationTs:Number(r.observation_ts),fetchedTs:Number(r.fetched_ts),
+      value:Number(r.value),
+      previousValue:r.previous_value===null?null:Number(r.previous_value),
+      change:r.change_value===null?null:Number(r.change_value),
+      source:r.source
+    }]));
+    const rates={
+      twoYear:map.DGS2||null,
+      tenYear:map.DGS10||null,
+      curveBps:map.DGS2&&map.DGS10
+        ? (Number(map.DGS10.value)-Number(map.DGS2.value))*100:null
+    };
+    const riskAssets={
+      sp500:map.SP500||null,
+      nasdaq:map.NASDAQCOM||null,
+      vix:map.VIXCLS||null
+    };
+    const dollar=map.DTWEXBGS||null;
+    const latestFetch=rows.length?Math.max(...rows.map(r=>Number(r.fetched_ts||0))):null;
+    return {n:rows.length,latestFetch,rates,riskAssets,dollar,rows};
+  }
+
+  macroMarketHealth(nowTs=Date.now()) {
+    const s=this.macroMarketSummary();
+    const expected=["SP500","NASDAQCOM","VIXCLS","DGS2","DGS10","DTWEXBGS"];
+    const present=new Set((s.rows||[]).map(r=>r.series));
+    const missing=expected.filter(x=>!present.has(x));
+    const age=s.latestFetch?Number(nowTs)-Number(s.latestFetch):null;
+    return {
+      fresh:Boolean(age!==null&&age<12*60*60_000),
+      ageMs:age,
+      missing,
+      seriesCount:s.n
+    };
+  }
+
   upsertMacroEvents(events, capturedTs=Date.now()) {
     let written=0;
     for(const e of events||[]) {
@@ -2502,6 +2597,7 @@ export class TradingCenter {
       replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0),
       shadowSetups: Number(this.one("SELECT COUNT(*) AS n FROM shadow_setups")?.n || 0),
       macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0),
+      macroMarketRows: Number(this.one("SELECT COUNT(*) AS n FROM macro_market_daily")?.n || 0),
       venueSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM venue_snapshots")?.n || 0)
     };
   }
