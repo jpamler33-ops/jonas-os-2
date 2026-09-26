@@ -11,6 +11,7 @@ import {
 } from "./backfill.js";
 import { evaluateReplaySetup, simulateOutcome } from "./replay_engine.js";
 import { fetchOfficialMacroEvents } from "./macro_calendar.js";
+import { fetchKrakenMicrostructure } from "./kraken_analytics.js";
 
 const SYMBOL = "BTCUSDT";
 const WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m";
@@ -472,7 +473,9 @@ export class RadarDO extends DurableObject {
       replay: null,
       genomeBackfill: null,
       lastMacroPoll: 0,
-      lastMacroError: null
+      lastMacroError: null,
+      lastKrakenAnalyticsAt: 0,
+      lastKrakenAnalyticsError: null
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -526,6 +529,11 @@ export class RadarDO extends DurableObject {
         orderflow5mRows: this.center.summary().orderflow5mRows,
         orderflowMode: "BINANCE_KLINE_TAKER_VOLUME_PLUS_BOOK_SNAPSHOT",
         venue: this.center.latestVenueSnapshot(),
+        secondaryMicrostructure: this.center.latestSecondaryMicrostructure(),
+        krakenAnalytics: {
+          lastOkAt: this.mem.lastKrakenAnalyticsAt || null,
+          lastError: this.mem.lastKrakenAnalyticsError || null
+        },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
         macro: {
@@ -570,6 +578,11 @@ export class RadarDO extends DurableObject {
           risk:this.center.macroRiskState(),
           calendar:this.center.macroCalendarHealth(),
           lastError:this.mem.lastMacroError||null
+        },
+        secondaryMicrostructure: {
+          summary:this.center.secondaryMicrostructureSummary(),
+          lastOkAt:this.mem.lastKrakenAnalyticsAt||null,
+          lastError:this.mem.lastKrakenAnalyticsError||null
         }
       });
     }
@@ -638,6 +651,14 @@ export class RadarDO extends DurableObject {
 
     if (path === "/api/venues") {
       return Response.json(this.center.venueStats());
+    }
+
+    if (path === "/api/microstructure") {
+      return Response.json({
+        summary:this.center.secondaryMicrostructureSummary(),
+        lastOkAt:this.mem.lastKrakenAnalyticsAt||null,
+        lastError:this.mem.lastKrakenAnalyticsError||null
+      });
     }
 
     if (path === "/api/risk") {
@@ -1236,6 +1257,18 @@ export class RadarDO extends DurableObject {
       } catch (e) {
         this.mem.lastExternalDataError = e?.message || String(e);
       }
+
+      // Independent secondary microstructure source: a Kraken failure must never
+      // take down the primary Binance/Bybit signal pipeline.
+      try {
+        const micro = await fetchKrakenMicrostructure();
+        this.center.recordSecondaryMicrostructure(micro);
+        this.mem.lastKrakenAnalyticsAt = Date.now();
+        this.mem.lastKrakenAnalyticsError = null;
+      } catch (e) {
+        this.mem.lastKrakenAnalyticsError = e?.message || String(e);
+      }
+
       this.center.recordMarketGenome(this.context);
       this.center.updatePatternOutcomes(Date.now());
       this.center.updateFactorOutcomes(Date.now());
