@@ -69,6 +69,10 @@ import {
   buildTokenOutcomeProfiles,
   trackWorldReality
 } from "./world_outcome_engine.js";
+import {
+  WORLD_MUTATION_VERSION,
+  analyzeWorldMutations
+} from "./world_mutation_engine.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -707,6 +711,16 @@ export class TradingCenter {
         payload_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS world_mutation_snapshots (
+        ts INTEGER PRIMARY KEY,
+        origin_ts INTEGER,
+        version TEXT NOT NULL,
+        strongest_status TEXT,
+        strongest_world_rank INTEGER,
+        takeover_pressure REAL,
+        payload_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS data_quality_snapshots (
         ts INTEGER PRIMARY KEY,
         score REAL NOT NULL,
@@ -792,6 +806,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_market_world_origin ON market_world_snapshots(origin_ts);
       CREATE INDEX IF NOT EXISTS idx_market_world_resolution_target ON market_world_resolutions(target_ts,resolved_ts);
       CREATE INDEX IF NOT EXISTS idx_world_outcome_origin ON world_outcome_snapshots(origin_ts);
+      CREATE INDEX IF NOT EXISTS idx_world_mutation_origin ON world_mutation_snapshots(origin_ts,ts);
       CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
@@ -1868,6 +1883,83 @@ export class TradingCenter {
     return{
       originTs:origin,
       ...trackWorldReality({world,resolutions,tokenComponents})
+    };
+  }
+
+  worldMutationReport(world=null,limit=6000) {
+    const w=world||this.latestMarketWorld()||this.buildMarketWorldReport();
+    if(!w?.paths?.length)return{
+      status:"LEARNING",version:WORLD_MUTATION_VERSION,originTs:w?.originTs??null,challengers:[]
+    };
+
+    const currentRow=this.one(
+      "SELECT token_id,grammar,components_json FROM market_tokens ORDER BY ts DESC LIMIT 1"
+    );
+    if(!currentRow)return{
+      status:"LEARNING",version:WORLD_MUTATION_VERSION,originTs:w.originTs,challengers:[]
+    };
+    const currentToken={
+      tokenId:String(currentRow.token_id),
+      grammar:currentRow.grammar,
+      components:JSON.parse(currentRow.components_json||"{}")
+    };
+
+    const rows=this.rows(
+      `SELECT token_id,components_json,ret_fwd_15m,ret_fwd_60m,ret_fwd_240m
+       FROM market_tokens
+       ORDER BY ts DESC LIMIT ?`,
+      Math.min(10000,Math.max(300,Number(limit||6000)))
+    );
+    const tokenHistory=rows.map(r=>({
+      tokenId:String(r.token_id),
+      components:JSON.parse(r.components_json||"{}"),
+      ret15:r.ret_fwd_15m===null?null:Number(r.ret_fwd_15m),
+      ret60:r.ret_fwd_60m===null?null:Number(r.ret_fwd_60m),
+      ret240:r.ret_fwd_240m===null?null:Number(r.ret_fwd_240m)
+    }));
+
+    const tokenComponents={};
+    for(const x of tokenHistory)if(!tokenComponents[x.tokenId])tokenComponents[x.tokenId]=x.components;
+
+    return analyzeWorldMutations({
+      world:w,
+      currentToken,
+      tokenComponents,
+      tokenHistory,
+      maxChallengers:4
+    });
+  }
+
+  refreshWorldMutations(world=null) {
+    const report=this.worldMutationReport(world);
+    const ts=Date.now();
+    const strongest=report.strongestMutationPressure||null;
+    this.sql.exec(
+      `INSERT OR REPLACE INTO world_mutation_snapshots(
+        ts,origin_ts,version,strongest_status,strongest_world_rank,takeover_pressure,payload_json
+      ) VALUES(?,?,?,?,?,?,?)`,
+      ts,
+      report.originTs===null||report.originTs===undefined?null:Number(report.originTs),
+      WORLD_MUTATION_VERSION,
+      strongest?.status||null,
+      strongest?.challengerWorldRank??null,
+      strongest?.takeoverPressure===null||strongest?.takeoverPressure===undefined
+        ?null:Number(strongest.takeoverPressure),
+      JSON.stringify(report)
+    );
+    return{ts,...report};
+  }
+
+  latestWorldMutations() {
+    const r=this.one(
+      "SELECT * FROM world_mutation_snapshots ORDER BY ts DESC LIMIT 1"
+    );
+    if(!r)return null;
+    return{
+      ts:Number(r.ts),
+      originTs:r.origin_ts===null?null:Number(r.origin_ts),
+      version:r.version,
+      ...JSON.parse(r.payload_json||"{}")
     };
   }
 
@@ -3982,6 +4074,7 @@ export class TradingCenter {
       marketWorldCalibration:this.marketWorldCalibrationReport(),
       worldOutcomes:this.latestMarketWorldOutcomes()||this.marketWorldOutcomeReport(),
       worldReality:this.worldRealityReport(),
+      worldMutations:this.latestWorldMutations()||this.worldMutationReport(),
       versions:this.versionReport(),
       predictionLedger:this.predictionLedgerAudit(),
       parity:this.parityReport(),
@@ -4968,7 +5061,8 @@ export class TradingCenter {
       grammarCounterfactualSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM grammar_counterfactual_snapshots")?.n || 0),
       marketWorldSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM market_world_snapshots")?.n || 0),
       marketWorldResolutions: Number(this.one("SELECT COUNT(*) AS n FROM market_world_resolutions WHERE resolved_ts IS NOT NULL")?.n || 0),
-      worldOutcomeSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM world_outcome_snapshots")?.n || 0)
+      worldOutcomeSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM world_outcome_snapshots")?.n || 0),
+      worldMutationSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM world_mutation_snapshots")?.n || 0)
     };
   }
 
