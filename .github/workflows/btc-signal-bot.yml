@@ -32,6 +32,14 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: pip install -r requirements.txt
 
+      - name: Bot-Zustand laden
+        uses: actions/cache/restore@v4
+        with:
+          path: bot_state.json
+          key: btc-bot-state-${{ github.run_id }}
+          restore-keys: |
+            btc-bot-state-
+
       - name: Engine Selbsttest
         run: python bot.py --self-test
 
@@ -40,6 +48,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.BIGGJ_BOT }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py
+
+      - name: Bot-Zustand speichern
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: bot_state.json
+          key: btc-bot-state-${{ github.run_id }}
 
       - name: Status speichern
         if: always()
