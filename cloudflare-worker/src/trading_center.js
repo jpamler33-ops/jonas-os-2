@@ -748,6 +748,47 @@ export class TradingCenter {
     return this.one("SELECT * FROM market_genomes ORDER BY ts DESC LIMIT 1");
   }
 
+  historicalIntegrityAudit() {
+    const b=this.one(
+      "SELECT MIN(ts) AS min_ts,MAX(ts) AS max_ts,COUNT(*) AS n FROM historical_5m"
+    )||{};
+    const n=Number(b.n||0),min=Number(b.min_ts),max=Number(b.max_ts);
+    const expected=n&&Number.isFinite(min)&&Number.isFinite(max)
+      ? Math.floor((max-min)/(5*60_000))+1 : 0;
+    const missing=Math.max(0,expected-n);
+    const invalid=Number(this.one(
+      `SELECT COUNT(*) AS n FROM historical_5m
+       WHERE high<MAX(open,close) OR low>MIN(open,close)
+          OR high<low OR volume<0 OR open<=0 OR close<=0`
+    )?.n||0);
+
+    let maxGapMs=null;
+    try {
+      maxGapMs=Number(this.one(
+        `SELECT MAX(gap) AS g FROM (
+           SELECT ts-LAG(ts) OVER (ORDER BY ts) AS gap FROM historical_5m
+         )`
+      )?.g||0)||null;
+    } catch {}
+
+    const oi=Number(this.one("SELECT COUNT(*) AS n FROM open_interest_history")?.n||0);
+    const ls=Number(this.one("SELECT COUNT(*) AS n FROM long_short_history")?.n||0);
+    const funding=Number(this.one("SELECT COUNT(*) AS n FROM funding_history")?.n||0);
+    const cross=this.rows(
+      "SELECT symbol,COUNT(*) AS n,MIN(ts) AS min_ts,MAX(ts) AS max_ts FROM cross_asset_history GROUP BY symbol"
+    );
+    const completeness=expected?Math.max(0,1-missing/expected):0;
+    const score=Math.max(0,Math.min(100,
+      completeness*80 + (invalid===0?10:0) + (oi>0&&ls>0&&funding>0?10:0)
+    ));
+    return {
+      score,
+      candles:{n,expected,missing,completeness,minTs:min||null,maxTs:max||null,maxGapMs,invalid},
+      derivatives:{openInterest:oi,longShort:ls,funding},
+      crossAssets:cross
+    };
+  }
+
   coverageReport(ctx=null) {
     const summary=this.summary();
     const genomeCount=Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n||0);
@@ -761,7 +802,8 @@ export class TradingCenter {
       "open_interest","funding","long_short_ratio","liquidations","cross_asset","news_events",
       "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
       "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay",
-      "official_macro_calendar","macro_risk_window","macro_reaction_history"
+      "official_macro_calendar","macro_risk_window","macro_reaction_history",
+      "historical_gap_audit"
     ]);
     const partial=new Set([]);
     live.add("parameter_stability");
@@ -772,7 +814,10 @@ export class TradingCenter {
         disadvantageIfMissing:Boolean(f.critical&&status==="PLANNED")
       };
     });
-    return {features,summary,genomeCount,flowCount,currentQuality};
+    return {
+      features,summary,genomeCount,flowCount,currentQuality,
+      historicalIntegrity:this.historicalIntegrityAudit()
+    };
   }
 
   historicalBounds() {
@@ -955,7 +1000,8 @@ export class TradingCenter {
         upcoming:this.upcomingMacro(20),
         stats:this.macroStats(),
         health:this.macroCalendarHealth()
-      }
+      },
+      historicalIntegrity:this.historicalIntegrityAudit()
     };
   }
 
