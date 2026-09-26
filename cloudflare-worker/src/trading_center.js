@@ -17,6 +17,7 @@ import {
   transitionMatrix,
   wilsonInterval
 } from "./research_engine.js";
+import { parameterGrid } from "./replay_engine.js";
 
 export class TradingCenter {
   constructor(sql) {
@@ -274,6 +275,29 @@ export class TradingCenter {
         payload_json TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS replay_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signature TEXT NOT NULL UNIQUE,
+        params_hash TEXT NOT NULL,
+        params_json TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        side TEXT NOT NULL,
+        entry REAL NOT NULL,
+        stop REAL NOT NULL,
+        target REAL NOT NULL,
+        planned_rr REAL NOT NULL,
+        level REAL,
+        result TEXT,
+        realized_r REAL,
+        mfe_r REAL,
+        mae_r REAL,
+        closed_ts INTEGER,
+        trend_5m TEXT,
+        trend_15m TEXT,
+        trend_1h TEXT,
+        trend_4h TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_setups_status ON setups(status);
       CREATE INDEX IF NOT EXISTS idx_patterns_pattern ON pattern_occurrences(pattern);
       CREATE INDEX IF NOT EXISTS idx_news_category ON news_events(category);
@@ -290,6 +314,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
+      CREATE INDEX IF NOT EXISTS idx_replay_params ON replay_results(params_hash);
+      CREATE INDEX IF NOT EXISTS idx_replay_ts ON replay_results(ts);
     `);
   }
 
@@ -698,7 +724,8 @@ export class TradingCenter {
       "orderflow_delta","spread","book_imbalance","data_quality","novelty","agreement_entropy",
       "historical_twins","counterfactuals","walk_forward","cost_model","edge_decay"
     ]);
-    const partial=new Set(["parameter_stability"]);
+    const partial=new Set([]);
+    live.add("parameter_stability");
     const features=FEATURE_REGISTRY.map(f=>{
       const status=live.has(f.key)?"LIVE":partial.has(f.key)?"PARTIAL":"PLANNED";
       return {
@@ -707,6 +734,113 @@ export class TradingCenter {
       };
     });
     return {features,summary,genomeCount,flowCount,currentQuality};
+  }
+
+  historicalBounds() {
+    return this.one(
+      "SELECT MIN(ts) AS min_ts, MAX(ts) AS max_ts, COUNT(*) AS n FROM historical_5m"
+    ) || {min_ts:null,max_ts:null,n:0};
+  }
+
+  historicalReplayWindow(startTs,endTs) {
+    return this.rows(
+      `SELECT ts AS t,open AS o,high AS h,low AS l,close AS c,volume AS v
+       FROM historical_5m WHERE ts>=? AND ts<=? ORDER BY ts ASC`,
+      Number(startTs),Number(endTs)
+    ).map(x=>({
+      t:Number(x.t),o:Number(x.o),h:Number(x.h),l:Number(x.l),c:Number(x.c),v:Number(x.v)
+    }));
+  }
+
+  paramsHash(params) {
+    return [
+      Number(params.retestTol??0.0012).toFixed(6),
+      Number(params.stopBuffer??0.0005).toFixed(6),
+      Number(params.minRR??2).toFixed(2),
+      Number(params.maxExtension??0.002).toFixed(6)
+    ].join("|");
+  }
+
+  replayParameterSet() {
+    const champion={retestTol:0.0012,stopBuffer:0.0005,minRR:2,maxExtension:0.002};
+    const grid=parameterGrid().filter(p =>
+      p.stopBuffer===0.0005 &&
+      [0.0010,0.0012,0.0016].includes(p.retestTol) &&
+      [1.5,2.0,2.5].includes(p.minRR)
+    );
+    const seen=new Set();
+    return [champion,...grid].filter(p=>{
+      const h=this.paramsHash(p);
+      if(seen.has(h)) return false;
+      seen.add(h); return true;
+    });
+  }
+
+  recordReplayResult(setup,outcome,params) {
+    if(!setup||!outcome)return 0;
+    const hash=this.paramsHash(params);
+    const levelBucket=Math.round(Number(setup.level||setup.entry)/5)*5;
+    const signature=`${hash}|${setup.side}|${Number(setup.ts)}|${levelBucket}`;
+    const t=setup.trends||{};
+    const cur=this.sql.exec(
+      `INSERT OR IGNORE INTO replay_results(
+        signature,params_hash,params_json,ts,side,entry,stop,target,planned_rr,level,
+        result,realized_r,mfe_r,mae_r,closed_ts,trend_5m,trend_15m,trend_1h,trend_4h
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      signature,hash,JSON.stringify(params),Number(setup.ts),setup.side,
+      Number(setup.entry),Number(setup.stop),Number(setup.target),Number(setup.planned_rr),
+      setup.level??null,outcome.result,outcome.realized_r??null,
+      Number(outcome.mfe_r||0),Number(outcome.mae_r||0),outcome.closed_ts??null,
+      t["5m"]||null,t["15m"]||null,t["1h"]||null,t["4h"]||null
+    );
+    return Number(cur.rowsWritten||0);
+  }
+
+  replayStats() {
+    const rows=this.rows(
+      `SELECT params_hash,params_json,
+        COUNT(*) AS n,
+        SUM(CASE WHEN result='TARGET' THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN result='STOP' THEN 1 ELSE 0 END) AS losses,
+        SUM(CASE WHEN result='AMBIGUOUS' THEN 1 ELSE 0 END) AS ambiguous,
+        AVG(CASE WHEN realized_r IS NOT NULL THEN realized_r END) AS avg_r,
+        AVG(mfe_r) AS avg_mfe,
+        AVG(mae_r) AS avg_mae
+       FROM replay_results GROUP BY params_hash,params_json ORDER BY n DESC`
+    );
+    return rows.map(r=>{
+      const wins=Number(r.wins||0),losses=Number(r.losses||0),decided=wins+losses;
+      const ci=wilsonInterval(wins,decided);
+      return {
+        paramsHash:r.params_hash,
+        params:JSON.parse(r.params_json),
+        n:Number(r.n||0),wins,losses,ambiguous:Number(r.ambiguous||0),
+        hitRate:ci.p,hitLow95:ci.low,hitHigh95:ci.high,
+        avgR:r.avg_r===null?null:Number(r.avg_r),
+        avgMfe:r.avg_mfe===null?null:Number(r.avg_mfe),
+        avgMae:r.avg_mae===null?null:Number(r.avg_mae)
+      };
+    });
+  }
+
+  parameterStabilityReport() {
+    const stats=this.replayStats();
+    if(!stats.length)return {status:"WAITING_FOR_REPLAY",variants:[]};
+    const byRR={};
+    for(const s of stats){
+      const k=`RR_${s.params.minRR}`;
+      if(!byRR[k])byRR[k]=[];
+      byRR[k].push(s.avgR);
+    }
+    const neighborhood=Object.entries(byRR).map(([key,vals])=>({
+      key,nVariants:vals.length,avgOfAvgR:researchMean(vals.filter(Number.isFinite))
+    }));
+    return {
+      status:stats.length>=5?"ACTIVE":"EARLY",
+      variants:stats,
+      neighborhood,
+      warning:"A single best parameter is not promoted automatically; stable neighborhoods matter more than an isolated optimum."
+    };
   }
 
   setupValidationReport() {
@@ -774,7 +908,9 @@ export class TradingCenter {
       validation:this.setupValidationReport(),
       genomeResearch:this.genomeResearchReport(),
       currentGenome:ctx?this.currentGenomeIntelligence(ctx,30):null,
-      coverage:this.coverageReport(ctx)
+      coverage:this.coverageReport(ctx),
+      replay:this.replayStats(),
+      parameterStability:this.parameterStabilityReport()
     };
   }
 
@@ -1329,7 +1465,8 @@ export class TradingCenter {
       crossAssetRows: Number(this.one("SELECT COUNT(*) AS n FROM cross_asset_history")?.n || 0),
       orderflow5mRows: Number(this.one("SELECT COUNT(*) AS n FROM orderflow_5m")?.n || 0),
       genomeRows: Number(this.one("SELECT COUNT(*) AS n FROM market_genomes")?.n || 0),
-      timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0)
+      timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0),
+      replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0)
     };
   }
 
