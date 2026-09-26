@@ -455,6 +455,18 @@ export class RadarDO extends DurableObject {
       this.context = await buildContext();
       this.context.reason = reason;
       this.mem.lastContextError = null;
+
+      if (!this.mem.patternBootstrapDone) {
+        try {
+          const hist5 = await getCandles("5m", 1000);
+          const added = this.center.bootstrapPatternHistory(hist5);
+          this.mem.patternBootstrapDone = true;
+          this.mem.patternBootstrapAdded = added;
+        } catch (e) {
+          this.mem.patternBootstrapError = e?.message || String(e);
+        }
+      }
+
       this.center.recordContext(this.context, reason);
       this.center.recordPatterns(this.context);
       this.center.recordFactorSnapshot(this.context);
