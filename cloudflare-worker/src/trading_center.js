@@ -1026,12 +1026,13 @@ export class TradingCenter {
       "historical_twins","walk_forward","cost_model","edge_decay",
       "official_macro_calendar","macro_risk_window","macro_reaction_history",
       "historical_gap_audit","multi_exchange_confirmation","spot_perp_dislocation",
-      "data_quality_lock","parameter_stability","historical_genome_bootstrap"
+      "data_quality_lock","parameter_stability","historical_genome_bootstrap",
+      "sequence_outcomes","change_point_detection","missed_opportunity_analysis",
+      "failure_attribution","alert_value_tracking"
     ]);
     const partial=new Set([
       "counterfactuals","feed_latency_monitor","feed_redundancy",
-      "sequence_outcomes","lead_lag_network","change_point_detection",
-      "failure_attribution","alert_value_tracking","shadow_strategies",
+      "lead_lag_network","shadow_strategies",
       "hypothesis_falsification"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
@@ -1046,7 +1047,13 @@ export class TradingCenter {
       historicalIntegrity:this.historicalIntegrityAudit(),
       venue:this.venueStats(),
       risk:this.riskPolicyState(),
-      equity:this.equityResearch()
+      equity:this.equityResearch(),
+      alertValue:this.alertValueReport(),
+      failureAttribution:this.failureAttributionReport(),
+      sequenceOutcomes:this.sequenceOutcomeReport(),
+      changePoint:this.changePointReport(),
+      missedOpportunities:this.missedOpportunityReport(),
+      crossMarketLead:this.crossMarketLeadResearch()
     };
   }
 
@@ -1264,6 +1271,156 @@ export class TradingCenter {
       transitions,
       sequenceDNA:sequences,
       warning:"Exploratory findings are hypotheses only. They require out-of-sample confirmation before being promoted to a rule."
+    };
+  }
+
+  alertValueReport() {
+    const alerts=this.rows(
+      "SELECT ts,stage,side FROM alerts ORDER BY ts DESC LIMIT 5000"
+    ).sort((a,b)=>Number(a.ts)-Number(b.ts));
+    const setups=this.rows(
+      "SELECT opened_ts,side FROM setups ORDER BY opened_ts ASC"
+    );
+    const groups=new Map();
+    for(const a of alerts){
+      const key=String(a.stage||"UNKNOWN");
+      if(!groups.has(key)) groups.set(key,{stage:key,n:0,toSetup30m:0,toSetup60m:0});
+      const g=groups.get(key); g.n++;
+      const t=Number(a.ts);
+      const same=s=>!a.side||!s.side||String(a.side)===String(s.side);
+      if(setups.some(s=>same(s)&&Number(s.opened_ts)>=t&&Number(s.opened_ts)<=t+30*60_000)) g.toSetup30m++;
+      if(setups.some(s=>same(s)&&Number(s.opened_ts)>=t&&Number(s.opened_ts)<=t+60*60_000)) g.toSetup60m++;
+    }
+    return [...groups.values()].map(g=>({
+      ...g,
+      conversion30m:g.n?g.toSetup30m/g.n:null,
+      conversion60m:g.n?g.toSetup60m/g.n:null
+    })).sort((a,b)=>b.n-a.n);
+  }
+
+  failureAttributionReport() {
+    const rows=this.factorEdgeStats();
+    const out=[];
+    for(const r of rows){
+      const wins=Number(r.wins||0),losses=Number(r.losses||0),n=wins+losses;
+      if(n<5) continue;
+      out.push({
+        side:r.side,session:r.session,volatility:r.volatility_regime,
+        trend:r.trend_alignment,ema:r.ema_state,n,wins,losses,
+        stopRate:n?losses/n:null,
+        avgR:r.avg_r===null?null:Number(r.avg_r),
+        avgMfe:r.avg_mfe===null?null:Number(r.avg_mfe),
+        avgMae:r.avg_mae===null?null:Number(r.avg_mae)
+      });
+    }
+    return out.sort((a,b)=>(b.stopRate??0)-(a.stopRate??0)).slice(0,40);
+  }
+
+  sequenceOutcomeReport(length=3) {
+    const events=this.recentTimeline(1500).sort((a,b)=>Number(a.ts)-Number(b.ts));
+    const groups=new Map();
+    for(let i=length-1;i<events.length;i++){
+      const seq=events.slice(i-length+1,i+1);
+      const end=Number(seq.at(-1).ts);
+      const base=this.nearestAnyClose(end);
+      const future=this.nearestAnyClose(end+60*60_000);
+      if(!base?.close||!future?.close) continue;
+      const key=seq.map(e=>`${e.event_type}:${e.subtype||"-"}`).join(">");
+      const ret=Number(future.close)/Number(base.close)-1;
+      const g=groups.get(key)||{sequence:key,n:0,sum:0,sumAbs:0,pos:0};
+      g.n++;g.sum+=ret;g.sumAbs+=Math.abs(ret);if(ret>0)g.pos++;
+      groups.set(key,g);
+    }
+    return [...groups.values()].filter(g=>g.n>=3).map(g=>({
+      sequence:g.sequence,n:g.n,
+      avgForward60m:g.sum/g.n,
+      avgAbsForward60m:g.sumAbs/g.n,
+      positiveRate:g.pos/g.n
+    })).sort((a,b)=>b.n-a.n).slice(0,50);
+  }
+
+  changePointReport() {
+    const rows=this.rows(
+      `SELECT ts,atr_pct,volume_ratio,oi_change,liq_5m,flow_delta_ratio,
+        agreement,entropy,spot_cross_diff_bps
+       FROM market_genomes g
+       LEFT JOIN venue_snapshots v ON v.ts=(
+         SELECT MAX(v2.ts) FROM venue_snapshots v2 WHERE v2.ts<=g.ts
+       )
+       ORDER BY g.ts DESC LIMIT 240`
+    ).reverse();
+    if(rows.length<72) return {status:"LEARNING",n:rows.length,score:null,features:[]};
+    const recent=rows.slice(-24),base=rows.slice(-120,-24);
+    const keys=["atr_pct","volume_ratio","oi_change","liq_5m","flow_delta_ratio","agreement","entropy","spot_cross_diff_bps"];
+    const feats=[];
+    for(const key of keys){
+      const a=base.map(x=>Number(x[key])).filter(Number.isFinite);
+      const b=recent.map(x=>Number(x[key])).filter(Number.isFinite);
+      if(a.length<20||b.length<6) continue;
+      const ma=a.reduce((x,y)=>x+y,0)/a.length;
+      const mb=b.reduce((x,y)=>x+y,0)/b.length;
+      const sd=Math.sqrt(a.reduce((s,x)=>s+(x-ma)*(x-ma),0)/Math.max(1,a.length-1));
+      const z=sd>0?(mb-ma)/sd:0;
+      feats.push({feature:key,baseline:ma,recent:mb,zShift:z});
+    }
+    const score=feats.length?feats.reduce((s,x)=>s+Math.abs(x.zShift),0)/feats.length:null;
+    return {
+      status:score===null?"LEARNING":score>=2?"MAJOR_SHIFT":score>=1?"SHIFT":"STABLE",
+      n:rows.length,score,features:feats.sort((a,b)=>Math.abs(b.zShift)-Math.abs(a.zShift))
+    };
+  }
+
+  missedOpportunityReport(threshold=0.01,horizonBars=12) {
+    const b=this.historicalBounds();
+    if(Number(b.n||0)<1500) return {status:"WAITING_FOR_HISTORY",events:0};
+    const candles=this.historicalReplayWindow(Number(b.min_ts),Number(b.max_ts));
+    const championHash=this.paramsHash({retestTol:0.0012,stopBuffer:0.0005,minRR:2,maxExtension:0.002});
+    const setups=this.rows(
+      "SELECT ts,side,result,realized_r FROM replay_results WHERE params_hash=? ORDER BY ts ASC",
+      championHash
+    );
+    if(!setups.length) return {status:"WAITING_FOR_REPLAY",events:0};
+    const events=[];
+    for(let i=0;i+horizonBars<candles.length;i++){
+      const ret=candles[i+horizonBars].c/candles[i].c-1;
+      if(Math.abs(ret)<threshold) continue;
+      const side=ret>0?"LONG":"SHORT",t=Number(candles[i].t);
+      const covered=setups.some(s=>
+        String(s.side)===side &&
+        Number(s.ts)>=t-30*60_000 &&
+        Number(s.ts)<=t+15*60_000
+      );
+      events.push({ts:t,side,forwardReturn:ret,covered});
+      i+=horizonBars-1;
+    }
+    const missed=events.filter(x=>!x.covered);
+    return {
+      status:"ACTIVE",
+      threshold,
+      horizonMinutes:horizonBars*5,
+      events:events.length,
+      covered:events.length-missed.length,
+      missed:missed.length,
+      coverageRate:events.length?(events.length-missed.length)/events.length:null,
+      largestMisses:missed.sort((a,b)=>Math.abs(b.forwardReturn)-Math.abs(a.forwardReturn)).slice(0,20)
+    };
+  }
+
+  crossMarketLeadResearch() {
+    const rows=this.rows(
+      `SELECT cross_ret_60m,ret_fwd_60m FROM historical_genomes
+       WHERE cross_ret_60m IS NOT NULL AND ret_fwd_60m IS NOT NULL
+       ORDER BY ts DESC LIMIT 5000`
+    );
+    if(rows.length<30) return {status:"LEARNING",n:rows.length,correlation:null};
+    const x=rows.map(r=>Number(r.cross_ret_60m)),y=rows.map(r=>Number(r.ret_fwd_60m));
+    const mx=x.reduce((a,b)=>a+b,0)/x.length,my=y.reduce((a,b)=>a+b,0)/y.length;
+    let num=0,dx=0,dy=0;
+    for(let i=0;i<x.length;i++){const a=x[i]-mx,b=y[i]-my;num+=a*b;dx+=a*a;dy+=b*b;}
+    const corr=dx>0&&dy>0?num/Math.sqrt(dx*dy):null;
+    return {
+      status:"ACTIVE",n:rows.length,correlation:corr,
+      interpretation:"Correlation between imported cross-asset trailing 60m return and BTC following 60m return; association only, not causality."
     };
   }
 
