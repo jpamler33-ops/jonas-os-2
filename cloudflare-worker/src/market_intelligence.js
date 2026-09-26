@@ -68,7 +68,11 @@ export const FEATURE_REGISTRY = [
   { key: "evidence_maturity", group: "validation", critical: true },
   { key: "live_replay_parity", group: "validation", critical: true },
   { key: "leakage_inspector", group: "validation", critical: true },
-  { key: "promotion_constitution", group: "validation", critical: true }
+  { key: "promotion_constitution", group: "validation", critical: true },
+  { key: "immutable_prediction_ledger", group: "validation", critical: true },
+  { key: "model_rule_versioning", group: "validation", critical: true },
+  { key: "feature_abstinence", group: "research", critical: true },
+  { key: "ledger_integrity_audit", group: "validation", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
