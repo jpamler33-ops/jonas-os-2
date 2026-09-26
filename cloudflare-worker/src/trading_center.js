@@ -158,6 +158,25 @@ export class TradingCenter {
         ret_240m REAL
       );
 
+      CREATE TABLE IF NOT EXISTS shadow_setups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        variant TEXT NOT NULL,
+        signature TEXT NOT NULL UNIQUE,
+        opened_ts INTEGER NOT NULL,
+        closed_ts INTEGER,
+        side TEXT NOT NULL,
+        entry REAL NOT NULL,
+        stop REAL NOT NULL,
+        target REAL NOT NULL,
+        planned_rr REAL NOT NULL,
+        level REAL,
+        status TEXT NOT NULL DEFAULT 'OPEN',
+        result TEXT,
+        realized_r REAL,
+        mfe_r REAL NOT NULL DEFAULT 0,
+        mae_r REAL NOT NULL DEFAULT 0
+      );
+
       CREATE TABLE IF NOT EXISTS setup_predictions (
         setup_id INTEGER PRIMARY KEY,
         created_ts INTEGER NOT NULL,
@@ -403,6 +422,8 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_historical_5m_ts ON historical_5m(ts);
       CREATE INDEX IF NOT EXISTS idx_setup_features_session ON setup_features(session);
       CREATE INDEX IF NOT EXISTS idx_setup_predictions_created ON setup_predictions(created_ts);
+      CREATE INDEX IF NOT EXISTS idx_shadow_setups_status ON shadow_setups(status);
+      CREATE INDEX IF NOT EXISTS idx_shadow_setups_variant ON shadow_setups(variant);
       CREATE INDEX IF NOT EXISTS idx_factor_snapshots_ts ON factor_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_oi_ts ON open_interest_history(ts);
       CREATE INDEX IF NOT EXISTS idx_funding_ts ON funding_history(ts);
@@ -1153,11 +1174,11 @@ export class TradingCenter {
       "failure_attribution","alert_value_tracking","orderbook_depth","slippage_model",
       "liquidity_sweep_detection","daily_risk_lock","position_sizing",
       "drawdown_monitor","multiple_testing_guard","model_drift_monitor","source_provenance",
-      "probability_calibration"
+      "probability_calibration","shadow_strategies"
     ]);
     const partial=new Set([
       "counterfactuals","feed_latency_monitor",
-      "lead_lag_network","shadow_strategies",
+      "lead_lag_network",
       "hypothesis_falsification","endpoint_auth","feed_redundancy"
     ]);
     const features=FEATURE_REGISTRY.map(f=>{
@@ -1629,7 +1650,8 @@ export class TradingCenter {
       missedOpportunities:this.missedOpportunityReport(),
       crossMarketLead:this.crossMarketLeadResearch(),
       modelDrift:this.modelDriftReport(),
-      probabilityCalibration:this.probabilityCalibrationReport()
+      probabilityCalibration:this.probabilityCalibrationReport(),
+      shadowStrategies:this.shadowStrategyStats()
     };
   }
 
@@ -1898,6 +1920,85 @@ export class TradingCenter {
     return this.rows(
       `SELECT stage, COUNT(*) AS n FROM alerts GROUP BY stage ORDER BY n DESC`
     );
+  }
+
+  openShadowSetup(variant,confirmed,ctx) {
+    if(!variant||!confirmed) return null;
+    const candleTs=Number(ctx?.c5?.at(-1)?.t||Date.now());
+    const levelBucket=Math.round(Number(confirmed.level||confirmed.entry)/5)*5;
+    const signature=`${variant}|${confirmed.side}|${levelBucket}|${candleTs}`;
+    this.sql.exec(
+      `INSERT OR IGNORE INTO shadow_setups(
+        variant,signature,opened_ts,side,entry,stop,target,planned_rr,level
+      ) VALUES(?,?,?,?,?,?,?,?,?)`,
+      String(variant),signature,candleTs,confirmed.side,
+      Number(confirmed.entry),Number(confirmed.stop),Number(confirmed.target),
+      Number(confirmed.rr),confirmed.level??null
+    );
+    return this.one("SELECT * FROM shadow_setups WHERE signature=?",signature);
+  }
+
+  checkOpenShadowSetups({ts,high,low}) {
+    const open=this.rows("SELECT * FROM shadow_setups WHERE status='OPEN' ORDER BY id ASC");
+    const closed=[];
+    for(const s of open) {
+      const risk=s.side==="LONG"?Number(s.entry)-Number(s.stop):Number(s.stop)-Number(s.entry);
+      if(!(risk>0)) continue;
+      const favorable=s.side==="LONG"?(Number(high)-s.entry)/risk:(s.entry-Number(low))/risk;
+      const adverse=s.side==="LONG"?(s.entry-Number(low))/risk:(Number(high)-s.entry)/risk;
+      const mfe=Math.max(Number(s.mfe_r||0),favorable);
+      const mae=Math.max(Number(s.mae_r||0),adverse);
+      const stopHit=s.side==="LONG"?Number(low)<=s.stop:Number(high)>=s.stop;
+      const targetHit=s.side==="LONG"?Number(high)>=s.target:Number(low)<=s.target;
+      if(stopHit&&targetHit) {
+        this.sql.exec(
+          "UPDATE shadow_setups SET status='CLOSED',result='AMBIGUOUS',closed_ts=?,mfe_r=?,mae_r=? WHERE id=?",
+          Number(ts),mfe,mae,s.id
+        );
+        closed.push({...s,result:"AMBIGUOUS"});
+      } else if(targetHit) {
+        this.sql.exec(
+          "UPDATE shadow_setups SET status='CLOSED',result='TARGET',closed_ts=?,realized_r=?,mfe_r=?,mae_r=? WHERE id=?",
+          Number(ts),Number(s.planned_rr),mfe,mae,s.id
+        );
+        closed.push({...s,result:"TARGET",realized_r:Number(s.planned_rr)});
+      } else if(stopHit) {
+        this.sql.exec(
+          "UPDATE shadow_setups SET status='CLOSED',result='STOP',closed_ts=?,realized_r=-1,mfe_r=?,mae_r=? WHERE id=?",
+          Number(ts),mfe,mae,s.id
+        );
+        closed.push({...s,result:"STOP",realized_r:-1});
+      } else {
+        this.sql.exec("UPDATE shadow_setups SET mfe_r=?,mae_r=? WHERE id=?",mfe,mae,s.id);
+      }
+    }
+    return closed;
+  }
+
+  shadowStrategyStats() {
+    return this.rows(
+      `SELECT variant,
+        COUNT(*) AS n,
+        SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open_n,
+        SUM(CASE WHEN result='TARGET' THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN result='STOP' THEN 1 ELSE 0 END) AS losses,
+        SUM(CASE WHEN result='AMBIGUOUS' THEN 1 ELSE 0 END) AS ambiguous,
+        AVG(CASE WHEN realized_r IS NOT NULL THEN realized_r END) AS avg_r,
+        AVG(mfe_r) AS avg_mfe,
+        AVG(mae_r) AS avg_mae
+       FROM shadow_setups GROUP BY variant ORDER BY n DESC`
+    ).map(r=>{
+      const wins=Number(r.wins||0),losses=Number(r.losses||0),decided=wins+losses;
+      const ci=wilsonInterval(wins,decided);
+      return {
+        variant:r.variant,n:Number(r.n||0),open:Number(r.open_n||0),
+        wins,losses,ambiguous:Number(r.ambiguous||0),
+        hitRate:ci.p,hitLow95:ci.low,hitHigh95:ci.high,
+        avgR:r.avg_r===null?null:Number(r.avg_r),
+        avgMfe:r.avg_mfe===null?null:Number(r.avg_mfe),
+        avgMae:r.avg_mae===null?null:Number(r.avg_mae)
+      };
+    });
   }
 
   recordSetupPrediction({setupId,rawScore=null,sampleN=0,source="empirical_reference",dataQuality=null,novelty=null}) {
@@ -2399,6 +2500,7 @@ export class TradingCenter {
       historicalGenomeRows: this.historicalGenomeCount(),
       timelineEvents: Number(this.one("SELECT COUNT(*) AS n FROM market_timeline")?.n || 0),
       replayResults: Number(this.one("SELECT COUNT(*) AS n FROM replay_results")?.n || 0),
+      shadowSetups: Number(this.one("SELECT COUNT(*) AS n FROM shadow_setups")?.n || 0),
       macroEvents: Number(this.one("SELECT COUNT(*) AS n FROM macro_events")?.n || 0),
       venueSnapshots: Number(this.one("SELECT COUNT(*) AS n FROM venue_snapshots")?.n || 0)
     };
