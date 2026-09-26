@@ -513,7 +513,11 @@ export class RadarDO extends DurableObject {
       lastWorldModelAt: 0,
       lastWorldModelError: null,
       lastWorldDivergenceSignature: null,
-      lastWorldDivergenceAlertAt: 0
+      lastWorldDivergenceAlertAt: 0,
+      lastWorldOutcomeAt: 0,
+      lastWorldOutcomeError: null,
+      lastWorldRealitySignature: null,
+      lastWorldRealityAlertAt: 0
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -648,6 +652,12 @@ export class RadarDO extends DurableObject {
           calibration:this.center.marketWorldCalibrationReport(1000),
           lastRunAt:this.mem.lastWorldModelAt||null,
           lastError:this.mem.lastWorldModelError||null
+        },
+        worldOutcomes: {
+          latest:this.center.latestMarketWorldOutcomes(),
+          reality:this.center.worldRealityReport(),
+          lastRunAt:this.mem.lastWorldOutcomeAt||null,
+          lastError:this.mem.lastWorldOutcomeError||null
         },
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
@@ -804,6 +814,18 @@ export class RadarDO extends DurableObject {
         lastRunAt:this.mem.lastWorldModelAt||null,
         lastError:this.mem.lastWorldModelError||null
       });
+    }
+
+    if (path === "/api/world-outcomes") {
+      return Response.json({
+        latest:this.center.latestMarketWorldOutcomes()||this.center.marketWorldOutcomeReport(),
+        reality:this.center.worldRealityReport(),
+        lastRunAt:this.mem.lastWorldOutcomeAt||null,
+        lastError:this.mem.lastWorldOutcomeError||null
+      });
+    }
+    if (path === "/api/world-reality") {
+      return Response.json(this.center.worldRealityReport());
     }
 
     if (path === "/api/macro") {
@@ -1387,6 +1409,40 @@ export class RadarDO extends DurableObject {
           const world=this.center.refreshMarketWorldModel({horizon:12,beamWidth:24,branchWidth:4});
           this.mem.lastWorldModelAt=now;
           this.mem.lastWorldModelError=null;
+
+          try {
+            this.center.refreshMarketWorldOutcomes(world);
+            this.mem.lastWorldOutcomeAt=now;
+            this.mem.lastWorldOutcomeError=null;
+          } catch(e) {
+            this.mem.lastWorldOutcomeError=e?.message||String(e);
+          }
+
+          const reality=this.center.worldRealityReport();
+          const dominant=reality?.dominant||null;
+          const realitySignature=reality?.lockIn && dominant
+            ? `${reality.originTs}|${dominant.worldRank}|${Math.round(Number(dominant.posteriorProbability||0)*20)}`
+            : null;
+          const realityChanged=realitySignature && realitySignature!==this.mem.lastWorldRealitySignature;
+          const realityCooldown=now-Number(this.mem.lastWorldRealityAlertAt||0)>=2*60*60_000;
+
+          if(reality?.lockIn && realityChanged && realityCooldown) {
+            await this.notifyOnce(
+              `world-reality|${realitySignature}`,
+              [
+                "BTC — MARKET WORLD CONVERGENCE",
+                `Beobachtete Schritte: ${reality.resolvedSteps}`,
+                `Aktuell ähnlichste Welt: #${dominant.worldRank}`,
+                `Posterior-Gewicht: ${(Number(dominant.posteriorProbability||0)*100).toFixed(1)}%`,
+                `Token-Ähnlichkeit: ${dominant.meanTokenSimilarity===null||dominant.meanTokenSimilarity===undefined?"—":(Number(dominant.meanTokenSimilarity)*100).toFixed(0)+"%"}`,
+                `Exakte Token-Treffer: ${dominant.exactMatches}/${dominant.comparedSteps}`,
+                "Bedeutung: Einer der vorher erzeugten Zustands-Pfade ähnelt dem tatsächlich entstehenden Markt inzwischen deutlich stärker als die Alternativen.",
+                "Keine Aussage, dass dieser Pfad sicher weiterläuft; kein Entry-Signal."
+              ].join("\n")
+            );
+            this.mem.lastWorldRealityAlertAt=now;
+          }
+          this.mem.lastWorldRealitySignature=realitySignature;
 
           const div=world?.divergence||null;
           const uncertainty=Number(world?.worldUncertainty||0);
