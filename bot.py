@@ -381,21 +381,55 @@ def markdown(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _telegram_chat_id(token: str) -> Optional[str]:
+    configured = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if configured:
+        return configured
+
+    r = requests.get(
+        f"https://api.telegram.org/bot{token}/getUpdates",
+        timeout=10,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    updates = payload.get("result", [])
+
+    for update in reversed(updates):
+        msg = update.get("message") or update.get("edited_message") or {}
+        chat = msg.get("chat") or {}
+        chat_id = chat.get("id")
+        if chat_id is not None:
+            return str(chat_id)
+
+    return None
+
+
 def send_telegram(result: dict) -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token:
+        return
 
-    if not token or not chat:
+    chat = _telegram_chat_id(token)
+    if not chat:
+        print("Telegram: noch kein Chat gefunden. Oeffne den Bot in Telegram und sende /start.")
         return
-    if result["decision"] not in ("LONG SETUP", "SHORT SETUP"):
+
+    manual_test = os.getenv("GITHUB_EVENT_NAME", "") == "workflow_dispatch"
+    is_signal = result["decision"] in ("LONG SETUP", "SHORT SETUP")
+
+    if not is_signal and not manual_test:
         return
+
+    rr_text = "—" if result["rr"] is None else f"{result['rr']:.2f}"
+    heading = "TEST / AKTUELLER STATUS" if manual_test and not is_signal else result["decision"]
 
     text = (
-        f"BTC {result['decision']}\n"
+        f"BTC SIGNALBOT — {heading}\n"
+        f"Status: {result['decision']}\n"
         f"Entry: {fmt(result['entry'])}\n"
         f"Stop: {fmt(result['stop'])}\n"
         f"Target: {fmt(result['target'])}\n"
-        f"CRV: {result['rr']:.2f}\n"
+        f"CRV: {rr_text}\n"
         f"4H/1H/15m/5m: "
         f"{result['trends']['4h']} / {result['trends']['1h']} / "
         f"{result['trends']['15m']} / {result['trends']['5m']}\n"
