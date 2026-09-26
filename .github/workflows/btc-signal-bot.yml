@@ -45,6 +45,16 @@ jobs:
           python -m py_compile bot.py live_bot.py macro_guard.py
           python bot.py --self-test
 
+      - name: Cloudflare Worker Syntaxcheck
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cloudflare Worker Dry Run
+        run: |
+          npm install
+          npx wrangler deploy --dry-run --outdir .wrangler-dry-run
+
       - name: BTC Regeln pruefen
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.BIGGJ_BOT }}
