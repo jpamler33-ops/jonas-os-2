@@ -254,6 +254,27 @@ export class TradingCenter {
         source TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS historical_genomes (
+        ts INTEGER PRIMARY KEY,
+        price REAL NOT NULL,
+        ret_5m REAL,
+        ret_15m REAL,
+        atr_pct REAL,
+        volume_ratio REAL,
+        ema_distance_pct REAL,
+        oi_change REAL,
+        funding_rate REAL,
+        long_short_ratio REAL,
+        cross_ret_60m REAL,
+        data_completeness REAL,
+        state_label TEXT,
+        fingerprint TEXT,
+        ret_fwd_15m REAL,
+        ret_fwd_60m REAL,
+        ret_fwd_240m REAL,
+        source TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS market_genomes (
         ts INTEGER PRIMARY KEY,
         price REAL NOT NULL,
@@ -347,6 +368,7 @@ export class TradingCenter {
       CREATE INDEX IF NOT EXISTS idx_orderflow_5m_ts ON orderflow_5m(ts);
       CREATE INDEX IF NOT EXISTS idx_venue_snapshots_ts ON venue_snapshots(ts);
       CREATE INDEX IF NOT EXISTS idx_market_genomes_ts ON market_genomes(ts);
+      CREATE INDEX IF NOT EXISTS idx_historical_genomes_ts ON historical_genomes(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_ts ON market_timeline(ts);
       CREATE INDEX IF NOT EXISTS idx_timeline_type ON market_timeline(event_type);
       CREATE INDEX IF NOT EXISTS idx_replay_params ON replay_results(params_hash);
