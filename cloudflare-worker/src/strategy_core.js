@@ -137,7 +137,7 @@ export function evaluateStrategyContext(ctx,opts={}){
 
 export function contextFrom5m(all5,currentIndex){
   const c5=(all5||[]).slice(Math.max(0,currentIndex-6000),currentIndex+1);
-  if(c5.length<1000)return null;
+  if(c5.length<960)return null;
   const last=c5.at(-1),currentClose=Number(last.t)+5*60_000;
   const c15=aggregateClosed(c5,15,currentClose);
   const c1h=aggregateClosed(c5,60,currentClose);
