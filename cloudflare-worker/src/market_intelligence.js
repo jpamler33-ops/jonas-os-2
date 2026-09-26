@@ -87,7 +87,10 @@ export const FEATURE_REGISTRY = [
   { key: "market_world_model", group: "research", critical: true },
   { key: "multi_step_state_rollout", group: "research", critical: true },
   { key: "world_branch_divergence", group: "research", critical: true },
-  { key: "world_model_calibration", group: "validation", critical: true }
+  { key: "world_model_calibration", group: "validation", critical: true },
+  { key: "world_outcome_engine", group: "research", critical: true },
+  { key: "world_reality_tracker", group: "research", critical: true },
+  { key: "world_risk_projection", group: "research", critical: true }
 ];
 
 export function clamp(x, lo = 0, hi = 1) {
