@@ -503,7 +503,9 @@ export class RadarDO extends DurableObject {
       lastInformationFlowAt: 0,
       lastInformationFlowError: null,
       lastPhaseStatus: null,
-      lastPhaseAlertAt: 0
+      lastPhaseAlertAt: 0,
+      lastGrammarStatus: null,
+      lastGrammarAlertAt: 0
     };
 
     ctx.blockConcurrencyWhile(async () => {
@@ -622,6 +624,7 @@ export class RadarDO extends DurableObject {
         marketLanguage: this.center.marketLanguageReport(500),
         informationFlow: this.center.latestInformationFlow(),
         phaseTransition: this.center.phaseTransitionReport(),
+        marketGrammar: this.center.marketGrammarReport(600),
         replay: this.replayPublicState(),
         genomeBackfill: this.genomeBackfillPublicState(),
         macro: {
@@ -743,6 +746,10 @@ export class RadarDO extends DurableObject {
     }
     if (path === "/api/phase-transition") {
       return Response.json(this.center.phaseTransitionReport());
+    }
+
+    if (path === "/api/grammar" || path === "/api/next-state") {
+      return Response.json(this.center.marketGrammarReport());
     }
 
     if (path === "/api/macro") {
@@ -1311,6 +1318,40 @@ export class RadarDO extends DurableObject {
         this.mem.lastInformationFlowError=null;
       }
 
+      const grammar=this.center.marketGrammarReport(1000);
+      const latestGrammar=grammar.latestResolved||null;
+      const previousGrammar=this.mem.lastGrammarStatus||null;
+      const grammarStatus=latestGrammar?.status||"LEARNING";
+      this.mem.lastGrammarStatus=grammarStatus;
+
+      const grammarSignificant=["GRAMMAR_BREAK","UNUSUAL"].includes(grammarStatus);
+      const grammarChanged=previousGrammar!==grammarStatus;
+      const grammarCooldown=now-Number(this.mem.lastGrammarAlertAt||0)>=2*60*60_000;
+
+      if(grammarSignificant && grammarChanged && grammarCooldown && Number(grammar.resolvedN||0)>=50) {
+        const next=grammar.latestForecast?.top?.slice(0,3)||[];
+        const nextText=next.length
+          ? next.map((x,i)=>`${i+1}. ${x.token} ${(Number(x.probability||0)*100).toFixed(1)}%`).join("\n")
+          : "noch keine belastbare nächste Zustandsverteilung";
+        await this.notifyOnce(
+          `grammar|${grammarStatus}|${Math.floor(now/(2*60*60_000))}`,
+          [
+            "BTC — MARKET GRAMMAR ANOMALY",
+            `Status: ${grammarStatus}`,
+            `Observed token probability: ${latestGrammar?.actualProbability===null||latestGrammar?.actualProbability===undefined?"—":(Number(latestGrammar.actualProbability)*100).toFixed(2)+"%"}`,
+            `Surprise: ${latestGrammar?.surpriseBits===null||latestGrammar?.surpriseBits===undefined?"—":Number(latestGrammar.surpriseBits).toFixed(2)+" bits"}`,
+            `Historical surprise percentile: ${latestGrammar?.surprisePercentile===null||latestGrammar?.surprisePercentile===undefined?"—":(Number(latestGrammar.surprisePercentile)*100).toFixed(1)+"%"}`,
+            `Grammar drift: ${grammar.drift?.status||"LEARNING"}`,
+            "Nächste plausible Markt-Zustände:",
+            nextText,
+            "",
+            "Bedeutung: Die aktuelle Zustandsfolge passt ungewöhnlich schlecht zur bisher beobachteten Market Grammar.",
+            "Kein Richtungs- oder Entry-Signal."
+          ].join("\n")
+        );
+        this.mem.lastGrammarAlertAt=now;
+      }
+
       const phase=this.center.phaseTransitionReport();
       const previous=this.mem.lastPhaseStatus||null;
       this.mem.lastPhaseStatus=phase.status;
@@ -1329,6 +1370,7 @@ export class RadarDO extends DurableObject {
             `Status: ${phase.status}`,
             `Instabilitäts-Score: ${(Number(phase.score||0)*100).toFixed(0)}/100`,
             `Sequenz-Rarität: ${(rarity*100).toFixed(0)}%`,
+            `Grammar: ${phase.grammarStatus||"LEARNING"} | Surprise ${phase.grammarSurprisePercentile===null||phase.grammarSurprisePercentile===undefined?"—":(Number(phase.grammarSurprisePercentile)*100).toFixed(0)+"%"}`,
             `Aktueller Information-Leader: ${leader}`,
             `Market Sequence: ${phase.currentSequence||"noch nicht genug Daten"}`,
             "Bedeutung: Marktstruktur verändert sich ungewöhnlich stark. Das ist keine Richtungsprognose und kein Entry-Signal."
