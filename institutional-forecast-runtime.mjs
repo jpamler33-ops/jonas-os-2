@@ -110,9 +110,13 @@ export function episodeVectorExtraFeatures(vector,availableAt){
 }
 
 export function forecastHistoryFromEpisodes(episodes,{
-  featureIds=EPISODE_FORECAST_FEATURE_IDS
+  featureIds=EPISODE_FORECAST_FEATURE_IDS,
+  horizonMs=null
 }={}){
   const wanted=new Set(featureIds);
+  const allowedHorizons=Array.isArray(horizonMs)&&horizonMs.length
+    ?new Set(horizonMs.map(Number).filter(Number.isFinite))
+    :null;
   const rows=[];
   let rejected=0;
   let blockedFutureOutcome=0;
@@ -137,7 +141,9 @@ export function forecastHistoryFromEpisodes(episodes,{
       continue;
     }
 
-    for(const [bars,horizonMs] of Object.entries(EPISODE_HORIZON_TO_MS)){
+    for(const [bars,horizon] of Object.entries(EPISODE_HORIZON_TO_MS)){
+      if(allowedHorizons&&!allowedHorizons.has(horizon)) continue;
+      const horizonMs=horizon;
       const outcome=episode?.outcomes?.[bars];
       if(!outcome) continue;
       const maturedAt=finiteOrNull(outcome?.maturedAt);
@@ -284,7 +290,11 @@ export async function saveInstitutionalForecastRuntime(runtime){
 
 export function seedInstitutionalForecastRuntimeFromEpisodes(runtime,episodes){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
-  const built=forecastHistoryFromEpisodes(episodes,{featureIds:runtime.engine.configSnapshot().featureIds});
+  const cfg=runtime.engine.configSnapshot();
+  const built=forecastHistoryFromEpisodes(episodes,{
+    featureIds:cfg.featureIds,
+    horizonMs:cfg.horizons.map(h=>h.horizonMs)
+  });
   const before=runtime.engine.historySize();
   runtime.engine.addHistoryMany(built.rows);
   const after=runtime.engine.historySize();
