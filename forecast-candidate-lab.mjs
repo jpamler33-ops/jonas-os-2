@@ -497,3 +497,133 @@ export function evaluateForecastCandidateWalkForward({
     }
   });
 }
+
+
+export function evaluateForecastFeatureExtensionWalkForward({
+  historyRows,
+  incumbentConfig,
+  addedFeatureIds,
+  dataCutoffAt,
+  asOf,
+  minimumTrainCases=40,
+  highConfidenceThreshold=.65
+}={}){
+  const t=finite(asOf,'asOf');
+  const cutoff=finite(dataCutoffAt,'dataCutoffAt');
+  if(t<cutoff) throw new Error('asOf cannot predate feature research cutoff');
+
+  const baseIds=[...(incumbentConfig?.featureIds||[])];
+  if(!baseIds.length) throw new Error('incumbent featureIds required');
+  const additions=[...new Set((Array.isArray(addedFeatureIds)?addedFeatureIds:[]).map(x=>String(x).trim()).filter(Boolean))];
+  if(!additions.length) throw new Error('addedFeatureIds required');
+  if(additions.some(id=>baseIds.includes(id))) throw new Error('feature research additions must be new');
+
+  const candidateConfig=clone(incumbentConfig);
+  candidateConfig.featureIds=[...baseIds,...additions];
+  const a={horizons:(incumbentConfig?.horizons||[]).map(h=>({id:String(h.id),horizonMs:Number(h.horizonMs),flatThreshold:Number(h.flatThreshold)}))};
+  const b={horizons:(candidateConfig?.horizons||[]).map(h=>({id:String(h.id),horizonMs:Number(h.horizonMs),flatThreshold:Number(h.flatThreshold)}))};
+  if(sha256(a)!==sha256(b)) throw new Error('feature research may not change forecast target semantics');
+
+  const all=stableRows((historyRows||[]).filter(r=>validHistoryRow(r,candidateConfig.featureIds)));
+  const blockedFuture=all.filter(r=>Number(r.resolvedAt)>t).length;
+  const usable=all.filter(r=>Number(r.resolvedAt)<=t);
+  const testRows=usable.filter(r=>Number(r.timestamp)>cutoff);
+
+  const candidateEngine=new ProbabilisticForecastEngine(candidateConfig);
+  const incumbentEngine=new ProbabilisticForecastEngine(clone(incumbentConfig));
+  const candPoints=[],incPoints=[],pendingCand=[],pendingInc=[];
+  let historyCursor=0,pitViolations=0,skippedWarmup=0;
+
+  const byTimestamp=new Map();
+  for(const row of testRows){
+    const xs=byTimestamp.get(Number(row.timestamp))??[];
+    xs.push(row);
+    byTimestamp.set(Number(row.timestamp),xs);
+  }
+  const times=[...byTimestamp.keys()].sort((x,y)=>x-y);
+
+  const maturePending=(pending,engine,at)=>{
+    const keep=[];
+    for(const p of pending){
+      if(p.resolvedAt<=at) feedMaturedPoint(engine,p);
+      else keep.push(p);
+    }
+    pending.splice(0,pending.length,...keep);
+  };
+
+  for(const timestamp of times){
+    while(historyCursor<usable.length&&Number(usable[historyCursor].resolvedAt)<=timestamp){
+      const row=usable[historyCursor++];
+      if(Number(row.resolvedAt)>timestamp){ pitViolations++; continue; }
+      candidateEngine.addHistory(row);
+      incumbentEngine.addHistory(row);
+    }
+    maturePending(pendingCand,candidateEngine,timestamp);
+    maturePending(pendingInc,incumbentEngine,timestamp);
+
+    const trainCount=candidateEngine.historySnapshot(timestamp)
+      .filter(r=>Number(r.resolvedAt)<=timestamp).length;
+    const group=byTimestamp.get(timestamp)||[];
+    if(trainCount<Math.max(1,Number(minimumTrainCases))){
+      skippedWarmup+=group.length;
+      continue;
+    }
+
+    for(const row of group){
+      const hc=horizonConfig(candidateConfig,row.horizonMs);
+      const hi=horizonConfig(incumbentConfig,row.horizonMs);
+      if(!hc||!hi) continue;
+      const cf=forecastForRow(candidateEngine,row,candidateConfig);
+      const inf=forecastForRow(incumbentEngine,row,incumbentConfig);
+      const cp=evaluationPoint(row,cf.input,cf.forecast);
+      const ip=evaluationPoint(row,inf.input,inf.forecast);
+      candPoints.push(cp);
+      incPoints.push(ip);
+      pendingCand.push(cp);
+      pendingInc.push(ip);
+    }
+  }
+
+  const candidateMetrics=aggregate(candPoints,highConfidenceThreshold);
+  const incumbentMetrics=aggregate(incPoints,highConfidenceThreshold);
+  const independentEpisodes=independentEpisodeCount(candPoints);
+  const pairedIndependent=independentPairedSeries(candPoints,incPoints,{maxPoints:1000});
+  const core={
+    version:FORECAST_CANDIDATE_LAB_VERSION,
+    kind:'TCX_FORECAST_FEATURE_EXTENSION_WALK_FORWARD',
+    asOf:t,
+    dataCutoffAt:cutoff,
+    incumbentConfigHash:sha256(incumbentConfig),
+    candidateConfigHash:sha256(candidateConfig),
+    addedFeatureIds:additions,
+    evaluation:{
+      cases:candPoints.length,
+      independentEpisodes,
+      candidate:candidateMetrics,
+      incumbent:incumbentMetrics,
+      deltas:{
+        brier:candidateMetrics.brier-incumbentMetrics.brier,
+        logLoss:candidateMetrics.logLoss-incumbentMetrics.logLoss,
+        intervalCoverage:candidateMetrics.intervalCoverage-incumbentMetrics.intervalCoverage,
+        highConfidenceWrongRate:candidateMetrics.highConfidenceWrongRate-incumbentMetrics.highConfidenceWrongRate
+      }
+    },
+    diagnostics:{
+      candidateGateCounts:gateCounts(candPoints),
+      incumbentGateCounts:gateCounts(incPoints),
+      skippedWarmup,
+      blockedFuture,
+      pitViolations,
+      temporalOosPassed:pitViolations===0,
+      pairedIndependentTotal:independentEpisodes,
+      pairedIndependent,
+      sameSampleFeedbackAllowed:false,
+      productionMutationAllowed:false
+    },
+    objective:'INCREMENTAL_FEATURE_VALUE_NOT_PNL',
+    executionMode:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false
+  };
+  return deepFreeze({...core,fingerprint:sha256(core)});
+}
