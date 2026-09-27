@@ -87,6 +87,7 @@ test('institutional staged release set hashes forecast, science, admission and t
     'institutional-forecast-issuance.mjs',
     'institutional-forecast-runtime.mjs',
     'forecast-product.mjs',
+    'forecast-candidate-lab.mjs',
     'forecast-runtime/forecast/engine.js',
     'forecast-runtime/forecast/calibration.js',
     'science-runtime/empirical-support.mjs',
