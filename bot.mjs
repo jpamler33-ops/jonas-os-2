@@ -17,6 +17,7 @@ import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marke
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, createEvidenceRecord, appendEvidenceRecord, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
+import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -44,6 +45,11 @@ const sorMaxBookAgeMs = Math.max(1000, Number(process.env.TCX_SOR_MAX_BOOK_AGE_M
 const sorBinanceFeeBps = Math.max(0, Number(process.env.TCX_SOR_BINANCE_FEE_BPS || shadowTakerFeeBps));
 const sorOkxFeeBps = Math.max(0, Number(process.env.TCX_SOR_OKX_FEE_BPS || shadowTakerFeeBps));
 const sorKrakenFeeBps = Math.max(0, Number(process.env.TCX_SOR_KRAKEN_FEE_BPS || shadowTakerFeeBps));
+const vqmWatchMs = Math.max(10000, Number(process.env.TCX_VQM_WATCH_MS || 15000));
+const vqmMarkoutMaxLagMs = Math.max(5000, Number(process.env.TCX_VQM_MARKOUT_MAX_LAG_MS || 45000));
+const vqmMinSamples = Math.max(3, Number(process.env.TCX_VQM_MIN_SAMPLES || 12));
+const vqmMinToxicitySamples = Math.max(10, Number(process.env.TCX_VQM_MIN_TOXICITY_SAMPLES || 30));
+const vqmHalfLifeDays = Math.max(1, Number(process.env.TCX_VQM_HALF_LIFE_DAYS || 30));
 const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').split(',').map(x => x.trim()).filter(Boolean));
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT')
@@ -84,6 +90,12 @@ const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-
 const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
 const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
 const loadedShadowOms = await loadShadowOms(shadowOmsFile);
+const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
+const loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
+let venueQualityRecords = loadedVenueQuality.records;
+let venueQualityHealthy = loadedVenueQuality.healthy;
+let venueQualityLastError = loadedVenueQuality.error || null;
+let venueQualityPersistenceQueue = Promise.resolve();
 let shadowOrders = loadedShadowOms.orders;
 let shadowOmsHealthy = loadedShadowOms.healthy;
 let shadowOmsLastError = loadedShadowOms.error || null;
@@ -116,6 +128,14 @@ const institutionalConfig = Object.freeze({
       OKX:sorOkxFeeBps,
       KRAKEN:sorKrakenFeeBps
     }
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    canExecuteLive:false,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs
   }
 });
 
@@ -142,7 +162,8 @@ try {
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
-      shadowSor:SHADOW_SOR_VERSION
+      shadowSor:SHADOW_SOR_VERSION,
+      venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -167,6 +188,24 @@ let evidenceHistoryQueue = Promise.resolve();
 let persistenceHealthy = true;
 let persistenceLastError = null;
 let persistenceQueue = Promise.resolve();
+
+async function persistVenueQualityMemory(reason='mutation') {
+  venueQualityPersistenceQueue = venueQualityPersistenceQueue.then(async()=>{
+    if(!venueQualityHealthy) return false;
+    try {
+      venueQualityRecords = await saveVenueQualityMemory(venueQualityFile,venueQualityRecords,{maxRecords:50000});
+      venueQualityLastError=null;
+      return true;
+    } catch(err) {
+      venueQualityHealthy=false;
+      venueQualityLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'venue_quality.persistence',message:venueQualityLastError});
+      console.error('venue quality persistence error',reason,venueQualityLastError);
+      return false;
+    }
+  });
+  return venueQualityPersistenceQueue;
+}
 
 async function persistShadowOms(reason='mutation') {
   shadowOmsPersistenceQueue = shadowOmsPersistenceQueue.then(async()=>{
