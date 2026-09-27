@@ -4173,14 +4173,41 @@ async function venueQualityWatcher() {
 async function appendResearchDataPlaneQueued(inputs,reason='capture'){
   if(!researchDataPlane.healthy) return {ok:false,appended:0,duplicates:0,reason:'RDP_UNHEALTHY'};
   const job=researchDataPlaneAppendQueue.then(async()=>{
-    const result=await appendResearchDataPlane(researchDataPlane,inputs);
+    const started=Date.now();
+    const nextGovernance=structuredClone(researchDataGovernance);
+    refreshResearchSourceFreshness(nextGovernance,{
+      now:started,
+      monitorStartedAt:researchGovernanceMonitorStartedAt
+    });
+    const governed=(Array.isArray(inputs)?inputs:[])
+      .map(input=>governResearchSnapshot(nextGovernance,input,{evaluatedAt:started}))
+      .filter(Boolean);
+    const result=await appendResearchDataPlane(researchDataPlane,governed);
+    researchDataGovernance=nextGovernance;
+    try{
+      await saveResearchDataGovernance(researchGovernanceFile,researchDataGovernance);
+      researchGovernanceHealthy=true;
+      researchGovernanceLastError=null;
+    }catch(err){
+      researchGovernanceHealthy=false;
+      researchGovernanceLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'research_data_governance.persistence',message:researchGovernanceLastError});
+    }
+    const governanceSummary=researchDataGovernanceSummary(researchDataGovernance,{now:started});
     recordOperation(observability,{
       name:'research_data_plane_append',
       ok:true,
-      latencyMs:0,
+      latencyMs:Date.now()-started,
       error:null
     });
-    return {ok:true,appended:result.appended.length,duplicates:result.duplicates};
+    return {
+      ok:true,
+      appended:result.appended.length,
+      duplicates:result.duplicates,
+      governed:governed.length,
+      restrictedSources:governanceSummary.quarantinedSources.length,
+      governanceFingerprint:governanceSummary.fingerprint
+    };
   });
   researchDataPlaneAppendQueue=job.catch(err=>{
     const msg=err instanceof Error?err.message:String(err);
