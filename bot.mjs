@@ -44,7 +44,7 @@ import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnaps
 import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
 import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
-import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
+import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';\nimport { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -263,6 +263,11 @@ const researchDataPlane=await openResearchDataPlane(researchDataPlaneFile,{
   warnBytes:Number(process.env.TCX_RESEARCH_DATA_PLANE_WARN_BYTES||125829120),
   hardBytes:Number(process.env.TCX_RESEARCH_DATA_PLANE_HARD_BYTES||167772160)
 });
+const researchGovernanceFile=process.env.TCX_RESEARCH_GOVERNANCE_FILE||'/data/tcx-research-governance.json';
+let researchDataGovernance=await loadResearchDataGovernance(researchGovernanceFile);
+let researchGovernanceHealthy=true;
+let researchGovernanceLastError=researchDataGovernance.lastLoadError||null;
+const researchGovernanceMonitorStartedAt=Date.now();
 const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-release-registry.jsonl';
 const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
 const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
@@ -326,6 +331,11 @@ const institutionalConfig = Object.freeze({
     configHash:sha256(forecastRuntime.engine.configSnapshot()),
     objective:'FORECAST_CALIBRATION_AND_ACCURACY_NOT_PNL',
     canExecuteLive:false
+  },
+  researchDataGovernance:{
+    version:RESEARCH_DATA_GOVERNANCE_VERSION,
+    objective:'SOURCE_QUALITY_AND_POINT_IN_TIME_DATA_CONTROL',
+    canExecuteLive:false
   }
 });
 
@@ -369,7 +379,9 @@ try {
       scientificCore:SCIENTIFIC_CORE_VERSION,
       institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
       forecastConfigHash:sha256(forecastRuntime.engine.configSnapshot()),
-      forecastProduct:FORECAST_PRODUCT_VERSION
+      forecastProduct:FORECAST_PRODUCT_VERSION,
+      researchDataPlane:RESEARCH_DATA_PLANE_VERSION,
+      researchDataGovernance:RESEARCH_DATA_GOVERNANCE_VERSION
     }
   });
   if(releaseRegistry.healthy){
