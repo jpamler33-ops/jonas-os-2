@@ -89,3 +89,26 @@ Model/parameter changes require:
 After the Forecast Specialist / Alpha.30 integration, TCX must expose one forecast contract and one lifecycle/calibration truth.
 
 Competing forecast engines may remain as experiments only if they have explicit ownership and cannot independently drive product truth.
+
+
+## D-016 · Institutional v3 is canonical on main
+
+PR #2 was merged to `main` at merge commit:
+
+```text
+331f9f4c93a5a8cff52b9057cdc888b8fdef8c13
+```
+
+The following are no longer specialist/integration candidates:
+- canonical Forecast Intelligence
+- Scientific Core
+- Institutional Admission
+- Research Trace
+- durable Forecast Runtime
+- model candidate / walk-forward / promotion governance
+- operational readiness / persistence contracts
+- selected V3 Expansion Pack adaptations
+
+Future work must extend these canonical owners rather than recreating them in a parallel branch.
+
+Repository merge does not by itself prove live deployment health. Deployment acceptance remains a separate fail-closed gate using `/ready`, release identity and post-deploy smoke tests.
