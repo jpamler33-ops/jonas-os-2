@@ -75,6 +75,7 @@ export function deriveForecastRuntimeQuality({
 
 export function renderInstitutionalForecastCard(issuance,{
   runtimeSummary=null,
+  auditBound=true,
   now=Date.now()
 }={}){
   if(!issuance?.forecast||!issuance?.admission) throw new Error('institutional issuance required');
@@ -82,7 +83,8 @@ export function renderInstitutionalForecastCard(issuance,{
   const lines=[
     '🔮 TCX FORECAST INTELLIGENCE · '+String(issuance.symbol).replace('USDT','/USDT'),
     '',
-    'Admission: '+issuance.admission.gate+' · '+issuance.admission.researchDisposition,
+    'Admission: '+(auditBound?issuance.admission.gate:'ABSTAIN')+' · '+(auditBound?issuance.admission.researchDisposition:'ABSTAIN'),
+    'Audit: '+(auditBound?'BOUND':'FAILED → ABSTAIN'),
     'Science: '+f.scienceGate+' · Forecast: '+f.overallGate,
     'Research validity: '+String(issuance.trace?.validity?.state||'UNKNOWN'),
     'Data safety: '+String(issuance.trace?.safety?.state||'UNKNOWN'),
@@ -90,13 +92,17 @@ export function renderInstitutionalForecastCard(issuance,{
   ];
 
   for(const h of f.horizons){
-    const display=h.display?.probabilityDisplayAllowed===true;
+    const display=auditBound&&issuance.probabilityDisplayAllowed===true&&h.display?.probabilityDisplayAllowed===true;
     lines.push(
       h.horizonId+' · '+h.direction+' · gate '+h.gate,
       'μ '+signedPct(h.expectedReturn)+' · q10..q90 '+signedPct(h.interval?.q10)+' .. '+signedPct(h.interval?.q90),
       display
         ?'P↑ '+pct(h.display.probabilities.up,0)+' · P→ '+pct(h.display.probabilities.flat,0)+' · P↓ '+pct(h.display.probabilities.down,0)
-        :'Probability: SUPPRESSED · '+reasons(h.display?.suppressionReasons,2).join(', '),
+        :'Probability: SUPPRESSED · '+(
+          !auditBound
+            ?'AUDIT_BINDING_FAILED'
+            :reasons(h.display?.suppressionReasons,2).join(', ')||'INSTITUTIONAL_ADMISSION_GATE'
+        ),
       'Support n='+Number(h.support?.analogCount||0)+' · ESS '+(finite(h.support?.effectiveSamples)?.toFixed(1)??'—')+
         ' · calibration '+String(h.calibration?.status||'UNKNOWN'),
       ''
