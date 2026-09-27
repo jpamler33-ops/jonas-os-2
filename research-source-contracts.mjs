@@ -1,1 +1,31 @@
-import { sha256 } from './institutional-kernel.mjs';\n\nexport const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V1';\n\nconst contracts=[\n  {id:'DERIVATIVES_MULTI_VENUE',domain:'DERIVATIVES',source:'BINANCE_OKX_PUBLIC_DERIVATIVES',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},\n  {id:'BYBIT_LIQUIDATION_STREAM',domain:'LIQUIDATION',source:'BYBIT_PUBLIC_ALL_LIQUIDATION',minCompleteness:.8,maxPublicationLagMs:120000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},\n  {id:'BITCOIN_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'MEMPOOL_SPACE_PUBLIC',minCompleteness:1,maxPublicationLagMs:1200000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},\n  {id:'ETHEREUM_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'ETHEREUM_PUBLIC_RPC',minCompleteness:1,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},\n  {id:'SOLANA_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'SOLANA_PUBLIC_RPC',minCompleteness:1,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},\n  {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},\n  {id:'PUBLIC_WALLET_COHORT',domain:'WALLET_COHORT',source:'PUBLIC_WALLET_COHORT_RPC',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null}\n].map(x=>Object.freeze({...x}));\n\nconst byKey=new Map(contracts.map(x=>[x.domain+'\u0000'+x.source,x]));\n\nexport const RESEARCH_SOURCE_CONTRACTS=Object.freeze([...contracts]);\n\nexport function researchSourceContract(domain,source){\n  return byKey.get(String(domain||'').toUpperCase()+'\u0000'+String(source||''))||null;\n}\n\nexport function sourceContractKey(domain,source){\n  return String(domain||'').toUpperCase()+':'+String(source||'');\n}\n\nexport function researchSourceContractsManifest(){\n  const rows=RESEARCH_SOURCE_CONTRACTS.map(x=>({...x}));\n  const core={version:RESEARCH_SOURCE_CONTRACTS_VERSION,sourceCount:rows.length,contracts:rows};\n  return Object.freeze({...core,fingerprint:sha256(core)});\n}\n
+import { sha256 } from './institutional-kernel.mjs';
+
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V1';
+
+const contracts=[
+  {id:'DERIVATIVES_MULTI_VENUE',domain:'DERIVATIVES',source:'BINANCE_OKX_PUBLIC_DERIVATIVES',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'BYBIT_LIQUIDATION_STREAM',domain:'LIQUIDATION',source:'BYBIT_PUBLIC_ALL_LIQUIDATION',minCompleteness:.8,maxPublicationLagMs:120000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'BITCOIN_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'MEMPOOL_SPACE_PUBLIC',minCompleteness:1,maxPublicationLagMs:1200000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'ETHEREUM_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'ETHEREUM_PUBLIC_RPC',minCompleteness:1,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'SOLANA_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'SOLANA_PUBLIC_RPC',minCompleteness:1,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},
+  {id:'PUBLIC_WALLET_COHORT',domain:'WALLET_COHORT',source:'PUBLIC_WALLET_COHORT_RPC',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null}
+].map(x=>Object.freeze({...x}));
+
+const byKey=new Map(contracts.map(x=>[x.domain+'\u0000'+x.source,x]));
+
+export const RESEARCH_SOURCE_CONTRACTS=Object.freeze([...contracts]);
+
+export function researchSourceContract(domain,source){
+  return byKey.get(String(domain||'').toUpperCase()+'\u0000'+String(source||''))||null;
+}
+
+export function sourceContractKey(domain,source){
+  return String(domain||'').toUpperCase()+':'+String(source||'');
+}
+
+export function researchSourceContractsManifest(){
+  const rows=RESEARCH_SOURCE_CONTRACTS.map(x=>({...x}));
+  const core={version:RESEARCH_SOURCE_CONTRACTS_VERSION,sourceCount:rows.length,contracts:rows};
+  return Object.freeze({...core,fingerprint:sha256(core)});
+}
