@@ -168,6 +168,7 @@ export function createLiquidationPublicStream({
       connected=true;
       connectedSince=now();
       lastError=null;
+      logger?.info?.('liquidation stream connected',JSON.stringify({url,symbols:wanted.length}));
       try{
         ws.send(JSON.stringify({
           op:'subscribe',
@@ -196,6 +197,7 @@ export function createLiquidationPublicStream({
       if(localGeneration!==generation) return;
       connected=false;
       connectedSince=null;
+      logger?.warn?.('liquidation stream disconnected');
       if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
       scheduleReconnect();
     };
