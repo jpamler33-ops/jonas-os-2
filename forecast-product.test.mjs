@@ -84,3 +84,27 @@ test('audit failure suppresses otherwise displayable probability',()=>{
   assert.match(text,/Probability: SUPPRESSED/);
   assert.doesNotMatch(text,/P↑/);
 });
+
+
+test('audit failure suppresses otherwise displayable probabilities',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1000,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    admission:{gate:'PASS',researchDisposition:'ADMIT_RESEARCH'},
+    trace:{validity:{state:'VALID'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'PASS',overallGate:'PASS',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'PASS',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:true,suppressionReasons:[],probabilities:{up:.6,flat:.2,down:.2}},
+        support:{analogCount:50,effectiveSamples:30},
+        calibration:{status:'CALIBRATED'}
+      }]
+    }
+  };
+  const text=renderInstitutionalForecastCard(issuance,{now:1100,auditHealthy:false});
+  assert.match(text,/Admission: ABSTAIN/);
+  assert.match(text,/Probability: SUPPRESSED/);
+  assert.doesNotMatch(text,/P↑/);
+  assert.match(text,/Audit binding: FAILED/);
+});
