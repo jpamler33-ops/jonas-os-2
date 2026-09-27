@@ -19,6 +19,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'deterministic-replay.mjs',
   'observability.mjs',
   'operational-readiness.mjs',
+  'persistence-contracts.mjs',
   'chaos-engineering.mjs',
   'shadow-oms.mjs',
   'multi-venue-shadow-sor.mjs',
