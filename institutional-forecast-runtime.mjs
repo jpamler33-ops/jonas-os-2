@@ -345,22 +345,7 @@ export function issueInstitutionalForecast(runtime,{
   });
 }
 
-export function observeInstitutionalForecastRuntime(runtime,{
-  input,
-  quality=1
-}={}){
-  if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
-  const iv=verifyCanonicalForecastInput(input);
-  if(!iv.ok) throw new Error('canonical forecast observation invalid: '+iv.reasons.join(','));
-
-  const revisions=runtime.intelligence.observe(input);
-  const resolved=runtime.journal.observe({
-    symbol:input.symbol,
-    timestamp:input.asOf,
-    price:input.price,
-    quality
-  });
-
+function evaluationsFromResolved(runtime,resolved){
   const evaluations=[];
   for(const row of resolved){
     const forecastId=String(row.id).slice(0,-(':'+row.horizonId).length);
@@ -395,11 +380,50 @@ export function observeInstitutionalForecastRuntime(runtime,{
     });
     evaluations.push({issuanceId:issuance.issuanceId,trace:issuance.trace,evaluation});
   }
+  return evaluations;
+}
+
+export function observeInstitutionalForecastOutcomePoint(runtime,{
+  symbol,
+  timestamp,
+  price,
+  quality=1
+}={}){
+  if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
+  const point={
+    symbol:String(symbol??'').toUpperCase(),
+    timestamp:finite(timestamp,'timestamp'),
+    price:finite(price,'price'),
+    quality
+  };
+  if(!(point.price>0)) throw new Error('price must be positive');
+  const resolved=runtime.journal.observe(point);
+  return deepFreeze({
+    resolved:clone(resolved),
+    evaluations:evaluationsFromResolved(runtime,resolved)
+  });
+}
+
+export function observeInstitutionalForecastRuntime(runtime,{
+  input,
+  quality=1
+}={}){
+  if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
+  const iv=verifyCanonicalForecastInput(input);
+  if(!iv.ok) throw new Error('canonical forecast observation invalid: '+iv.reasons.join(','));
+
+  const revisions=runtime.intelligence.observe(input);
+  const resolved=runtime.journal.observe({
+    symbol:input.symbol,
+    timestamp:input.asOf,
+    price:input.price,
+    quality
+  });
 
   return deepFreeze({
     revisions:clone(revisions),
     resolved:clone(resolved),
-    evaluations
+    evaluations:evaluationsFromResolved(runtime,resolved)
   });
 }
 
