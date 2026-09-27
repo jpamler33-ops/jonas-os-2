@@ -1,4 +1,4 @@
-export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v3-live-intelligence";
+export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v4-autolearn";
 
 export const PRODUCT_STATUS = Object.freeze([
   "VALID",
@@ -156,7 +156,7 @@ export function homeKeyboard() {
     ],
     [
       {text:"🔔 Alerts",callback_data:"home:alerts"},
-      {text:"🧠 Was TCX gelernt hat",callback_data:"home:performance"}
+      {text:"🧪 TCX Lernzentrum",callback_data:"home:performance"}
     ],
     [
       {text:"🖥 System",callback_data:"home:system"},
