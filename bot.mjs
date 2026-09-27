@@ -34,6 +34,7 @@ import {
   saveInstitutionalForecastRuntime,
   seedInstitutionalForecastRuntimeFromEpisodes,
   issueInstitutionalForecast,
+  observeInstitutionalForecastRuntime,
   observeInstitutionalForecastOutcomePoint,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
@@ -2767,6 +2768,40 @@ async function showForecast(chatId,symbol,messageId=null){
     regimeConfidence:runtimeQuality.regimeConfidence,
     extraFeatures
   });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={chat_id:chatId,text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    if(messageId) return tg('editMessageText',{...failPayload,message_id:messageId});
+    return tg('sendMessage',failPayload);
+  }
 
   const scienceAdapter=buildForecastScienceInputs({
     engine:forecastRuntime.engine,
