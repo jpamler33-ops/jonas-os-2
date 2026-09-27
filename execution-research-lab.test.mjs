@@ -77,9 +77,10 @@ test('toxicity calibration compares predicted penalty with matured 5m adverse se
 
 test('missed markouts never enter toxicity calibration',()=>{
   const rows=route('r1',1);
-  rows[0].markouts={'300000':{status:'MISSED_CAPTURE_WINDOW'}};
+  rows[0].markouts={'300000':{status:'MISSED_CAPTURE_WINDOW',adverseSelectionBps:99}};
   const c=toxicityCalibration(rows,{minN:1});
   assert.equal(c.n,1);
+  assert.equal(c.biasBps,-1);
 });
 
 test('drift catches simultaneous cost and edge deterioration',()=>{
