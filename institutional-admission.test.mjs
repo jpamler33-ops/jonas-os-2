@@ -135,3 +135,16 @@ test('admission tampering is detected',()=>{
   x.gate='ABSTAIN';
   assert.equal(verifyInstitutionalAdmission(x).ok,false);
 });
+
+
+test('research baseline is admitted only with caution',()=>{
+  const r=evaluateInstitutionalAdmission({
+    asOf:1000,
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'BASELINE'},
+    forecast:forecast('PASS'),
+    scientificValidity:science('PASS')
+  });
+  assert.equal(r.gate,'CAUTION');
+  assert.equal(r.researchDisposition,'ADMIT_WITH_CAUTION');
+});
