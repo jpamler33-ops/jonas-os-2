@@ -230,6 +230,51 @@ function independentEpisodeCount(points){
   }
   return [...groups.values()].reduce((s,g)=>s+g.count,0);
 }
+
+function independentPairedSeries(candidatePoints,incumbentPoints,{maxPoints=1000}={}){
+  const incumbentById=new Map((incumbentPoints||[]).map(p=>[String(p.id),p]));
+  const selected=[];
+  const groups=new Map();
+  for(const cp of [...(candidatePoints||[])].sort((a,b)=>a.timestamp-b.timestamp||a.horizonMs-b.horizonMs)){
+    const ip=incumbentById.get(String(cp.id));
+    if(!ip) continue;
+    const key=cp.symbol+'\u0000'+cp.horizonMs;
+    const g=groups.get(key)??{last:-Infinity};
+    if(cp.timestamp-g.last<cp.horizonMs) continue;
+    g.last=cp.timestamp;
+    groups.set(key,g);
+    selected.push({
+      id:String(cp.id),
+      symbol:String(cp.symbol),
+      timestamp:Number(cp.timestamp),
+      resolvedAt:Number(cp.resolvedAt),
+      horizonMs:Number(cp.horizonMs),
+      regimeId:String(cp.regimeId??'UNKNOWN'),
+      candidate:{
+        brier:Number(cp.brier),
+        logLoss:Number(cp.logLoss),
+        intervalMiss:cp.intervalMiss===true,
+        topProbability:Number(cp.topProbability),
+        topCorrect:cp.topCorrect===true
+      },
+      incumbent:{
+        brier:Number(ip.brier),
+        logLoss:Number(ip.logLoss),
+        intervalMiss:ip.intervalMiss===true,
+        topProbability:Number(ip.topProbability),
+        topCorrect:ip.topCorrect===true
+      },
+      deltas:{
+        brier:Number(cp.brier)-Number(ip.brier),
+        logLoss:Number(cp.logLoss)-Number(ip.logLoss),
+        intervalMiss:(cp.intervalMiss?1:0)-(ip.intervalMiss?1:0),
+        topCorrect:(cp.topCorrect?1:0)-(ip.topCorrect?1:0)
+      }
+    });
+  }
+  const limit=Math.max(1,Math.floor(Number(maxPoints)||1000));
+  return selected.slice(-limit);
+}
 function gateCounts(points){
   const out={PASS:0,CAUTION:0,INSUFFICIENT:0,ABSTAIN:0,OTHER:0};
   for(const p of points){
@@ -405,6 +450,7 @@ export function evaluateForecastCandidateWalkForward({
   const candidateMetrics=aggregate(candPoints,highConfidenceThreshold);
   const incumbentMetrics=aggregate(incPoints,highConfidenceThreshold);
   const independentEpisodes=independentEpisodeCount(candPoints);
+  const pairedIndependent=independentPairedSeries(candPoints,incPoints,{maxPoints:1000});
   const core={
     version:FORECAST_CANDIDATE_LAB_VERSION,
     kind:'TCX_FORECAST_TEMPORAL_WALK_FORWARD',
@@ -431,6 +477,8 @@ export function evaluateForecastCandidateWalkForward({
       blockedFuture,
       pitViolations,
       temporalOosPassed:pitViolations===0,
+      pairedIndependentTotal:independentEpisodes,
+      pairedIndependent,
       sameSampleFeedbackAllowed:false
     },
     objective:'FORECAST_CALIBRATION_AND_ACCURACY_NOT_PNL',
