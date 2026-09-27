@@ -1680,11 +1680,11 @@ async function captureEpisodeFromState(state,{persist=true}={}) {
   return episode;
 }
 
-function matureSymbolEpisodes(symbol,candles) {
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
   let changed=false;
   for(const e of episodes) {
     if(e.symbol!==symbol) continue;
-    if(matureEpisode(e,candles)) changed=true;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
   }
   return changed;
 }
@@ -1698,7 +1698,7 @@ function statLine(label,s) {
 async function showMemory(chatId,symbol) {
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
-  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"]);
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
   if(matured) await persistEpisodeMemory("manual-maturity");
   const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
   const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
@@ -2435,7 +2435,7 @@ async function showEngine(chatId,symbol){
   const engineStarted=Date.now();
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
-  if(matureSymbolEpisodes(symbol,state.byTf["5m"])) await persistEpisodeMemory("engine-maturity");
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) await persistEpisodeMemory("engine-maturity");
   const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
 
   const r15=runMechanismTransitionEngine({
@@ -3226,7 +3226,7 @@ async function episodeWatcher() {
         const before=episodes.length;
         await captureEpisodeFromState(state,{persist:false});
         if(episodes.length!==before) changed=true;
-        if(matureSymbolEpisodes(symbol,state.byTf["5m"])) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
         try {
           const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
           const context=buildResearchAlertContext(state,witnessReport);
