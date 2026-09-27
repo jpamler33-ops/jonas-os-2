@@ -353,6 +353,28 @@ async function persistEvidenceHistory(reason='mutation') {
   return evidenceHistoryHealthy;
 }
 
+async function persistForecastRuntime(reason='mutation') {
+  forecastRuntimePersistenceQueue = forecastRuntimePersistenceQueue.then(async()=>{
+    if(!forecastRuntime.healthy) return false;
+    try {
+      await saveInstitutionalForecastRuntime(forecastRuntime);
+      forecastRuntime.lastError=null;
+      return true;
+    } catch(err) {
+      forecastRuntime.healthy=false;
+      forecastRuntime.lastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'forecast_runtime.persistence',message:forecastRuntime.lastError});
+      console.error('forecast runtime persistence error',reason,forecastRuntime.lastError);
+      return false;
+    }
+  });
+  return forecastRuntimePersistenceQueue;
+}
+
+if(forecastSeedAtBoot.addedRows>0 && forecastRuntime.healthy){
+  await persistForecastRuntime('boot-episode-seed');
+}
+
 function latestEvidenceRecord(symbol) {
   return latestEvidenceSnapshot(evidenceRecords,symbol);
 }
