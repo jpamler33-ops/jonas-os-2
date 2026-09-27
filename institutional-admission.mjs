@@ -40,9 +40,10 @@ function researchGate(validity){
 }
 
 function componentTimeReasons(asOf,name,report){
+  // asOf/availableAt define what information was knowable at the research point.
+  // generatedAt may legitimately be later than asOf because computation takes time.
   const times=[
     ['asOf',finite(report?.asOf)],
-    ['generatedAt',finite(report?.generatedAt)],
     ['availableAt',finite(report?.availableAt)]
   ].filter(([,v])=>v!=null);
   return times.filter(([,v])=>v>asOf).map(([k])=>name+'_'+k.toUpperCase()+'_FROM_FUTURE');
