@@ -1,5 +1,7 @@
 import http from 'node:http';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
+import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
+import { renderCandlestickPng } from './chart-renderer.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -132,7 +134,7 @@ async function fetchMarketParts(symbol) {
 
 async function fetchKlines(symbol, interval, limit=30) {
   const encoded = encodeURIComponent(symbol);
-  const allowed = new Set(['1m','5m','15m','1h']);
+  const allowed = new Set(['1m','5m','15m','1h','4h']);
   if (!allowed.has(interval)) throw new Error('Unsupported interval');
   const errors = [];
   for (const base of binanceBases) {
@@ -160,6 +162,18 @@ async function tg(method, body) {
     if (method === 'editMessageText' && msg.includes('message is not modified')) return null;
     throw new Error(msg);
   }
+  return data.result;
+}
+
+async function tgMultipart(method, fields, fileField, fileName, fileBuffer, mime="image/png") {
+  const form = new FormData();
+  for (const [key,value] of Object.entries(fields)) {
+    form.append(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  form.append(fileField, new Blob([fileBuffer], { type:mime }), fileName);
+  const res = await fetch(`${telegramApi}/${method}`, { method:"POST", body:form });
+  const data = await res.json().catch(() => ({ ok:false, description:`HTTP ${res.status}` }));
+  if (!res.ok || !data.ok) throw new Error(String(data?.description || `Telegram HTTP ${res.status}`));
   return data.result;
 }
 
@@ -192,6 +206,10 @@ function marketKeyboard(chatId, symbol, live) {
       { text:'1h', callback_data:`tf:${symbol}:1h` }
     ],
     [
+      { text:'📈 Chart', callback_data:`chart:${symbol}:5m` },
+      { text:'🧭 Struktur', callback_data:`structure:${symbol}` }
+    ],
+    [
       { text:isFav?'★ Favorit':'☆ Favorit', callback_data:`fav:${symbol}` },
       { text:'🔔 Alarm', callback_data:`alerthelp:${symbol}` },
       { text:'🧠 TCX', callback_data:`tcx:${symbol}` }
@@ -219,10 +237,43 @@ function timeframeKeyboard(symbol) {
       { text:'1h', callback_data:`tf:${symbol}:1h` }
     ],
     [
+      { text:'📈 Chart', callback_data:`chart:${symbol}:5m` },
+      { text:'🧭 Struktur', callback_data:`structure:${symbol}` }
+    ],
+    [
       { text:'📊 Markt', callback_data:`refresh:${symbol}` },
       { text:'🧠 TCX', callback_data:`tcx:${symbol}` }
     ],
     [{ text:'⬅️ Zurück', callback_data:'back' }]
+  ]};
+}
+
+function chartKeyboard(symbol, interval) {
+  return { inline_keyboard:[
+    [
+      { text:"1m", callback_data:`chart:${symbol}:1m` },
+      { text:"5m", callback_data:`chart:${symbol}:5m` },
+      { text:"15m", callback_data:`chart:${symbol}:15m` },
+      { text:"1h", callback_data:`chart:${symbol}:1h` },
+      { text:"4h", callback_data:`chart:${symbol}:4h` }
+    ],
+    [
+      { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
+      { text:"📊 Markt", callback_data:`refresh:${symbol}` }
+    ]
+  ]};
+}
+
+function structureKeyboard(symbol) {
+  return { inline_keyboard:[
+    [
+      { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
+      { text:"📈 1h Chart", callback_data:`chart:${symbol}:1h` }
+    ],
+    [
+      { text:"📊 Markt", callback_data:`refresh:${symbol}` },
+      { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
+    ]
   ]};
 }
 
@@ -272,21 +323,24 @@ async function snapshot(symbol) {
 async function timeframeSnapshot(symbol, interval) {
   const started = Date.now();
   const { rows, base } = await fetchKlines(symbol, interval, 30);
-  const firstOpen = Number(rows[0][1]);
-  const lastClose = Number(rows[rows.length-1][4]);
-  const high = Math.max(...rows.map(r => Number(r[2])));
-  const low = Math.min(...rows.map(r => Number(r[3])));
-  const quoteVolume = rows.reduce((s,r) => s + Number(r[7] || 0), 0);
+  const availableAt = Date.now();
+  const candles = candlesFromKlines(rows, availableAt);
+  const closed = closedCandles(candles);
+  if (closed.length < 2) throw new Error("Insufficient closed kline data");
+  const firstOpen = closed[0].o;
+  const lastClose = closed.at(-1).c;
+  const high = Math.max(...closed.map(c => c.h));
+  const low = Math.min(...closed.map(c => c.l));
+  const quoteVolume = rows.slice(0,closed.length).reduce((s,r) => s + Number(r[7] || 0), 0);
   const movePct = firstOpen > 0 ? (lastClose-firstOpen)/firstOpen*100 : 0;
   const rangePct = firstOpen > 0 ? (high-low)/firstOpen*100 : 0;
-  const now = Date.now();
   return {
-    symbol, interval, bars:rows.length, firstOpen, lastClose, high, low, quoteVolume, movePct, rangePct,
-    timestamp:Number(rows[rows.length-1][0]),
-    availableAt:now,
-    source:'BINANCE_PUBLIC_REST_KLINES',
-    version:'v3',
-    provenance:`klines30; interval=${interval}; host=${new URL(base).host}; fetched_ms=${now-started}`
+    symbol, interval, bars:closed.length, firstOpen, lastClose, high, low, quoteVolume, movePct, rangePct,
+    timestamp:closed.at(-1).closeTime,
+    availableAt,
+    source:"BINANCE_PUBLIC_REST_KLINES",
+    version:"v3",
+    provenance:`closed_klines; interval=${interval}; host=${new URL(base).host}; fetched_ms=${availableAt-started}`
   };
 }
 
@@ -304,6 +358,8 @@ function helpText() {
     '🧠 TCX Bot · Befehle','',
     '/start – Hauptmenü',
     '/coin BTC – Coin direkt öffnen',
+    '/chart BTC 5m – Candlestick-Chart',
+    '/structure BTC – 4H/1H/15m/5m Struktur',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -426,6 +482,71 @@ async function showTcx(chatId, messageId, symbol) {
   sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
 }
 
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host) {
+  const recent = (analysis.classifiedPivots || []).slice(-4).map(p => `${p.label} ${priceText(p.price)}`).join(" · ") || "keine bestätigten Swings";
+  const pattern = analysis.pattern ? `${analysis.pattern.stage} · ${analysis.pattern.side} @ ${priceText(analysis.pattern.level)}` : "kein frisches Break/Retest-Muster";
+  const activeVisible = candles.some(c => c.closed === false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval}`,
+    `Trend: ${analysis.trend}`,
+    `Swings: ${recent}`,
+    `EMA20 / EMA50: ${priceText(analysis.ema20)} / ${priceText(analysis.ema50)}`,
+    `Support / Resistance: ${priceText(analysis.support)} / ${priceText(analysis.resistance)}`,
+    `Pattern: ${pattern}`,
+    activeVisible ? "Live-Kerze sichtbar; Struktur nutzt ausschließlich geschlossene Kerzen." : "Alle dargestellten Kerzen geschlossen.",
+    "",
+    "OBSERVED: OHLCV · DERIVED: EMA/Pivots/Levels/Pattern",
+    "Mechanismus: NOT INFERRED · Action: ABSTAIN / SHADOW_ONLY",
+    `availableAt: ${new Date(availableAt).toISOString()} · source: ${host}`
+  ].join("\n").slice(0,1024);
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const availableAt = Date.now();
+  const { rows, base } = await fetchKlines(symbol, interval, 140);
+  const candles = candlesFromKlines(rows, availableAt);
+  const analysis = analyzeStructure(candles);
+  const png = renderCandlestickPng(candles,analysis,{width:1000,height:620});
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,analysis,candles,availableAt,new URL(base).host),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const lines=[`🧭 TCX Structure · ${symbol.replace("USDT","/USDT")}`,""];
+  for (const tf of ["4h","1h","15m","5m"]) {
+    const a=result.analyses[tf];
+    const p=a?.pattern ? `${a.pattern.stage}/${a.pattern.side}` : "—";
+    lines.push(`${tf}: ${a?.trend || "INSUFFICIENT"} · EMA20 ${priceText(a?.ema20)} · EMA50 ${priceText(a?.ema50)} · Pattern ${p}`);
+  }
+  lines.push("",`MTF Bias: ${result.bias} · Score ${result.biasScore}`);
+  const five=result.analyses["5m"];
+  lines.push(`5m Support / Resistance: ${priceText(five?.support)} / ${priceText(five?.resistance)}`);
+  lines.push("","EPISTEMIC STATUS","• OHLCV: OBSERVED","• Pivots/EMA/Bias/Break-Retest: DERIVED HEURISTIC","• Causal mechanism: NOT INFERRED","• Trading action: ABSTAIN / SHADOW_ONLY",`availableAt: ${new Date(availableAt).toISOString()}`);
+  return lines.join("\n");
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
 function parseAction(data='') {
   if (data === 'back') return { kind:'BACK' };
   if (data === 'favorites') return { kind:'FAVORITES' };
@@ -437,6 +558,8 @@ function parseAction(data='') {
   if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
   if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
   if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
   return { kind:'UNKNOWN' };
 }
@@ -475,6 +598,36 @@ async function handleCommand(msg) {
     }
     return true;
   }
+
+  if (command === "/chart") {
+    const symbol = normalizeSymbol(parts[1] || "");
+    const interval = ["1m","5m","15m","1h","4h"].includes(parts[2]) ? parts[2] : "5m";
+    if (!symbol) {
+      await tg("sendMessage",{ chat_id:chatId, text:"Beispiel: /chart BTC 5m" });
+      return true;
+    }
+    try { await showChart(chatId,symbol,interval); }
+    catch (err) {
+      console.error("chart command error",err instanceof Error ? err.message : String(err));
+      await tg("sendMessage",{ chat_id:chatId, text:"Chart-Daten gerade nicht verfügbar." });
+    }
+    return true;
+  }
+
+  if (command === "/structure") {
+    const symbol = normalizeSymbol(parts[1] || "");
+    if (!symbol) {
+      await tg("sendMessage",{ chat_id:chatId, text:"Beispiel: /structure BTC" });
+      return true;
+    }
+    try { await showStructure(chatId,symbol); }
+    catch (err) {
+      console.error("structure command error",err instanceof Error ? err.message : String(err));
+      await tg("sendMessage",{ chat_id:chatId, text:"Struktur-Daten gerade nicht verfügbar." });
+    }
+    return true;
+  }
+
 
   if (command === '/alert') {
     const symbol = normalizeSymbol(parts[1] || '');
@@ -587,6 +740,18 @@ async function handle(update) {
       await ack(q.id);
       return;
     }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
     if (a.kind === 'FAV') {
       const set = favoriteSet(chatId);
       if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);

@@ -15,5 +15,5 @@ jobs:
           node-version: '22'
       - name: Syntax check
         run: npm run check
-      - name: State persistence tests
+      - name: Unit tests
         run: npm test

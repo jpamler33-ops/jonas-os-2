@@ -57,3 +57,13 @@ TCX_TELEGRAM_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,...
 ## Safety / epistemics
 
 Market data is OBSERVED. The compact Telegram TCX view does not promote telemetry to causal mechanism truth. Trading action remains **ABSTAIN / SHADOW_ONLY**.
+
+## TCX Chart Engine v1
+
+- `/chart BTC 5m` sends a real candlestick PNG generated inside the bot.
+- Chart timeframes: 1m, 5m, 15m, 1h, 4h.
+- Overlays: EMA20, EMA50, nearest swing support/resistance and confirmed swing pivots.
+- `/structure BTC` restores the legacy 4H / 1H / 15m / 5m structure concept as a DERIVED research layer.
+- HH / HL / LH / LL and break/retest states are descriptive heuristics, not causal mechanism truth.
+- Active candles may be shown visually, but all structure/EMA/pivot/break-retest calculations use only candles whose close time is <= availableAt.
+- Execution remains ABSTAIN / SHADOW_ONLY.
