@@ -40,6 +40,8 @@ Optional variables:
 ```text
 TCX_TELEGRAM_REFRESH_MS=10000
 TCX_TELEGRAM_ALERT_CHECK_MS=15000
+TCX_EPISODE_SWEEP_MS=300000
+TCX_EPISODE_FILE=/data/tcx-episodes.json
 TCX_TELEGRAM_ALLOWED_CHATS=123456789
 TCX_TELEGRAM_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,...
 ```
@@ -63,6 +65,7 @@ Market data is OBSERVED. The compact Telegram TCX view does not promote telemetr
 - `/chart BTC 5m` sends a real candlestick PNG generated inside the bot.
 - Chart timeframes: 1m, 5m, 15m, 1h, 4h.
 - Overlays: EMA20, EMA50, nearest swing support/resistance and confirmed swing pivots.
+- `/memory BTC` compares the current mechanism/state telemetry with matured historical episodes.
 - `/structure BTC` restores the legacy 4H / 1H / 15m / 5m structure concept as a DERIVED research layer.
 - HH / HL / LH / LL and break/retest states are descriptive heuristics, not causal mechanism truth.
 - Active candles may be shown visually, but all structure/EMA/pivot/break-retest calculations use only candles whose close time is <= availableAt.
@@ -81,3 +84,57 @@ Market data is OBSERVED. The compact Telegram TCX view does not promote telemetr
 - RIFT pressure proxy derived from spread, depth imbalance, realized range and relative volume
 
 The RIFT pressure proxy is explicitly `DERIVED_HEURISTIC`. It is not a causal mechanism posterior. Mechanism status remains `NOT_IDENTIFIED`; trading action remains `ABSTAIN / SHADOW_ONLY`.
+
+
+## TCX Chart Engine v3 · Mechanism Episode Memory
+
+The bot now builds a point-in-time episode memory on Railway.
+
+Each canonical 5m episode stores:
+
+- MTF bias and local trend
+- regime
+- liquidity class and spread
+- order-book flow and depth imbalance
+- RIFT pressure proxy
+- ATR/range, realized volatility and relative volume
+- EMA separation and normalized support/resistance distance
+- break/retest state
+- timestamp, availableAt, source/version provenance
+- explicit epistemic labels
+
+Sampling uses a fixed cadence plus event-driven captures. Serial near-duplicates are reduced so a long stress episode cannot dominate memory simply because it lasted many bars.
+
+After future candles have actually closed, episodes receive neutral realized outcomes at:
+
+- 15m (3 × 5m bars)
+- 1h (12 × 5m bars)
+- 3h (36 × 5m bars)
+
+Outcomes store end return, maximum rise, maximum fall and realized range. A continuity guard refuses to mature an episode if the required immediate future bars are missing.
+
+Similarity is state/mechanism-telemetry-first, not chart-shape-first. The Telegram command:
+
+```text
+/memory BTC
+```
+
+shows robust summaries for the nearest matured same-symbol episodes. It does not output a win probability, buy/sell recommendation or causal mechanism claim.
+
+Memory persists at:
+
+```text
+/data/tcx-episodes.json
+```
+
+The existing Railway volume mounted at `/data` therefore preserves both favorites/alerts and the episode database.
+
+Epistemic boundary:
+
+```text
+Current market inputs: OBSERVED
+Structure / regime / RIFT pressure: DERIVED_HEURISTIC
+Historical outcomes: OBSERVED_POST_EPISODE
+Mechanism posterior: NOT_IDENTIFIED
+Trading action: ABSTAIN / SHADOW_ONLY
+```
