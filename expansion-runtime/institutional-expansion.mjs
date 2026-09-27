@@ -4,6 +4,7 @@ import { buildEventImpactMemory, estimateEventImpact } from './event-impact-memo
 import { analyzeLiquiditySnapshot, buildLiquidityMap, inferLiquidityReaction } from './liquidity-intelligence.mjs';
 import { EXPANSION_PACK_PROVENANCE_HASH } from './provenance.mjs';
 import { buildTraderWalletEvidence } from './trader-wallet-intelligence.mjs';
+import { buildMemecoinEvidence } from './memecoin-intelligence.mjs';
 
 export const INSTITUTIONAL_EXPANSION_VERSION='TCX_INSTITUTIONAL_EXPANSION_V1';
 
@@ -36,7 +37,8 @@ export function buildInstitutionalExpansionEvidence({
   orderBook=null,
   liquidityOptions={},
   liquidityContext={},
-  traderWallet=null
+  traderWallet=null,
+  memecoin=null
 }={}){
   const t=finite(asOf,'asOf');
 
@@ -69,12 +71,17 @@ export function buildInstitutionalExpansionEvidence({
     ? buildTraderWalletEvidence({asOf:t,...traderWallet})
     : null;
 
+  const memecoinEvidence=memecoin
+    ? buildMemecoinEvidence({asOf:t,...memecoin})
+    : null;
+
   const activeGates=[
     sourceReliability.gate,
     eventImpactMemory.gate,
     ...(sourceClassification?[sourceClassification.gate]:[]),
     ...(liquiditySnapshot?[liquiditySnapshot.gate]:[]),
-    ...(traderWalletEvidence?[traderWalletEvidence.evidenceGate]:[])
+    ...(traderWalletEvidence?[traderWalletEvidence.evidenceGate]:[]),
+    ...(memecoinEvidence?[memecoinEvidence.evidenceGate]:[])
   ];
 
   const evidenceGate=strictest(activeGates);
@@ -83,7 +90,8 @@ export function buildInstitutionalExpansionEvidence({
     ...(sourceClassification?.reasons||[]).map(x=>'SOURCE_EVENT:'+x),
     ...(eventImpactMemory.reasons||[]).map(x=>'EVENT_IMPACT:'+x),
     ...(liquiditySnapshot?.reasons||[]).map(x=>'LIQUIDITY:'+x),
-    ...(traderWalletEvidence?.reasons||[]).map(x=>'TRADER_WALLET:'+x)
+    ...(traderWalletEvidence?.reasons||[]).map(x=>'TRADER_WALLET:'+x),
+    ...(memecoinEvidence?.reasons||[]).map(x=>'MEMECOIN:'+x)
   ];
 
   const core={
@@ -97,6 +105,7 @@ export function buildInstitutionalExpansionEvidence({
     liquidityMap,
     liquidityReaction,
     traderWalletEvidence,
+    memecoinEvidence,
     evidenceGate,
     reasons:[...new Set(reasons)],
     provenance:{
@@ -108,7 +117,8 @@ export function buildInstitutionalExpansionEvidence({
       sourceReliability:'EMPIRICAL_POST_OUTCOME',
       eventImpact:'EMPIRICAL_POST_OUTCOME_NOT_CAUSAL',
       liquidity:'OBSERVED_PLUS_DERIVED_MICROSTRUCTURE',
-      traderWallet:'EMPIRICAL_POST_OUTCOME_NOT_CAUSAL'
+      traderWallet:'EMPIRICAL_POST_OUTCOME_NOT_CAUSAL',
+      memecoin:'OBSERVED_RISK_AND_ACTIVITY_NOT_FORECAST_PROBABILITY'
     },
     restrictions:{
       mayExecute:false,
