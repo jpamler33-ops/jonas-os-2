@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sha256 } from './institutional-kernel.mjs';
-import { evaluateModelPromotion, createModelPromotionRecord, verifyModelPromotionEvaluation } from './model-promotion-ladder.mjs';
+import { evaluateModelPromotion, createModelPromotionRecord, verifyModelPromotionRecord, verifyModelPromotionEvaluation } from './model-promotion-ladder.mjs';
 
 const A='a'.repeat(64),B='b'.repeat(64);
 
@@ -99,4 +99,44 @@ test('tampered promotion evaluation fails verification',()=>{
   const r=structuredClone(evaluateModelPromotion(args()));
   r.decision='REJECT_CANDIDATE';
   assert.equal(verifyModelPromotionEvaluation(r).ok,false);
+});
+
+
+test('promotion record verifier detects tampering',()=>{
+  const evaluation=evaluateModelPromotion({
+    asOf:1000,
+    candidate:{
+      candidateId:'cand-verify',
+      modelHash:'a'.repeat(64),
+      configHash:'b'.repeat(64),
+      createdAt:900,
+      parentReleaseId:'r1',
+      source:'TEST',
+      executionMode:'SHADOW_ONLY'
+    },
+    scientificValidity:science('PASS'),
+    software:{
+      testsPassed:true,
+      pitLeakagePassed:true,
+      temporalOosPassed:true,
+      deterministicReplayPassed:true,
+      releaseManifestBound:true,
+      rollbackReady:true
+    },
+    evaluation:{
+      cases:300,
+      independentEpisodes:120,
+      candidate:{brier:.18,logLoss:.56,intervalCoverage:.80,highConfidenceWrongRate:.03},
+      incumbent:{brier:.20,logLoss:.59,intervalCoverage:.77,highConfidenceWrongRate:.04}
+    }
+  });
+  const record=createModelPromotionRecord({
+    evaluation,
+    promotedAt:1100,
+    previousReleaseId:'r1',
+    candidateReleaseId:'r2'
+  });
+  assert.equal(verifyModelPromotionRecord(record).ok,true);
+  const tampered={...record,candidateReleaseId:'r3'};
+  assert.equal(verifyModelPromotionRecord(tampered).ok,false);
 });
