@@ -1131,48 +1131,22 @@ function startText() {
 
 function helpText() {
   return [
-    '🧠 TCX Bot · Befehle','',
-    '/start – Hauptmenü',
-    '/coin BTC – Coin direkt öffnen',
-    '/chart BTC 5m – Candlestick-Chart',
-    '/structure BTC – 4H/1H/15m/5m Struktur',
-    '/memory BTC – ähnliche historische TCX-Episoden',
-    '/evidence BTC – Disagreement Map + Evidence-Diagnostik',
-    '/validity BTC – Drift/Expiry der letzten Research-Sicht',
-    '/history BTC – persistenter Evidence-Verlauf',
-    '/engine BTC – Mechanism Transition Lattice',
-    '/forecast BTC – institutioneller Multi-Horizon Forecast',
-    '/intelligence BTC – aktive Intelligence-Schichten + Evidence-Status',
-    '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
-    '/audit – Institutional Kernel / Ledger-Integrität',
-    '/fabric – Event-Sourced Market Data Fabric',
-    '/replay BTC [ISO-Zeit] – Point-in-Time Replay',
-    'Replay auch per 🎬-Button direkt am Markt',
-    '/release – Runtime Release & Configuration Registry',
-    '/obs – Institutional Observability / SLOs',
-    '/chaos [SCENARIO] – synthetischer Fail-Closed-Test',
-    '/oms – Shadow OMS / Microstructure Simulator',
-    '/shadow BTC BUY 100 MARKET [latencyMs] – virtuelle Market-Order',
-    '/shadow BTC BUY 100 LIMIT 65000 [latencyMs] – virtuelle Limit-Order',
-    '/shadoworders [BTC] – Shadow-Orders',
-    '/shadowcancel ORDER_ID – virtuelle Order abbrechen',
-    '/sor BTC BUY 100 – Multi-Venue Shadow Smart Order Route',
-    '/sorstatus [BTC] – Venue-Qualität / Routing-Fähigkeit',
-    '/venuequality BTC [BUY|SELL] [1000] – gelernte Venue-Execution-Qualität',
-    '/executionlab BTC [BUY|SELL] – OOS / Walk-Forward / Calibration / Drift',
-    '/favorites – Favoriten',
-    '/compare – bis zu vier Favoriten vergleichen',
-    '/alert BTC 70000 – einmaliger Preisalarm',
-    '/alertregime BTC – Regime-Wechsel',
-    '/alertstructure BTC – Struktur-Wechsel',
-    '/alertwitness BTC 75 – Witness-Schwelle in %',
-    '/alertmemory BTC 8 – Mindestzahl historischer Transitionen',
-    '/alertsafety BTC – Safety-State-Wechsel',
-    '/alertcombo BTC – Composite Research Gate',
-    '/alerts – aktive Alarme',
-    '/clearalerts – alle Alarme löschen','',
-    'Favoriten und Alarme werden persistent gespeichert, wenn Railway ein Volume auf /data gemountet hat.',
-    'Execution bleibt SHADOW_ONLY.'
+    '⚡ TCX · HILFE','',
+    'Du musst dir keine Befehle merken. Nutze am besten /start und tippe auf die Buttons.','',
+    'DIE WICHTIGSTEN FUNKTIONEN',
+    '/forecast BTC – verständliche Kursprognose',
+    '/coin BTC – Coin analysieren',
+    '/chart BTC 5m – Chart öffnen',
+    '/structure BTC – Marktstruktur erklären',
+    '/memory BTC – zeigen, was TCX aus ähnlichen Fällen gelernt hat',
+    '/evidence BTC – Daten und Belege hinter der Einschätzung',
+    '/validity BTC – prüfen, ob die Einschätzung noch aktuell ist',
+    '/alerts – aktive Alarme anzeigen','',
+    'PROFI-FUNKTIONEN',
+    '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
+    '/audit · /fabric · /replay · /release · /obs · /chaos',
+    '/oms · /sorstatus · /venuequality · /executionlab','',
+    'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
   ].join('\n');
 }
 
@@ -1237,24 +1211,49 @@ async function ack(id, text) {
 
 function commandMenuKeyboard(){
   return {inline_keyboard:[
-    [{text:'🔮 Forecast',callback_data:'cmd:forecast'},{text:'🧠 Intelligence',callback_data:'cmd:intelligence'}],
-    [{text:'📊 Markt',callback_data:'cmd:market'},{text:'📈 Chart',callback_data:'cmd:chart'}],
-    [{text:'🧬 Evidence',callback_data:'cmd:evidence'},{text:'🧠 Memory',callback_data:'cmd:memory'}],
-    [{text:'⚙️ Engine',callback_data:'cmd:engine'},{text:'🩺 System',callback_data:'cmd:system'}],
-    [{text:'🏠 Home',callback_data:'home'}]
+    [{text:'🔮 Kursprognose',callback_data:'cmd:forecast'},{text:'📊 Coin analysieren',callback_data:'cmd:market'}],
+    [{text:'🧠 Marktcheck',callback_data:'cmd:intelligence'},{text:'📈 Chart',callback_data:'cmd:chart'}],
+    [{text:'🔎 Daten & Belege',callback_data:'cmd:evidence'},{text:'🧠 Was TCX gelernt hat',callback_data:'cmd:memory'}],
+    [{text:'⚙️ Profi-Analyse',callback_data:'cmd:engine'},{text:'🖥 System',callback_data:'cmd:system'}],
+    [{text:'🏠 Start',callback_data:'home'}]
   ]};
 }
 async function showCommandMenu(chatId,messageId){
-  const payload={chat_id:chatId,text:'⌨️ TCX COMMANDS\n\nWähle eine Funktion. Danach wählst du einfach den Markt.',reply_markup:commandMenuKeyboard()};
+  const payload={
+    chat_id:chatId,
+    text:[
+      '⚙️ ALLE TCX-FUNKTIONEN','',
+      'Wähle einfach aus, was du wissen willst.',
+      'Bei Coin-Funktionen wählst du danach nur noch BTC, ETH, SOL usw. aus.','',
+      'Die normalen Ansichten erklären Ergebnisse einfach.',
+      'Profi-Ansichten zeigen zusätzlich technische Details.'
+    ].join('\n'),
+    reply_markup:commandMenuKeyboard()
+  };
   if(messageId)return tg('editMessageText',{...payload,message_id:messageId});
   return tg('sendMessage',payload);
 }
 async function showCommandMarkets(chatId,messageId,command){
   const buttons=markets.slice(0,12).map(symbol=>({text:symbolLabel(symbol),callback_data:'cmdrun:'+command+':'+symbol}));
   const rows=[];for(let i=0;i<buttons.length;i+=2)rows.push(buttons.slice(i,i+2));
-  rows.push([{text:'⬅️ Commands',callback_data:'commands'},{text:'🏠 Home',callback_data:'home'}]);
-  return tg('editMessageText',{chat_id:chatId,message_id:messageId,text:'Wähle den Markt für /'+command+':',reply_markup:{inline_keyboard:rows}});
+  rows.push([{text:'⬅️ Funktionen',callback_data:'commands'},{text:'🏠 Start',callback_data:'home'}]);
+  const names={
+    forecast:'Kursprognose',
+    intelligence:'Marktcheck',
+    market:'Coin-Analyse',
+    chart:'Chart',
+    evidence:'Daten & Belege',
+    memory:'Lernhistorie',
+    engine:'Profi-Analyse'
+  };
+  return tg('editMessageText',{
+    chat_id:chatId,
+    message_id:messageId,
+    text:'🪙 '+(names[command]||'Analyse')+'\n\nWelchen Coin möchtest du öffnen?',
+    reply_markup:{inline_keyboard:rows}
+  });
 }
+
 async function showStart(chatId, messageId) {
   sessions.delete(String(chatId));
   const payload = {
@@ -1277,9 +1276,13 @@ async function showMarkets(chatId,messageId) {
   const payload={
     chat_id:chatId,
     text:[
-      '📊 TCX Märkte','',
-      'Wähle einen Markt. Jeder Coin öffnet die Live-Marktkarte.',
-      'Research-Status bleibt ABSTAIN / SHADOW_ONLY.'
+      '📊 COIN ANALYSIEREN','',
+      'Wähle einen Coin. TCX zeigt dir danach auf einen Blick:',
+      '• aktuellen Preis und 24h-Bewegung',
+      '• Richtung und Marktphase',
+      '• Kauf-/Verkaufsdruck',
+      '• Risiko und Unsicherheit','',
+      'Danach kannst du Prognose, Chart oder „Warum?“ direkt antippen.'
     ].join('\n'),
     reply_markup:productMarketsKeyboard(markets,favoriteSet(chatId).size)
   };
@@ -1295,70 +1298,79 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='ALERTS') {
     const list=activeAlerts(chatId);
     text=list.length
-      ? ['🔔 TCX ALERTS v2','',...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'','Preis: /alert BTC 70000','Weitere Alerts direkt über den 🔔-Button eines Marktes.'].join('\n')
-      : ['🔔 TCX ALERTS v2','','Keine aktiven Alarme.','Preis: /alert BTC 70000','Research-Alerts direkt über den 🔔-Button eines Marktes.'].join('\n');
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
   } else if(section==='RADAR') {
     const now=Date.now();
     const lines=requestedSymbols.map(symbol=>{
       const r=radarCache.get(symbol);
       if(!r){
         const own=episodes.filter(e=>e.symbol===symbol);
-        return `${symbolLabel(symbol)} · warming · Memory ${own.length}`;
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
       }
       const age=Math.max(0,now-r.capturedAt);
-      return `${symbolLabel(symbol)} · ${r.status} · ${r.regime} · V${r.validity||'BASE'} · W${fmt(r.witnessAgreement*100,0)}% · M${r.support} · N${fmt(r.novelty*100,0)}% · C${fmt(r.contradiction*100,0)}% · ${Math.round(age/1000)}s`;
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
     });
-    text=['🧠 TCX RADAR v2','',
-      'Kein Trade-Ranking. V=View Validity · W=Witness · M=Memory · N=Novelty · C=Contradiction.','',
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
       ...lines,'',
-      'Action bleibt ABSTAIN / SHADOW_ONLY.'
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
     ].join('\n');
   } else if(section==='SYSTEM') {
     text=[
-      '🩺 TCX SYSTEM','',
-      `Audit ledger: ${auditLedger.healthy?'OK':'DEGRADED'} · seq ${auditLedger.seq}`,
-      `Market fabric: ${marketFabric.healthy?'OK':'DEGRADED'} · events ${marketFabric.events.length}`,
-      `Release registry: ${releaseRegistry.healthy?'OK':'DEGRADED'} · seq ${releaseRegistry.seq}`,
-      `State persistence: ${persistenceHealthy?'OK':'DEGRADED'}`,
-      `Episode persistence: ${episodePersistenceHealthy?'OK':'DEGRADED'}`,
-      `Evidence persistence: ${evidenceHistoryHealthy?'OK':'DEGRADED'} · snapshots ${evidenceRecords.length}`,
-      `Witness cache: ${witnessCache.size}`,
-      `Active sessions: ${sessions.size}`,'',
-      'Execution: SHADOW_ONLY',
-      'canExecute: false'
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Speicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 läuft':'🟡 eingeschränkt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
     ].join('\n');
   } else if(section==='PERFORMANCE') {
     const total=episodes.length;
     const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
     const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
     const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
-    const activeAlerts=[...alerts.values()].reduce((n,x)=>n+x.length,0);
     text=[
-      '📈 TCX PERFORMANCE · Measured only','',
-      `Episodes total: ${total}`,
-      `Mature 15m: ${mature15}`,
-      `Mature 1h: ${mature1h}`,
-      `Mature 3h: ${mature3h}`,
-      `Active alerts: ${activeAlerts}`,
-      `Evidence snapshots: ${evidenceRecords.length}`,
-      `Tracked markets: ${markets.length}`,'',
-      'Noch keine künstliche Winrate und keine erfundenen Forecast-Scores.',
-      'Brier/Calibration/Coverage kommen erst mit einem validierten Forecast-Modul.'
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
     ].join('\n');
   } else if(section==='SETTINGS') {
     text=[
-      '⚙️ TCX SETTINGS · Runtime','',
-      `Live refresh: ${Math.round(refreshMs/1000)} s`,
-      `Alert check: ${Math.round(alertCheckMs/1000)} s`,
-      `Episode sweep: ${Math.round(episodeSweepMs/1000)} s`,
-      `Markets: ${markets.length}`,
-      `Chat whitelist: ${allowedChats.size?'ON':'OFF'}`,
-      `State file: ${stateFile}`,'',
-      'Execution: SHADOW_ONLY',
-      'Telegram-spezifische User-Settings werden als eigener persistenter Layer ergänzt.'
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
   } else {
-    text='TCX Bereich noch nicht verfügbar.';
+    text='Dieser Bereich ist noch nicht verfügbar.';
   }
 
   const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
@@ -1371,33 +1383,41 @@ async function showWhy(chatId,messageId,symbol) {
   const witness=await witnessState(symbol,state.market).catch(()=>null);
   const stored=episodes.filter(e=>e.symbol===symbol).length;
   const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
   const contradictions=witness?.contradictions?.length
-    ? witness.contradictions.slice(0,4).join(', ')
-    : 'keine harte Cross-Venue-Contradiction im aktuellen Audit';
-  const pattern=state.analysis?.pattern
-    ? `${state.analysis.pattern.stage}/${state.analysis.pattern.side}`
-    : 'kein frisches Break/Retest-Muster';
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
   const text=[
-    `❓ WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
-    'AKTUELL BEOBACHTET / ABGELEITET',
-    `• MTF Bias: ${state.dashboard.bias} (${state.dashboard.biasScore>=0?'+':''}${state.dashboard.biasScore})`,
-    `• Regime: ${state.dashboard.regime}`,
-    `• Flow: ${state.dashboard.flow}`,
-    `• Liquidity: ${state.dashboard.liquidity}`,
-    `• RIFT pressure proxy: ${Math.round(state.dashboard.pressureScore)}/100 · ${state.dashboard.pressureBand}`,
-    `• 5m Structure: ${state.analysis?.trend||'INSUFFICIENT'} · ${pattern}`,
-    `• Memory: ${stored} gespeichert · ${mature} mit 1h-Outcome`,
-    `• Witness agreement: ${witness?Math.round((witness.agreementScore||0)*100)+'%':'nicht verfügbar'}`,'',
-    'WIDERSPRUCH / UNSICHERHEIT',
-    `• ${contradictions}`,'',
-    'WAS WÜRDE DIE AKTUELLE SICHT ÄNDERN?',
-    '• neuer Strukturzustand / Break-Retest-Wechsel',
-    '• Regime-Transition',
-    '• deutlicher Cross-Venue-Konflikt',
-    '• veraltete oder fehlerhafte Daten',
-    '• aktuell historisch neuartiger Zustand','',
-    'Kein Buy/Sell-Signal. Mechanism posterior: NOT_IDENTIFIED.',
-    'Action: ABSTAIN / SHADOW_ONLY'
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
   await tg('editMessageText',{
     chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
@@ -1408,22 +1428,28 @@ async function showWhy(chatId,messageId,symbol) {
 async function showRegime(chatId,messageId,symbol) {
   const state=await researchState(symbol,'5m');
   const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
   const rows=['4h','1h','15m','5m'].map(tf=>{
     const a=mtf?.analyses?.[tf];
-    return `${tf}: ${a?.trend||'INSUFFICIENT'} · EMA20 ${priceText(a?.ema20)} · EMA50 ${priceText(a?.ema50)}`;
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
   });
   const text=[
-    `🧬 REGIME · ${symbol.replace('USDT','/USDT')}`,'',
-    `Local regime: ${state.dashboard.regime}`,
-    `MTF Bias: ${state.dashboard.bias} · Score ${state.dashboard.biasScore}`,
-    `Flow: ${state.dashboard.flow}`,
-    `Liquidity: ${state.dashboard.liquidity}`,
-    `RIFT: ${Math.round(state.dashboard.pressureScore)}/100 · ${state.dashboard.pressureBand}`,'',
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
     ...rows,'',
-    'Status: DERIVED_HEURISTIC',
-    'Causal mechanism: NOT_IDENTIFIED',
-    'Action: ABSTAIN / SHADOW_ONLY',
-    `availableAt: ${new Date(state.availableAt).toISOString()}`
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
   await tg('editMessageText',{
     chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
