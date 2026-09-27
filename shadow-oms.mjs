@@ -2,7 +2,8 @@ import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { sha256, canonicalJson } from './institutional-kernel.mjs';
 
-const SCHEMA_VERSION=1;
+export const SHADOW_OMS_SCHEMA_VERSION=1;
+const SCHEMA_VERSION=SHADOW_OMS_SCHEMA_VERSION;
 const EPS=1e-12;
 
 function finite(x,fallback=null){ const n=Number(x); return Number.isFinite(n)?n:fallback; }

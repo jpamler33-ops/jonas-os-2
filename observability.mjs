@@ -173,20 +173,31 @@ export function observabilitySnapshot(obs,{now=Date.now()}={}){
 export function deriveSloHealth(snapshot,{
   providerSuccessFloor=0.95,
   providerP95Ms=3000,
-  operationP95Ms=5000
+  operationSuccessFloor=0.95,
+  operationP95Ms=5000,
+  minimumSamples=5
 }={}){
   const breaches=[];
+  const min=Math.max(1,Math.floor(Number(minimumSamples)||5));
   for(const [name,p] of Object.entries(snapshot?.providers||{})){
-    if(p.calls>=5 && p.successRate!=null && p.successRate<providerSuccessFloor) breaches.push(`PROVIDER_SUCCESS_${name}`);
-    if(p.latency?.n>=5 && p.latency.p95Ms>providerP95Ms) breaches.push(`PROVIDER_LATENCY_${name}`);
+    if(p.calls>=min && p.successRate!=null && p.successRate<providerSuccessFloor) breaches.push(`PROVIDER_SUCCESS_${name}`);
+    if(p.latency?.n>=min && p.latency.p95Ms>providerP95Ms) breaches.push(`PROVIDER_LATENCY_${name}`);
   }
   for(const [name,op] of Object.entries(snapshot?.operations||{})){
-    if(op.latency?.n>=5 && op.latency.p95Ms>operationP95Ms) breaches.push(`OPERATION_LATENCY_${name}`);
+    if(op.calls>=min && op.successRate!=null && op.successRate<operationSuccessFloor) breaches.push(`OPERATION_SUCCESS_${name}`);
+    if(op.latency?.n>=min && op.latency.p95Ms>operationP95Ms) breaches.push(`OPERATION_LATENCY_${name}`);
   }
   return {
     ok:breaches.length===0,
-    breaches,
-    state:snapshot?.safety?.current||'UNKNOWN'
+    breaches:[...new Set(breaches)],
+    state:snapshot?.safety?.current||'UNKNOWN',
+    thresholds:{
+      providerSuccessFloor,
+      providerP95Ms,
+      operationSuccessFloor,
+      operationP95Ms,
+      minimumSamples:min
+    }
   };
 }
 

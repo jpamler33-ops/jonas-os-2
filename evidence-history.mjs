@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createStateFingerprint, validateStateFingerprint } from "./state-validity.mjs";
 
 export const EVIDENCE_HISTORY_VERSION="TCX_EVIDENCE_HISTORY_V2";
-const SCHEMA_VERSION=1;
+export const EVIDENCE_HISTORY_SCHEMA_VERSION=1;
+const SCHEMA_VERSION=EVIDENCE_HISTORY_SCHEMA_VERSION;
 const SYMBOL_RE=/^[A-Z0-9]{2,18}USDT$/;
 
 function clamp(x,a=0,b=1){

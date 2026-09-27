@@ -2,8 +2,10 @@ import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { sanitizeAlert } from './alert-engine.mjs';
 
-const SCHEMA_VERSION = 2;
-const LEGACY_SCHEMA_VERSION = 1;
+export const STATE_STORE_SCHEMA_VERSION = 2;
+export const STATE_STORE_LEGACY_SCHEMA_VERSIONS = Object.freeze([1]);
+const SCHEMA_VERSION = STATE_STORE_SCHEMA_VERSION;
+const LEGACY_SCHEMA_VERSION = STATE_STORE_LEGACY_SCHEMA_VERSIONS[0];
 const SYMBOL_RE = /^[A-Z0-9]{2,18}USDT$/;
 
 function validChatKey(key) {
@@ -83,19 +85,30 @@ export async function loadPersistentState(filePath) {
     if (!parsed || ![LEGACY_SCHEMA_VERSION,SCHEMA_VERSION].includes(Number(parsed.schemaVersion))) {
       throw new Error(`unsupported state schema: ${parsed?.schemaVersion}`);
     }
+    const loadedSchemaVersion=Number(parsed.schemaVersion);
     return {
       favorites:sanitizeFavorites(parsed.favorites),
       alerts:sanitizeAlerts(parsed.alerts),
       recoveredFromCorrupt:false,
-      backupPath:null
+      backupPath:null,
+      loadedSchemaVersion,
+      migrationNeeded:loadedSchemaVersion!==SCHEMA_VERSION
     };
   } catch (err) {
     if (err?.code === 'ENOENT') {
-      return { favorites:new Map(), alerts:new Map(), recoveredFromCorrupt:false, backupPath:null };
+      return {
+        favorites:new Map(), alerts:new Map(),
+        recoveredFromCorrupt:false, backupPath:null,
+        loadedSchemaVersion:null, migrationNeeded:false
+      };
     }
     const backupPath = await backupCorrupt(filePath);
     console.error('state load failed; starting clean',err instanceof Error ? err.message : String(err),backupPath || '');
-    return { favorites:new Map(), alerts:new Map(), recoveredFromCorrupt:true, backupPath };
+    return {
+      favorites:new Map(), alerts:new Map(),
+      recoveredFromCorrupt:true, backupPath,
+      loadedSchemaVersion:null, migrationNeeded:false
+    };
   }
 }
 

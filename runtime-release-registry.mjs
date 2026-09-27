@@ -18,6 +18,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'market-data-fabric.mjs',
   'deterministic-replay.mjs',
   'observability.mjs',
+  'operational-readiness.mjs',
+  'persistence-contracts.mjs',
   'chaos-engineering.mjs',
   'shadow-oms.mjs',
   'multi-venue-shadow-sor.mjs',
@@ -35,6 +37,65 @@ export const DEFAULT_RUNTIME_FILES=[
   'runtime-release-registry.mjs',
   'package.json'
 ];
+
+export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
+  'forecast-contract.mjs',
+  'scientific-validity.mjs',
+  'scientific-core.mjs',
+  'institutional-admission.mjs',
+  'research-trace.mjs',
+  'institutional-forecast-issuance.mjs',
+  'institutional-forecast-runtime.mjs',
+  'model-promotion-ladder.mjs',
+  'model-candidate-registry.mjs',
+  'model-governance-audit.mjs',
+  'model-release-binding.mjs',
+  'institutional-audit-binding.mjs',
+  'forecast-input-adapter.mjs',
+  'forecast-science-adapter.mjs',
+  'forecast-product.mjs',
+  'forecast-candidate-lab.mjs',
+
+  'forecast-runtime/utils/math.js',
+  'forecast-runtime/forecast/types.js',
+  'forecast-runtime/forecast/calibration.js',
+  'forecast-runtime/forecast/reliability.js',
+  'forecast-runtime/forecast/model_performance.js',
+  'forecast-runtime/forecast/interval_calibration.js',
+  'forecast-runtime/forecast/drift.js',
+  'forecast-runtime/forecast/path_engine.js',
+  'forecast-runtime/forecast/regime_transition.js',
+  'forecast-runtime/forecast/invalidation.js',
+  'forecast-runtime/forecast/revision_tracker.js',
+  'forecast-runtime/forecast/counterfactual.js',
+  'forecast-runtime/forecast/history_builder.js',
+  'forecast-runtime/forecast/evaluation.js',
+  'forecast-runtime/forecast/journal.js',
+  'forecast-runtime/forecast/engine.js',
+  'forecast-runtime/forecast/tcx_adapter.js',
+  'forecast-runtime/forecast/intelligence.js',
+  'forecast-runtime/forecast/intelligence_service.js',
+
+  'science-runtime/empirical-support.mjs',
+  'science-runtime/research-integrity.mjs',
+  'science-runtime/concept-stability.mjs',
+  'science-runtime/nonlinear-concept-stability.mjs',
+  'science-runtime/temporal-recency.mjs',
+  'science-runtime/sequential-evidence.mjs',
+  'science-runtime/specification-multiverse.mjs',
+  'science-runtime/transportability.mjs',
+  'science-runtime/evidence-lineage-independence.mjs',
+
+  'expansion-runtime/provenance.mjs',
+  'expansion-runtime/institutional-expansion.mjs',
+  'expansion-runtime/source-intelligence.mjs',
+  'expansion-runtime/event-impact-memory.mjs',
+  'expansion-runtime/liquidity-intelligence.mjs'
+];
+
+export function institutionalRuntimeFiles(){
+  return [...new Set([...DEFAULT_RUNTIME_FILES,...INSTITUTIONAL_STAGED_RUNTIME_FILES])].sort();
+}
 
 function cleanDeployment(d={}){
   const gitCommit=/^[0-9a-f]{7,64}$/i.test(String(d.gitCommit||''))?String(d.gitCommit):null;

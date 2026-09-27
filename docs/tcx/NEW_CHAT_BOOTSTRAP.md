@@ -14,8 +14,11 @@ Technical source of truth: current GitHub `main`
 4. `/docs/tcx/MODULE_REGISTRY.md`
 5. `/docs/tcx/DECISIONS.md`
 6. `/docs/tcx/OPEN_WORK.md`
-7. `/docs/tcx/SPECIALIST_HANDOVERS.md`
-8. Relevant canonical product/research specs, especially `/docs/TCX_TELEGRAM_PRODUCT_SPEC.md`
+7. `/docs/tcx/FINAL_INSTITUTIONAL_GAP_AUDIT.md`
+8. `/docs/tcx/MAIN_MERGE_PLAN.md`
+9. `/docs/tcx/INCIDENT_RECOVERY_RUNBOOK.md`
+10. `/docs/tcx/SPECIALIST_HANDOVERS.md`
+11. Relevant canonical product/research specs, especially `/docs/TCX_TELEGRAM_PRODUCT_SPEC.md`
 
 ## Working rules
 

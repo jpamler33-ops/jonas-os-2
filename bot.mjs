@@ -6,11 +6,13 @@ import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independent-witness-network.mjs';
-import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
-import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
+import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
+import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './operational-readiness.mjs';
+import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from './persistence-contracts.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -25,6 +27,26 @@ import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } fro
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
+import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
+import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
+import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
+import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
+import {
+  openInstitutionalForecastRuntime,
+  saveInstitutionalForecastRuntime,
+  seedInstitutionalForecastRuntimeFromEpisodes,
+  issueInstitutionalForecast,
+  observeInstitutionalForecastRuntime,
+  observeInstitutionalForecastOutcomePoint,
+  latestInstitutionalForecast,
+  institutionalForecastRuntimeSummary,
+  episodeVectorExtraFeatures,
+  INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+} from './institutional-forecast-runtime.mjs';
+import {
+  appendInstitutionalForecastIssuanceAudit,
+  appendResearchTraceEvaluationAudit
+} from './institutional-audit-binding.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -51,6 +73,8 @@ const researchValidityConfig = Object.freeze({
   driftThreshold:researchValidityDriftThreshold
 });
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
+const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_OUTCOME_CHECK_MS || 60000));
+const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
 const shadowWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_WATCH_MS || 10000));
 const shadowDefaultLatencyMs = Math.max(0, Math.min(5000, Number(process.env.TCX_SHADOW_LATENCY_MS || 120)));
@@ -121,6 +145,9 @@ const alerts = loadedState.alerts;
 const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
 const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
+const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
+const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile);
+const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
 const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
@@ -144,6 +171,7 @@ let shadowOmsLastError = loadedShadowOms.error || null;
 let shadowOmsPersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
+let forecastRuntimePersistenceQueue = Promise.resolve();
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
   marketMaxAgeMs:institutionalMarketMaxAgeMs,
@@ -183,6 +211,12 @@ const institutionalConfig = Object.freeze({
     version:EXECUTION_RESEARCH_LAB_VERSION,
     canExecuteLive:false,
     objective:'EXECUTION_QUALITY_NOT_PNL'
+  },
+  forecastRuntime:{
+    version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
+    configHash:sha256(forecastRuntime.engine.configSnapshot()),
+    objective:'FORECAST_CALIBRATION_AND_ACCURACY_NOT_PNL',
+    canExecuteLive:false
   }
 });
 
@@ -191,6 +225,7 @@ let runtimeReleaseRecord=null;
 try {
   runtimeManifest=await buildRuntimeManifest({
     rootDir:'.',
+    files:institutionalRuntimeFiles(),
     config:institutionalConfig,
     deployment:{
       gitCommit:process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || '',
@@ -205,6 +240,8 @@ try {
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
+      operationalReadiness:OPERATIONAL_READINESS_VERSION,
+      persistenceContracts:PERSISTENCE_CONTRACTS_VERSION,
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
@@ -217,7 +254,13 @@ try {
       telegramMutationCommands:TELEGRAM_MUTATION_COMMANDS_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
-      executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION
+      executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION,
+      forecastInputAdapter:FORECAST_INPUT_ADAPTER_VERSION,
+      forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+      scientificCore:SCIENTIFIC_CORE_VERSION,
+      institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
+      forecastConfigHash:sha256(forecastRuntime.engine.configSnapshot()),
+      forecastProduct:FORECAST_PRODUCT_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -328,6 +371,28 @@ async function persistEvidenceHistory(reason='mutation') {
   return evidenceHistoryHealthy;
 }
 
+async function persistForecastRuntime(reason='mutation') {
+  forecastRuntimePersistenceQueue = forecastRuntimePersistenceQueue.then(async()=>{
+    if(!forecastRuntime.healthy) return false;
+    try {
+      await saveInstitutionalForecastRuntime(forecastRuntime);
+      forecastRuntime.lastError=null;
+      return true;
+    } catch(err) {
+      forecastRuntime.healthy=false;
+      forecastRuntime.lastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'forecast_runtime.persistence',message:forecastRuntime.lastError});
+      console.error('forecast runtime persistence error',reason,forecastRuntime.lastError);
+      return false;
+    }
+  });
+  return forecastRuntimePersistenceQueue;
+}
+
+if(forecastSeedAtBoot.addedRows>0 && forecastRuntime.healthy){
+  await persistForecastRuntime('boot-episode-seed');
+}
+
 function latestEvidenceRecord(symbol) {
   return latestEvidenceSnapshot(evidenceRecords,symbol);
 }
@@ -366,6 +431,48 @@ async function appendInstitutionalAudit(kind,payload) {
         detail:err instanceof Error?err.message:String(err)
       };
       console.error('institutional audit append failure',auditLedger.verification.detail);
+      return null;
+    }
+  });
+  return auditAppendQueue;
+}
+
+async function appendForecastIssuanceAuditQueued(issuance) {
+  auditAppendQueue = auditAppendQueue.then(async()=>{
+    if(!auditLedger.healthy) return null;
+    try {
+      return await appendInstitutionalForecastIssuanceAudit(auditLedger,issuance,{
+        occurredAt:issuance.generatedAt
+      });
+    } catch(err) {
+      auditLedger.healthy=false;
+      auditLedger.verification={
+        ok:false,
+        error:'FORECAST_AUDIT_APPEND_FAILURE',
+        detail:err instanceof Error?err.message:String(err)
+      };
+      recordError(observability,{scope:'forecast.audit.issue',message:auditLedger.verification.detail});
+      return null;
+    }
+  });
+  return auditAppendQueue;
+}
+
+async function appendForecastEvaluationAuditQueued(trace,evaluation) {
+  auditAppendQueue = auditAppendQueue.then(async()=>{
+    if(!auditLedger.healthy) return null;
+    try {
+      return await appendResearchTraceEvaluationAudit(auditLedger,trace,evaluation,{
+        occurredAt:evaluation.observedAt
+      });
+    } catch(err) {
+      auditLedger.healthy=false;
+      auditLedger.verification={
+        ok:false,
+        error:'FORECAST_EVALUATION_AUDIT_APPEND_FAILURE',
+        detail:err instanceof Error?err.message:String(err)
+      };
+      recordError(observability,{scope:'forecast.audit.evaluation',message:auditLedger.verification.detail});
       return null;
     }
   });
@@ -635,8 +742,8 @@ async function showAlertSetup(chatId,symbol) {
   });
 }
 
-function buildResearchAlertContext(state,witnessReport) {
-  const engine=runMechanismTransitionEngine({
+function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safetyOverride=null}={}) {
+  const engine=engineOverride||runMechanismTransitionEngine({
     analysis:state.memoryAnalysis,
     dashboard:state.memoryDashboard,
     episodes,
@@ -650,7 +757,7 @@ function buildResearchAlertContext(state,witnessReport) {
   });
   const witnessAudit=auditWitnessReport(witnessReport);
   const engineAudit=auditEngineResult(engine);
-  const safety=determineSafetyState({
+  const safety=safetyOverride||determineSafetyState({
     marketAudit,
     witnessAudit,
     engineAudit,
@@ -937,6 +1044,7 @@ function memoryKeyboard(symbol) {
       { text:"🛰 Witness", callback_data:`witness:${symbol}` }
     ],
     [
+      { text:"🔮 Forecast", callback_data:`forecast:${symbol}` },
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
       { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
     ]
@@ -1032,6 +1140,7 @@ function helpText() {
     '/validity BTC – Drift/Expiry der letzten Research-Sicht',
     '/history BTC – persistenter Evidence-Verlauf',
     '/engine BTC – Mechanism Transition Lattice',
+    '/forecast BTC – institutioneller Multi-Horizon Forecast',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
     '/audit – Institutional Kernel / Ledger-Integrität',
     '/fabric – Event-Sourced Market Data Fabric',
@@ -1624,12 +1733,12 @@ function chartCaption(symbol, interval, analysis, candles, availableAt, host, da
 }
 
 async function researchState(symbol,interval="5m") {
-  const availableAt=Date.now();
   const frames=[...new Set(["4h","1h","15m","5m",interval])];
   const [market,...fetched]=await Promise.all([
     snapshot(symbol),
     ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
   ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
   const byTf={};
   frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
   const analysis=analyzeStructure(byTf[interval]);
@@ -1680,11 +1789,11 @@ async function captureEpisodeFromState(state,{persist=true}={}) {
   return episode;
 }
 
-function matureSymbolEpisodes(symbol,candles) {
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
   let changed=false;
   for(const e of episodes) {
     if(e.symbol!==symbol) continue;
-    if(matureEpisode(e,candles)) changed=true;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
   }
   return changed;
 }
@@ -1698,7 +1807,7 @@ function statLine(label,s) {
 async function showMemory(chatId,symbol) {
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
-  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"]);
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
   if(matured) await persistEpisodeMemory("manual-maturity");
   const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
   const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
@@ -2431,13 +2540,19 @@ function transitionLine(label,lattice){
   return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
 }
 
-async function showEngine(chatId,symbol){
-  const engineStarted=Date.now();
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
-  if(matureSymbolEpisodes(symbol,state.byTf["5m"])) await persistEpisodeMemory("engine-maturity");
-  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
 
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
   const r15=runMechanismTransitionEngine({
     analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
   });
@@ -2450,13 +2565,13 @@ async function showEngine(chatId,symbol){
 
   const fabricWrite=await ingestResearchFabric(state,witnessReport);
   const fabricSummary=marketFabricSummary(marketFabric);
-
   const marketAudit=auditMarketSnapshot(state.market,{
     now:Date.now(),
     maxAgeMs:institutionalMarketMaxAgeMs
   });
   const witnessAudit=auditWitnessReport(witnessReport);
   const engineAudit=auditEngineResult(r15);
+
   let safety=determineSafetyState({
     marketAudit,
     witnessAudit,
@@ -2465,9 +2580,10 @@ async function showEngine(chatId,symbol){
     fabricHealthy:marketFabric.healthy,
     registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
   });
-  let envelope=buildResearchEnvelope({
+
+  const makeEnvelope=()=>buildResearchEnvelope({
     symbol,
-    availableAt:state.availableAt,
+    availableAt:contextAvailableAt,
     market:state.market,
     witness:witnessReport,
     engine:r15,
@@ -2483,9 +2599,9 @@ async function showEngine(chatId,symbol){
     },
     dataFabric:{
       version:MARKET_DATA_FABRIC_VERSION,
-      seq:fabricSummary.seq,
-      tailHash:fabricSummary.tailHash,
-      healthy:fabricSummary.healthy
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
     },
     runtimeRelease:{
       registryVersion:RELEASE_REGISTRY_VERSION,
@@ -2495,47 +2611,39 @@ async function showEngine(chatId,symbol){
       registryHealthy:releaseRegistry.healthy
     }
   });
-  const auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
-  if(!auditLedger.healthy){
-    safety=determineSafetyState({
-      marketAudit,
-      witnessAudit,
-      engineAudit,
-      ledgerHealthy:false,
-      fabricHealthy:marketFabric.healthy,
-      registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
-    });
-    envelope=buildResearchEnvelope({
-      symbol,
-      availableAt:state.availableAt,
-      market:state.market,
-      witness:witnessReport,
-      engine:r15,
-      safety,
-      config:institutionalConfig,
-      versions:{
-        institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
-        mechanismEngine:r15.version,
-        episodeMemory:'V3',
-        witnessNetwork:'IWN_V1',
-        marketDataFabric:MARKET_DATA_FABRIC_VERSION,
-        deterministicReplay:DETERMINISTIC_REPLAY_VERSION
-      },
-      dataFabric:{
-        version:MARKET_DATA_FABRIC_VERSION,
-        seq:marketFabric.seq,
-        tailHash:marketFabric.tailHash,
-        healthy:marketFabric.healthy
-      },
-      runtimeRelease:{
-        registryVersion:RELEASE_REGISTRY_VERSION,
-        releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
-        registrySeq:runtimeReleaseRecord?.seq??null,
-        registryTailHash:releaseRegistry.tailHash,
-        registryHealthy:releaseRegistry.healthy
-      }
-    });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
   }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
 
   recordSafety(observability,safety.state,{
     hardReasons:safety.hardReasons,
@@ -2605,6 +2713,201 @@ async function showEngine(chatId,symbol){
   return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
 }
 
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={chat_id:chatId,text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    if(messageId) return tg('editMessageText',{...failPayload,message_id:messageId});
+    return tg('sendMessage',failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    evidence:[
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={chat_id:chatId,text,reply_markup:forecastProductKeyboard(symbol)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
 function parseAction(data='') {
   const product=parseProductCallback(data);
   if(product.kind!=='UNKNOWN') return product;
@@ -2624,6 +2927,7 @@ function parseAction(data='') {
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
   if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
   if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
   if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
@@ -2654,6 +2958,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showAudit,
   showWitness,
   showEngine,
+  showForecast,
   showMemory,
   showEvidence,
   showEvidenceHistory,
@@ -2868,6 +3173,12 @@ async function handle(update) {
     if (a.kind === "ENGINE") {
       await showEngine(chatId,a.symbol);
       await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
       return;
     }
 
@@ -3215,6 +3526,67 @@ async function venueQualityWatcher() {
   }
 }
 
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
 async function episodeWatcher() {
   while(running) {
     let changed=false;
@@ -3226,7 +3598,7 @@ async function episodeWatcher() {
         const before=episodes.length;
         await captureEpisodeFromState(state,{persist:false});
         if(episodes.length!==before) changed=true;
-        if(matureSymbolEpisodes(symbol,state.byTf["5m"])) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
         try {
           const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
           const context=buildResearchAlertContext(state,witnessReport);
@@ -3248,8 +3620,88 @@ async function episodeWatcher() {
   }
 }
 
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
   if (req.url === '/health' || req.url === '/') {
     const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
     res.writeHead(200,{'content-type':'application/json'});
@@ -3294,6 +3746,14 @@ const server = http.createServer((req,res) => {
         version:OBSERVABILITY_VERSION,
         snapshot:observabilitySnapshot(observability),
         slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
       },
       chaosEngineering:{
         version:CHAOS_ENGINEERING_VERSION,
@@ -3389,6 +3849,11 @@ const server = http.createServer((req,res) => {
         version:RESEARCH_LIFECYCLE_VERSION,
         evidenceSnapshots:evidenceRecords.length
       },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -3413,6 +3878,7 @@ async function gracefulShutdown(signal) {
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
   await persistShadowOms(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   server.close(() => process.exit(0));
@@ -3430,6 +3896,13 @@ console.log(JSON.stringify({
   alertCheckMs,
   researchAlertCheckMs,
   episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
   institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
   auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
   releaseRegistry:{
@@ -3450,6 +3923,8 @@ console.log(JSON.stringify({
   },
   deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
   observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
   chaosEngineering:CHAOS_ENGINEERING_VERSION,
   alertEngine:ALERT_ENGINE_VERSION,
   stateValidity:{
@@ -3499,6 +3974,7 @@ console.log(JSON.stringify({
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
+  configuredReplicaCount,
   marketDataHosts:binanceBases.map(x => new URL(x).host),
   witnessProviders:{
     okx:new URL(okxBase).host,
@@ -3519,4 +3995,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);

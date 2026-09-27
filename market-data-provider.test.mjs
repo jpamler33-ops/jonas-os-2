@@ -97,3 +97,43 @@ test("agg trade parser preserves buyer-maker flag",async()=>{
   assert.equal(r.trades[0].buyerMaker,true);
   assert.equal(r.trades[1].buyerMaker,false);
 });
+
+
+test("circuit breaker opens after repeated host failures",async()=>{
+  let calls=0;
+  let clock=10_000;
+  const p=provider(async()=>{
+    calls++;
+    return response(500,{err:"down"});
+  },{
+    now:()=>clock++,
+    circuitFailureThreshold:2,
+    circuitOpenMs:60_000
+  });
+  await assert.rejects(()=>p.fetchJson("https://a.binance.test/fail"),/HTTP 500/);
+  await assert.rejects(()=>p.fetchJson("https://a.binance.test/fail"),/HTTP 500/);
+  await assert.rejects(()=>p.fetchJson("https://a.binance.test/fail"),/TCX_PROVIDER_CIRCUIT_OPEN/);
+  assert.equal(calls,2);
+  const health=p.providerHealth();
+  assert.equal(health.circuits["a.binance.test"].open,true);
+});
+
+test("provider applies bounded backpressure before unbounded queue growth",async()=>{
+  let release;
+  const hold=new Promise(resolve=>{release=resolve;});
+  let calls=0;
+  const p=provider(async()=>{
+    calls++;
+    await hold;
+    return response(200,{ok:true});
+  },{
+    maxConcurrentRequests:1,
+    maxPendingRequests:0
+  });
+  const first=p.fetchJson("https://a.binance.test/one");
+  await assert.rejects(()=>p.fetchJson("https://a.binance.test/two"),/TCX_PROVIDER_BACKPRESSURE/);
+  assert.equal(p.providerHealth().inFlight,1);
+  release();
+  await first;
+  assert.equal(calls,1);
+});

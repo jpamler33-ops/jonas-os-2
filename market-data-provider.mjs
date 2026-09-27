@@ -26,6 +26,10 @@ export function createMarketDataProvider({
   krakenPair,
   sorFees={},
   timeoutMs=8000,
+  maxConcurrentRequests=12,
+  maxPendingRequests=100,
+  circuitFailureThreshold=5,
+  circuitOpenMs=15000,
   userAgent="TCX-v2-SHADOW_ONLY",
   now=defaultNow,
   onProviderCall=noop,
@@ -52,7 +56,107 @@ export function createMarketDataProvider({
     KRAKEN:Math.max(0,Number(sorFees.KRAKEN||0))
   };
 
+  const requestedMaxConcurrent=Number(maxConcurrentRequests);
+  const requestedMaxPending=Number(maxPendingRequests);
+  const capacity={
+    maxConcurrent:Math.max(1,Math.floor(Number.isFinite(requestedMaxConcurrent)?requestedMaxConcurrent:12)),
+    maxPending:Math.max(0,Math.floor(Number.isFinite(requestedMaxPending)?requestedMaxPending:100)),
+    inFlight:0,
+    pending:[]
+  };
+  const breaker=new Map();
+
+  function breakerKey(url){
+    try{return new URL(url).host.toLowerCase();}
+    catch{return "unknown";}
+  }
+  function breakerState(url){
+    const key=breakerKey(url);
+    if(!breaker.has(key)) breaker.set(key,{failures:0,openUntil:0,lastError:null,lastFailureAt:null});
+    return {key,state:breaker.get(key)};
+  }
+  function assertCircuitClosed(url){
+    const {key,state}=breakerState(url);
+    const t=now();
+    if(state.openUntil>t){
+      const err=new Error("TCX_PROVIDER_CIRCUIT_OPEN "+key);
+      err.code="TCX_PROVIDER_CIRCUIT_OPEN";
+      throw err;
+    }
+    if(state.openUntil&&state.openUntil<=t){
+      state.openUntil=0;
+      state.failures=0;
+    }
+  }
+  function recordCircuitSuccess(url){
+    const {state}=breakerState(url);
+    state.failures=0;
+    state.openUntil=0;
+    state.lastError=null;
+  }
+  function recordCircuitFailure(url,message){
+    const {state}=breakerState(url);
+    state.failures++;
+    state.lastError=String(message||"").slice(0,240);
+    state.lastFailureAt=now();
+    if(state.failures>=Math.max(1,Number(circuitFailureThreshold)||5)){
+      state.openUntil=state.lastFailureAt+Math.max(1000,Number(circuitOpenMs)||15000);
+    }
+  }
+  function releaseCapacity(){
+    capacity.inFlight=Math.max(0,capacity.inFlight-1);
+    const next=capacity.pending.shift();
+    if(next){
+      capacity.inFlight++;
+      next();
+    }
+  }
+  function withCapacity(fn){
+    return new Promise((resolve,reject)=>{
+      const run=()=>{
+        Promise.resolve()
+          .then(fn)
+          .then(resolve,reject)
+          .finally(releaseCapacity);
+      };
+      if(capacity.inFlight<capacity.maxConcurrent){
+        capacity.inFlight++;
+        run();
+        return;
+      }
+      if(capacity.pending.length>=capacity.maxPending){
+        const err=new Error("TCX_PROVIDER_BACKPRESSURE");
+        err.code="TCX_PROVIDER_BACKPRESSURE";
+        reject(err);
+        return;
+      }
+      capacity.pending.push(run);
+    });
+  }
+  function providerHealth(){
+    const circuits={};
+    for(const [host,state] of breaker){
+      circuits[host]={
+        failures:state.failures,
+        open:state.openUntil>now(),
+        openUntil:state.openUntil||null,
+        lastError:state.lastError,
+        lastFailureAt:state.lastFailureAt
+      };
+    }
+    return {
+      version:MARKET_DATA_PROVIDER_VERSION,
+      inFlight:capacity.inFlight,
+      pending:capacity.pending.length,
+      maxConcurrent:capacity.maxConcurrent,
+      maxPending:capacity.maxPending,
+      circuits
+    };
+  }
+
   async function fetchJson(url){
+    return withCapacity(async()=>{
+    assertCircuitClosed(url);
     const ctrl=new AbortController();
     const timer=setTimeout(()=>ctrl.abort(),Math.max(1,Number(timeoutMs)||8000));
     const started=now();
@@ -72,16 +176,19 @@ export function createMarketDataProvider({
       let parsed;
       try{ parsed=JSON.parse(body); }
       catch{ throw new Error("Invalid JSON from "+new URL(url).host); }
+      recordCircuitSuccess(url);
       onProviderCall({provider,ok:true,latencyMs:now()-started,status});
       return parsed;
     }catch(err){
       const message=err instanceof Error?err.message:String(err);
+      recordCircuitFailure(url,message);
       onProviderCall({provider,ok:false,latencyMs:now()-started,status,error:message});
       onError({scope:"provider."+provider,message});
       throw err;
     }finally{
       clearTimeout(timer);
     }
+    });
   }
 
   async function fetchMarketParts(symbol){
@@ -290,6 +397,7 @@ export function createMarketDataProvider({
     fetchKrakenSorBook,
     fetchSorVenueBooks,
     fetchLatestAggTradeId,
-    fetchAggTradesSince
+    fetchAggTradesSince,
+    providerHealth
   });
 }
