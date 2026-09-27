@@ -2137,6 +2137,69 @@ function sorLegLine(leg,totalBase){
   return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
 }
 
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
 async function showSorStatus(chatId,symbol='BTCUSDT'){
   const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
   const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
