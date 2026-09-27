@@ -313,21 +313,42 @@ function alertList(chatId) {
   return alerts.get(key);
 }
 
+function providerNameFromUrl(url) {
+  try {
+    const host=new URL(url).host.toLowerCase();
+    if(host.includes('binance')) return 'BINANCE';
+    if(host.includes('okx')) return 'OKX';
+    if(host.includes('kraken')) return 'KRAKEN';
+    return host.toUpperCase();
+  } catch { return 'UNKNOWN'; }
+}
 async function fetchJson(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
+  const started=Date.now();
+  const provider=providerNameFromUrl(url);
+  let status=null;
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
       headers: { 'user-agent':'TCX-v2-SHADOW_ONLY', accept:'application/json' }
     });
+    status=res.status;
     const body = await res.text();
     if (!res.ok) {
       const detail = body.slice(0,180).replace(/\s+/g,' ');
       throw new Error(`HTTP ${res.status} ${new URL(url).host}: ${detail}`);
     }
-    try { return JSON.parse(body); }
+    let parsed;
+    try { parsed=JSON.parse(body); }
     catch { throw new Error(`Invalid JSON from ${new URL(url).host}`); }
+    recordProviderCall(observability,{provider,ok:true,latencyMs:Date.now()-started,status});
+    return parsed;
+  } catch(err) {
+    const message=err instanceof Error?err.message:String(err);
+    recordProviderCall(observability,{provider,ok:false,latencyMs:Date.now()-started,status,error:message});
+    recordError(observability,{scope:`provider.${provider}`,message});
+    throw err;
   } finally {
     clearTimeout(timer);
   }
