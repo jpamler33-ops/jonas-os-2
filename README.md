@@ -478,3 +478,79 @@ Release Registry corruption is a hard Institutional Kernel failure and produces 
 This closes a major reproducibility gap: TCX can identify not only which data was known at a point in time, but also which exact hashed runtime release processed it.
 
 Execution remains disabled: `ABSTAIN / SHADOW_ONLY`.
+
+
+## TCX Institutional Observability & Chaos Engineering v1
+
+TCX now measures operational quality rather than only reporting that the process is alive.
+
+### Observability
+
+Runtime telemetry includes:
+
+- provider call count
+- provider success/failure rate
+- provider latency mean / p50 / p95 / p99 / max
+- institutional engine latency
+- safety-state transitions
+- evidence-strength distribution
+- novelty distribution
+- contradiction distribution
+- witness-agreement distribution
+- primary-data age
+- recent scoped errors
+
+Telegram:
+
+```text
+/obs
+```
+
+The observability layer derives SLO breaches for:
+
+- low provider success rate
+- excessive provider p95 latency
+- excessive engine/operation p95 latency
+
+Metrics are bounded in memory so monitoring itself cannot grow without limit.
+
+### Synthetic Chaos Harness
+
+Telegram:
+
+```text
+/chaos
+/chaos PRIMARY_STALE
+```
+
+The chaos harness is side-effect-free with respect to real markets, provider calls, orders, the Market Data Fabric and current market state. It exercises the actual Institutional Kernel using synthetic fixtures.
+
+Current scenarios include:
+
+- healthy baseline
+- stale primary market data
+- crossed order book
+- future timestamp / clock-skew style failure
+- invalid order-book imbalance
+- OKX + Kraken outage
+- cross-venue disagreement
+- engine execution-mode violation
+- engine action invariant violation
+- causal-status violation
+- Audit Ledger corruption
+- Market Data Fabric corruption
+- Release Registry corruption
+- simultaneous multi-system failure
+
+Expected behavior is asserted per scenario:
+
+```text
+soft witness failure -> DEGRADED
+hard primary/integrity/invariant failure -> SAFE_STOP
+canExecute -> always FALSE
+execution -> always SHADOW_ONLY
+```
+
+Chaos reports can be written to the Institutional Audit Ledger when that ledger is healthy.
+
+Both `observability.mjs` and `chaos-engineering.mjs` are included in the deterministic Runtime Release hash, so changes to monitoring or failure-test logic create a new release identity.
