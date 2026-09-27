@@ -62,6 +62,9 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-feature-research.mjs',
   'research-data-plane.mjs',
   'research-data-plane-adapters.mjs',
+  'research-feature-catalog.mjs',
+  'research-source-contracts.mjs',
+  'research-data-governance.mjs',
 
   'forecast-runtime/utils/math.js',
   'forecast-runtime/forecast/types.js',
