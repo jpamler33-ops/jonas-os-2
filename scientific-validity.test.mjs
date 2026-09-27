@@ -127,3 +127,17 @@ test('summary never creates trade permission',()=>{
   assert.equal(s.action,'ABSTAIN');
   assert.equal(s.canExecute,false);
 });
+
+
+test('non-finite scientific diagnostics fail closed instead of crashing',()=>{
+  const r=evaluateScientificValidity({
+    asOf:1000,
+    guards:[
+      {id:'COLD_START_GUARD',required:true,report:report('INSUFFICIENT',{diagnostics:{distance:Infinity,score:NaN}})}
+    ]
+  });
+  assert.equal(r.gate,'ABSTAIN');
+  assert.equal(r.guards[0].usable,false);
+  assert.ok(r.guards[0].reasons.includes('REPORT_NONFINITE'));
+  assert.equal(verifyScientificValidity(r).ok,true);
+});
