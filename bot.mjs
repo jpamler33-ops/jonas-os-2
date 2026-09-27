@@ -13,6 +13,7 @@ import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, veri
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
 import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './operational-readiness.mjs';
 import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from './persistence-contracts.mjs';
+import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistence-smoke.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -4052,6 +4053,8 @@ process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
 process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 
 const me = await tg('getMe',{});
+const persistenceSmoke=runPersistenceSmokeTest();
+console.log('[TCX_PERSISTENCE_SMOKE]',JSON.stringify(persistenceSmoke));
 console.log(JSON.stringify({
   service:'TCX Telegram UI',
   botUsername:me?.username || 'UNKNOWN',
