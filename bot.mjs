@@ -6,6 +6,7 @@ import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses } from './independent-witness-network.mjs';
+import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -22,6 +23,7 @@ const krakenBase = (process.env.TCX_KRAKEN_REST_BASE || 'https://api.kraken.com'
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
+const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
 const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').split(',').map(x => x.trim()).filter(Boolean));
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT')
@@ -48,6 +50,18 @@ const alerts = loadedState.alerts;
 const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
 const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
+const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
+const auditLedger = await openAuditLedger(auditFile);
+let auditAppendQueue = Promise.resolve();
+const institutionalConfig = Object.freeze({
+  execution:'SHADOW_ONLY',
+  marketMaxAgeMs:institutionalMarketMaxAgeMs,
+  primaryProvider:'BINANCE',
+  witnessProviders:['OKX','KRAKEN'],
+  strictWitnessMinExternal:2,
+  mechanismCausalStatus:'NOT_IDENTIFIED',
+  orderExecutionPath:false
+});
 let episodePersistenceHealthy = true;
 let episodePersistenceLastError = null;
 let episodePersistenceQueue = Promise.resolve();
@@ -85,6 +99,25 @@ async function persistEpisodeMemory(reason='mutation') {
   });
   await episodePersistenceQueue;
   return episodePersistenceHealthy;
+}
+
+async function appendInstitutionalAudit(kind,payload) {
+  auditAppendQueue = auditAppendQueue.then(async()=>{
+    if(!auditLedger.healthy) return null;
+    try {
+      return await appendAuditRecord(auditLedger,{kind,payload,occurredAt:Date.now()});
+    } catch(err) {
+      auditLedger.healthy=false;
+      auditLedger.verification={
+        ok:false,
+        error:'LEDGER_APPEND_FAILURE',
+        detail:err instanceof Error?err.message:String(err)
+      };
+      console.error('institutional audit append failure',auditLedger.verification.detail);
+      return null;
+    }
+  });
+  return auditAppendQueue;
 }
 
 let offset = 0;
@@ -435,6 +468,7 @@ function helpText() {
     '/memory BTC – ähnliche historische TCX-Episoden',
     '/engine BTC – Mechanism Transition Lattice',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
+    '/audit – Institutional Kernel / Ledger-Integrität',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -766,6 +800,36 @@ async function showWitness(chatId,symbol) {
   return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
 }
 
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
 function pct01(x){ return fmt(Number(x)*100,0); }
 
 function transitionLine(label,lattice){
@@ -793,6 +857,58 @@ async function showEngine(chatId,symbol){
     analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
   });
 
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy
+  });
+  let envelope=buildResearchEnvelope({
+    symbol,
+    availableAt:state.availableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1'
+    }
+  });
+  const auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+  if(!auditLedger.healthy){
+    safety=determineSafetyState({
+      marketAudit,
+      witnessAudit,
+      engineAudit,
+      ledgerHealthy:false
+    });
+    envelope=buildResearchEnvelope({
+      symbol,
+      availableAt:state.availableAt,
+      market:state.market,
+      witness:witnessReport,
+      engine:r15,
+      safety,
+      config:institutionalConfig,
+      versions:{
+        institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+        mechanismEngine:r15.version,
+        episodeMemory:'V3',
+        witnessNetwork:'IWN_V1'
+      }
+    });
+  }
+
   const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
   const strongest=ch[0]||["NONE",0];
   const text=[
@@ -817,6 +933,18 @@ async function showEngine(chatId,symbol){
     `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
     `Source independence: ${r15.audit.sourceIndependence}`,
     `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
     "",
     "STATUS",
     "• Transition evidence: OBSERVATIONAL",
@@ -912,6 +1040,15 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/audit") {
+    try { await showAudit(chatId); }
+    catch(err){
+      console.error("audit command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Institutional Kernel Audit gerade nicht verfügbar."});
+    }
+    return true;
+  }
 
   if (command === "/witness") {
     const symbol=normalizeSymbol(parts[1]||"");
@@ -1240,6 +1377,14 @@ const server = http.createServer((req,res) => {
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
       alerts:activeAlerts,
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -1289,6 +1434,8 @@ console.log(JSON.stringify({
   refreshMs,
   alertCheckMs,
   episodeSweepMs,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
