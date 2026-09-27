@@ -16,8 +16,8 @@ function supportRows(shift=0){
       source:'TEST',version:'1',provenance:'fixture'
     });
   }
-  for(let i=0;i<40;i++){
-    const x=(i-20)/12+shift;
+  for(let i=0;i<60;i++){
+    const x=(i-30)/12+shift;
     rows.push({
       id:`t-${i}`,mechanismId:'M1',environmentId:'TARGET',role:'TARGET',
       sampleId:`t-${i}`,feature:'x',value:x,deploymentTarget:true,
