@@ -3,6 +3,7 @@ import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
+import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -16,6 +17,7 @@ const binanceBases = (configuredBinanceBases
 
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
+const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').split(',').map(x => x.trim()).filter(Boolean));
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT')
@@ -38,6 +40,12 @@ const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
 const loadedState = await loadPersistentState(stateFile);
 const favorites = loadedState.favorites;
 const alerts = loadedState.alerts;
+const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
+const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
+let episodes = loadedEpisodeMemory.episodes;
+let episodePersistenceHealthy = true;
+let episodePersistenceLastError = null;
+let episodePersistenceQueue = Promise.resolve();
 let persistenceHealthy = true;
 let persistenceLastError = null;
 let persistenceQueue = Promise.resolve();
@@ -56,6 +64,22 @@ async function persistState(reason='mutation') {
   });
   await persistenceQueue;
   return persistenceHealthy;
+}
+
+async function persistEpisodeMemory(reason='mutation') {
+  episodePersistenceQueue = episodePersistenceQueue.then(async () => {
+    try {
+      episodes = await saveEpisodeMemory(episodeFile,episodes,{maxPerSymbol:2000});
+      episodePersistenceHealthy = true;
+      episodePersistenceLastError = null;
+    } catch (err) {
+      episodePersistenceHealthy = false;
+      episodePersistenceLastError = err instanceof Error ? err.message : String(err);
+      console.error('episode persistence error',reason,episodePersistenceLastError);
+    }
+  });
+  await episodePersistenceQueue;
+  return episodePersistenceHealthy;
 }
 
 let offset = 0;
@@ -208,7 +232,8 @@ function marketKeyboard(chatId, symbol, live) {
     ],
     [
       { text:'📈 Chart', callback_data:`chart:${symbol}:5m` },
-      { text:'🧭 Struktur', callback_data:`structure:${symbol}` }
+      { text:'🧭 Struktur', callback_data:`structure:${symbol}` },
+      { text:'🧬 Memory', callback_data:`memory:${symbol}` }
     ],
     [
       { text:isFav?'★ Favorit':'☆ Favorit', callback_data:`fav:${symbol}` },
@@ -239,7 +264,8 @@ function timeframeKeyboard(symbol) {
     ],
     [
       { text:'📈 Chart', callback_data:`chart:${symbol}:5m` },
-      { text:'🧭 Struktur', callback_data:`structure:${symbol}` }
+      { text:'🧭 Struktur', callback_data:`structure:${symbol}` },
+      { text:'🧬 Memory', callback_data:`memory:${symbol}` }
     ],
     [
       { text:'📊 Markt', callback_data:`refresh:${symbol}` },
@@ -260,6 +286,7 @@ function chartKeyboard(symbol, interval) {
     ],
     [
       { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
+      { text:"🧬 Memory", callback_data:`memory:${symbol}` },
       { text:"📊 Markt", callback_data:`refresh:${symbol}` }
     ]
   ]};
@@ -270,6 +297,20 @@ function structureKeyboard(symbol) {
     [
       { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
       { text:"📈 1h Chart", callback_data:`chart:${symbol}:1h` }
+    ],
+    [
+      { text:"📊 Markt", callback_data:`refresh:${symbol}` },
+      { text:"🧬 Memory", callback_data:`memory:${symbol}` },
+      { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
+    ]
+  ]};
+}
+
+function memoryKeyboard(symbol) {
+  return { inline_keyboard:[
+    [
+      { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
+      { text:"🧭 Struktur", callback_data:`structure:${symbol}` }
     ],
     [
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
@@ -361,6 +402,7 @@ function helpText() {
     '/coin BTC – Coin direkt öffnen',
     '/chart BTC 5m – Candlestick-Chart',
     '/structure BTC – 4H/1H/15m/5m Struktur',
+    '/memory BTC – ähnliche historische TCX-Episoden',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -509,29 +551,116 @@ function chartCaption(symbol, interval, analysis, candles, availableAt, host, da
   ].join("\n").slice(0,1024);
 }
 
-async function showChart(chatId, symbol, interval="5m") {
-  const availableAt = Date.now();
+async function researchState(symbol,interval="5m") {
+  const availableAt=Date.now();
   const frames=[...new Set(["4h","1h","15m","5m",interval])];
   const [market,...fetched]=await Promise.all([
     snapshot(symbol),
-    ...frames.map(tf=>fetchKlines(symbol,tf,160))
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
   ]);
   const byTf={};
   frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
-  const candles=byTf[interval];
-  const analysis=analyzeStructure(candles);
+  const analysis=analyzeStructure(byTf[interval]);
   const mtf=analyzeMultiTimeframe({
     "4h":byTf["4h"],
     "1h":byTf["1h"],
     "15m":byTf["15m"],
     "5m":byTf["5m"]
   });
-  const dashboard=deriveChartDashboard(candles,analysis,mtf,market);
-  const png=renderCandlestickPng(candles,analysis,{width:1100,height:760,dashboard});
-  const host=new URL(fetched[frames.indexOf(interval)].base).host;
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles)) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: n=${s?.n||0} · noch zu wenig gereifte Episoden`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return `${label}: n=${s.n} · Sim ${fmt(s.medianSimilarity,0)}% · End ${fmt(r.median,2)}% [IQR ${fmt(r.q25,2)}..${fmt(r.q75,2)}] · Rise ${fmt(up.median,2)}% · Fall ${fmt(down.median,2)}%`;
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"]);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧬 TCX Episode Memory · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Aktuell: ${state.memoryDashboard.regime} · ${state.memoryDashboard.flow} · RIFT ${Math.round(state.memoryDashboard.pressureScore)}/100`,
+    `Gespeicherte Episoden: ${stored}`,
+    "",
+    "Ähnlichkeit = Zustand/Mechanik-Telemetrie, NICHT Chartform.",
+    statLine("15m",s3),
+    statLine("1h",s12),
+    statLine("3h",s36),
+    "",
+    "Outcomes: historisch beobachtete Endbewegung + maximale Auf-/Abwärtsbewegung.",
+    "Keine Trefferquote, keine Prognose, kein Trade-Signal.",
+    "Mechanism posterior: NOT_IDENTIFIED",
+    "Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+  return tg("sendMessage",{chat_id:chatId,text,reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
   return tgMultipart("sendPhoto",{
     chat_id:String(chatId),
-    caption:chartCaption(symbol,interval,analysis,candles,availableAt,host,dashboard),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
     reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
   },"photo",`${symbol}-${interval}.png`,png,"image/png");
 }
@@ -577,6 +706,7 @@ function parseAction(data='') {
   if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
   if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
   return { kind:'UNKNOWN' };
 }
@@ -645,6 +775,20 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/memory") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    if(!symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /memory BTC"});
+      return true;
+    }
+    try { await showMemory(chatId,symbol); }
+    catch(err){
+      console.error("memory command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Episode Memory gerade nicht verfügbar."});
+    }
+    return true;
+  }
 
   if (command === '/alert') {
     const symbol = normalizeSymbol(parts[1] || '');
@@ -769,6 +913,12 @@ async function handle(update) {
     }
 
 
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
     if (a.kind === 'FAV') {
       const set = favoriteSet(chatId);
       if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
@@ -879,6 +1029,27 @@ async function alertWatcher() {
   }
 }
 
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"])) changed=true;
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
   if (req.url === '/health' || req.url === '/') {
@@ -892,6 +1063,14 @@ const server = http.createServer((req,res) => {
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
       alerts:activeAlerts,
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -914,6 +1093,7 @@ async function gracefulShutdown(signal) {
   running = false;
   console.log('shutdown', signal);
   await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0),5000).unref();
 }
@@ -927,6 +1107,7 @@ console.log(JSON.stringify({
   markets:markets.map(x=>x.symbol),
   refreshMs,
   alertCheckMs,
+  episodeSweepMs,
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
@@ -937,8 +1118,13 @@ console.log(JSON.stringify({
     recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
     loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
     loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
   }
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher()]);
