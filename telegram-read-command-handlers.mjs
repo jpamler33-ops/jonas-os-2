@@ -27,6 +27,7 @@ export function createReadCommandHandlers(deps={}){
     showWitness,
     showEngine,
     showForecast,
+    showIntelligence,
     showMemory,
     showEvidence,
     showEvidenceHistory,
@@ -221,6 +222,7 @@ export function createReadCommandHandlers(deps={}){
     "/witness":symbolResearch("/witness","/witness BTC",showWitness,"Independent Witness Network gerade nicht verfügbar.","command.witness"),
     "/engine":symbolResearch("/engine","/engine BTC",showEngine,"MTL Engine gerade nicht verfügbar.","command.engine"),
     "/forecast":symbolResearch("/forecast","/forecast BTC",showForecast,"Forecast Intelligence gerade nicht verfügbar.","command.forecast"),
+    "/intelligence":symbolResearch("/intelligence","/intelligence BTC",showIntelligence,"Intelligence-Status gerade nicht verfügbar.","command.intelligence"),
     "/memory":symbolResearch("/memory","/memory BTC",showMemory,"Episode Memory gerade nicht verfügbar.","command.memory"),
 
     "/evidence":async ({chatId,args})=>{
