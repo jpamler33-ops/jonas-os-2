@@ -4603,7 +4603,11 @@ function currentPersistenceCompatibility(){
       AUDIT_LEDGER:{healthy:auditLedger.healthy},
       MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
       RELEASE_REGISTRY:{healthy:releaseRegistry.healthy},
-      RESEARCH_DATA_PLANE:{healthy:researchDataPlane.healthy}
+      RESEARCH_DATA_PLANE:{healthy:researchDataPlane.healthy},
+      RESEARCH_DATA_GOVERNANCE:{
+        healthy:researchGovernanceHealthy,
+        recoveredFromCorrupt:researchDataGovernance.recoveredFromCorrupt===true
+      }
     },
     localFilePersistence:true,
     replicaCount:configuredReplicaCount
