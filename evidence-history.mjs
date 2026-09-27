@@ -1,7 +1,8 @@
 import path from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createStateFingerprint, validateStateFingerprint } from "./state-validity.mjs";
 
-export const EVIDENCE_HISTORY_VERSION="TCX_EVIDENCE_HISTORY_V1";
+export const EVIDENCE_HISTORY_VERSION="TCX_EVIDENCE_HISTORY_V2";
 const SCHEMA_VERSION=1;
 const SYMBOL_RE=/^[A-Z0-9]{2,18}USDT$/;
 
@@ -32,7 +33,8 @@ function fingerprint(record){
     record.trend,
     record.disagreementCount,
     record.index,
-    record.gate
+    record.gate,
+    record.stateFingerprint?.hash||"NO_STATE_FP"
   ].join("|");
   let h=2166136261;
   for(let i=0;i<s.length;i++){
@@ -146,6 +148,9 @@ export function createEvidenceRecord(symbol,ctx,previousRecord=null){
     contradiction:clamp(ctx.engine?.contradiction),
     evidenceStrength:clamp(ctx.engine?.evidenceStrength),
     gate:String(ctx.engine?.gate||"UNKNOWN"),
+    stateFingerprint:createStateFingerprint(s,ctx),
+    validityLast:null,
+    closedAt:null,
     epistemic:"DERIVED_RESEARCH_DIAGNOSTIC_NOT_PROBABILITY"
   };
   return {...record,fingerprint:fingerprint(record),map};
@@ -177,6 +182,11 @@ function sanitizeRecord(r){
   const capturedAt=Number(r.capturedAt);
   const index=Number(r.index);
   if(!Number.isFinite(capturedAt)||capturedAt<=0||!Number.isFinite(index)) return null;
+  const stateFingerprint=validateStateFingerprint(r.stateFingerprint)?r.stateFingerprint:null;
+  const closedAt=Number(r.closedAt);
+  const validityLast=(r.validityLast&&typeof r.validityLast==="object"&&!Array.isArray(r.validityLast))
+    ? {...r.validityLast}
+    : null;
   return {
     ...r,
     schemaVersion:SCHEMA_VERSION,
@@ -186,6 +196,9 @@ function sanitizeRecord(r){
     trend:String(r.trend||"UNKNOWN"),
     disagreementCount:Math.max(0,Number(r.disagreementCount||0)),
     weakCount:Math.max(0,Number(r.weakCount||0)),
+    stateFingerprint,
+    validityLast,
+    closedAt:Number.isFinite(closedAt)&&closedAt>0?closedAt:null,
     map:r.map&&typeof r.map==="object"?r.map:{reference:"MIXED",layers:[],conflictCount:0,weakCount:0}
   };
 }
