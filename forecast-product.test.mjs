@@ -48,7 +48,7 @@ test('forecast card suppresses unavailable probabilities',()=>{
     }
   };
   const text=renderInstitutionalForecastCard(issuance,{now:1200});
-  assert.match(text,/Probability: SUPPRESSED/);
+  assert.match(text,/Wahrscheinlichkeit: noch nicht freigegeben/);
   assert.doesNotMatch(text,/P↑/);
   assert.match(text,/SHADOW_ONLY/);
 });
@@ -80,7 +80,7 @@ test('audit failure suppresses otherwise displayable probability',()=>{
     }
   };
   const text=renderInstitutionalForecastCard(issuance,{auditBound:false,now:1200});
-  assert.match(text,/Audit: FAILED/);
+  assert.match(text,/Audit: FEHLER → Forecast gesperrt/);
   assert.match(text,/Probability: SUPPRESSED/);
   assert.doesNotMatch(text,/P↑/);
 });
@@ -103,10 +103,10 @@ test('audit failure suppresses otherwise displayable probabilities',()=>{
     }
   };
   const text=renderInstitutionalForecastCard(issuance,{now:1100,auditHealthy:false});
-  assert.match(text,/Admission: ABSTAIN/);
+  assert.match(text,/Aktion: ABSTAIN/);
   assert.match(text,/Probability: SUPPRESSED/);
   assert.doesNotMatch(text,/P↑/);
-  assert.match(text,/Audit binding: FAILED/);
+  assert.match(text,/Audit: FEHLER → Forecast gesperrt/);
 });
 
 
