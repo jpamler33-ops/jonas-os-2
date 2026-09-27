@@ -42,6 +42,8 @@ TCX_TELEGRAM_REFRESH_MS=10000
 TCX_TELEGRAM_ALERT_CHECK_MS=15000
 TCX_EPISODE_SWEEP_MS=300000
 TCX_EPISODE_FILE=/data/tcx-episodes.json
+TCX_OKX_REST_BASE=https://www.okx.com
+TCX_KRAKEN_REST_BASE=https://api.kraken.com
 TCX_TELEGRAM_ALLOWED_CHATS=123456789
 TCX_TELEGRAM_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,...
 ```
@@ -172,3 +174,49 @@ Telegram:
 Important: the current deployment uses one Binance provider with multiple modalities (OHLCV, order book, volume/structure). These are not independent witnesses. Therefore MTL may support a mechanism hypothesis, but its causal status remains `NOT_IDENTIFIED`. It cannot enter `IDENTIFIABILITY_REVIEW` until a genuinely independent witness is available.
 
 MTL is observational research infrastructure. It outputs no buy/sell instruction and remains `ABSTAIN / SHADOW_ONLY`.
+
+
+## TCX Independent Witness Network v1
+
+The mechanism stack now queries independent spot venues at engine time:
+
+- Binance is the primary telemetry source.
+- OKX is a same-quote `USDT` order-book witness.
+- Kraken is an independent `USD` order-book witness.
+
+Public order books are normalized to a common witness schema containing:
+
+- bid / ask / mid
+- spread in bps
+- top-depth notional imbalance
+- publication timestamp
+- availableAt
+- venue/source provenance
+
+The witness audit rejects stale snapshots and excessive capture skew before they can contribute. It then measures:
+
+- flow-direction agreement
+- liquidity-class agreement
+- same-quote price agreement
+- cross-quote price agreement with an explicit USD-vs-USDT caveat
+- cross-venue contradiction flags
+- freshness
+- total witness agreement
+
+Strict `independentWitnessSatisfied` requires at least two usable external venues, at least one same-quote witness, same-quote price agreement, sufficient flow agreement and sufficient aggregate agreement.
+
+Commands:
+
+```text
+/witness BTC
+/engine BTC
+```
+
+MTL receives the witness report. A strict multi-venue witness can move a sufficiently supported hypothesis to `IDENTIFIABILITY_REVIEW`, but never to causal truth. Even then:
+
+```text
+Causal status: NOT_IDENTIFIED
+Trading action: ABSTAIN / SHADOW_ONLY
+```
+
+Cross-venue agreement is evidence against a venue-local artifact; it is not proof of a causal mechanism.
