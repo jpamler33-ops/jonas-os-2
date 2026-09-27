@@ -6,6 +6,7 @@ import { EXPANSION_PACK_PROVENANCE_HASH } from './provenance.mjs';
 import { buildTraderWalletEvidence } from './trader-wallet-intelligence.mjs';
 import { buildMemecoinEvidence } from './memecoin-intelligence.mjs';
 import { buildNarrativeReflexivityEvidence } from './narrative-reflexivity.mjs';
+import { buildFutureIntelligenceEvidence } from './future-intelligence.mjs';
 
 export const INSTITUTIONAL_EXPANSION_VERSION='TCX_INSTITUTIONAL_EXPANSION_V1';
 
@@ -40,7 +41,8 @@ export function buildInstitutionalExpansionEvidence({
   liquidityContext={},
   traderWallet=null,
   memecoin=null,
-  narrative=null
+  narrative=null,
+  futureIntelligence=null
 }={}){
   const t=finite(asOf,'asOf');
 
@@ -81,6 +83,10 @@ export function buildInstitutionalExpansionEvidence({
     ? buildNarrativeReflexivityEvidence({asOf:t,...narrative})
     : null;
 
+  const futureIntelligenceEvidence=futureIntelligence
+    ? buildFutureIntelligenceEvidence({asOf:t,...futureIntelligence})
+    : null;
+
   const activeGates=[
     sourceReliability.gate,
     eventImpactMemory.gate,
@@ -89,6 +95,7 @@ export function buildInstitutionalExpansionEvidence({
     ...(traderWalletEvidence?[traderWalletEvidence.evidenceGate]:[]),
     ...(memecoinEvidence?[memecoinEvidence.evidenceGate]:[]),
     ...(narrativeEvidence?[narrativeEvidence.evidenceGate]:[])
+    // Future Intelligence is intentionally excluded from the fast evidence gate.
   ];
 
   const evidenceGate=strictest(activeGates);
@@ -115,6 +122,7 @@ export function buildInstitutionalExpansionEvidence({
     traderWalletEvidence,
     memecoinEvidence,
     narrativeEvidence,
+    futureIntelligenceEvidence,
     evidenceGate,
     reasons:[...new Set(reasons)],
     provenance:{
@@ -128,7 +136,8 @@ export function buildInstitutionalExpansionEvidence({
       liquidity:'OBSERVED_PLUS_DERIVED_MICROSTRUCTURE',
       traderWallet:'EMPIRICAL_POST_OUTCOME_NOT_CAUSAL',
       memecoin:'OBSERVED_RISK_AND_ACTIVITY_NOT_FORECAST_PROBABILITY',
-      narrative:'OBSERVED_DISCOURSE_AND_REFLEXIVITY_HYPOTHESIS_NOT_CAUSAL'
+      narrative:'OBSERVED_DISCOURSE_AND_REFLEXIVITY_HYPOTHESIS_NOT_CAUSAL',
+      futureIntelligence:'SLOW_HORIZON_SCENARIO_EVIDENCE_SEPARATE_FROM_FAST_FORECAST'
     },
     restrictions:{
       mayExecute:false,
