@@ -4811,6 +4811,12 @@ const server = http.createServer((req,res) => {
         outcomeCheckMs:forecastOutcomeCheckMs
       },
       researchDataPlane:researchDataPlaneSummary(researchDataPlane),
+      researchDataGovernance:{
+        ...researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}),
+        file:researchGovernanceFile,
+        healthy:researchGovernanceHealthy,
+        lastError:researchGovernanceLastError
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
