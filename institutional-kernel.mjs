@@ -250,7 +250,16 @@ export async function openAuditLedger(filePath){
       catch{throw new Error(`Invalid ledger JSON at line ${i+1}`);}
     });
   }catch(err){
-    if(err?.code!=='ENOENT') throw err;
+    if(err?.code!=='ENOENT'){
+      return {
+        filePath,
+        healthy:false,
+        verification:{ok:false,error:'LEDGER_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
+        seq:0,
+        tailHash:GENESIS,
+        records:[]
+      };
+    }
   }
   const verification=verifyLedgerRecords(records);
   return {
