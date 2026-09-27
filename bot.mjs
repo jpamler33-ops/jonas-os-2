@@ -704,6 +704,91 @@ async function fetchExecutionBook(symbol) {
   throw new Error(`Execution book unavailable: ${errors.join(' | ')}`);
 }
 
+async function fetchBinanceSorBook(symbol) {
+  const encoded=encodeURIComponent(symbol);
+  const errors=[];
+  for(const base of binanceBases){
+    const started=Date.now();
+    try {
+      const depth=await fetchJson(`${base}/api/v3/depth?symbol=${encoded}&limit=100`);
+      const availableAt=Date.now();
+      return normalizeVenueBook({
+        venue:'BINANCE',
+        source:'BINANCE_PUBLIC_REST_DEPTH100',
+        symbol,quote:'USDT',
+        bids:depth.bids||[],asks:depth.asks||[],
+        availableAt,fetchLatencyMs:availableAt-started,
+        feeBps:sorBinanceFeeBps,
+        provenance:`host=${new URL(base).host}; lastUpdateId=${depth.lastUpdateId??'UNKNOWN'}`
+      });
+    } catch(err){
+      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
+    }
+  }
+  throw new Error(`Binance SOR book unavailable: ${errors.join(' | ')}`);
+}
+
+async function fetchOkxSorBook(symbol) {
+  const instId=okxInstrument(symbol);
+  if(!instId) throw new Error('OKX instrument unavailable');
+  const started=Date.now();
+  const payload=await fetchJson(`${okxBase}/api/v5/market/books?instId=${encodeURIComponent(instId)}&sz=100`);
+  if(String(payload?.code)!=='0') throw new Error(`OKX error ${payload?.code||'UNKNOWN'} ${payload?.msg||''}`);
+  const row=payload?.data?.[0];
+  if(!row) throw new Error('OKX missing book');
+  const availableAt=Date.now();
+  return normalizeVenueBook({
+    venue:'OKX',source:'OKX_PUBLIC_BOOKS100',symbol,quote:'USDT',
+    bids:row.bids||[],asks:row.asks||[],
+    availableAt,fetchLatencyMs:availableAt-started,
+    feeBps:sorOkxFeeBps,
+    provenance:`OKX /api/v5/market/books instId=${instId}; exchangeTs=${row.ts||'UNKNOWN'}`
+  });
+}
+
+async function fetchKrakenSorBook(symbol) {
+  const pair=krakenPair(symbol);
+  if(!pair) throw new Error('Kraken pair unavailable');
+  const started=Date.now();
+  const payload=await fetchJson(`${krakenBase}/0/public/Depth?pair=${encodeURIComponent(pair)}&count=100`);
+  if(Array.isArray(payload?.error)&&payload.error.length) throw new Error(`Kraken error ${payload.error.join(',')}`);
+  const result=payload?.result;
+  const key=result&&Object.keys(result)[0];
+  const row=key?result[key]:null;
+  if(!row) throw new Error('Kraken missing book');
+  const availableAt=Date.now();
+  return normalizeVenueBook({
+    venue:'KRAKEN',source:'KRAKEN_PUBLIC_DEPTH100',symbol,quote:'USD',
+    bids:row.bids||[],asks:row.asks||[],
+    availableAt,fetchLatencyMs:availableAt-started,
+    feeBps:sorKrakenFeeBps,
+    provenance:`Kraken /0/public/Depth pair=${key||pair}`
+  });
+}
+
+async function fetchSorVenueBooks(symbol) {
+  const started=Date.now();
+  const results=await Promise.allSettled([
+    fetchBinanceSorBook(symbol),
+    fetchOkxSorBook(symbol),
+    fetchKrakenSorBook(symbol)
+  ]);
+  const books=[];
+  const errors=[];
+  const names=['BINANCE','OKX','KRAKEN'];
+  results.forEach((r,i)=>{
+    if(r.status==='fulfilled') books.push(r.value);
+    else errors.push({venue:names[i],error:r.reason instanceof Error?r.reason.message:String(r.reason)});
+  });
+  recordOperation(observability,{
+    name:'shadow_sor.books',
+    ok:books.length>0,
+    latencyMs:Date.now()-started,
+    error:books.length?null:errors.map(x=>x.venue+':'+x.error).join(' | ')
+  });
+  return {books,errors,capturedAt:Date.now()};
+}
+
 async function fetchLatestAggTradeId(symbol) {
   const encoded=encodeURIComponent(symbol);
   const errors=[];
