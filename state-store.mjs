@@ -85,19 +85,30 @@ export async function loadPersistentState(filePath) {
     if (!parsed || ![LEGACY_SCHEMA_VERSION,SCHEMA_VERSION].includes(Number(parsed.schemaVersion))) {
       throw new Error(`unsupported state schema: ${parsed?.schemaVersion}`);
     }
+    const loadedSchemaVersion=Number(parsed.schemaVersion);
     return {
       favorites:sanitizeFavorites(parsed.favorites),
       alerts:sanitizeAlerts(parsed.alerts),
       recoveredFromCorrupt:false,
-      backupPath:null
+      backupPath:null,
+      loadedSchemaVersion,
+      migrationNeeded:loadedSchemaVersion!==SCHEMA_VERSION
     };
   } catch (err) {
     if (err?.code === 'ENOENT') {
-      return { favorites:new Map(), alerts:new Map(), recoveredFromCorrupt:false, backupPath:null };
+      return {
+        favorites:new Map(), alerts:new Map(),
+        recoveredFromCorrupt:false, backupPath:null,
+        loadedSchemaVersion:null, migrationNeeded:false
+      };
     }
     const backupPath = await backupCorrupt(filePath);
     console.error('state load failed; starting clean',err instanceof Error ? err.message : String(err),backupPath || '');
-    return { favorites:new Map(), alerts:new Map(), recoveredFromCorrupt:true, backupPath };
+    return {
+      favorites:new Map(), alerts:new Map(),
+      recoveredFromCorrupt:true, backupPath,
+      loadedSchemaVersion:null, migrationNeeded:false
+    };
   }
 }
 
