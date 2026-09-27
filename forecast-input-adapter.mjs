@@ -1,4 +1,5 @@
 import { replayEnvelopeIntegrity, sha256 } from './institutional-kernel.mjs';
+import { verifyInstitutionalExpansionEvidence } from './expansion-runtime/institutional-expansion.mjs';
 
 export const FORECAST_INPUT_ADAPTER_VERSION='TCX_FORECAST_INPUT_ADAPTER_V1';
 
@@ -91,13 +92,8 @@ export function buildCanonicalForecastInput({
   if(expansionEvidence!=null){
     const expAsOf=Number(expansionEvidence?.asOf);
     const fp=String(expansionEvidence?.fingerprint??'');
-    const restrictions=expansionEvidence?.restrictions??{};
-    const safe=expansionEvidence?.executionMode==='SHADOW_ONLY'&&
-      expansionEvidence?.action==='ABSTAIN'&&
-      expansionEvidence?.canExecute===false&&
-      restrictions?.mayMutateForecast===false&&
-      restrictions?.mayBypassInstitutionalAdmission===false;
-    if(!Number.isFinite(expAsOf)||!fp||!safe){
+    const verification=verifyInstitutionalExpansionEvidence(expansionEvidence);
+    if(!Number.isFinite(expAsOf)||!fp||!verification.ok){
       rejectedExpansion++;
     }else if(expAsOf>asOf){
       blockedFutureExpansion++;
