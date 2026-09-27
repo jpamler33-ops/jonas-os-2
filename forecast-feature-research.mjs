@@ -50,6 +50,26 @@ export const DEFAULT_RESEARCH_FEATURES=Object.freeze([
     id:'FUNDING_VENUE_SPREAD',
     label:'Funding Venue Spread',
     featureIds:Object.freeze(['research.derivatives.fundingRateVenueSpread'])
+  }),
+  Object.freeze({
+    id:'LIQUIDATION_IMBALANCE',
+    label:'Liquidation Imbalance 5m',
+    featureIds:Object.freeze(['research.liquidation.imbalance5m'])
+  }),
+  Object.freeze({
+    id:'LIQUIDATION_INTENSITY',
+    label:'Liquidation Intensity 5m',
+    featureIds:Object.freeze(['research.liquidation.logUsd5m'])
+  }),
+  Object.freeze({
+    id:'LIQUIDATION_CONCENTRATION',
+    label:'Liquidation Concentration 5m',
+    featureIds:Object.freeze(['research.liquidation.concentration5m'])
+  }),
+  Object.freeze({
+    id:'LIQUIDATION_COUNT',
+    label:'Liquidation Count 5m',
+    featureIds:Object.freeze(['research.liquidation.logCount5m'])
   })
 ]);
 
