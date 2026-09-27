@@ -17,6 +17,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'institutional-kernel.mjs',
   'market-data-fabric.mjs',
   'deterministic-replay.mjs',
+  'observability.mjs',
+  'chaos-engineering.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
