@@ -141,13 +141,6 @@ try {
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
-  evidenceHistory:{
-    version:EVIDENCE_HISTORY_VERSION,
-    file:evidenceHistoryFile,
-    healthy:evidenceHistoryHealthy,
-    loaded:evidenceRecords.length,
-    recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
-  },
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       shadowSor:SHADOW_SOR_VERSION
     }
@@ -2818,6 +2811,12 @@ async function handle(update) {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
       await showShadowOrders(chatId,a.symbol);
       await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
       return;
     }
     if (a.kind === 'BACK') {
