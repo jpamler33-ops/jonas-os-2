@@ -201,6 +201,7 @@ export function validateResearchDataRecord(record){
     const sourceKey=String(record.governance?.sourceKey||'');
     if(sourceKey!==String(record?.domain||'')+':'+String(record?.source||'')) errors.push('GOVERNANCE_SOURCE_KEY');
     if(record.governance?.canExecute!==false) errors.push('GOVERNANCE_EXECUTION_INVARIANT');
+    if(record.governance?.usableForResearch!=null&&typeof record.governance.usableForResearch!=='boolean') errors.push('GOVERNANCE_USABILITY');
   }
 
   const features=Array.isArray(record?.features)?record.features:[];
@@ -425,6 +426,7 @@ export function researchFeaturesAsOf(plane,{
     const governance=record.governance||null;
     if(requireGoverned&&!governance) continue;
     if(governance&&['QUARANTINE','REJECT'].includes(String(governance.decision||''))) continue;
+    if(governance?.usableForResearch===false) continue;
     const sourceKey=governance?.sourceKey||String(record.domain)+':'+String(record.source);
     if(blocked.has(sourceKey)) continue;
     recordsConsidered++;
