@@ -116,3 +116,13 @@ test('corrupt VQM state fails closed and is recovered separately',async()=>{
   assert.equal(loaded.recoveredFromCorrupt,true);
   assert.equal(loaded.records.length,0);
 });
+
+
+test('missed capture window is marked instead of backfilled',()=>{
+  const x=createVenueQualityObservations({report:report(),symbol:'BTCUSDT',capturedAt:1000})[0];
+  const r=matureVenueQualityObservation(x,{mid:95,at:500_000,maxLagMs:30_000});
+  assert.equal(r.changed,true);
+  assert.equal(r.record.markouts['60000'].status,'MISSED_CAPTURE_WINDOW');
+  assert.equal(r.record.markouts['300000'].status,'MISSED_CAPTURE_WINDOW');
+  assert.equal(r.record.markouts['60000'].adverseSelectionBps,undefined);
+});
