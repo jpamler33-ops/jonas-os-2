@@ -12,6 +12,7 @@ import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERS
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
+import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -708,9 +709,171 @@ async function ack(id, text) {
 
 async function showStart(chatId, messageId) {
   sessions.delete(String(chatId));
-  const payload = { chat_id:chatId, text:startText(), reply_markup:startKeyboard() };
+  const payload = {
+    chat_id:chatId,
+    text:productHomeText({marketCount:markets.length,systemStatus:'ONLINE'}),
+    reply_markup:productHomeKeyboard()
+  };
   if (messageId) await tg('editMessageText', { ...payload, message_id:messageId });
   else await tg('sendMessage', payload);
+}
+
+function homeBackKeyboard(extra=[]) {
+  return { inline_keyboard:[
+    ...extra,
+    [{ text:'📊 Märkte', callback_data:'home:markets' }, { text:'🏠 Home', callback_data:'home' }]
+  ]};
+}
+
+async function showMarkets(chatId,messageId) {
+  const payload={
+    chat_id:chatId,
+    text:[
+      '📊 TCX Märkte','',
+      'Wähle einen Markt. Jeder Coin öffnet die Live-Marktkarte.',
+      'Research-Status bleibt ABSTAIN / SHADOW_ONLY.'
+    ].join('\n'),
+    reply_markup:productMarketsKeyboard(markets,favoriteSet(chatId).size)
+  };
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showHomeSection(chatId,messageId,section) {
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=alertList(chatId);
+    text=list.length
+      ? ['🔔 TCX Alerts','',...list.map((a,i)=>`${i+1}. ${symbolLabel(a.symbol)} ${a.direction==='ABOVE'?'≥':'≤'} ${fmt(a.target,a.target<1?6:2)} USDT`),'','Neue Preisalarme: /alert BTC 70000','TCX-native Alerts folgen auf dieser Basis.'].join('\n')
+      : ['🔔 TCX Alerts','','Keine aktiven Preisalarme.','Neue Preisalarme: /alert BTC 70000','','Nächste Ausbaustufe: Struktur-, Regime-, Witness- und Composite-Alerts.'].join('\n');
+  } else if(section==='RADAR') {
+    const lines=requestedSymbols.map(symbol=>{
+      const own=episodes.filter(e=>e.symbol===symbol);
+      const mature=own.filter(e=>e.outcomes?.['12']).length;
+      return `${symbolLabel(symbol)} · Memory ${own.length} · mature 1h ${mature}`;
+    });
+    text=['🧠 TCX RADAR · Research Coverage','',
+      'Kein Trade-Ranking. Der Radar zeigt aktuell reale Forschungsabdeckung aus Episode Memory.','',
+      ...lines,'',
+      'Nächster Layer: Data Quality + Witness + Novelty + Regime Change in einer gemeinsamen Radaransicht.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🩺 TCX SYSTEM','',
+      `Audit ledger: ${auditLedger.healthy?'OK':'DEGRADED'} · seq ${auditLedger.seq}`,
+      `Market fabric: ${marketFabric.healthy?'OK':'DEGRADED'} · events ${marketFabric.events.length}`,
+      `Release registry: ${releaseRegistry.healthy?'OK':'DEGRADED'} · seq ${releaseRegistry.seq}`,
+      `State persistence: ${persistenceHealthy?'OK':'DEGRADED'}`,
+      `Episode persistence: ${episodePersistenceHealthy?'OK':'DEGRADED'}`,
+      `Witness cache: ${witnessCache.size}`,
+      `Active sessions: ${sessions.size}`,'',
+      'Execution: SHADOW_ONLY',
+      'canExecute: false'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    const activeAlerts=[...alerts.values()].reduce((n,x)=>n+x.length,0);
+    text=[
+      '📈 TCX PERFORMANCE · Measured only','',
+      `Episodes total: ${total}`,
+      `Mature 15m: ${mature15}`,
+      `Mature 1h: ${mature1h}`,
+      `Mature 3h: ${mature3h}`,
+      `Active alerts: ${activeAlerts}`,
+      `Tracked markets: ${markets.length}`,'',
+      'Noch keine künstliche Winrate und keine erfundenen Forecast-Scores.',
+      'Brier/Calibration/Coverage kommen erst mit einem validierten Forecast-Modul.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX SETTINGS · Runtime','',
+      `Live refresh: ${Math.round(refreshMs/1000)} s`,
+      `Alert check: ${Math.round(alertCheckMs/1000)} s`,
+      `Episode sweep: ${Math.round(episodeSweepMs/1000)} s`,
+      `Markets: ${markets.length}`,
+      `Chat whitelist: ${allowedChats.size?'ON':'OFF'}`,
+      `State file: ${stateFile}`,'',
+      'Execution: SHADOW_ONLY',
+      'Telegram-spezifische User-Settings werden als eigener persistenter Layer ergänzt.'
+    ].join('\n');
+  } else {
+    text='TCX Bereich noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const contradictions=witness?.contradictions?.length
+    ? witness.contradictions.slice(0,4).join(', ')
+    : 'keine harte Cross-Venue-Contradiction im aktuellen Audit';
+  const pattern=state.analysis?.pattern
+    ? `${state.analysis.pattern.stage}/${state.analysis.pattern.side}`
+    : 'kein frisches Break/Retest-Muster';
+  const text=[
+    `❓ WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'AKTUELL BEOBACHTET / ABGELEITET',
+    `• MTF Bias: ${state.dashboard.bias} (${state.dashboard.biasScore>=0?'+':''}${state.dashboard.biasScore})`,
+    `• Regime: ${state.dashboard.regime}`,
+    `• Flow: ${state.dashboard.flow}`,
+    `• Liquidity: ${state.dashboard.liquidity}`,
+    `• RIFT pressure proxy: ${Math.round(state.dashboard.pressureScore)}/100 · ${state.dashboard.pressureBand}`,
+    `• 5m Structure: ${state.analysis?.trend||'INSUFFICIENT'} · ${pattern}`,
+    `• Memory: ${stored} gespeichert · ${mature} mit 1h-Outcome`,
+    `• Witness agreement: ${witness?Math.round((witness.agreementScore||0)*100)+'%':'nicht verfügbar'}`,'',
+    'WIDERSPRUCH / UNSICHERHEIT',
+    `• ${contradictions}`,'',
+    'WAS WÜRDE DIE AKTUELLE SICHT ÄNDERN?',
+    '• neuer Strukturzustand / Break-Retest-Wechsel',
+    '• Regime-Transition',
+    '• deutlicher Cross-Venue-Konflikt',
+    '• veraltete oder fehlerhafte Daten',
+    '• aktuell historisch neuartiger Zustand','',
+    'Kein Buy/Sell-Signal. Mechanism posterior: NOT_IDENTIFIED.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `${tf}: ${a?.trend||'INSUFFICIENT'} · EMA20 ${priceText(a?.ema20)} · EMA50 ${priceText(a?.ema50)}`;
+  });
+  const text=[
+    `🧬 REGIME · ${symbol.replace('USDT','/USDT')}`,'',
+    `Local regime: ${state.dashboard.regime}`,
+    `MTF Bias: ${state.dashboard.bias} · Score ${state.dashboard.biasScore}`,
+    `Flow: ${state.dashboard.flow}`,
+    `Liquidity: ${state.dashboard.liquidity}`,
+    `RIFT: ${Math.round(state.dashboard.pressureScore)}/100 · ${state.dashboard.pressureBand}`,'',
+    ...rows,'',
+    'Status: DERIVED_HEURISTIC',
+    'Causal mechanism: NOT_IDENTIFIED',
+    'Action: ABSTAIN / SHADOW_ONLY',
+    `availableAt: ${new Date(state.availableAt).toISOString()}`
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
 }
 
 async function showFavorites(chatId, messageId) {
@@ -726,7 +889,7 @@ async function showFavorites(chatId, messageId) {
 async function showMarket(chatId, messageId, symbol, live) {
   const s = await snapshot(symbol);
   const text = renderMarket(s,live);
-  const reply_markup = marketKeyboard(chatId,symbol,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
   if (messageId) {
     await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
     sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
@@ -1351,6 +1514,8 @@ async function showEngine(chatId,symbol){
 }
 
 function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
   if (data === 'back') return { kind:'BACK' };
   if (data === 'favorites') return { kind:'FAVORITES' };
   if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
@@ -1609,6 +1774,28 @@ async function handle(update) {
 
   const a = parseAction(q.data);
   try {
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
     if (a.kind === 'BACK') {
       await showStart(chatId,messageId);
       await ack(q.id);
