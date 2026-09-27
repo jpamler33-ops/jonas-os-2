@@ -26,6 +26,7 @@ import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADO
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
 import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
+import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
 import {
   openInstitutionalForecastRuntime,
@@ -241,6 +242,7 @@ try {
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
       executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION,
       forecastInputAdapter:FORECAST_INPUT_ADAPTER_VERSION,
+      forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
       scientificCore:SCIENTIFIC_CORE_VERSION,
       institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
     }
