@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildExecutionResearchSamples,temporalOosEvaluation,toxicityCalibration,
-  executionDrift,executionResearchReport,EXECUTION_RESEARCH_CAPABILITIES
+  buildExecutionResearchSamples,temporalOosEvaluation,walkForwardExecutionEvaluation,
+  segmentExecutionBreakdown,toxicityCalibration,executionDrift,executionResearchReport,
+  EXECUTION_RESEARCH_CAPABILITIES
 } from './execution-research-lab.mjs';
 
 function route(routeHash,t,{policy=2,best=4,fill=1,pred=1,realized=2,symbol='BTCUSDT'}={}){
@@ -106,4 +107,33 @@ test('full report keeps execution and causal boundaries explicit',()=>{
   assert.equal(r.epistemic.execution,'SHADOW_ONLY');
   assert.equal(r.epistemic.inference,'DESCRIPTIVE_OOS_EVALUATION_NOT_CAUSAL');
   assert.equal(r.sampleRoutes,50);
+});
+
+
+test('walk-forward evaluation uses sequential unseen windows',()=>{
+  const records=[];
+  for(let i=0;i<70;i++) records.push(...route('wf'+i,1000+i,{policy:2,best:4}));
+  const s=buildExecutionResearchSamples(records);
+  const w=walkForwardExecutionEvaluation(s,{minTrain:30,testWindow:10,step:10,minTest:5});
+  assert.equal(w.status,'WALK_FORWARD_AVAILABLE');
+  assert.equal(w.folds,4);
+  assert.equal(w.positiveFoldRate,1);
+  assert.ok(w.details.every((x,i)=>x.trainN===30+i*10));
+  assert.ok(w.details.every(x=>x.testN===10));
+});
+
+test('segment breakdown separates regimes and memory state without mixing small groups',()=>{
+  const records=[];
+  for(let i=0;i<6;i++) records.push(...route('range'+i,i,{policy:2,best:4}));
+  for(let i=0;i<6;i++){
+    const rows=route('stress'+i,100+i,{policy:5,best:4});
+    for(const x of rows){ x.regime='STRESS'; x.routeMemoryActive=false; }
+    records.push(...rows);
+  }
+  const s=buildExecutionResearchSamples(records);
+  const seg=segmentExecutionBreakdown(s,{minN:5});
+  assert.equal(seg.REGIME.length,2);
+  assert.equal(seg.MEMORY.length,2);
+  assert.equal(seg.REGIME.find(x=>x.segment==='RANGE').edgeMeanBps,2);
+  assert.equal(seg.REGIME.find(x=>x.segment==='STRESS').edgeMeanBps,-1);
 });
