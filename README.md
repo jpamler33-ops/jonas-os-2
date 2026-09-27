@@ -138,3 +138,37 @@ Historical outcomes: OBSERVED_POST_EPISODE
 Mechanism posterior: NOT_IDENTIFIED
 Trading action: ABSTAIN / SHADOW_ONLY
 ```
+
+
+## TCX Mechanism Transition Lattice (MTL) v1
+
+MTL is a research layer above Episode Memory. It does not add another indicator. It decomposes the current point-in-time state into pressure channels and asks how similar historical mechanism/state configurations transitioned into later configurations.
+
+Current channels:
+
+- LIQUIDITY_STRESS
+- FORCED_FLOW
+- REFLEXIVE_ALIGNMENT
+- BOUNDARY_COMPRESSION
+- ABSORPTION
+- CASCADE_RISK
+
+The engine also computes:
+
+- modality coverage
+- contradiction score
+- novelty versus memory
+- transition entropy
+- transition coherence
+- empirical successor-state distributions at 15m / 1h / 3h
+- an identifiability gate
+
+Telegram:
+
+```text
+/engine BTC
+```
+
+Important: the current deployment uses one Binance provider with multiple modalities (OHLCV, order book, volume/structure). These are not independent witnesses. Therefore MTL may support a mechanism hypothesis, but its causal status remains `NOT_IDENTIFIED`. It cannot enter `IDENTIFIABILITY_REVIEW` until a genuinely independent witness is available.
+
+MTL is observational research infrastructure. It outputs no buy/sell instruction and remains `ABSTAIN / SHADOW_ONLY`.
