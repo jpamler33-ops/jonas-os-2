@@ -60,7 +60,7 @@ test('provider joins public Binance and OKX derivatives context',async()=>{
   assert.equal(s.ok,true);
   assert.equal(s.witness.sourceCount,2);
   assert.equal(s.binance.fundingRate,.0001);
-  assert.equal(s.binance.premiumPct,.005);
+  assert.ok(Math.abs(s.binance.premiumPct-.005)<1e-12);
   assert.equal(s.binance.openInterestUsd,100500);
   assert.ok(Math.abs(s.binance.openInterestDelta5m-.1)<1e-12);
   assert.equal(s.binance.globalLongShortRatio,1.25);
@@ -77,7 +77,7 @@ test('snapshot converts only finite observed values into PIT extra features',asy
   const rows=derivativesSnapshotToExtraFeatures(s);
   const byId=new Map(rows.map(x=>[x.id,x]));
   assert.equal(byId.get('research.derivatives.fundingRate').value,.0001);
-  assert.equal(byId.get('research.derivatives.openInterestDelta5m').value,.1);
+  assert.ok(Math.abs(byId.get('research.derivatives.openInterestDelta5m').value-.1)<1e-12);
   assert.equal(byId.get('research.derivatives.fundingRateVenueSpread').availableAt,2_000_000);
   assert.ok(rows.every(x=>Number.isFinite(x.value)));
 });
