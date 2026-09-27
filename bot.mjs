@@ -2776,24 +2776,26 @@ async function showForecast(chatId,symbol,messageId=null){
   });
   // Expansion V1 is wired only from evidence we actually observe here.
   // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
-  const expansionSnapshot=await snapshot(symbol);
-  const expansionEvidence=buildInstitutionalExpansionEvidence({
-    asOf:Number(expansionSnapshot.availableAt),
-    orderBook:{
-      timestamp:Number(expansionSnapshot.timestamp),
-      availableAt:Number(expansionSnapshot.availableAt),
-      source:String(expansionSnapshot.source),
-      version:String(expansionSnapshot.version),
-      bids:[[Number(expansionSnapshot.bid),1]],
-      asks:[[Number(expansionSnapshot.ask),1]]
-    },
-    liquidityContext:{
-      aggressiveFlow:Number(expansionSnapshot.imbalance||0),
-      priceResponse:0,
-      visibleBarrierStrength:Math.min(1,Math.abs(Number(expansionSnapshot.imbalance||0))),
-      approachVelocity:0
-    }
-  });
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
   const input=buildCanonicalForecastInput({
     envelope,
     dataQuality:runtimeQuality.dataQuality,
@@ -2869,13 +2871,13 @@ async function showForecast(chatId,symbol,messageId=null){
     },
     expansion:expansionEvidence,
     evidence:[
-      {
+      ...(expansionEvidence?[{
         type:'EXPANSION_EVIDENCE',
         version:INSTITUTIONAL_EXPANSION_VERSION,
         fingerprint:expansionEvidence.fingerprint,
         gate:expansionEvidence.evidenceGate,
         epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
-      },
+      }]:[]),
       {
         type:'EVIDENCE_SNAPSHOT',
         fingerprint:evidenceRecord?.fingerprint??null,
