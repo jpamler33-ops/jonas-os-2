@@ -168,21 +168,26 @@ const okxPorSource=Object.freeze({
   reportId:process.env.TCX_OKX_POR_REPORT_ID||'502299735',
   reportDate:process.env.TCX_OKX_POR_REPORT_DATE||'2026-09-08'
 });
-let entityRegistry=await loadEntityRegistry(entityRegistryFile);
+let entityRegistry=await loadEntityRegistry(entityRegistryFile,{maxBytes:20*1024*1024});
 let entityRegistryRefreshError=null;
-try{
-  const fresh=await fetchOfficialOkxPorRegistry({
-    fetchImpl:globalThis.fetch,
-    url:okxPorSource.url,
-    reportId:okxPorSource.reportId,
-    reportDate:okxPorSource.reportDate,
-    timeoutMs:15000
-  });
-  entityRegistry=fresh;
-  await saveEntityRegistry(entityRegistryFile,entityRegistry);
-}catch(err){
-  entityRegistryRefreshError=err instanceof Error?err.message:String(err);
-  recordError(observability,{scope:'entity_registry.refresh',message:entityRegistryRefreshError});
+const entityRegistryRefreshEnabled=String(process.env.TCX_ENTITY_REGISTRY_REFRESH_ENABLED||'0')==='1';
+if(entityRegistryRefreshEnabled){
+  try{
+    const fresh=await fetchOfficialOkxPorRegistry({
+      fetchImpl:globalThis.fetch,
+      url:okxPorSource.url,
+      reportId:okxPorSource.reportId,
+      reportDate:okxPorSource.reportDate,
+      timeoutMs:15000
+    });
+    entityRegistry=fresh;
+    await saveEntityRegistry(entityRegistryFile,entityRegistry);
+  }catch(err){
+    entityRegistryRefreshError=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'entity_registry.refresh',message:entityRegistryRefreshError});
+  }
+}else if(!entityRegistry){
+  entityRegistryRefreshError='LIVE_REFRESH_DISABLED_PENDING_STREAMING_IMPORT';
 }
 const registryWalletCohorts=registryToWalletCohorts(entityRegistry||{entries:[]},{
   entityIds:['OKX'],
