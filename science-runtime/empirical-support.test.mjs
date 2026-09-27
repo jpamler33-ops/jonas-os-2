@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateEmpiricalSupport } from './science-runtime/empirical-support.mjs';
+import { evaluateEmpiricalSupport } from './empirical-support.mjs';
 
 function rows({shift=0,targetCorrelationFlip=false,future=false,deploymentTarget=true}={}){
   const out=[];
