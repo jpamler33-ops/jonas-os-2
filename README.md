@@ -55,6 +55,12 @@ TCX_SOR_MAX_BOOK_AGE_MS=15000
 TCX_SOR_BINANCE_FEE_BPS=10
 TCX_SOR_OKX_FEE_BPS=10
 TCX_SOR_KRAKEN_FEE_BPS=10
+TCX_VENUE_QUALITY_MEMORY_FILE=/data/tcx-venue-quality-memory.json
+TCX_VQM_WATCH_MS=15000
+TCX_VQM_MARKOUT_MAX_LAG_MS=45000
+TCX_VQM_MIN_SAMPLES=12
+TCX_VQM_MIN_TOXICITY_SAMPLES=30
+TCX_VQM_HALF_LIFE_DAYS=30
 TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS=15000
 TCX_OKX_REST_BASE=https://www.okx.com
 TCX_KRAKEN_REST_BASE=https://api.kraken.com
@@ -869,3 +875,109 @@ Real exchange order submission: NONE
 ```
 
 Every SOR report can be written to the Institutional Audit Ledger and `multi-venue-shadow-sor.mjs` is included in the Runtime Release hash.
+
+
+## TCX Venue Quality Memory v1
+
+TCX now learns execution quality from its own Shadow SOR history without enabling live execution.
+
+Persistent state:
+
+```text
+/data/tcx-venue-quality-memory.json
+```
+
+Telegram:
+
+```text
+/venuequality BTC BUY 1000
+/vqm BTC SELL 5000
+```
+
+### What is learned
+
+Each SOR run stores a per-venue counterfactual observation for **every venue with an observed book**, not only the venue chosen by the router.
+
+Context dimensions:
+
+- venue
+- symbol
+- side
+- notional size bucket
+- market regime
+- liquidity state
+- pressure band
+
+Metrics:
+
+- counterfactual fill ratio
+- visible-book slippage
+- all-in cost
+- fee assumption
+- public-book fetch latency
+- router selection share
+- 1m / 5m / 15m same-venue future markouts
+- adverse selection
+
+This avoids training only on the router's own winners.
+
+### Point-in-time markout integrity
+
+Future markouts have strict capture windows.
+
+If TCX misses a horizon because the process was offline or the venue book was unavailable, it records:
+
+```text
+MISSED_CAPTURE_WINDOW
+```
+
+It never uses a much later current price as a fake historical 1m/5m/15m markout.
+
+### Hierarchical evidence
+
+VQM starts with the most specific matching segment and falls back only when sample support is insufficient:
+
+```text
+venue + symbol + side + size + regime + liquidity
+→ venue + symbol + side + size + regime
+→ venue + symbol + side + size
+→ venue + symbol + side
+→ venue + side
+→ venue global
+```
+
+The reported scope and sample count remain visible.
+
+### Toxicity feedback into SOR
+
+Venue toxicity is derived only from matured 5-minute adverse-selection observations.
+
+Default gate:
+
+```text
+minimum matured 5m observations = 30
+```
+
+Below the gate:
+
+```text
+NOT_APPLIED_INSUFFICIENT_EVIDENCE
+toxicity penalty = 0
+```
+
+Above the gate, adverse-selection evidence is recency weighted and shrunk toward zero before it can influence future Shadow SOR routes.
+
+New observations from the current route are appended **after** the route has been computed, preventing same-run self-feedback.
+
+### Epistemic boundary
+
+```text
+L2 book: OBSERVED
+single-venue fill: COUNTERFACTUAL SHADOW SIMULATION
+future venue mid: OBSERVED only inside valid capture window
+quality memory: EMPIRICAL SHADOW EXECUTION MEMORY
+causal status: NOT_IDENTIFIED
+live execution: DISABLED
+```
+
+Corrupt VQM state disables learned penalties and further learning; it does not fabricate memory or silently repair history. Base observed-book Shadow SOR can continue without the learned penalty.
