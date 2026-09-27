@@ -90,6 +90,8 @@ test('institutional staged release set hashes forecast, science, admission and t
     'science-runtime/empirical-support.mjs',
     'science-runtime/specification-multiverse.mjs',
     'science-runtime/evidence-lineage-independence.mjs',
+    'expansion-runtime/provenance.mjs',
+    'expansion-runtime/institutional-expansion.mjs',
     'expansion-runtime/source-intelligence.mjs',
     'expansion-runtime/event-impact-memory.mjs',
     'expansion-runtime/liquidity-intelligence.mjs'
