@@ -19,7 +19,7 @@ Completed:
 
 ## P1 · Forecast Specialist staging
 
-Status: RUNTIME + PRODUCT DONE / FINAL MAIN REVIEW PENDING
+Status: PRE-MERGE ENGINEERING COMPLETE / MAIN MERGE PENDING
 
 Completed:
 - full v2.3.1 forecast runtime staged
@@ -42,8 +42,9 @@ Completed runtime/product path:
 - matured-outcome watcher with audited Research Trace evaluations
 
 Still required before main promotion:
-- final institutional gap audit
-- final main-merge migration review
+- merge PR #2 only while latest checks remain green and branch is not behind main
+- deploy single-replica runtime
+- post-deploy readiness / Telegram / matured-outcome acceptance
 
 ## P2 · TCX Research Trace
 
@@ -136,7 +137,7 @@ Completed:
 - candidate/governance Docker packaging + CI
 
 Next:
-1. final institutional gap audit
+1. merge/deploy acceptance
 2. decide explicit operational trigger for offline candidate evaluation after main merge
 3. keep all promotion actions explicit and versioned; no unattended production mutation
 
@@ -204,21 +205,28 @@ Do not expose raw internal probabilities when calibration/science/admission/audi
 
 ## P7 · Institutional gap audit
 
-Status: NEXT / FINAL PRE-MERGE GATE
+Status: DONE / PRE-MERGE ENGINEERING GATE PASSED
 
-Audit:
+Closed:
 - schema/version contracts
-- persistence migrations
+- persistence migrations/contracts
 - idempotency
-- backpressure
+- bounded backpressure
 - circuit breakers
-- distributed persistence prerequisites
-- rollback
+- single-replica persistence prerequisite
+- rollback governance + drill
 - release hashing
 - observability/SLOs
-- incident recovery
+- incident recovery runbook
+- fail-closed /ready endpoint
 - deployment packaging
-- main-branch migration
+- automated institutional pre-merge gate
+- main-branch migration plan
+
+Release-process work remaining:
+- merge tested PR head
+- deploy
+- post-deploy acceptance
 
 ## Stop condition
 
