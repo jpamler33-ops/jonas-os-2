@@ -108,3 +108,31 @@ test('audit failure suppresses otherwise displayable probabilities',()=>{
   assert.doesNotMatch(text,/P↑/);
   assert.match(text,/Audit binding: FAILED/);
 });
+
+
+test('forecast card explains the signal in plain German',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1000,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    probabilityDisplayAllowed:false,
+    admission:{gate:'INSUFFICIENT',researchDisposition:'ABSTAIN'},
+    trace:{validity:{state:'VALID'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'INSUFFICIENT',overallGate:'INSUFFICIENT',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'INSUFFICIENT',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:false,suppressionReasons:['CALIBRATION_INSUFFICIENT'],probabilities:null},
+        support:{analogCount:3,effectiveSamples:2},
+        calibration:{status:'INSUFFICIENT'}
+      }],
+      path:{coherence:'INSUFFICIENT',dominantArchetype:'UNKNOWN'}
+    }
+  };
+  const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
+  assert.match(rendered,/KURZ GESAGT/);
+  assert.match(rendered,/eher nach oben/);
+  assert.match(rendered,/WAS DAS FÜR DICH BEDEUTET/);
+  assert.match(rendered,/noch nicht freigegeben/);
+  assert.doesNotMatch(rendered,/P↑/);
+  assert.match(rendered,/SHADOW_ONLY/);
+});
