@@ -235,6 +235,9 @@ export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
       {text:"📜 History",callback_data:"history:"+s}
     ],
     [
+      {text:"🎬 Replay",callback_data:"replaymenu:"+s}
+    ],
+    [
       {text:"🔔 Alert",callback_data:"alerthelp:"+s},
       {text:isFavorite?"★ Favorit":"☆ Favorit",callback_data:"fav:"+s}
     ],
@@ -257,6 +260,7 @@ export function parseProductCallback(data="") {
   if(p[0]==="sor"&&p[1]) return {kind:"SOR",symbol:p[1]};
   if(p[0]==="evidence"&&p[1]) return {kind:"EVIDENCE",symbol:p[1]};
   if(p[0]==="history"&&p[1]) return {kind:"HISTORY",symbol:p[1]};
+  if(p[0]==="replaymenu"&&p[1]) return {kind:"REPLAY_MENU",symbol:p[1]};
   return {kind:"UNKNOWN"};
 }
 
