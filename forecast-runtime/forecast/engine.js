@@ -281,7 +281,7 @@ export class ProbabilisticForecastEngine {
         const mws = models.map(m => m.effectiveWeight * Math.min(1, Math.sqrt(m.sampleCount / Math.max(1, this.cfg.minTrainingCases))));
         const expectedReturn = models.length ? weightedMean(models.map(m => m.expectedReturn), mws) : 0;
         const raw = normalize({ up: models.length ? weightedMean(models.map(m => m.pUp), mws) : 1 / 3, down: models.length ? weightedMean(models.map(m => m.pDown), mws) : 1 / 3, flat: models.length ? weightedMean(models.map(m => m.pFlat), mws) : 1 / 3 });
-        const modelDispersion = models.length ? std(models.map(m => m.expectedReturn)) : Infinity;
+        const modelDispersion = models.length ? std(models.map(m => m.expectedReturn)) : null;
         const modelProbabilityDisagreement = models.length ? weightedMean(models.map(m => jsd({ up: m.pUp, down: m.pDown, flat: m.pFlat }, raw)), mws) : 1;
         const cal = this.calibration.calibrateDirectional({ symbol: input.symbol, horizonMs: h.horizonMs, regimeId: input.regimeId, raw, asOf: input.asOf, options: { minCases: this.cfg.calibrationMinCases, bins: this.cfg.calibrationBins, priorStrength: this.cfg.calibrationPriorStrength, recencyHalfLifeMs: this.cfg.recencyHalfLifeMs } });
         const probs = cal.calibrated;
