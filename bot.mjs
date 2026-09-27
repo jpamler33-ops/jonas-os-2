@@ -714,18 +714,18 @@ function alertPreset(symbol,preset,{witnessPct=75,memorySupport=8}={}) {
 function alertSetupKeyboard(symbol) {
   return {inline_keyboard:[
     [
-      {text:'🧬 Regime-Wechsel',callback_data:'alertpreset:'+symbol+':REGIME'},
-      {text:'🧭 Struktur-Wechsel',callback_data:'alertpreset:'+symbol+':STRUCTURE'}
+      {text:'🧭 Marktphase ändert sich',callback_data:'alertpreset:'+symbol+':REGIME'},
+      {text:'📈 Trendstruktur ändert sich',callback_data:'alertpreset:'+symbol+':STRUCTURE'}
     ],
     [
-      {text:'🛰 Witness ≥75%',callback_data:'alertpreset:'+symbol+':WITNESS75'},
-      {text:'🧠 Memory ≥8',callback_data:'alertpreset:'+symbol+':MEMORY8'}
+      {text:'🌐 Quellen stimmen überein',callback_data:'alertpreset:'+symbol+':WITNESS75'},
+      {text:'🧠 Genug Vergleichsfälle',callback_data:'alertpreset:'+symbol+':MEMORY8'}
     ],
     [
-      {text:'🛡 Safety-Wechsel',callback_data:'alertpreset:'+symbol+':SAFETY'},
-      {text:'🧩 Composite',callback_data:'alertpreset:'+symbol+':COMPOSITE'}
+      {text:'⚠️ Sicherheitsstatus ändert sich',callback_data:'alertpreset:'+symbol+':SAFETY'},
+      {text:'🎯 Mehrere Bedingungen passen',callback_data:'alertpreset:'+symbol+':COMPOSITE'}
     ],
-    [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    [{text:'📊 Coin',callback_data:'refresh:'+symbol},{text:'🏠 Start',callback_data:'home'}]
   ]};
 }
 
@@ -733,11 +733,12 @@ async function showAlertSetup(chatId,symbol) {
   return tg('sendMessage',{
     chat_id:chatId,
     text:[
-      '🔔 TCX ALERTS · '+symbol.replace('USDT','/USDT'),'',
-      'Wähle einen Research-Alert oder setze einen Preisalarm mit:',
-      '/alert '+symbolLabel(symbol)+' PREIS','',
-      'Research-Alerts informieren über Zustandsänderungen und Evidenz.',
-      'Sie sind keine Buy/Sell-Signale.'
+      '🔔 ALERT EINRICHTEN · '+symbol.replace('USDT','/USDT'),'',
+      'TCX kann dich informieren, wenn sich etwas Wichtiges verändert.','',
+      'Wähle unten eine Bedingung.',
+      'Für einen festen Preisalarm nutze:',
+      '/alert '+symbolLabel(symbol)+' 70000','',
+      'Ein Alert ist nur eine Benachrichtigung und kein Kauf-/Verkaufssignal.'
     ].join('\n'),
     reply_markup:alertSetupKeyboard(symbol)
   });
@@ -972,11 +973,15 @@ function marketKeyboard(chatId, symbol, live) {
 
 function tcxKeyboard(symbol, live) {
   return { inline_keyboard:[
-    [{ text:'📊 Markt', callback_data:`refresh:${symbol}` }],
     [
-      { text:live?'⏸ Live aus':'⚡ Live an', callback_data:`live:${symbol}:${live?'off':'on'}` },
-      { text:'⬅️ Zurück', callback_data:'back' }
-    ]
+      { text:'🔮 Prognose', callback_data:`forecast:${symbol}` },
+      { text:'🔎 Warum?', callback_data:`why:${symbol}` }
+    ],
+    [
+      { text:'📊 Übersicht', callback_data:`refresh:${symbol}` },
+      { text:live?'⏸ Live aus':'⚡ Live an', callback_data:`live:${symbol}:${live?'off':'on'}` }
+    ],
+    [{ text:'🏠 Start', callback_data:'home' }]
   ]};
 }
 
@@ -1011,12 +1016,14 @@ function chartKeyboard(symbol, interval) {
       { text:"4h", callback_data:`chart:${symbol}:4h` }
     ],
     [
-      { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
-      { text:"🧬 Memory", callback_data:`memory:${symbol}` },
-      { text:"🧪 MTL", callback_data:`engine:${symbol}` },
-      { text:"🛰 Witness", callback_data:`witness:${symbol}` },
-      { text:"📊 Markt", callback_data:`refresh:${symbol}` }
-    ]
+      { text:"🧭 Marktstruktur", callback_data:`structure:${symbol}` },
+      { text:"🔮 Prognose", callback_data:`forecast:${symbol}` }
+    ],
+    [
+      { text:"🔎 Warum?", callback_data:`why:${symbol}` },
+      { text:"📊 Übersicht", callback_data:`refresh:${symbol}` }
+    ],
+    [{ text:"🏠 Start", callback_data:"home" }]
   ]};
 }
 
@@ -1027,28 +1034,32 @@ function structureKeyboard(symbol) {
       { text:"📈 1h Chart", callback_data:`chart:${symbol}:1h` }
     ],
     [
-      { text:"📊 Markt", callback_data:`refresh:${symbol}` },
-      { text:"🧬 Memory", callback_data:`memory:${symbol}` },
-      { text:"🧪 MTL", callback_data:`engine:${symbol}` },
-      { text:"🛰 Witness", callback_data:`witness:${symbol}` },
-      { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
-    ]
+      { text:"🔮 Prognose", callback_data:`forecast:${symbol}` },
+      { text:"🔎 Warum?", callback_data:`why:${symbol}` }
+    ],
+    [
+      { text:"🧠 Lernhistorie", callback_data:`memory:${symbol}` },
+      { text:"📊 Übersicht", callback_data:`refresh:${symbol}` }
+    ],
+    [{ text:"🏠 Start", callback_data:"home" }]
   ]};
 }
 
 function memoryKeyboard(symbol) {
   return { inline_keyboard:[
     [
-      { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
-      { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
-      { text:"🧪 MTL", callback_data:`engine:${symbol}` },
-      { text:"🛰 Witness", callback_data:`witness:${symbol}` }
+      { text:"🔮 Prognose", callback_data:`forecast:${symbol}` },
+      { text:"📊 Übersicht", callback_data:`refresh:${symbol}` }
     ],
     [
-      { text:"🔮 Forecast", callback_data:`forecast:${symbol}` },
-      { text:"📊 Markt", callback_data:`refresh:${symbol}` },
-      { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
-    ]
+      { text:"📈 Chart", callback_data:`chart:${symbol}:5m` },
+      { text:"🧭 Marktstruktur", callback_data:`structure:${symbol}` }
+    ],
+    [
+      { text:"🔎 Daten & Belege", callback_data:`evidence:${symbol}` },
+      { text:"⚙️ Profi-Analyse", callback_data:`engine:${symbol}` }
+    ],
+    [{ text:"🏠 Start", callback_data:"home" }]
   ]};
 }
 
@@ -1061,8 +1072,8 @@ function favoritesKeyboard(chatId) {
       callback_data:`market:${symbol}`
     })));
   }
-  if(syms.length>=2) rows.push([{ text:'📊 Compare', callback_data:'compare' }]);
-  rows.push([{ text:'📊 Märkte', callback_data:'home:markets' }, { text:'🏠 Home', callback_data:'home' }]);
+  if(syms.length>=2) rows.push([{ text:'⚖️ Vergleichen', callback_data:'compare' }]);
+  rows.push([{ text:'📊 Coins', callback_data:'home:markets' }, { text:'🏠 Start', callback_data:'home' }]);
   return { inline_keyboard: rows };
 }
 
@@ -1183,25 +1194,22 @@ function renderTimeframe(t) {
 }
 
 function renderTcx(s) {
-  const liquidity = s.spreadBps < 1 ? 'TIGHT' : s.spreadBps < 4 ? 'NORMAL' : 'WIDE';
-  const flow = s.imbalance > 0.15 ? 'BID_PRESSURE' : s.imbalance < -0.15 ? 'ASK_PRESSURE' : 'BALANCED';
-  const move = Math.abs(s.changePct) < 1 ? 'LOW' : Math.abs(s.changePct) < 4 ? 'MEDIUM' : 'HIGH';
+  const liquidity = s.spreadBps < 1 ? '🟢 gut' : s.spreadBps < 4 ? '🟡 normal' : '🔴 dünn';
+  const flow = s.imbalance > 0.15 ? '🟢 mehr Kaufdruck' : s.imbalance < -0.15 ? '🔴 mehr Verkaufsdruck' : '⚪ ausgeglichen';
+  const move = Math.abs(s.changePct) < 1 ? '🟢 ruhig' : Math.abs(s.changePct) < 4 ? '🟡 normal' : '🔴 stark';
   return [
-    `🧠 TCX · ${s.symbol.replace('USDT','/USDT')}`,'',
-    'OBSERVED',
-    `• Liquidity: ${liquidity}`,
-    `• Orderbook flow: ${flow}`,
-    `• 24h move magnitude: ${move}`,
+    `🧠 PROFI-DETAILS · ${s.symbol.replace('USDT','/USDT')}`,'',
+    'EINFACH ERKLÄRT',
+    `• Liquidität: ${liquidity}`,
+    `• Kauf-/Verkaufsdruck: ${flow}`,
+    `• 24h-Schwankung: ${move}`,'',
+    'TECHNISCHE DATEN',
     `• Spread: ${fmt(s.spreadBps,3)} bps`,
-    `• Depth imbalance: ${fmt(s.imbalance*100,1)} %`,'',
-    'EPISTEMIC STATUS',
-    '• Market snapshot: OBSERVED',
-    '• Mechanism attribution: NOT INFERRED HERE',
-    '• Trading action: ABSTAIN / SHADOW_ONLY','',
-    `timestamp: ${new Date(s.timestamp).toISOString()}`,
-    `availableAt: ${new Date(s.availableAt).toISOString()}`,
-    `source: ${s.source}`,
-    `version: ${s.version}`
+    `• Orderbuch-Ungleichgewicht: ${fmt(s.imbalance*100,1)} %`,'',
+    'Spread = Abstand zwischen bestem Kauf- und Verkaufspreis.',
+    'Orderbuch-Ungleichgewicht = ob nahe am aktuellen Preis mehr Kauf- oder Verkaufsvolumen liegt.','',
+    'Diese Werte beschreiben den aktuellen Zustand, beweisen aber keine zukünftige Kursrichtung.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
 }
 
@@ -1477,39 +1485,28 @@ async function currentEvidenceRecord(symbol) {
 
 async function showEvidence(chatId,messageId,symbol) {
   const {record,validity}=await currentEvidenceState(symbol);
-  const map=record.map;
-  const lines=map.layers.map(x=>
-    '• '+x.layer+': '+x.value+' · '+evidenceRelationIcon(x.relation)+' '+x.relation
-  );
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
   const text=[
-    '🧩 TCX EVIDENCE · '+symbol.replace('USDT','/USDT'),'',
-    'Evidence Index: '+record.index+'/100',
-    'Evidence Trend: '+record.trend,
-    'Directional reference: '+record.reference,
-    'Safety: '+record.status,
-    'Gate: '+record.gate,
-    'View validity: '+(validity?.status||'BASELINE')+(validity?' · drift '+fmt(validity.driftScore*100,0)+'%':''),
-    'State FP: '+(record.stateFingerprint?.hash?record.stateFingerprint.hash.slice(0,16)+'…':'legacy'),'',
-    'DISAGREEMENT MAP',
-    ...lines,'',
-    'Witness agreement: '+fmt(record.witnessAgreement*100,0)+'%',
-    'Historical support: '+record.memorySupport,
-    'Novelty: '+fmt(record.novelty*100,0)+'%',
-    'Contradiction: '+fmt(record.contradiction*100,0)+'%',
-    'Evidence strength: '+fmt(record.evidenceStrength*100,0)+'%',
-    'Conflicts: '+record.disagreementCount+' · weak/novel: '+record.weakCount,
-    ...(validity?['Validity reasons: '+(formatValidityReason(validity,{limit:3}).join(', ')||'none')]:[]),'',
-    'Der Evidence Index ist ein diagnostischer Forschungsindex, KEINE Eintrittswahrscheinlichkeit.',
-    'Epistemic: DERIVED_RESEARCH_DIAGNOSTIC_NOT_PROBABILITY',
-    'Action: ABSTAIN / SHADOW_ONLY'
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
-  const payload={
-    chat_id:chatId,
-    text:text.slice(0,4096),
-    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
-  };
-  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
-  else await tg('sendMessage',payload);
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
 }
 
 async function showEvidenceHistory(chatId,messageId,symbol) {
@@ -1517,204 +1514,100 @@ async function showEvidenceHistory(chatId,messageId,symbol) {
   const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
   let text;
   if(!rows.length){
-    text=[
-      '📜 TCX EVIDENCE HISTORY · '+symbol.replace('USDT','/USDT'),'',
-      'Noch keine persistente Evidence-Historie.',
-      'Der Research-Sweep schreibt automatisch Zustands-Snapshots.',
-      '',
-      'Evidence ist ein diagnostischer Forschungsindex, keine Trading-Wahrscheinlichkeit.',
-      'Action: ABSTAIN / SHADOW_ONLY'
-    ].join('\n');
-  } else {
-    const latest=rows.at(-1);
-    const previous=rows.length>1?rows.at(-2):null;
-    const delta=previous?latest.index-previous.index:null;
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
     const entries=rows.slice().reverse().map(r=>{
-      const ts=new Intl.DateTimeFormat('de-DE',{
-        timeZone:'Europe/Berlin',
-        hour:'2-digit',
-        minute:'2-digit',
-        day:'2-digit',
-        month:'2-digit'
-      }).format(new Date(r.capturedAt));
-      const lifecycle=r.validityLast?.status || (r===latest?'ACTIVE':'LEGACY');
-      return '• '+ts+' · '+r.index+'/100 · '+r.trend+' · '+lifecycle+' · '+r.regime;
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
     });
-    text=[
-      '📜 TCX EVIDENCE HISTORY · '+symbol.replace('USDT','/USDT'),'',
-      'Snapshots gespeichert: '+total,
-      'Aktuell: '+latest.index+'/100 · '+latest.trend,
-      'Δ letzter Snapshot: '+(delta==null?'—':(delta>=0?'+':'')+delta),
-      'Conflicts: '+latest.disagreementCount+' · Gate: '+latest.gate,
-      'Latest lifecycle: '+(latest.validityLast?.status||'ACTIVE'),'',
-      'LETZTE SNAPSHOTS',
-      ...entries,'',
-      'Index = Evidence-Diagnostik, nicht Preis- oder Trefferwahrscheinlichkeit.',
-      'Action: ABSTAIN / SHADOW_ONLY'
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
     ].join('\n');
   }
-  const payload={
-    chat_id:chatId,
-    text:text.slice(0,4096),
-    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
-  };
-  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
-  else await tg('sendMessage',payload);
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
 }
 
 async function showValidity(chatId,messageId,symbol) {
   const {baseline,record,validity}=await currentEvidenceState(symbol);
   let text;
   if(!baseline?.stateFingerprint){
-    text=[
-      '⏱ TCX RESEARCH VALIDITY · '+symbol.replace('USDT','/USDT'),'',
-      'Status: BASELINE',
-      'Noch kein fingerprint-fähiger gespeicherter Snapshot vorhanden.',
-      'Der nächste Research-Sweep erzeugt die Vergleichsbasis.','',
-      'Current fingerprint: '+(record.stateFingerprint?.hash?.slice(0,20)||'unavailable')+'…',
-      'Execution: SHADOW_ONLY'
-    ].join('\n');
-  } else {
-    const reasons=formatValidityReason(validity,{limit:6});
-    text=[
-      '⏱ TCX RESEARCH VALIDITY · '+symbol.replace('USDT','/USDT'),'',
-      'Status: '+validity.status,
-      'Age: '+Math.round(validity.ageMs/1000)+'s',
-      'Drift: '+fmt(validity.driftScore*100,1)+'%',
-      'Changed dimensions: '+validity.changedDimensions,
-      'Price drift from baseline: '+fmt(validity.priceMovePct,3)+'%',
-      'Reusable without refresh: '+(validity.reusableWithoutRefresh?'YES':'NO'),
-      'Valid for research: '+(validity.validForResearch?'YES':'NO'),'',
-      'BASELINE',
-      '• '+new Date(baseline.capturedAt).toISOString(),
-      '• '+baseline.stateFingerprint.hash.slice(0,20)+'…',
-      'CURRENT',
-      '• '+new Date(record.capturedAt).toISOString(),
-      '• '+record.stateFingerprint.hash.slice(0,20)+'…','',
-      'REASONS',
-      ...(reasons.length?reasons.map(x=>'• '+x):['• none']),
-      '',
-      'STALE = refresh recommended.',
-      'DRIFTED / EXPIRED / INVALIDATED = alte Research-Sicht nicht weiterverwenden.',
-      'canExecute: false · SHADOW_ONLY'
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
   }
-  const payload={
-    chat_id:chatId,
-    text:text.slice(0,4096),
-    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
-  };
-  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
-  else await tg('sendMessage',payload);
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
 }
 
 async function showFavorites(chatId, messageId) {
-  const syms = [...favoriteSet(chatId)];
+  const syms=[...favoriteSet(chatId)];
   let text;
   if(!syms.length){
-    text='⭐ WATCHLIST\n\nNoch keine Favoriten.\n\nÖffne einen Coin und tippe auf ☆ Favorit.';
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
   } else {
     const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
-      try{
-        const s=await snapshot(symbol);
-        return [symbol,s];
-      }catch{
-        return [symbol,null];
-      }
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
     }));
     const live=new Map(marketRows);
     const lines=syms.slice(0,20).map(symbol=>{
       const s=live.get(symbol);
       const r=radarCache.get(symbol);
-      const price=s?.price;
-      const change=s?.changePct;
-      const priceText=Number.isFinite(price)?fmt(price,price<1?6:2):'—';
-      const changeText=Number.isFinite(change)?((change>=0?'+':'')+fmt(change,2)+'%'):'—';
-      const regime=r?.regime||'warming';
-      const status=r?.status||'—';
-      return '• '+symbolLabel(symbol)+' · '+priceText+' · '+changeText+' · '+regime+' · '+status+' · V '+(r?.validity||'BASE');
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
     });
-    text=[
-      '⭐ TCX WATCHLIST v2','',
-      'Preis · 24h · Regime · Safety · Validity','',
-      ...lines,
-      syms.length>20?'… weitere Favoriten ausgeblendet':'',
-      '',
-      'Research-Felder werden vom TCX-Sweep aktualisiert.',
-      'Action: ABSTAIN / SHADOW_ONLY'
-    ].filter(Boolean).join('\n');
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
   }
-  const payload = { chat_id:chatId, text:text.slice(0,4096), reply_markup:favoritesKeyboard(chatId) };
-  if (messageId) await tg('editMessageText', { ...payload, message_id:messageId });
-  else await tg('sendMessage', payload);
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
 }
 
 async function showCompare(chatId,messageId) {
   const syms=[...favoriteSet(chatId)].slice(0,4);
   if(syms.length<2){
-    const payload={
-      chat_id:chatId,
-      text:'📊 COMPARE\n\nMindestens zwei Favoriten erforderlich.',
-      reply_markup:favoritesKeyboard(chatId)
-    };
-    if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
-    else await tg('sendMessage',payload);
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
     return;
   }
-
   const results=[];
   for(const symbol of syms){
     let r=radarCache.get(symbol);
-    const stale=!r || Date.now()-Number(r.capturedAt||0)>10*60*1000;
-    if(stale){
-      try{
-        await researchAlertContext(symbol,{force:true});
-        r=radarCache.get(symbol);
-      }catch{}
-    }
-    let market=null;
-    try{ market=await snapshot(symbol); }catch{}
-    const e=latestEvidenceRecord(symbol);
-    results.push({symbol,r,market,e});
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
   }
-
-  const lines=results.map(({symbol,r,market,e})=>{
-    const price=market?.price;
-    return [
-      symbolLabel(symbol),
-      'P '+(Number.isFinite(price)?fmt(price,price<1?6:2):'—'),
-      'R '+String(r?.regime||'—'),
-      'MTF '+String(r?.bias||'—'),
-      'W '+(r?fmt(r.witnessAgreement*100,0)+'%':'—'),
-      'M '+(r?.support??'—'),
-      'N '+(r?fmt(r.novelty*100,0)+'%':'—'),
-      'C '+(r?fmt(r.contradiction*100,0)+'%':'—'),
-      'E '+(e?.index??'—')+'/100',
-      'V '+String(r?.validity||'BASE'),
-      'S '+String(r?.status||'—')
-    ].join(' · ');
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
   });
-
   const rows=[];
-  for(let i=0;i<syms.length;i+=2){
-    rows.push(syms.slice(i,i+2).map(symbol=>({
-      text:symbolIcon(symbol)+' '+symbolLabel(symbol),
-      callback_data:'market:'+symbol
-    })));
-  }
-  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Home',callback_data:'home'}]);
-
-  const text=[
-    '📊 TCX COMPARE','',
-    'P=Preis · R=Regime · W=Witness · M=Memory · N=Novelty · C=Contradiction · E=Evidence · V=Validity · S=Safety','',
-    ...lines,'',
-    'Keine Rangliste und kein Trade-Winner.',
-    'Action: ABSTAIN / SHADOW_ONLY'
-  ].join('\n');
-
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
   const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
-  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
-  else await tg('sendMessage',payload);
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
 }
 
 async function showMarket(chatId, messageId, symbol, live) {
@@ -1760,23 +1653,24 @@ function priceText(v) {
 }
 
 function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
-  const recent=(analysis.classifiedPivots||[]).slice(-4).map(p=>`${p.label} ${priceText(p.price)}`).join(" · ")||"keine bestätigten Swings";
-  const pattern=analysis.pattern?`${analysis.pattern.stage} · ${analysis.pattern.side} @ ${priceText(analysis.pattern.level)}`:"kein frisches Break/Retest-Muster";
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
   const activeVisible=candles.some(c=>c.closed===false);
   return [
-    `📈 ${symbol.replace("USDT","/USDT")} · ${interval}`,
-    `MTF Bias: ${dashboard.bias} (${dashboard.biasScore>=0?"+":""}${dashboard.biasScore}) · Regime: ${dashboard.regime}`,
-    `RIFT pressure proxy: ${Math.round(dashboard.pressureScore)}/100 ${dashboard.pressureBand} · ${dashboard.dominantPressure}`,
-    `Flow: ${dashboard.flow} · Liquidity: ${dashboard.liquidity} · Spread ${dashboard.spreadBps.toFixed(2)} bps`,
-    `Swings: ${recent}`,
-    `EMA20 / EMA50: ${priceText(analysis.ema20)} / ${priceText(analysis.ema50)}`,
-    `Support / Resistance: ${priceText(analysis.support)} / ${priceText(analysis.resistance)}`,
-    `Pattern: ${pattern}`,
-    activeVisible?"Live-Kerze sichtbar; Struktur nutzt nur geschlossene Kerzen.":"Alle dargestellten Kerzen geschlossen.",
-    "",
-    "OBSERVED: OHLCV/Orderbook · DERIVED_HEURISTIC: Struktur/Regime/RIFT pressure",
-    "Mechanism posterior: NOT_IDENTIFIED · Action: ABSTAIN / SHADOW_ONLY",
-    `availableAt: ${new Date(availableAt).toISOString()} · source: ${host}`
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join("\n").slice(0,1024);
 }
 
@@ -1847,9 +1741,9 @@ function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
 }
 
 function statLine(label,s) {
-  if(!s||s.n<3) return `${label}: n=${s?.n||0} · noch zu wenig gereifte Episoden`;
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
   const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
-  return `${label}: n=${s.n} · Sim ${fmt(s.medianSimilarity,0)}% · End ${fmt(r.median,2)}% [IQR ${fmt(r.q25,2)}..${fmt(r.q75,2)}] · Rise ${fmt(up.median,2)}% · Fall ${fmt(down.median,2)}%`;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
 }
 
 async function showMemory(chatId,symbol) {
@@ -1864,22 +1758,14 @@ async function showMemory(chatId,symbol) {
   const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
   const stored=episodes.filter(e=>e.symbol===symbol).length;
   const text=[
-    `🧬 TCX Episode Memory · ${symbol.replace("USDT","/USDT")}`,
-    "",
-    `Aktuell: ${state.memoryDashboard.regime} · ${state.memoryDashboard.flow} · RIFT ${Math.round(state.memoryDashboard.pressureScore)}/100`,
-    `Gespeicherte Episoden: ${stored}`,
-    "",
-    "Ähnlichkeit = Zustand/Mechanik-Telemetrie, NICHT Chartform.",
-    statLine("15m",s3),
-    statLine("1h",s12),
-    statLine("3h",s36),
-    "",
-    "Outcomes: historisch beobachtete Endbewegung + maximale Auf-/Abwärtsbewegung.",
-    "Keine Trefferquote, keine Prognose, kein Trade-Signal.",
-    "Mechanism posterior: NOT_IDENTIFIED",
-    "Action: ABSTAIN / SHADOW_ONLY"
-  ].join("\n");
-  return tg("sendMessage",{chat_id:chatId,text,reply_markup:memoryKeyboard(symbol)});
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
 }
 
 async function showChart(chatId, symbol, interval="5m") {
@@ -1895,17 +1781,18 @@ async function showChart(chatId, symbol, interval="5m") {
 }
 
 function structureText(symbol, result, availableAt) {
-  const lines=[`🧭 TCX Structure · ${symbol.replace("USDT","/USDT")}`,""];
-  for (const tf of ["4h","1h","15m","5m"]) {
-    const a=result.analyses[tf];
-    const p=a?.pattern ? `${a.pattern.stage}/${a.pattern.side}` : "—";
-    lines.push(`${tf}: ${a?.trend || "INSUFFICIENT"} · EMA20 ${priceText(a?.ema20)} · EMA50 ${priceText(a?.ema50)} · Pattern ${p}`);
-  }
-  lines.push("",`MTF Bias: ${result.bias} · Score ${result.biasScore}`);
-  const five=result.analyses["5m"];
-  lines.push(`5m Support / Resistance: ${priceText(five?.support)} / ${priceText(five?.resistance)}`);
-  lines.push("","EPISTEMIC STATUS","• OHLCV: OBSERVED","• Pivots/EMA/Bias/Break-Retest: DERIVED HEURISTIC","• Causal mechanism: NOT INFERRED","• Trading action: ABSTAIN / SHADOW_ONLY",`availableAt: ${new Date(availableAt).toISOString()}`);
-  return lines.join("\n");
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
 }
 
 async function showStructure(chatId, symbol) {
@@ -1948,18 +1835,16 @@ function witnessSummary(report) {
 async function showWitness(chatId,symbol) {
   const primary=await snapshot(symbol);
   const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
   const text=[
-    `🛰 TCX Independent Witness Network · ${symbol.replace("USDT","/USDT")}`,
-    "",
-    witnessSummary(report),
-    "",
-    "EPISTEMIC STATUS",
-    "• Binance / OKX / Kraken: independent venue observations",
-    "• Cross-venue agreement: evidence audit, not causality",
-    "• USD vs USDT: quote-basis caveat where Kraken is used",
-    "• Mechanism: NOT_IDENTIFIED",
-    "• Action: ABSTAIN / SHADOW_ONLY"
-  ].join("\n");
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
   return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
 }
 
@@ -2784,23 +2669,22 @@ async function showIntelligence(chatId,symbol){
     liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
   });
   const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
   const lines=[
-    '🧠 TCX INTELLIGENCE · '+symbolLabel(symbol),'',
-    'LIVE AKTIV',
-    '💧 Liquidity Intelligence: '+String(liq?.gate||'INSUFFICIENT'),
-    '   Spread: '+(Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'–'),
-    '   Orderbook-Balance: '+(Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'–'),'',
-    'NOCH OHNE LIVE-QUELLE',
-    '👛 Trader / Wallet: bereit, aber keine Wallet-Evidence eingespeist',
-    '🪙 Memecoin: bereit, aber keine Token-On-Chain-Evidence eingespeist',
-    '🗣 Narrative / Reflexivity: bereit, aber keine öffentliche Narrative-Quelle eingespeist',
-    '🔭 Future Intelligence: bereit, aber keine Slow-Horizon-Datenquelle eingespeist','',
-    'EXPANSION GATE: '+String(expansion.evidenceGate),
-    'Fingerprint: '+String(expansion.fingerprint||'').slice(0,16)+'…',
-    'Modus: SHADOW_ONLY · Aktion: ABSTAIN','',
-    'Nur Intelligence mit realer Evidence wird als aktiv angezeigt.'
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
   ];
-  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n')});
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
 }
 
 async function showForecast(chatId,symbol,messageId=null){
