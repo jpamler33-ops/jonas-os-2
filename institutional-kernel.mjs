@@ -153,7 +153,8 @@ export function buildResearchEnvelope({
   safety,
   config,
   versions={},
-  dataFabric={}
+  dataFabric={},
+  runtimeRelease={}
 }){
   const configHash=sha256(config||{});
   const inputs={
@@ -204,6 +205,7 @@ export function buildResearchEnvelope({
     inputHash,
     versions:canonicalize(versions),
     dataFabric:canonicalize(dataFabric),
+    runtimeRelease:canonicalize(runtimeRelease),
     safety:canonicalize(safety),
     inputs:canonicalize(inputs)
   };
