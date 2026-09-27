@@ -3028,7 +3028,10 @@ async function showIntelligence(chatId,symbol){
     'LIQUIDATION-RESEARCH',
     `⚡ Stream: ${liquidations?.connected?'🟢 verbunden':'🟡 nicht verbunden'}`,
     `• 5m-Abdeckung: ${liquidations?.ready5m?'bereit':'sammelt'}`,
-    `• Liquidationsvolumen 5m: ${liquidations?.ready5m?'
+    `• Liquidationsvolumen 5m: ${liquidations?.ready5m?('$'+Math.round(liquidations.window5m.totalUsd).toLocaleString('en-US')):'—'}`,
+    `• Long-Liquidationsanteil: ${liquidations?.ready5m?((liquidations.window5m.longShare*100).toFixed(1)+'%'):'—'}`,
+    `• Imbalance: ${liquidations?.ready5m?((liquidations.window5m.imbalance*100).toFixed(1)+'%'):'—'}`,
+    'Liquidationen werden nur als Forschungsfeature gespeichert; keine Handelsfreigabe.','',
     'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
     '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
