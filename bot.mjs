@@ -1713,12 +1713,12 @@ function chartCaption(symbol, interval, analysis, candles, availableAt, host, da
 }
 
 async function researchState(symbol,interval="5m") {
-  const availableAt=Date.now();
   const frames=[...new Set(["4h","1h","15m","5m",interval])];
   const [market,...fetched]=await Promise.all([
     snapshot(symbol),
     ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
   ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
   const byTf={};
   frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
   const analysis=analyzeStructure(byTf[interval]);
