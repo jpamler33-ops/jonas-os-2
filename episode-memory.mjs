@@ -123,11 +123,18 @@ export function computeOutcome(episode,candles,horizonBars) {
   if(!HORIZONS.includes(h)) throw new Error('Unsupported outcome horizon');
   const entry=finiteOrNull(episode?.entryPrice);
   if(entry==null||entry<=0) return null;
+  const intervalMs=episode?.interval==='5m'?300000:null;
+  if(intervalMs==null) return null;
   const future=candles
     .filter(c=>c.closed===true && Number(c.closeTime)>Number(episode.anchorCloseTime))
     .sort((a,b)=>a.closeTime-b.closeTime)
     .slice(0,h);
   if(future.length<h) return null;
+  const toleranceMs=2500;
+  for(let i=0;i<future.length;i++){
+    const expected=Number(episode.anchorCloseTime)+intervalMs*(i+1);
+    if(Math.abs(Number(future[i].closeTime)-expected)>toleranceMs) return null;
+  }
   const end=future.at(-1);
   const maxHigh=Math.max(...future.map(c=>c.h));
   const minLow=Math.min(...future.map(c=>c.l));
