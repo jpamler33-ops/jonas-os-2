@@ -67,3 +67,17 @@ Market data is OBSERVED. The compact Telegram TCX view does not promote telemetr
 - HH / HL / LH / LL and break/retest states are descriptive heuristics, not causal mechanism truth.
 - Active candles may be shown visually, but all structure/EMA/pivot/break-retest calculations use only candles whose close time is <= availableAt.
 - Execution remains ABSTAIN / SHADOW_ONLY.
+
+## TCX Chart Engine v2
+
+- labeled HH / HL / LH / LL swing tags
+- support and resistance zones
+- BRK and RT markers for closed-candle break/retest heuristics
+- EMA20 and EMA50
+- volume panel
+- multi-timeframe bias strip
+- local regime strip
+- orderbook flow and liquidity strip
+- RIFT pressure proxy derived from spread, depth imbalance, realized range and relative volume
+
+The RIFT pressure proxy is explicitly `DERIVED_HEURISTIC`. It is not a causal mechanism posterior. Mechanism status remains `NOT_IDENTIFIED`; trading action remains `ABSTAIN / SHADOW_ONLY`.
