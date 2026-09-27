@@ -12,6 +12,7 @@ import {
   seedInstitutionalForecastRuntimeFromEpisodes,
   issueInstitutionalForecast,
   observeInstitutionalForecastRuntime,
+  observeInstitutionalForecastOutcomePoint,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
   EPISODE_FORECAST_FEATURE_IDS
@@ -226,4 +227,28 @@ test('corrupt persistence fails closed into recovered clean runtime',async()=>{
   const reopened=await openInstitutionalForecastRuntime(r.filePath,{config:r.engine.configSnapshot()});
   assert.equal(reopened.recoveredFromCorrupt,true);
   assert.ok(reopened.backupPath);
+});
+
+
+test('lightweight outcome point resolves without rebuilding research state',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+
+  const out=observeInstitutionalForecastOutcomePoint(r,{
+    symbol:'BTCUSDT',
+    timestamp:inp.asOf+300_000,
+    price:65100,
+    quality:1
+  });
+  assert.equal(out.evaluations.length,1);
+  assert.equal(out.evaluations[0].evaluation.horizonId,'5m');
 });
