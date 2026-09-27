@@ -252,3 +252,23 @@ test('lightweight outcome point resolves without rebuilding research state',asyn
   assert.equal(out.evaluations.length,1);
   assert.equal(out.evaluations[0].evaluation.horizonId,'5m');
 });
+
+
+test('cold-start issuance remains serializable and fail-closed',async()=>{
+  const r=await runtime();
+  const inp=input();
+  const out=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'INSUFFICIENT'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  assert.equal(out.issuance.executionMode,'SHADOW_ONLY');
+  assert.equal(out.issuance.canExecute,false);
+  assert.notEqual(out.issuance.admission.gate,'PASS');
+  assert.doesNotThrow(()=>JSON.stringify(out.issuance));
+  const serialized=JSON.stringify(out.issuance);
+  assert.doesNotMatch(serialized,/Infinity|NaN/);
+});
