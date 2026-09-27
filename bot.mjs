@@ -3479,6 +3479,67 @@ async function venueQualityWatcher() {
   }
 }
 
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
 async function episodeWatcher() {
   while(running) {
     let changed=false;
@@ -3653,6 +3714,11 @@ const server = http.createServer((req,res) => {
         version:RESEARCH_LIFECYCLE_VERSION,
         evidenceSnapshots:evidenceRecords.length
       },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -3677,6 +3743,7 @@ async function gracefulShutdown(signal) {
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
   await persistShadowOms(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   server.close(() => process.exit(0));
@@ -3694,6 +3761,13 @@ console.log(JSON.stringify({
   alertCheckMs,
   researchAlertCheckMs,
   episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
   institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
   auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
   releaseRegistry:{
@@ -3783,4 +3857,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
