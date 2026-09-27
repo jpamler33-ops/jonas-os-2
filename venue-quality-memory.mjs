@@ -104,26 +104,45 @@ export function appendVenueQualityObservations(records,observations,{maxRecords=
   return {records:next,added};
 }
 
-export function matureVenueQualityObservation(record,{mid,at=Date.now()}={}){
+export function matureVenueQualityObservation(record,{mid,at=Date.now(),maxLagMs=45_000}={}){
+  if(!(Number(record?.avgFillPrice)>0)||Number(record?.fillRatio)<=0) return {record,changed:false};
   const m=finite(mid);
-  if(!(m>0)||!(Number(record?.avgFillPrice)>0)||Number(record?.fillRatio)<=0) return {record,changed:false};
   const markouts={...(record.markouts||{})};
   let changed=false;
+  let observed=false;
   const sideSign=record.side==='BUY'?1:-1;
+  const elapsed=Number(at)-Number(record.capturedAt);
+  const lag=Math.max(1_000,Number(maxLagMs)||45_000);
+
   for(const h of HORIZONS){
     const key=String(h);
     if(markouts[key]) continue;
-    if(Number(at)-Number(record.capturedAt)<h) continue;
+    if(elapsed<h) continue;
+
+    if(elapsed>h+lag){
+      markouts[key]={
+        horizonMs:h,
+        status:'MISSED_CAPTURE_WINDOW',
+        observedAt:Number(at)
+      };
+      changed=true;
+      continue;
+    }
+
+    if(!(m>0)) continue;
     const signed=sideSign*(m-Number(record.avgFillPrice))/Number(record.avgFillPrice)*10000;
     markouts[key]={
       horizonMs:h,
+      status:'OBSERVED',
       observedAt:Number(at),
       venueMid:m,
       signedMarkoutBps:signed,
       adverseSelectionBps:-signed
     };
     changed=true;
+    observed=true;
   }
+
   if(!changed) return {record,changed:false};
   return {
     record:{
@@ -131,7 +150,7 @@ export function matureVenueQualityObservation(record,{mid,at=Date.now()}={}){
       markouts,
       epistemic:{
         ...record.epistemic,
-        futureMid:'OBSERVED_SAME_VENUE_PUBLIC_BOOK'
+        futureMid:observed?'OBSERVED_SAME_VENUE_PUBLIC_BOOK':record.epistemic?.futureMid||'NOT_YET_OBSERVED'
       }
     },
     changed:true
