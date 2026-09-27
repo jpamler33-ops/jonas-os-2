@@ -21,6 +21,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'chaos-engineering.mjs',
   'shadow-oms.mjs',
   'telegram-product-ui.mjs',
+  'alert-engine.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
