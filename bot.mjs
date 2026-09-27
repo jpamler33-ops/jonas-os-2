@@ -2,6 +2,7 @@ import http from 'node:http';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
+import { deriveChartDashboard } from './dashboard-state.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -487,34 +488,50 @@ function priceText(v) {
   return fmt(v,Math.abs(v)<1?6:2);
 }
 
-function chartCaption(symbol, interval, analysis, candles, availableAt, host) {
-  const recent = (analysis.classifiedPivots || []).slice(-4).map(p => `${p.label} ${priceText(p.price)}`).join(" · ") || "keine bestätigten Swings";
-  const pattern = analysis.pattern ? `${analysis.pattern.stage} · ${analysis.pattern.side} @ ${priceText(analysis.pattern.level)}` : "kein frisches Break/Retest-Muster";
-  const activeVisible = candles.some(c => c.closed === false);
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const recent=(analysis.classifiedPivots||[]).slice(-4).map(p=>`${p.label} ${priceText(p.price)}`).join(" · ")||"keine bestätigten Swings";
+  const pattern=analysis.pattern?`${analysis.pattern.stage} · ${analysis.pattern.side} @ ${priceText(analysis.pattern.level)}`:"kein frisches Break/Retest-Muster";
+  const activeVisible=candles.some(c=>c.closed===false);
   return [
     `📈 ${symbol.replace("USDT","/USDT")} · ${interval}`,
-    `Trend: ${analysis.trend}`,
+    `MTF Bias: ${dashboard.bias} (${dashboard.biasScore>=0?"+":""}${dashboard.biasScore}) · Regime: ${dashboard.regime}`,
+    `RIFT pressure proxy: ${Math.round(dashboard.pressureScore)}/100 ${dashboard.pressureBand} · ${dashboard.dominantPressure}`,
+    `Flow: ${dashboard.flow} · Liquidity: ${dashboard.liquidity} · Spread ${dashboard.spreadBps.toFixed(2)} bps`,
     `Swings: ${recent}`,
     `EMA20 / EMA50: ${priceText(analysis.ema20)} / ${priceText(analysis.ema50)}`,
     `Support / Resistance: ${priceText(analysis.support)} / ${priceText(analysis.resistance)}`,
     `Pattern: ${pattern}`,
-    activeVisible ? "Live-Kerze sichtbar; Struktur nutzt ausschließlich geschlossene Kerzen." : "Alle dargestellten Kerzen geschlossen.",
+    activeVisible?"Live-Kerze sichtbar; Struktur nutzt nur geschlossene Kerzen.":"Alle dargestellten Kerzen geschlossen.",
     "",
-    "OBSERVED: OHLCV · DERIVED: EMA/Pivots/Levels/Pattern",
-    "Mechanismus: NOT INFERRED · Action: ABSTAIN / SHADOW_ONLY",
+    "OBSERVED: OHLCV/Orderbook · DERIVED_HEURISTIC: Struktur/Regime/RIFT pressure",
+    "Mechanism posterior: NOT_IDENTIFIED · Action: ABSTAIN / SHADOW_ONLY",
     `availableAt: ${new Date(availableAt).toISOString()} · source: ${host}`
   ].join("\n").slice(0,1024);
 }
 
 async function showChart(chatId, symbol, interval="5m") {
   const availableAt = Date.now();
-  const { rows, base } = await fetchKlines(symbol, interval, 140);
-  const candles = candlesFromKlines(rows, availableAt);
-  const analysis = analyzeStructure(candles);
-  const png = renderCandlestickPng(candles,analysis,{width:1000,height:620});
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,160))
+  ]);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const candles=byTf[interval];
+  const analysis=analyzeStructure(candles);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(candles,analysis,mtf,market);
+  const png=renderCandlestickPng(candles,analysis,{width:1100,height:760,dashboard});
+  const host=new URL(fetched[frames.indexOf(interval)].base).host;
   return tgMultipart("sendPhoto",{
     chat_id:String(chatId),
-    caption:chartCaption(symbol,interval,analysis,candles,availableAt,new URL(base).host),
+    caption:chartCaption(symbol,interval,analysis,candles,availableAt,host,dashboard),
     reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
   },"photo",`${symbol}-${interval}.png`,png,"image/png");
 }
