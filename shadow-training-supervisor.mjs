@@ -22,7 +22,7 @@ function pf(rows){
     if(x>0) gp+=x;
     else if(x<0) gl+=Math.abs(x);
   }
-  return gl>1e-12?gp/gl:(gp>0?Infinity:null);
+  return gl>1e-12?gp/gl:null;
 }
 function expectancy(rows){
   if(!rows.length) return null;
@@ -284,7 +284,7 @@ export function renderSupervisorCompact(supervisor){
     mission:String(x.mission?.title||'Training'),
     progressPct:pct(x.mission?.progress),
     riskMultiplier:Number(x.risk?.multiplier||0),
-    profitFactor:pfv==null?null:Number.isFinite(Number(pfv))?Number(pfv):Infinity,
+    profitFactor:pfv==null?null:Number(pfv),
     expectancyQuote:finite(x.rolling?.expectancyQuote),
     drawdownPct:finite(x.rolling?.maxDrawdownPct,0),
     recentTrades:Number(x.samples?.recent||0),
