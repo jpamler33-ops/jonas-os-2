@@ -1,4 +1,4 @@
-export const FORECAST_PRODUCT_VERSION='TCX_FORECAST_PRODUCT_V1';
+export const FORECAST_PRODUCT_VERSION='TCX_FORECAST_PRODUCT_V2_BEGINNER_FIRST';
 
 function finite(v){const n=Number(v);return Number.isFinite(n)?n:null;}
 function clamp01(v){const n=finite(v);return n==null?0:Math.max(0,Math.min(1,n));}
@@ -81,103 +81,103 @@ export function renderInstitutionalForecastCard(issuance,{
   now=Date.now()
 }={}){
   if(!issuance?.forecast||!issuance?.admission) throw new Error('institutional issuance required');
-  const auditOk=typeof auditBound==='boolean'
-    ?auditBound
-    :(typeof auditHealthy==='boolean'?auditHealthy:true);
+  const auditOk=typeof auditBound==='boolean'?auditBound:(typeof auditHealthy==='boolean'?auditHealthy:true);
   const f=issuance.forecast;
   const horizons=Array.isArray(f.horizons)?f.horizons:[];
   const directionWord=d=>{
     const x=String(d||'UNKNOWN').toUpperCase();
-    if(x==='UP') return 'eher nach oben';
-    if(x==='DOWN') return 'eher nach unten';
-    if(x==='FLAT'||x==='SIDEWAYS') return 'eher seitwärts';
-    return 'noch keine klare Richtung';
-  };
-  const gateWord=g=>{
-    const x=String(g||'UNKNOWN').toUpperCase();
-    if(x==='PASS'||x==='VALID') return 'ausreichend geprüft';
-    if(x==='CAUTION') return 'mit Vorsicht';
-    if(x==='INSUFFICIENT') return 'noch zu wenig Belege';
-    if(x==='ABSTAIN'||x==='SAFE_STOP') return 'keine belastbare Aussage';
-    return x.toLowerCase();
+    if(x==='UP') return '🟢 eher steigend';
+    if(x==='DOWN') return '🔴 eher fallend';
+    if(x==='FLAT'||x==='SIDEWAYS') return '🟡 eher seitwärts';
+    return '⚪ noch unklar';
   };
   const admitted=auditOk&&String(issuance.admission.gate||'').toUpperCase()==='PASS';
   const lead=horizons[0]||null;
+  const leadDisplay=lead&&auditOk&&issuance.probabilityDisplayAllowed===true&&lead.display?.probabilityDisplayAllowed===true;
   const lines=[
-    '🔮 TCX FORECAST · '+String(issuance.symbol).replace('USDT','/USDT'),
+    '🔮 KURSPROGNOSE · '+String(issuance.symbol).replace('USDT','/USDT'),
     '',
     'KURZ GESAGT',
-    lead
-      ?'Für '+lead.horizonId+' sieht TCX den Markt '+directionWord(lead.direction)+'.'
-      :'TCX hat aktuell noch keine belastbare Richtung.',
-    admitted
-      ?'Der Forecast hat die institutionellen Prüfungen bestanden.'
-      :'TCX hält sich aktuell zurück: '+gateWord(issuance.admission.gate)+'.',
+    lead?('Richtung: '+directionWord(lead.direction)):'Richtung: ⚪ noch unklar',
+    admitted?'Belastbarkeit: 🟢 ausreichend geprüft':'Belastbarkeit: 🟡 noch nicht belastbar',
+    lead?('Erwartete Bewegung: '+signedPct(lead.expectedReturn)):'',
+    lead?('Möglicher Bereich: '+signedPct(lead.interval?.q10)+' bis '+signedPct(lead.interval?.q90)):'',
+    leadDisplay
+      ?('Modellverteilung: ↑ '+pct(lead.display.probabilities.up,0)+' · ↔ '+pct(lead.display.probabilities.flat,0)+' · ↓ '+pct(lead.display.probabilities.down,0))
+      :'Wahrscheinlichkeit: noch nicht freigegeben',
     ''
-  ];
+  ].filter(Boolean);
 
   if(horizons.length){
     lines.push('ZEITHORIZONTE');
     for(const h of horizons){
       const display=auditOk&&issuance.probabilityDisplayAllowed===true&&h.display?.probabilityDisplayAllowed===true;
       lines.push(
-        '• '+h.horizonId+': '+directionWord(h.direction),
-        '  Erwartete Bewegung: '+signedPct(h.expectedReturn)+
-          ' · realistischer Bereich: '+signedPct(h.interval?.q10)+' bis '+signedPct(h.interval?.q90),
+        '• '+h.horizonId+' · '+directionWord(h.direction)+' · '+signedPct(h.expectedReturn),
+        '  Bereich: '+signedPct(h.interval?.q10)+' bis '+signedPct(h.interval?.q90),
         display
-          ?'  Chancenmodell: hoch '+pct(h.display.probabilities.up,0)+
-            ' · seitwärts '+pct(h.display.probabilities.flat,0)+
-            ' · runter '+pct(h.display.probabilities.down,0)
-          :'  Wahrscheinlichkeit: noch nicht freigegeben',
-        '  Grundlage: '+Number(h.support?.analogCount||0)+' ähnliche Fälle'+
-          ' · Kalibrierung: '+String(h.calibration?.status||'UNKNOWN'),
-        ''
+          ?'  ↑ '+pct(h.display.probabilities.up,0)+' · ↔ '+pct(h.display.probabilities.flat,0)+' · ↓ '+pct(h.display.probabilities.down,0)
+          :'  Wahrscheinlichkeit: noch nicht freigegeben'
       );
     }
   }
 
-  lines.push(
-    'WARUM TCX SO URTEILT',
-    '• Daten: '+gateWord(issuance.trace?.safety?.state==='NORMAL'?'PASS':issuance.trace?.safety?.state),
-    '• Wissenschaftliche Prüfung: '+gateWord(f.scienceGate),
-    '• Forecast-Prüfung: '+gateWord(f.overallGate),
-    '• Forschungsstand: '+String(issuance.trace?.validity?.state||'UNKNOWN'),
-    '• Audit: '+(auditOk?'vollständig gebunden':'FEHLER → Forecast gesperrt')
-  );
+  lines.push('','WARUM TCX DAS SO SIEHT');
+  lines.push('• Datenprüfung: '+(issuance.trace?.safety?.state==='NORMAL'?'🟢 sauber':'🟡 eingeschränkt'));
+  lines.push('• Wissenschaftlicher Check: '+String(f.scienceGate||'UNKNOWN'));
+  lines.push('• Forecast-Check: '+String(f.overallGate||'UNKNOWN'));
+  lines.push('• Aktueller Forschungsstand: '+String(issuance.trace?.validity?.state||'UNKNOWN'));
+  lines.push('• Audit: '+(auditOk?'🟢 vollständig':'FEHLER → Forecast gesperrt'));
 
-  if(f.path){
-    lines.push(
-      '• Preisweg: '+String(f.path.coherence||'UNKNOWN')+
-      (f.path.dominantArchetype?' · Muster '+String(f.path.dominantArchetype):'')
-    );
+  if(!auditOk){
+    lines.push('Probability: SUPPRESSED');
   }
 
   if(Array.isArray(scienceGuardLines)&&scienceGuardLines.length){
-    lines.push('','DETAILCHECKS',...scienceGuardLines.slice(0,6).map(x=>'• '+String(x)));
+    lines.push('','PROFI-CHECKS',...scienceGuardLines.slice(0,5).map(x=>'• '+String(x)));
   }
 
   lines.push('','WAS DAS FÜR DICH BEDEUTET');
   if(!auditOk){
-    lines.push('Der Audit ist nicht sauber. TCX verwirft die Aussage deshalb vollständig.');
+    lines.push('Die Datenprüfung ist nicht sauber. TCX verwirft die Prognose deshalb.');
   }else if(!admitted){
-    lines.push('Die Richtung ist nur ein Forschungssignal. Die Belege reichen noch nicht für eine belastbare Wahrscheinlichkeit.');
+    lines.push('TCX sieht zwar eine mögliche Richtung, aber die Belege reichen noch nicht für eine belastbare Aussage.');
   }else{
-    lines.push('Das Signal ist für Forschung zugelassen. Es bleibt eine Prognose mit Unsicherheit, keine sichere Kursvorhersage.');
+    lines.push('Die Prognose hat die internen Prüfungen bestanden. Sie bleibt trotzdem unsicher und kann sich mit neuen Daten ändern.');
   }
 
   lines.push(
     '',
-    'SYSTEM',
-    'Trace '+String(issuance.traceId||'').slice(0,12)+'… · '+Math.max(0,Math.round((Number(now)-Number(issuance.generatedAt))/1000))+'s alt',
-    ...(runtimeSummary?[
-      'Lernbasis: '+Number(runtimeSummary.historyCases||0)+' ausgewertete Fälle'+
-      ' · '+Number(runtimeSummary.pendingOutcomes||0)+' offen'
-    ]:[]),
+    'RISIKO & GRENZEN',
+    '• Keine Kursprognose ist sicher.',
+    '• Neue Marktbewegungen oder widersprüchliche Daten können die Sicht ändern.',
+    '• TCX führt keine echten Orders aus.',
     '',
-    'Modus: SHADOW_ONLY · Aktion: ABSTAIN'
+    'Systemmodus: ABSTAIN / SHADOW_ONLY',
+    'Trace '+String(issuance.traceId||'').slice(0,10)+'… · '+Math.max(0,Math.round((Number(now)-Number(issuance.generatedAt))/1000))+'s alt',
+    ...(runtimeSummary?['Lernbasis: '+Number(runtimeSummary.historyCases||0)+' ausgewertete Fälle · '+Number(runtimeSummary.pendingOutcomes||0)+' offen']:[])
   );
 
   return lines.join('\n').slice(0,4096);
+}
+
+export function forecastKeyboard(symbol){
+  const s=String(symbol||'').toUpperCase();
+  return {inline_keyboard:[
+    [
+      {text:'🔄 Neu berechnen',callback_data:'forecast:'+s},
+      {text:'📊 Markt',callback_data:'refresh:'+s}
+    ],
+    [
+      {text:'🔎 Warum?',callback_data:'why:'+s},
+      {text:'📈 Chart',callback_data:'chart:'+s+':5m'}
+    ],
+    [
+      {text:'🧠 Daten & Belege',callback_data:'evidence:'+s},
+      {text:'⏱ Gültigkeit',callback_data:'validity:'+s}
+    ],
+    [{text:'🏠 Start',callback_data:'home'}]
+  ]};
 }
 
 export function forecastKeyboard(symbol){
