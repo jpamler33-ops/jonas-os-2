@@ -11,6 +11,22 @@ async function rpc(fetchImpl,url,method,params){
   return body.result;
 }
 
+async function rpcBatch(fetchImpl,url,calls){
+  const payload=calls.map((x,i)=>({jsonrpc:'2.0',id:i+1,method:x.method,params:x.params}));
+  const res=await fetchImpl(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+  const text=await res.text();
+  if(!res.ok) throw new Error('RPC_BATCH_HTTP_'+res.status);
+  const body=JSON.parse(text);
+  if(!Array.isArray(body)) throw new Error('RPC_BATCH_INVALID');
+  const byId=new Map(body.map(x=>[Number(x.id),x]));
+  return payload.map(req=>{
+    const row=byId.get(Number(req.id));
+    if(!row) throw new Error('RPC_BATCH_MISSING_'+req.id);
+    if(row.error) throw new Error('RPC_'+String(row.error.code||'ERROR'));
+    return row.result;
+  });
+}
+
 export function parseWalletCohorts(raw){
   if(!raw) return [];
   let value;
@@ -68,10 +84,24 @@ export function createWalletCohortPublicProvider({
     const latest=Number(BigInt(latestHex));
     const wanted=new Set(c.addresses.map(a=>a.toLowerCase()));
     let activity5m=0,activity15m=0,nativeNetFlow=0,nativeGrossFlow=0,total15=0,success=0;
-    for(let n=latest;n>=Math.max(0,latest-80);n--){
-      const block=await rpc(fetchImpl,ethereumRpcUrl,'eth_getBlockByNumber',['0x'+n.toString(16),true]);
+    const numbers=[];
+    for(let n=latest;n>=Math.max(0,latest-84);n--) numbers.push(n);
+    let blocks;
+    try{
+      blocks=await rpcBatch(fetchImpl,ethereumRpcUrl,numbers.map(n=>({
+        method:'eth_getBlockByNumber',
+        params:['0x'+n.toString(16),true]
+      })));
+    }catch{
+      blocks=[];
+      for(const n of numbers){
+        blocks.push(await rpc(fetchImpl,ethereumRpcUrl,'eth_getBlockByNumber',['0x'+n.toString(16),true]));
+      }
+    }
+    for(const block of blocks){
+      if(!block?.timestamp) continue;
       const ts=Number(BigInt(block.timestamp))*1000;
-      if(asOf-ts>15*60_000) break;
+      if(asOf-ts>15*60_000) continue;
       for(const tx of Array.isArray(block.transactions)?block.transactions:[]){
         const from=String(tx?.from||'').toLowerCase(),to=String(tx?.to||'').toLowerCase();
         if(!wanted.has(from)&&!wanted.has(to)) continue;
