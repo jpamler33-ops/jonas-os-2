@@ -18,6 +18,7 @@ export function createReadCommandHandlers(deps={}){
     showChaos,
     showOms,
     showShadowPortfolio,
+    showShadowTradeStats,
     showExecutionResearch,
     showVenueQuality,
     showSorStatus,
@@ -178,6 +179,39 @@ export function createReadCommandHandlers(deps={}){
         const msg=message(err);
         recordError(observability,{scope:"command.trades",message:msg});
         await tg("sendMessage",{chat_id:chatId,text:"Shadow-Portfolio gerade nicht verfügbar."});
+      }
+    },
+
+    "/stats":async ({chatId})=>{
+      try{ await showShadowTradeStats(chatId,null,"DAY"); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.stats",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Trade-Statistik gerade nicht verfügbar."});
+      }
+    },
+    "/daystats":async ({chatId})=>{
+      try{ await showShadowTradeStats(chatId,null,"DAY"); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.daystats",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Tagesstatistik gerade nicht verfügbar."});
+      }
+    },
+    "/weekstats":async ({chatId})=>{
+      try{ await showShadowTradeStats(chatId,null,"WEEK"); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.weekstats",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Wochenstatistik gerade nicht verfügbar."});
+      }
+    },
+    "/monthstats":async ({chatId})=>{
+      try{ await showShadowTradeStats(chatId,null,"MONTH"); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.monthstats",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Monatsstatistik gerade nicht verfügbar."});
       }
     },
 

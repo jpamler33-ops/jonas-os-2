@@ -13,6 +13,8 @@ import {
   reconcileShadowPortfolioEntries,
   replaceShadowPortfolioPosition,
   shadowPortfolioSummary,
+  shadowPortfolioPeriodStats,
+  shadowPortfolioStatistics,
   verifyShadowPortfolioSummary,
   loadShadowPortfolioLedger,
   saveShadowPortfolioLedger
@@ -28,7 +30,8 @@ function entry(overrides={}){
       strategy:'TCX_AUTONOMOUS_SHADOW_TRADER_V1',
       role:'ENTRY',horizonMs:60_000,horizonId:'1m',
       expectedReturn:0.01,directionalProbability:0.7,probabilityEdge:0.4,
-      admissionGate:'PASS',issuanceId:'iss1',forecastFingerprint:'f'.repeat(64)
+      admissionGate:'PASS',issuanceId:'iss1',forecastFingerprint:'f'.repeat(64),
+      assetClass:'MEME',strategyLane:'BTCUSDT:1m:BUY'
     },
     ...overrides
   };
@@ -135,4 +138,66 @@ test('ledger persists and restores shadow-only positions',async()=>{
   assert.equal(loaded.ledger.positions.length,1);
   assert.equal(loaded.ledger.execution,'SHADOW_ONLY');
   assert.equal(loaded.ledger.canExecuteLive,false);
+});
+
+
+test('period statistics split day week month and asset class',()=>{
+  const base=createEmptyShadowPortfolioLedger({initialEquityQuote:1000});
+  const mk=(id,openedAt,closedAt,pnl,assetClass='CORE')=>({
+    ...shadowPositionFromEntryOrder(entry({
+      id,createdAt:openedAt,updatedAt:openedAt,
+      strategyMeta:{...entry().strategyMeta,assetClass}
+    }),{openedAt}),
+    status:'CLOSED',closedAt,
+    realizedNetPnlQuote:pnl,realizedReturnPct:pnl/100,
+    exitPrice:100+pnl,exitQuote:100+pnl,exitFeesQuote:0
+  });
+  const asOf=Date.UTC(2026,8,27,20,0,0);
+  const l={...base,positions:[
+    mk('d1',Date.UTC(2026,8,27,10),Date.UTC(2026,8,27,11),5,'MEME'),
+    mk('w1',Date.UTC(2026,8,25,10),Date.UTC(2026,8,25,11),-2,'CORE'),
+    mk('m1',Date.UTC(2026,8,5,10),Date.UTC(2026,8,5,11),3,'CORE'),
+    mk('old',Date.UTC(2026,7,10),Date.UTC(2026,7,10),7,'CORE')
+  ]};
+  const day=shadowPortfolioPeriodStats(l,{period:'DAY',asOf});
+  assert.equal(day.trades,1);
+  assert.equal(day.realizedPnlQuote,5);
+  assert.equal(day.byAssetClass.MEME.trades,1);
+
+  const week=shadowPortfolioPeriodStats(l,{period:'WEEK',asOf});
+  assert.equal(week.trades,2);
+  assert.equal(week.realizedPnlQuote,3);
+
+  const month=shadowPortfolioPeriodStats(l,{period:'MONTH',asOf});
+  assert.equal(month.trades,3);
+  assert.equal(month.realizedPnlQuote,6);
+
+  const all=shadowPortfolioStatistics(l,{asOf});
+  assert.equal(all.ALL.trades,4);
+  assert.equal(all.ALL.realizedPnlQuote,13);
+});
+
+test('position preserves asset class and strategy lane',()=>{
+  const p=shadowPositionFromEntryOrder(entry());
+  assert.equal(p.assetClass,'MEME');
+  assert.equal(p.strategyLane,'BTCUSDT:1m:BUY');
+});
+
+
+test('Berlin day statistics use local midnight across UTC offset',()=>{
+  const base=createEmptyShadowPortfolioLedger({initialEquityQuote:1000});
+  const mk=(id,closedAt,pnl)=>({
+    ...shadowPositionFromEntryOrder(entry({id,createdAt:closedAt-60_000,updatedAt:closedAt-60_000}),{openedAt:closedAt-60_000}),
+    status:'CLOSED',closedAt,realizedNetPnlQuote:pnl,realizedReturnPct:pnl/100,
+    exitPrice:100+pnl,exitQuote:100+pnl,exitFeesQuote:0
+  });
+  const asOf=Date.UTC(2026,8,27,12,0,0);
+  const l={...base,positions:[
+    mk('before-local-midnight',Date.UTC(2026,8,26,21,30,0),1),
+    mk('after-local-midnight',Date.UTC(2026,8,26,22,30,0),2)
+  ]};
+  const day=shadowPortfolioPeriodStats(l,{period:'DAY',asOf,timeZone:'Europe/Berlin'});
+  assert.equal(day.trades,1);
+  assert.equal(day.realizedPnlQuote,2);
+  assert.equal(day.timeZone,'Europe/Berlin');
 });

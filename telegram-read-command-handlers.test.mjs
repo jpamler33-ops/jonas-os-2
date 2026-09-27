@@ -19,6 +19,7 @@ function deps(overrides={}){
     showChaos:async(...x)=>calls.push(["chaos",...x]),
     showOms:async(...x)=>calls.push(["oms",...x]),
     showShadowPortfolio:async(...x)=>calls.push(["portfolio",...x]),
+    showShadowTradeStats:async(...x)=>calls.push(["stats",...x]),
     showExecutionResearch:async(...x)=>calls.push(["erl",...x]),
     showVenueQuality:async(...x)=>calls.push(["vqm",...x]),
     showSorStatus:async(...x)=>calls.push(["sorstatus",...x]),
@@ -89,4 +90,17 @@ test("portfolio and trades aliases open the same shadow portfolio",async()=>{
   await h["/portfolio"]({chatId:9,args:[]});
   await h["/trades"]({chatId:9,args:[]});
   assert.equal(calls.filter(x=>x[0]==="portfolio").length,2);
+});
+
+
+test("stats commands map to requested periods",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/stats"]({chatId:7,args:[]});
+  await h["/daystats"]({chatId:7,args:[]});
+  await h["/weekstats"]({chatId:7,args:[]});
+  await h["/monthstats"]({chatId:7,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="stats"&&x[3]==="DAY").length,2);
+  assert.equal(calls.filter(x=>x[0]==="stats"&&x[3]==="WEEK").length,1);
+  assert.equal(calls.filter(x=>x[0]==="stats"&&x[3]==="MONTH").length,1);
 });

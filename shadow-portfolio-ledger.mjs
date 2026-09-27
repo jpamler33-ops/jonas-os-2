@@ -100,6 +100,12 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null}={}){
     issuanceId:String(order.strategyMeta?.issuanceId||''),
     forecastFingerprint:String(order.strategyMeta?.forecastFingerprint||''),
     horizonId:String(order.strategyMeta?.horizonId||''),
+    assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
+    strategyLane:String(order.strategyMeta?.strategyLane||[
+      String(order.symbol).toUpperCase(),
+      String(order.strategyMeta?.horizonId||''),
+      String(order.side).toUpperCase()
+    ].join(':')),
     status:'OPEN',
     closeReason:null,
     lastMark:null,
@@ -320,6 +326,138 @@ export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
     canExecuteLive:false
   };
   return deepFreeze({...core,fingerprint:sha256(core)});
+}
+
+
+function zonedParts(epoch,timeZone){
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone,year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
+  }).formatToParts(new Date(epoch));
+  const get=type=>parts.find(x=>x.type===type)?.value;
+  const weekday={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[get('weekday')];
+  return {
+    year:Number(get('year')),month:Number(get('month')),day:Number(get('day')),
+    hour:Number(get('hour')),minute:Number(get('minute')),second:Number(get('second')),
+    weekday
+  };
+}
+
+function zonedEpoch({year,month,day,hour=0,minute=0,second=0},timeZone){
+  let guess=Date.UTC(year,month-1,day,hour,minute,second);
+  for(let i=0;i<3;i++){
+    const p=zonedParts(guess,timeZone);
+    const represented=Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second);
+    const target=Date.UTC(year,month-1,day,hour,minute,second);
+    const diff=represented-target;
+    if(Math.abs(diff)<1000) break;
+    guess-=diff;
+  }
+  return guess;
+}
+
+function periodWindow(period,asOf,timeZone='UTC'){
+  const end=Number(asOf);
+  if(!Number.isFinite(end)) throw new Error('ASOF_INVALID');
+  try{ new Intl.DateTimeFormat('en',{timeZone}).format(new Date(end)); }
+  catch{ throw new Error('TIMEZONE_INVALID'); }
+  const p=String(period||'DAY').toUpperCase();
+  if(p==='ALL') return {period:'ALL',startAt:0,endAt:end,label:'Gesamt',timeZone};
+  const local=zonedParts(end,timeZone);
+  let y=local.year,m=local.month,d=local.day;
+  if(p==='WEEK'){
+    const delta=(local.weekday+6)%7;
+    const x=new Date(Date.UTC(y,m-1,d-delta));
+    y=x.getUTCFullYear();m=x.getUTCMonth()+1;d=x.getUTCDate();
+  }else if(p==='MONTH'){
+    d=1;
+  }else if(p!=='DAY'){
+    throw new Error('PERIOD_INVALID');
+  }
+  return {
+    period:p,
+    startAt:zonedEpoch({year:y,month:m,day:d},timeZone),
+    endAt:end,
+    label:p==='DAY'?'Heute':p==='WEEK'?'Diese Woche':'Dieser Monat',
+    timeZone
+  };
+}
+
+function tradeStats(rows){
+  const closed=rows.filter(p=>p.status==='CLOSED');
+  const realized=closed.reduce((sum,p)=>sum+Number(p.realizedNetPnlQuote||0),0);
+  const wins=closed.filter(p=>Number(p.realizedNetPnlQuote)>0);
+  const losses=closed.filter(p=>Number(p.realizedNetPnlQuote)<0);
+  const breakeven=closed.length-wins.length-losses.length;
+  const grossProfit=wins.reduce((sum,p)=>sum+Number(p.realizedNetPnlQuote||0),0);
+  const grossLoss=Math.abs(losses.reduce((sum,p)=>sum+Number(p.realizedNetPnlQuote||0),0));
+  const avgWin=wins.length?grossProfit/wins.length:null;
+  const avgLoss=losses.length?grossLoss/losses.length:null;
+  const best=closed.length?closed.slice().sort((a,b)=>Number(b.realizedNetPnlQuote||0)-Number(a.realizedNetPnlQuote||0))[0]:null;
+  const worst=closed.length?closed.slice().sort((a,b)=>Number(a.realizedNetPnlQuote||0)-Number(b.realizedNetPnlQuote||0))[0]:null;
+  return {
+    trades:closed.length,wins:wins.length,losses:losses.length,breakeven,
+    winRate:closed.length?wins.length/closed.length:null,
+    realizedPnlQuote:realized,
+    grossProfitQuote:grossProfit,
+    grossLossQuote:grossLoss,
+    profitFactor:grossLoss>EPS?grossProfit/grossLoss:null,
+    expectancyQuote:closed.length?realized/closed.length:null,
+    avgWinQuote:avgWin,
+    avgLossQuote:avgLoss,
+    bestTrade:best?{symbol:best.symbol,pnlQuote:Number(best.realizedNetPnlQuote||0),returnPct:finite(best.realizedReturnPct),assetClass:best.assetClass||'CORE'}:null,
+    worstTrade:worst?{symbol:worst.symbol,pnlQuote:Number(worst.realizedNetPnlQuote||0),returnPct:finite(worst.realizedReturnPct),assetClass:worst.assetClass||'CORE'}:null
+  };
+}
+
+export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
+  const window=periodWindow(period,asOf,timeZone);
+  const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean);
+  const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
+  const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
+  const base=tradeStats(closed);
+
+  const bySymbol={};
+  const byAssetClass={};
+  const bySide={LONG:0,SHORT:0};
+  for(const p of closed){
+    const symbol=String(p.symbol);
+    const assetClass=String(p.assetClass||'CORE').toUpperCase();
+    (bySymbol[symbol]??=[]).push(p);
+    (byAssetClass[assetClass]??=[]).push(p);
+    if(p.side==='LONG'||p.side==='SHORT') bySide[p.side]++;
+  }
+  const symbolStats=Object.fromEntries(
+    Object.entries(bySymbol).map(([k,v])=>[k,tradeStats(v)])
+  );
+  const assetClassStats=Object.fromEntries(
+    Object.entries(byAssetClass).map(([k,v])=>[k,tradeStats(v)])
+  );
+
+  const core={
+    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+    period:window.period,
+    label:window.label,
+    startAt:window.startAt,
+    endAt:window.endAt,
+    timeZone:window.timeZone,
+    entries:entered.length,
+    openEntries:entered.filter(p=>p.status==='OPEN').length,
+    ...base,
+    bySide,
+    bySymbol:symbolStats,
+    byAssetClass:assetClassStats,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  return deepFreeze({...core,fingerprint:sha256(core)});
+}
+
+export function shadowPortfolioStatistics(ledger,{asOf=Date.now(),timeZone='UTC'}={}){
+  const periods=['DAY','WEEK','MONTH','ALL'];
+  return deepFreeze(Object.fromEntries(periods.map(period=>[
+    period,shadowPortfolioPeriodStats(ledger,{period,asOf,timeZone})
+  ])));
 }
 
 export function verifyShadowPortfolioSummary(value){
