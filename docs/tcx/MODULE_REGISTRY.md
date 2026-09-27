@@ -25,6 +25,7 @@ Purpose: prevent duplicate subsystem ownership and make the current source of tr
 | Persistence contracts | `persistence-contracts.mjs` | MAIN CANONICAL |
 | Chaos harness | `chaos-engineering.mjs` | MAIN CANONICAL |
 | Shadow OMS | `shadow-oms.mjs` | MAIN CANONICAL |
+| Shadow Portfolio Brain | `portfolio-brain.mjs` | MAIN CANONICAL V1 |
 | Shadow SOR | `multi-venue-shadow-sor.mjs` | MAIN CANONICAL |
 | Venue Quality Memory | `venue-quality-memory.mjs` | MAIN CANONICAL |
 | Execution Research Lab | `execution-research-lab.mjs` | MAIN CANONICAL |
