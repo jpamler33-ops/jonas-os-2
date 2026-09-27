@@ -3304,6 +3304,12 @@ async function handle(update) {
       await ack(q.id,'Shadow SOR geladen');
       return;
     }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
     if (a.kind === 'BACK') {
       await showStart(chatId,messageId);
       await ack(q.id);
