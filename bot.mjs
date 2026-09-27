@@ -2107,6 +2107,12 @@ async function handle(update) {
       await ack(q.id,'Regime geladen');
       return;
     }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
     if (a.kind === 'BACK') {
       await showStart(chatId,messageId);
       await ack(q.id);
