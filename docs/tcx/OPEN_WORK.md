@@ -123,7 +123,7 @@ Completed:
 - no silent production mutation
 
 Next:
-1. durable candidate-version registry
+1. durable candidate-version registry — DONE
 2. offline candidate builder from matured outcomes only
 3. temporal walk-forward evaluation driver
 4. promotion record → audit ledger binding
@@ -135,6 +135,41 @@ Forbidden:
 - hidden threshold mutation
 - silent production replacement
 - unversioned online learning
+
+## P5A · V3 Expansion Pack
+
+Status: CORE SELECTIVE INTEGRATION DONE / RUNTIME WIRING PENDING
+
+Verified source package:
+`3.0.0-alpha.insertable.1`
+SHA-256:
+`e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
+
+Completed:
+- package verification: 36 files / 30 modules / SHADOW_ONLY / no live execution
+- original pack tests: 9/9 PASS
+- capability-by-capability duplicate audit
+- Source Intelligence institutional adaptation
+- Event Impact Memory institutional adaptation
+- Liquidity Intelligence institutional adaptation
+- expansion evidence bundle
+- provenance hashing
+- Runtime Release Registry inclusion
+- integration tests + CI green
+
+Deferred intentionally:
+- Memecoin Intelligence until real on-chain safety/provenance inputs exist
+- Trader Intelligence until wallet/entity resolution + survivorship controls exist
+- Future Intelligence as a separate slow-timescale research layer
+- Narrative/Psychology/Reflexivity until empirical validation replaces heuristic confidence
+- Portfolio Brain until canonical shadow portfolio wiring
+- causal graph only as hypothesis graph, never causal truth
+- original expansion orchestrator, Ghost Portfolio, forecast ledger and science gates because canonical TCX owners already exist
+
+Next:
+- bind expansion evidence into canonical Research Trace / evidence references
+- map permitted expansion evidence into ForecastInput only through explicit typed features
+- add product drill-down only after runtime orchestration is stable
 
 ## P6 · Product integration
 
