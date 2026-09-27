@@ -1307,9 +1307,151 @@ function compactUsd(v){
   const n=Number(v);
   if(!Number.isFinite(n)) return '—';
   const a=Math.abs(n);
-  if(a>=1e9) return '
+  if(a>=1e9) return '$'+(n/1e9).toFixed(2)+'B';
+  if(a>=1e6) return '$'+(n/1e6).toFixed(2)+'M';
+  if(a>=1e3) return '$'+(n/1e3).toFixed(1)+'K';
+  if(a>=1) return '$'+n.toFixed(2);
+  if(a>=0.01) return '$'+n.toFixed(4);
+  return '$'+n.toFixed(8);
+}
+
+function signedPercent(v,d=1){
+  const n=Number(v);
+  return Number.isFinite(n)?(n>=0?'+':'')+n.toFixed(d)+'%':'—';
+}
+
+function memecoinRisk(pair,now=Date.now()){
+  if(!pair) return {label:'⚪ unbekannt',reasons:['keine verwertbaren DEX-Paardaten']};
+  const liq=Number(pair.liquidityUsd);
+  const created=Number(pair.pairCreatedAt);
+  const ageMs=Number.isFinite(created)?Math.max(0,now-created):null;
+  const reasons=[];
+  let level=1;
+  if(!Number.isFinite(liq)||liq<=0){level=3;reasons.push('Liquidität unbekannt');}
+  else if(liq<25000){level=3;reasons.push('sehr geringe Liquidität');}
+  else if(liq<100000){level=Math.max(level,2);reasons.push('geringe Liquidität');}
+  if(ageMs!=null&&ageMs<3600000){level=3;reasons.push('Pair jünger als 1 Stunde');}
+  else if(ageMs!=null&&ageMs<86400000){level=Math.max(level,2);reasons.push('Pair jünger als 24 Stunden');}
+  return {label:level>=3?'🔴 sehr hoch':level===2?'🟠 erhöht':'🟡 memecoin-typisch hoch',reasons};
+}
+
+function pairAgeText(createdAt,now=Date.now()){
+  const t=Number(createdAt);
+  if(!Number.isFinite(t)) return 'Alter unbekannt';
+  const h=Math.floor(Math.max(0,now-t)/3600000);
+  if(h<1) return '<1h alt';
+  if(h<48) return h+'h alt';
+  return Math.floor(h/24)+'d alt';
+}
+
+async function showMemecoinRadar(chatId,messageId,{force=false}={}){
+  const started=Date.now();
+  try{
+    const radar=await dexScreenerProvider.fetchMemecoinRadar({limit:6,chainIds:['solana','base','ethereum'],force});
+    const rows=[];
+    radar.rows.forEach((item,i)=>{
+      const p=item.pair;
+      const risk=memecoinRisk(p,radar.capturedAt);
+      const name=p?.baseToken?.symbol||p?.baseToken?.name||item.tokenAddress.slice(0,8)+'…';
+      rows.push(
+        (i+1)+'. '+name+' · '+String(item.chainId||'').toUpperCase(),
+        '   Preis '+compactUsd(p?.priceUsd)+' · 1h '+signedPercent(p?.priceChangeH1)+' · Vol '+compactUsd(p?.volumeH1),
+        '   Liquidität '+compactUsd(p?.liquidityUsd)+' · Käufe/Verkäufe 1h '+(p?.buysH1??'—')+'/'+(p?.sellsH1??'—')+' · '+pairAgeText(p?.pairCreatedAt,radar.capturedAt),
+        '   Risikoindikator: '+risk.label
+      );
+    });
+    const text=[
+      '🐸 MEMECOIN-RADAR · LIVE','',
+      'TCX zeigt aktuell stark beworbene/auffällige Tokens aus öffentlichen DEX-Daten.',
+      'Das ist KEIN Ranking nach Kaufchance.','',
+      ...(rows.length?rows:['Keine verwertbaren Tokens aus der Live-Quelle erhalten.']),'',
+      ...(radar.errors.length?['⚠️ '+radar.errors.length+' Token-Abfragen konnten nicht geladen werden.']:[]),
+      'WICHTIGE DATENLÜCKEN',
+      '• Holder-Konzentration wird hier noch nicht verifiziert.',
+      '• LP-Lock/Mint-/Freeze-Rechte werden durch DEX-Daten allein nicht bewiesen.',
+      '• Der Risikoindikator nutzt nur sichtbare Liquidität und Pair-Alter.','',
+      'Quelle: DEX Screener Public API',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    recordOperation(observability,{name:'memecoin_radar',ok:true,latencyMs:Date.now()-started});
+    return deliverTelegramTextCard(tg,chatId,messageId,{
+      text:text.slice(0,4096),
+      reply_markup:{inline_keyboard:[
+        [{text:'🔄 Aktualisieren',callback_data:'home:memecoins'},{text:'🧭 Stimmung & Trends',callback_data:'home:trends'}],
+        [{text:'🏠 Start',callback_data:'home'}]
+      ]}
+    });
+  }catch(err){
+    const message=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'memecoin_radar',message});
+    recordOperation(observability,{name:'memecoin_radar',ok:false,latencyMs:Date.now()-started,error:message});
+    return deliverTelegramTextCard(tg,chatId,messageId,{
+      text:['🐸 MEMECOIN-RADAR','','Live-Quelle gerade nicht verfügbar.','TCX zeigt deshalb keine erfundenen Token-Daten.','','Quelle: DEX Screener Public API','Systemmodus: ABSTAIN / SHADOW_ONLY'].join('\n'),
+      reply_markup:{inline_keyboard:[[{text:'🔄 Nochmal versuchen',callback_data:'home:memecoins'},{text:'🏠 Start',callback_data:'home'}]]}
+    });
+  }
+}
+
+function sentimentLabel(value,classification){
+  const n=Number(value);
+  if(!Number.isFinite(n)) return '⚪ unbekannt';
+  if(n<=24) return '🔴 '+(classification||'Extreme Fear');
+  if(n<=44) return '🟠 '+(classification||'Fear');
+  if(n<=55) return '⚪ '+(classification||'Neutral');
+  if(n<=74) return '🟡 '+(classification||'Greed');
+  return '🟠 '+(classification||'Extreme Greed');
+}
+
+async function showTrendContext(chatId,messageId,{force=false}={}){
+  const started=Date.now();
+  const [contextResult,metaResult]=await Promise.allSettled([
+    publicMarketContextProvider.fetchContext({force}),
+    dexScreenerProvider.fetchTrendingMetas({limit:6,force})
+  ]);
+  const context=contextResult.status==='fulfilled'?contextResult.value:null;
+  const metas=metaResult.status==='fulfilled'?metaResult.value:null;
+  const s=context?.sentiment;
+  const g=context?.global;
+  const metaLines=(metas?.rows||[]).flatMap((m,i)=>[
+    (i+1)+'. '+(m.name||m.slug||'Unbekannter Trend')+' · '+(m.tokenCount||0)+' Tokens',
+    '   1h '+signedPercent(m.marketCapChange?.h1)+' · 24h '+signedPercent(m.marketCapChange?.h24)+' · Vol '+compactUsd(m.volume)+' · Liq '+compactUsd(m.liquidity)
+  ]);
+  const errors=[
+    ...(context?.errors||[]),
+    ...(contextResult.status==='rejected'?[{source:'Alternative.me',error:contextResult.reason instanceof Error?contextResult.reason.message:String(contextResult.reason)}]:[]),
+    ...(metaResult.status==='rejected'?[{source:'DEX Screener',error:metaResult.reason instanceof Error?metaResult.reason.message:String(metaResult.reason)}]:[])
+  ];
+  const text=[
+    '🧭 MARKTSTIMMUNG & TRENDS · LIVE','',
+    'GESAMTMARKT',
+    s?'Fear & Greed: '+s.value+'/100 · '+sentimentLabel(s.value,s.classification)+(s.delta==null?'':' · Δ '+(s.delta>=0?'+':'')+s.delta):'Fear & Greed: ⚪ nicht verfügbar',
+    g?'Bitcoin-Dominanz: '+(Number.isFinite(g.bitcoinDominancePct)?g.bitcoinDominancePct.toFixed(1)+'%':'—'):'Bitcoin-Dominanz: —',
+    g?'Gesamtmarkt: '+compactUsd(g.totalMarketCapUsd)+' · 24h-Volumen '+compactUsd(g.totalVolume24hUsd):'Gesamtmarkt: —','',
+    'TRENDING DEX-METAS',
+    ...(metaLines.length?metaLines:['Keine Meta-Trends verfügbar.']),'',
+    'SO IST DAS ZU LESEN',
+    '• Fear & Greed beschreibt Marktstimmung, keine Kurswahrscheinlichkeit.',
+    '• DEX-Metas zeigen, wo Aktivität/Kapital gerade gebündelt ist; sie sind kein Social-Sentiment und kein Kaufsignal.',
+    ...(errors.length?['⚠️ Teilweise eingeschränkt: '+errors.length+' Quelle(n)/Abruf(e) fehlgeschlagen.']:[]),'',
+    'Quellen: Alternative.me (Fear & Greed / Global Market) · DEX Screener Public API',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const ok=Boolean(s||g||metaLines.length);
+  recordOperation(observability,{name:'public_trend_context',ok,latencyMs:Date.now()-started,error:ok?null:'all public context sources unavailable'});
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🔄 Aktualisieren',callback_data:'home:trends'},{text:'🐸 Memecoin-Radar',callback_data:'home:memecoins'}],
+      [{text:'🏠 Start',callback_data:'home'}]
+    ]}
+  });
+}
+
+async function showHomeSection(chatId,messageId,section) {
   if(section==='MARKETS') return showMarkets(chatId,messageId);
   if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+  if(section==='MEMECOINS') return showMemecoinRadar(chatId,messageId);
+  if(section==='TRENDS') return showTrendContext(chatId,messageId);
 
   let text='';
   if(section==='ALERTS') {
@@ -1317,7 +1459,7 @@ function compactUsd(v){
     text=list.length
       ? ['🔔 DEINE ALERTS','',
          'TCX beobachtet diese Bedingungen für dich:','',
-         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         ...list.map((a,i)=>\`\${i+1}. \${describeAlert(a)}\`),'',
          'Neuen Preisalarm setzen: /alert BTC 70000',
          'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
       : ['🔔 DEINE ALERTS','',
@@ -1333,13 +1475,13 @@ function compactUsd(v){
       const r=radarCache.get(symbol);
       if(!r){
         const own=episodes.filter(e=>e.symbol===symbol);
-        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+        return \`\${symbolLabel(symbol)} · ⏳ sammelt Daten · \${own.length} Lernfälle\`;
       }
       const age=Math.max(0,now-r.capturedAt);
       const witness=Math.round((Number(r.witnessAgreement)||0)*100);
       const status=String(r.status||'').toUpperCase();
       const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
-      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+      return \`\${symbolLabel(symbol)} · \${icon} \${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen \${witness}% · Lernfälle \${r.support||0} · \${Math.round(age/1000)}s alt\`;
     });
     text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
       'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
@@ -1350,15 +1492,15 @@ function compactUsd(v){
   } else if(section==='SYSTEM') {
     text=[
       '🖥 TCX SYSTEMSTATUS','',
-      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
-      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
-      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
-      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
-      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      \`Kernsystem: \${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}\`,
+      \`Marktdaten: \${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}\`,
+      \`Dateispeicher: \${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}\`,
+      \`Persistenz über Deploys: \${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}\`,
+      \`Belege: \${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}\`,
       'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
       'Marktstimmung: 🟢 Live-Provider eingebaut',
-      `Beobachtete Märkte: ${markets.length}`,
-      `Aktive Sitzungen: ${sessions.size}`,'',
+      \`Beobachtete Märkte: \${markets.length}\`,
+      \`Aktive Sitzungen: \${sessions.size}\`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
       'Sicherheitsmodus:',
       'TCX darf keine echten Orders ausführen.',
@@ -1371,11 +1513,11 @@ function compactUsd(v){
     const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
     text=[
       '🧠 WAS TCX GELERNT HAT','',
-      `Gespeicherte Marktsituationen: ${total}`,
-      `Davon nach 15 Min. ausgewertet: ${mature15}`,
-      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
-      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
-      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      \`Gespeicherte Marktsituationen: \${total}\`,
+      \`Davon nach 15 Min. ausgewertet: \${mature15}\`,
+      \`Davon nach 1 Std. ausgewertet: \${mature1h}\`,
+      \`Davon nach 3 Std. ausgewertet: \${mature3h}\`,
+      \`Gespeicherte Beleg-Snapshots: \${evidenceRecords.length}\`,'',
       'Warum das wichtig ist:',
       'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
       'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
@@ -1384,10 +1526,10 @@ function compactUsd(v){
   } else if(section==='SETTINGS') {
     text=[
       '⚙️ TCX EINSTELLUNGEN','',
-      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
-      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
-      `Beobachtete Märkte: ${markets.length}`,
-      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      \`Live-Aktualisierung: alle \${Math.round(refreshMs/1000)} Sekunden\`,
+      \`Alert-Prüfung: alle \${Math.round(alertCheckMs/1000)} Sekunden\`,
+      \`Beobachtete Märkte: \${markets.length}\`,
+      \`Zugriffsschutz: \${allowedChats.size?'aktiv':'nicht eingeschränkt'}\`,'',
       'Systemmodus: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
   } else {
