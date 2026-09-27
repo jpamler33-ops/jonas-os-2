@@ -2838,9 +2838,13 @@ async function showForecast(chatId,symbol,messageId=null){
   const issuance=issued.issuance;
   const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
   const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
   const text=renderInstitutionalForecastCard(issuance,{
     runtimeSummary,
-    auditBound:auditHealthyAfter,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
     now:Date.now()
   });
 
