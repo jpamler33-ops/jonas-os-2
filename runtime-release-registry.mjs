@@ -55,6 +55,11 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-science-adapter.mjs',
   'forecast-product.mjs',
   'forecast-candidate-lab.mjs',
+  'forecast-learning-center.mjs',
+  'forecast-hypothesis-generator.mjs',
+  'forecast-shadow-competition.mjs',
+  'forecast-experiment-governor.mjs',
+  'forecast-feature-research.mjs',
 
   'forecast-runtime/utils/math.js',
   'forecast-runtime/forecast/types.js',
@@ -90,7 +95,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'expansion-runtime/institutional-expansion.mjs',
   'expansion-runtime/source-intelligence.mjs',
   'expansion-runtime/event-impact-memory.mjs',
-  'expansion-runtime/liquidity-intelligence.mjs'
+  'expansion-runtime/liquidity-intelligence.mjs',
+  'expansion-runtime/derivatives-public-provider.mjs'
 ];
 
 export function institutionalRuntimeFiles(){
