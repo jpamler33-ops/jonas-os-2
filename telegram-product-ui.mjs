@@ -1,4 +1,4 @@
-export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v2-beginner-first";
+export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v3-live-intelligence";
 
 export const PRODUCT_STATUS = Object.freeze([
   "VALID",
@@ -147,7 +147,11 @@ export function homeKeyboard() {
       {text:"📊 Coin analysieren",callback_data:"home:markets"}
     ],
     [
-      {text:"🎯 Chancen & Bewegungen",callback_data:"home:radar"},
+      {text:"🎯 Auffällige Bewegungen",callback_data:"home:radar"},
+      {text:"🐸 Memecoin-Radar",callback_data:"home:memecoins"}
+    ],
+    [
+      {text:"🧭 Stimmung & Trends",callback_data:"home:trends"},
       {text:"⭐ Watchlist",callback_data:"home:watchlist"}
     ],
     [
