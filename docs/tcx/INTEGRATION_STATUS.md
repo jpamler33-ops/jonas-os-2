@@ -1,59 +1,97 @@
 # TCX Institutional Integration Status
 
 Branch: `integration/tcx-institutional-v3`
+PR: #2 — TCX Institutional v3 — Forecast + Scientific Validity Integration
 
-## Staged and green
+## Current staged core
 
-- institutional standard and target architecture
-- Master / Forecast / Alpha.30 merge audit
-- Forecast Specialist v2.3.1 runtime
-- Episode Memory PIT maturity hardening
-- forecast integration regression guards
-- canonical `forecast-contract.mjs`
-- immutable `research-trace.mjs`
-- strict `scientific-validity.mjs`
-- Alpha.30 empirical-support guard adaptation
-- Alpha.30 research-integrity / adaptive-holdout guard adaptation
-- cross-guard scientific-core integration tests
-- integration-branch / PR CI
-
-Latest verified integration gate:
-```text
-commit: 8ef07028b0934034d70eced19f3ad51fdf3df20a
-GitHub Actions: SUCCESS
-root tests + science-runtime tests: PASS
-syntax gate: PASS
-```
-
-## Important boundary
-
-Nothing on this branch is production-canonical on `main` yet.
-
-The branch is intentionally acting as an institutional staging environment so forecast/science changes cannot destabilize the running canonical master before their contracts and gates are complete.
-
-## Current architecture achieved
+The integration branch now contains one joined institutional path:
 
 ```text
-MASTER TEMPORAL / SAFETY TRUTH
+MASTER MARKET / TEMPORAL TRUTH
         ↓
-Forecast Specialist Runtime
+TCX Research Envelope
+        ↓
+Canonical ForecastInput Adapter
+        ↓
+Forecast Specialist v2.3.1 Core
         ↓
 Canonical Forecast Contract
         ↘
-          Scientific Validity Aggregator
+          Scientific Core
         ↗
-Alpha.30 Support + Research Integrity
+Alpha.30-derived falsification guards
         ↓
-Research Trace
+Unified Institutional Admission
         ↓
-future Institutional admission + product views
+Institutional Forecast Issuance
+        ↓
+Immutable Research Trace
+        ↓
+Append-only Audit Ledger
+        ↓
+Matured Outcome
+        ↓
+Model Promotion Ladder
 ```
 
-## Next
+## Staged and tested
 
-1. adapt Alpha.30 concept-stability + nonlinear-stability guards
-2. adapt temporal-recency + sequential-evidence guards
-3. add unified Institutional admission gate
-4. bind canonical forecast + scientific validity to Research Trace
-5. include staged modules in Runtime Release Registry
-6. expose forecast UI only after the admission path is fully gated
+- Forecast Specialist v2.3.1 runtime
+- canonical Master → Forecast input adapter
+- canonical forecast output contract
+- immutable Research Trace
+- Scientific Validity aggregator
+- canonical Scientific Core orchestrator
+- empirical support
+- adaptive research-integrity / holdout guard
+- linear + nonlinear concept stability
+- temporal recency
+- sequential evidence / optional-stopping guard
+- specification multiverse
+- transportability
+- evidence-lineage independence
+- strictest-wins Institutional admission gate
+- atomic forecast/science/admission/trace issuance identity
+- issuance + outcome audit-ledger binding
+- staged institutional runtime release file identity
+- fail-closed model promotion ladder
+
+## Latest verified gate
+
+```text
+commit: ee245b99ebf87abd8e59187c29fc62847534a0f3
+push CI: SUCCESS
+PR CI: SUCCESS
+syntax: PASS
+root tests + science-runtime tests: PASS
+```
+
+## Hard invariants
+
+```text
+executionMode = SHADOW_ONLY
+action = ABSTAIN
+canExecute = false
+same-sample self-feedback = forbidden
+silent production mutation = forbidden
+future knowledge = blocked
+uncalibrated/suppressed probability = not user-displayable
+```
+
+## Not yet production-canonical
+
+Nothing on this branch is canonical on `main` until the runtime/deployment migration is complete and the final integration PR is reviewed.
+
+Current missing production path:
+1. durable candidate/version registry
+2. offline candidate builder from matured outcomes
+3. temporal walk-forward evaluation driver
+4. actual bot orchestration through the new adapter/science/admission/trace path
+5. persistence/deployment packaging for staged modules
+6. Telegram forecast views
+7. rollback drill + final institutional gap audit
+
+## Next highest-leverage work
+
+Finish the versioned learning/promotion pipeline before UI expansion. Then wire the gated institutional forecast service into the bot and expose only normalized, admissible views.
