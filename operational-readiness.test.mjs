@@ -79,3 +79,36 @@ test('provider queue saturation is not ready',()=>{
   assert.equal(r.ready,false);
   assert.ok(r.hardReasons.includes('PROVIDER_BACKPRESSURE_SATURATED'));
 });
+
+
+test('persistence contract block is a hard readiness failure',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    persistenceCompatibility:{
+      version:'TEST',
+      state:'BLOCKED',
+      compatible:false,
+      hardReasons:['FORECAST_RUNTIME_RECOVERED_FROM_CORRUPT'],
+      warningReasons:[],
+      fingerprint:'x'
+    }
+  }));
+  assert.equal(r.ready,false);
+  assert.ok(r.hardReasons.includes('PERSISTENCE_CONTRACT_BLOCKED'));
+  assert.ok(r.hardReasons.includes('PERSISTENCE_FORECAST_RUNTIME_RECOVERED_FROM_CORRUPT'));
+});
+
+test('persistence contract degradation becomes readiness warning',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    persistenceCompatibility:{
+      version:'TEST',
+      state:'DEGRADED',
+      compatible:true,
+      hardReasons:[],
+      warningReasons:['USER_STATE_MIGRATION_PENDING'],
+      fingerprint:'x'
+    }
+  }));
+  assert.equal(r.ready,true);
+  assert.equal(r.state,'DEGRADED');
+  assert.ok(r.warningReasons.includes('PERSISTENCE_USER_STATE_MIGRATION_PENDING'));
+});
