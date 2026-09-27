@@ -36,8 +36,13 @@ function candidate(tag='a'){
     parentReleaseId:'model-prev'
   });
 }
-function registryRecord(releaseId='software-1'){
-  const manifest={releaseId,kind:'TCX_RUNTIME_RELEASE',configHash:'c'.repeat(64)};
+function registryRecord(releaseId='software-1',candidateArtifact=null){
+  const manifest={
+    releaseId,
+    kind:'TCX_RUNTIME_RELEASE',
+    configHash:'c'.repeat(64),
+    versions:{forecastConfigHash:candidateArtifact?.configHash??'f'.repeat(64)}
+  };
   const core={
     schemaVersion:1,
     seq:1,
@@ -71,7 +76,7 @@ function promotion(c,binding,previousReleaseId='model-prev'){
 
 test('model release binding links candidate to registered software release',()=>{
   const c=candidate();
-  const record=registryRecord();
+  const record=registryRecord('software-1',c);
   const binding=createModelReleaseBinding({candidate:c,runtimeReleaseRecord:record,createdAt:4001});
   const registry={healthy:true,records:[record]};
   const p=promotion(c,binding);
@@ -82,7 +87,7 @@ test('model release binding links candidate to registered software release',()=>
 
 test('release linkage fails closed when software release is not registered',()=>{
   const c=candidate();
-  const record=registryRecord();
+  const record=registryRecord('software-1',c);
   const binding=createModelReleaseBinding({candidate:c,runtimeReleaseRecord:record,createdAt:4001});
   const p=promotion(c,binding);
   const link=verifyPromotionReleaseLink({promotion:p,binding,releaseRegistry:{healthy:true,records:[]}});
@@ -93,8 +98,8 @@ test('release linkage fails closed when software release is not registered',()=>
 test('rollback drill proves known previous model release without mutating production',()=>{
   const c=candidate('a');
   const prevCandidate=candidate('b');
-  const currentRecord=registryRecord('software-current');
-  const previousRecord=registryRecord('software-previous');
+  const currentRecord=registryRecord('software-current',c);
+  const previousRecord=registryRecord('software-previous',prevCandidate);
   const currentBinding=createModelReleaseBinding({candidate:c,runtimeReleaseRecord:currentRecord,createdAt:4001});
   const previousBinding=createModelReleaseBinding({candidate:prevCandidate,runtimeReleaseRecord:previousRecord,createdAt:4001});
   const p=promotion(c,currentBinding,previousBinding.modelReleaseId);
@@ -114,8 +119,8 @@ test('promotion and rollback drill are idempotently audit-bound',async()=>{
   const ledger=await openAuditLedger(path.join(dir,'audit.jsonl'));
   const c=candidate('a');
   const prevCandidate=candidate('b');
-  const currentBinding=createModelReleaseBinding({candidate:c,runtimeReleaseRecord:registryRecord('software-current'),createdAt:4001});
-  const previousBinding=createModelReleaseBinding({candidate:prevCandidate,runtimeReleaseRecord:registryRecord('software-previous'),createdAt:4001});
+  const currentBinding=createModelReleaseBinding({candidate:c,runtimeReleaseRecord:registryRecord('software-current',c),createdAt:4001});
+  const previousBinding=createModelReleaseBinding({candidate:prevCandidate,runtimeReleaseRecord:registryRecord('software-previous',prevCandidate),createdAt:4001});
   const p=promotion(c,currentBinding,previousBinding.modelReleaseId);
   const drill=createModelRollbackDrill({promotion:p,candidateBinding:currentBinding,previousBinding,drilledAt:6000});
 
@@ -127,4 +132,15 @@ test('promotion and rollback drill are idempotently audit-bound',async()=>{
   assert.equal(b.duplicate,true);
   assert.equal(d1.duplicate,false);
   assert.equal(d2.duplicate,true);
+});
+
+
+test('model release binding rejects mismatched forecast config hash',()=>{
+  const c=candidate();
+  const wrong=candidate('b');
+  const record=registryRecord('software-wrong',wrong);
+  assert.throws(
+    ()=>createModelReleaseBinding({candidate:c,runtimeReleaseRecord:record,createdAt:4001}),
+    /forecast config hash/
+  );
 });
