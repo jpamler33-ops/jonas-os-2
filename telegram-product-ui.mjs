@@ -160,7 +160,7 @@ export function homeKeyboard() {
     ],
     [
       {text:"💼 Shadow-Portfolio",callback_data:"home:portfolio"},
-      {text:"🧾 Shadow OMS",callback_data:"home:system"}
+      {text:"📈 Trade-Statistik",callback_data:"home:stats_day"}
     ],
     [
       {text:"🖥 System",callback_data:"home:system"},
