@@ -329,30 +329,58 @@ export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
 }
 
 
-function periodWindow(period,asOf){
-  const t=new Date(Number(asOf));
-  if(!Number.isFinite(t.getTime())) throw new Error('ASOF_INVALID');
-  const end=t.getTime();
+function zonedParts(epoch,timeZone){
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone,year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
+  }).formatToParts(new Date(epoch));
+  const get=type=>parts.find(x=>x.type===type)?.value;
+  const weekday={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[get('weekday')];
+  return {
+    year:Number(get('year')),month:Number(get('month')),day:Number(get('day')),
+    hour:Number(get('hour')),minute:Number(get('minute')),second:Number(get('second')),
+    weekday
+  };
+}
+
+function zonedEpoch({year,month,day,hour=0,minute=0,second=0},timeZone){
+  let guess=Date.UTC(year,month-1,day,hour,minute,second);
+  for(let i=0;i<3;i++){
+    const p=zonedParts(guess,timeZone);
+    const represented=Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second);
+    const target=Date.UTC(year,month-1,day,hour,minute,second);
+    const diff=represented-target;
+    if(Math.abs(diff)<1000) break;
+    guess-=diff;
+  }
+  return guess;
+}
+
+function periodWindow(period,asOf,timeZone='UTC'){
+  const end=Number(asOf);
+  if(!Number.isFinite(end)) throw new Error('ASOF_INVALID');
+  try{ new Intl.DateTimeFormat('en',{timeZone}).format(new Date(end)); }
+  catch{ throw new Error('TIMEZONE_INVALID'); }
   const p=String(period||'DAY').toUpperCase();
-  if(p==='ALL') return {period:'ALL',startAt:0,endAt:end,label:'Gesamt'};
-  const d=new Date(end);
-  if(p==='DAY'){
-    d.setUTCHours(0,0,0,0);
-    return {period:p,startAt:d.getTime(),endAt:end,label:'Heute'};
-  }
+  if(p==='ALL') return {period:'ALL',startAt:0,endAt:end,label:'Gesamt',timeZone};
+  const local=zonedParts(end,timeZone);
+  let y=local.year,m=local.month,d=local.day;
   if(p==='WEEK'){
-    d.setUTCHours(0,0,0,0);
-    const dow=d.getUTCDay();
-    const delta=(dow+6)%7;
-    d.setUTCDate(d.getUTCDate()-delta);
-    return {period:p,startAt:d.getTime(),endAt:end,label:'Diese Woche'};
+    const delta=(local.weekday+6)%7;
+    const x=new Date(Date.UTC(y,m-1,d-delta));
+    y=x.getUTCFullYear();m=x.getUTCMonth()+1;d=x.getUTCDate();
+  }else if(p==='MONTH'){
+    d=1;
+  }else if(p!=='DAY'){
+    throw new Error('PERIOD_INVALID');
   }
-  if(p==='MONTH'){
-    d.setUTCHours(0,0,0,0);
-    d.setUTCDate(1);
-    return {period:p,startAt:d.getTime(),endAt:end,label:'Dieser Monat'};
-  }
-  throw new Error('PERIOD_INVALID');
+  return {
+    period:p,
+    startAt:zonedEpoch({year:y,month:m,day:d},timeZone),
+    endAt:end,
+    label:p==='DAY'?'Heute':p==='WEEK'?'Diese Woche':'Dieser Monat',
+    timeZone
+  };
 }
 
 function tradeStats(rows){
@@ -382,8 +410,8 @@ function tradeStats(rows){
   };
 }
 
-export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now()}={}){
-  const window=periodWindow(period,asOf);
+export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
+  const window=periodWindow(period,asOf,timeZone);
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean);
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
@@ -412,6 +440,7 @@ export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now()}
     label:window.label,
     startAt:window.startAt,
     endAt:window.endAt,
+    timeZone:window.timeZone,
     entries:entered.length,
     openEntries:entered.filter(p=>p.status==='OPEN').length,
     ...base,
@@ -424,10 +453,10 @@ export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now()}
   return deepFreeze({...core,fingerprint:sha256(core)});
 }
 
-export function shadowPortfolioStatistics(ledger,{asOf=Date.now()}={}){
+export function shadowPortfolioStatistics(ledger,{asOf=Date.now(),timeZone='UTC'}={}){
   const periods=['DAY','WEEK','MONTH','ALL'];
   return deepFreeze(Object.fromEntries(periods.map(period=>[
-    period,shadowPortfolioPeriodStats(ledger,{period,asOf})
+    period,shadowPortfolioPeriodStats(ledger,{period,asOf,timeZone})
   ])));
 }
 
