@@ -41,7 +41,7 @@ import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DE
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
 import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
-import { fetchOfficialOkxPorRegistry, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, registryToWalletCohorts, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
+import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, registryToWalletCohorts, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -170,15 +170,18 @@ const okxPorSource=Object.freeze({
 });
 let entityRegistry=await loadEntityRegistry(entityRegistryFile,{maxBytes:20*1024*1024});
 let entityRegistryRefreshError=null;
-const entityRegistryRefreshEnabled=String(process.env.TCX_ENTITY_REGISTRY_REFRESH_ENABLED||'0')==='1';
+const entityRegistryRefreshEnabled=String(process.env.TCX_ENTITY_REGISTRY_REFRESH_ENABLED||'1')!=='0';
 if(entityRegistryRefreshEnabled){
   try{
-    const fresh=await fetchOfficialOkxPorRegistry({
+    const fresh=await fetchOfficialOkxPorRegistryStreaming({
       fetchImpl:globalThis.fetch,
       url:okxPorSource.url,
       reportId:okxPorSource.reportId,
       reportDate:okxPorSource.reportDate,
-      timeoutMs:15000
+      timeoutMs:30000,
+      allowedChains:['BITCOIN','ETHEREUM','SOLANA'],
+      maxEntriesPerChain:5000,
+      maxExpandedBytes:300*1024*1024
     });
     entityRegistry=fresh;
     await saveEntityRegistry(entityRegistryFile,entityRegistry);
@@ -187,7 +190,7 @@ if(entityRegistryRefreshEnabled){
     recordError(observability,{scope:'entity_registry.refresh',message:entityRegistryRefreshError});
   }
 }else if(!entityRegistry){
-  entityRegistryRefreshError='LIVE_REFRESH_DISABLED_PENDING_STREAMING_IMPORT';
+  entityRegistryRefreshError='LIVE_REFRESH_DISABLED_BY_CONFIG';
 }
 const registryWalletCohorts=registryToWalletCohorts(entityRegistry||{entries:[]},{
   entityIds:['OKX'],
