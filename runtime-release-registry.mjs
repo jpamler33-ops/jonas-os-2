@@ -36,6 +36,48 @@ export const DEFAULT_RUNTIME_FILES=[
   'package.json'
 ];
 
+export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
+  'forecast-contract.mjs',
+  'scientific-validity.mjs',
+  'institutional-admission.mjs',
+  'research-trace.mjs',
+  'institutional-forecast-issuance.mjs',
+
+  'forecast-runtime/utils/math.js',
+  'forecast-runtime/forecast/types.js',
+  'forecast-runtime/forecast/calibration.js',
+  'forecast-runtime/forecast/reliability.js',
+  'forecast-runtime/forecast/model_performance.js',
+  'forecast-runtime/forecast/interval_calibration.js',
+  'forecast-runtime/forecast/drift.js',
+  'forecast-runtime/forecast/path_engine.js',
+  'forecast-runtime/forecast/regime_transition.js',
+  'forecast-runtime/forecast/invalidation.js',
+  'forecast-runtime/forecast/revision_tracker.js',
+  'forecast-runtime/forecast/counterfactual.js',
+  'forecast-runtime/forecast/history_builder.js',
+  'forecast-runtime/forecast/evaluation.js',
+  'forecast-runtime/forecast/journal.js',
+  'forecast-runtime/forecast/engine.js',
+  'forecast-runtime/forecast/tcx_adapter.js',
+  'forecast-runtime/forecast/intelligence.js',
+  'forecast-runtime/forecast/intelligence_service.js',
+
+  'science-runtime/empirical-support.mjs',
+  'science-runtime/research-integrity.mjs',
+  'science-runtime/concept-stability.mjs',
+  'science-runtime/nonlinear-concept-stability.mjs',
+  'science-runtime/temporal-recency.mjs',
+  'science-runtime/sequential-evidence.mjs',
+  'science-runtime/specification-multiverse.mjs',
+  'science-runtime/transportability.mjs',
+  'science-runtime/evidence-lineage-independence.mjs'
+];
+
+export function institutionalRuntimeFiles(){
+  return [...new Set([...DEFAULT_RUNTIME_FILES,...INSTITUTIONAL_STAGED_RUNTIME_FILES])].sort();
+}
+
 function cleanDeployment(d={}){
   const gitCommit=/^[0-9a-f]{7,64}$/i.test(String(d.gitCommit||''))?String(d.gitCommit):null;
   const gitBranch=String(d.gitBranch||'').slice(0,120)||null;
