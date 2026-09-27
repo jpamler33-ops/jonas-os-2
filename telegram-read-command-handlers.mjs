@@ -8,6 +8,7 @@ export function createReadCommandHandlers(deps={}){
     helpText,
     normalizeSymbol,
     showStart,
+    showCommandMenu,
     showFavorites,
     showCompare,
     showMarket,
