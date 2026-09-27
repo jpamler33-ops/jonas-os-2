@@ -77,6 +77,7 @@ const researchValidityConfig = Object.freeze({
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_OUTCOME_CHECK_MS || 60000));
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
+const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
 const shadowWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_WATCH_MS || 10000));
 const shadowDefaultLatencyMs = Math.max(0, Math.min(5000, Number(process.env.TCX_SHADOW_LATENCY_MS || 120)));
@@ -1342,10 +1343,12 @@ async function showHomeSection(chatId,messageId,section) {
       '🖥 TCX SYSTEMSTATUS','',
       `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
       `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
-      `Speicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 läuft':'🟡 eingeschränkt'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
       `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
       'Sicherheitsmodus:',
       'TCX darf keine echten Orders ausführen.',
       'Systemmodus: ABSTAIN / SHADOW_ONLY.'
