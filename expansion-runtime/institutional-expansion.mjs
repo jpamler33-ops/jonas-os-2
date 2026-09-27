@@ -3,6 +3,7 @@ import { evaluateSourceReliability, classifySourceEvent } from './source-intelli
 import { buildEventImpactMemory, estimateEventImpact } from './event-impact-memory.mjs';
 import { analyzeLiquiditySnapshot, buildLiquidityMap, inferLiquidityReaction } from './liquidity-intelligence.mjs';
 import { EXPANSION_PACK_PROVENANCE_HASH } from './provenance.mjs';
+import { buildTraderWalletEvidence } from './trader-wallet-intelligence.mjs';
 
 export const INSTITUTIONAL_EXPANSION_VERSION='TCX_INSTITUTIONAL_EXPANSION_V1';
 
@@ -34,7 +35,8 @@ export function buildInstitutionalExpansionEvidence({
   eventImpactOptions={},
   orderBook=null,
   liquidityOptions={},
-  liquidityContext={}
+  liquidityContext={},
+  traderWallet=null
 }={}){
   const t=finite(asOf,'asOf');
 
@@ -63,11 +65,16 @@ export function buildInstitutionalExpansionEvidence({
     ? inferLiquidityReaction(liquidityContext?.reactionInputs??{})
     : null;
 
+  const traderWalletEvidence=traderWallet
+    ? buildTraderWalletEvidence({asOf:t,...traderWallet})
+    : null;
+
   const activeGates=[
     sourceReliability.gate,
     eventImpactMemory.gate,
     ...(sourceClassification?[sourceClassification.gate]:[]),
-    ...(liquiditySnapshot?[liquiditySnapshot.gate]:[])
+    ...(liquiditySnapshot?[liquiditySnapshot.gate]:[]),
+    ...(traderWalletEvidence?[traderWalletEvidence.evidenceGate]:[])
   ];
 
   const evidenceGate=strictest(activeGates);
@@ -75,7 +82,8 @@ export function buildInstitutionalExpansionEvidence({
     ...(sourceReliability.reasons||[]).map(x=>'SOURCE:'+x),
     ...(sourceClassification?.reasons||[]).map(x=>'SOURCE_EVENT:'+x),
     ...(eventImpactMemory.reasons||[]).map(x=>'EVENT_IMPACT:'+x),
-    ...(liquiditySnapshot?.reasons||[]).map(x=>'LIQUIDITY:'+x)
+    ...(liquiditySnapshot?.reasons||[]).map(x=>'LIQUIDITY:'+x),
+    ...(traderWalletEvidence?.reasons||[]).map(x=>'TRADER_WALLET:'+x)
   ];
 
   const core={
@@ -88,6 +96,7 @@ export function buildInstitutionalExpansionEvidence({
     liquiditySnapshot,
     liquidityMap,
     liquidityReaction,
+    traderWalletEvidence,
     evidenceGate,
     reasons:[...new Set(reasons)],
     provenance:{
@@ -98,7 +107,8 @@ export function buildInstitutionalExpansionEvidence({
       evidenceGate:'EVIDENCE_DIAGNOSTIC_NOT_FORECAST_PROBABILITY',
       sourceReliability:'EMPIRICAL_POST_OUTCOME',
       eventImpact:'EMPIRICAL_POST_OUTCOME_NOT_CAUSAL',
-      liquidity:'OBSERVED_PLUS_DERIVED_MICROSTRUCTURE'
+      liquidity:'OBSERVED_PLUS_DERIVED_MICROSTRUCTURE',
+      traderWallet:'EMPIRICAL_POST_OUTCOME_NOT_CAUSAL'
     },
     restrictions:{
       mayExecute:false,
