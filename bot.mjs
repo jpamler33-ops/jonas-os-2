@@ -432,6 +432,117 @@ async function fetchKlines(symbol, interval, limit=30) {
   throw new Error(`Klines unavailable: ${errors.join(' | ')}`);
 }
 
+async function fetchExecutionBook(symbol) {
+  const encoded=encodeURIComponent(symbol);
+  const errors=[];
+  for(const base of binanceBases){
+    try {
+      const depth=await fetchJson(`${base}/api/v3/depth?symbol=${encoded}&limit=100`);
+      const availableAt=Date.now();
+      return normalizeExecutionBook({
+        symbol,
+        bids:depth.bids||[],
+        asks:depth.asks||[],
+        availableAt,
+        source:'BINANCE_PUBLIC_REST_DEPTH100',
+        provenance:`host=${new URL(base).host}; lastUpdateId=${depth.lastUpdateId??'UNKNOWN'}`
+      });
+    } catch(err) {
+      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
+    }
+  }
+  throw new Error(`Execution book unavailable: ${errors.join(' | ')}`);
+}
+
+async function fetchLatestAggTradeId(symbol) {
+  const encoded=encodeURIComponent(symbol);
+  const errors=[];
+  for(const base of binanceBases){
+    try {
+      const rows=await fetchJson(`${base}/api/v3/aggTrades?symbol=${encoded}&limit=1`);
+      const row=Array.isArray(rows)?rows.at(-1):null;
+      const id=Number(row?.a);
+      if(!Number.isFinite(id)) throw new Error('Missing aggregate trade id');
+      return id;
+    } catch(err) {
+      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
+    }
+  }
+  throw new Error(`Latest aggTrade unavailable: ${errors.join(' | ')}`);
+}
+
+async function fetchAggTradesSince(symbol,fromId,{maxPages=3}={}) {
+  const start=Number(fromId);
+  if(!Number.isFinite(start)||start<0) throw new Error('Invalid aggTrade fromId');
+  const encoded=encodeURIComponent(symbol);
+  const errors=[];
+  for(const base of binanceBases){
+    try {
+      let next=start;
+      const out=[];
+      let truncated=false;
+      for(let page=0;page<maxPages;page++){
+        const rows=await fetchJson(`${base}/api/v3/aggTrades?symbol=${encoded}&fromId=${next}&limit=1000`);
+        if(!Array.isArray(rows)) throw new Error('Invalid aggTrades payload');
+        for(const r of rows){
+          const id=Number(r.a),price=Number(r.p),qty=Number(r.q),time=Number(r.T);
+          if(!Number.isFinite(id)||!Number.isFinite(price)||!Number.isFinite(qty)) continue;
+          out.push({id,price,qty,time,buyerMaker:r.m===true});
+        }
+        if(rows.length<1000){ truncated=false; break; }
+        const last=Number(rows.at(-1)?.a);
+        if(!Number.isFinite(last)||last<next) break;
+        next=last+1;
+        truncated=page===maxPages-1;
+      }
+      return {trades:out,truncated,base};
+    } catch(err) {
+      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
+    }
+  }
+  throw new Error(`aggTrades unavailable: ${errors.join(' | ')}`);
+}
+
+function shadowAuditPayload(event,order,extra={}) {
+  return {
+    event:String(event),
+    at:Date.now(),
+    order:shadowOrderSummary(order),
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_OMS_CAPABILITIES,
+    ...extra
+  };
+}
+
+async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,latencyMs=shadowDefaultLatencyMs}) {
+  if(!shadowOmsHealthy) throw new Error('Shadow OMS unhealthy');
+  const started=Date.now();
+  const decisionBook=await fetchExecutionBook(symbol);
+  const boundedLatency=Math.max(0,Math.min(5000,Number(latencyMs)));
+  if(boundedLatency>0) await sleep(boundedLatency);
+  const arrivalBook=await fetchExecutionBook(symbol);
+  let lastAggTradeId=null;
+  try { lastAggTradeId=await fetchLatestAggTradeId(symbol); }
+  catch(err) { recordError(observability,{scope:'shadow_oms.trade_cursor',message:err instanceof Error?err.message:String(err)}); }
+  const order=createShadowOrder({
+    intent:{symbol,side,type,notionalQuote,limitPrice,latencyMs:boundedLatency},
+    decisionBook,arrivalBook,createdAt:Date.now(),lastAggTradeId,
+    config:{
+      makerFeeBps:shadowMakerFeeBps,
+      takerFeeBps:shadowTakerFeeBps,
+      hiddenQueueBufferPct:shadowHiddenQueueBufferPct
+    }
+  });
+  if(order.liquidity==='MAKER' && lastAggTradeId==null){
+    order.dataQuality='DEGRADED_NO_TRADE_CURSOR';
+  }
+  shadowOrders.push(order);
+  await persistShadowOms('placed');
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('PLACED',order));
+  recordOperation(observability,{name:'shadow_oms.place',ok:true,latencyMs:Date.now()-started});
+  return order;
+}
+
 async function tg(method, body) {
   const res = await fetch(`${telegramApi}/${method}`, {
     method:'POST',
