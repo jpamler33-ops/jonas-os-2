@@ -29,7 +29,7 @@ Completed:
 - CI green after staging
 
 Still required before main promotion:
-- canonical ForecastInput / ForecastOutput contracts
+- canonical ForecastInput / ForecastOutput contracts — CONTRACT V1 STAGED
 - normalized master adapter
 - Institutional Kernel admission
 - Runtime Release hash inclusion
@@ -56,15 +56,15 @@ Next:
 
 ## P3 · Alpha.30 Scientific Validity extraction
 
-Status: NEXT
+Status: IN PROGRESS
 
 Do NOT merge Alpha.30 wholesale.
 
 Order:
-1. define strict scientific-validity aggregation contract
-2. adapt empirical-support guard
-3. adapt research-integrity guard
-4. adapt concept-stability / nonlinear-stability guards
+1. define strict scientific-validity aggregation contract — DONE
+2. adapt empirical-support guard — DONE
+3. adapt research-integrity guard — DONE
+4. adapt concept-stability / nonlinear-stability guards — NEXT
 5. adapt temporal recency + sequential evidence/change
 6. adapt specification multiverse
 7. adapt transportability
