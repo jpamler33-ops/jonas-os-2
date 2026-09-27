@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile, stat } from 'node:fs/promises';
 import { inflateRawSync } from 'node:zlib';
 
 import { sha256 } from '../institutional-kernel.mjs';
@@ -216,9 +216,15 @@ export function registryToWalletCohorts(registry,{
   return [...groups.values()].filter(x=>x.addresses.length);
 }
 
-export async function loadEntityRegistry(filePath){
+export async function loadEntityRegistry(filePath,{maxBytes=20*1024*1024}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
   try{
+    const info=await stat(filePath);
+    if(info.size>Math.max(1024,Number(maxBytes)||20*1024*1024)){
+      const backup=filePath+'.oversize-'+Date.now();
+      try{await rename(filePath,backup);}catch{}
+      return null;
+    }
     const raw=await readFile(filePath,'utf8');
     const value=JSON.parse(raw);
     if(value?.version!==VERIFIED_ENTITY_REGISTRY_VERSION) throw new Error('unsupported entity registry version');
