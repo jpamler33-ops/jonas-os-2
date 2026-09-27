@@ -67,17 +67,19 @@ Model Promotion Ladder
 ## Latest verified gate
 
 ```text
-commit: 73ff2f6797a9bdced0254dd052e9bfc81a0d965d
+commit: 98984c91ac1f005ea3d3f49e9153e2d358400310
 GitHub Actions: SUCCESS
 PR CI: SUCCESS
 syntax: PASS
-root + science-runtime + expansion-runtime + forecast candidate/governance tests: PASS
+root + science-runtime + expansion-runtime + forecast candidate/governance + pre-merge tests: PASS
 Docker institutional packaging smoke test: PASS
 ```
 
 The verified branch now includes the durable forecast runtime, Telegram forecast product,
 matured-outcome feedback, candidate builder, chronological walk-forward evaluation,
-promotion/audit binding, model-to-runtime release binding, and rollback drill.
+promotion/audit binding, model-to-runtime release binding, rollback drill, bounded provider
+backpressure/circuit breakers, explicit persistence contracts, fail-closed /ready checks,
+SLO enforcement, deterministic chaos tests and the institutional pre-merge gate.
 
 Expansion source package SHA-256:
 `e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
@@ -98,7 +100,7 @@ uncalibrated/suppressed probability = not user-displayable
 
 ## Not yet production-canonical
 
-Nothing on this branch is canonical on `main` until PR #2 passes the final institutional gap audit and is merged.
+The engineering pre-merge audit is closed. Nothing on this branch is canonical on `main` until PR #2 is merged and the post-deploy acceptance gate passes.
 
 Completed production-path staging:
 1. durable forecast runtime persistence
@@ -116,6 +118,6 @@ Completed production-path staging:
 
 ## Next highest-leverage work
 
-Run the final institutional gap audit on persistence migrations, operational failure modes,
-release/rollback procedure, observability, and main-branch migration. Do not start another
-prediction engine before this review is closed.
+Merge/deploy only the tested PR head, require `/ready = 200`, then complete Telegram and
+matured-outcome smoke acceptance. Do not start another prediction engine before deployment
+acceptance is closed.
