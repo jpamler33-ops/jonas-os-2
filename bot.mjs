@@ -3433,6 +3433,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         recordsConsidered:researchPlaneView.recordsConsidered,
         epistemic:'POINT_IN_TIME_RESEARCH_FEATURES'
       }]:[]),
+      {type:'RESEARCH_DATA_GOVERNANCE',version:RESEARCH_DATA_GOVERNANCE_VERSION,fingerprint:researchGovernanceView.fingerprint,epistemic:'POINT_IN_TIME_DATA_POLICY'},
       ...(expansionEvidence?[{
         type:'EXPANSION_EVIDENCE',
         version:INSTITUTIONAL_EXPANSION_VERSION,
