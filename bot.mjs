@@ -3968,7 +3968,6 @@ async function syncExperimentGovernor({evaluate=false}={}){
 }
 
 async function shadowCompetitionWatcher(){
-  await sleep(30000);
   while(running){
     const started=Date.now();
     try{
