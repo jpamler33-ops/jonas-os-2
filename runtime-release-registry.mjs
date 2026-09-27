@@ -27,6 +27,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'evidence-history.mjs',
   'state-validity.mjs',
   'research-lifecycle.mjs',
+  'market-data-provider.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
