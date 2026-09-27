@@ -1,4 +1,4 @@
-export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v1";
+export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v2-beginner-first";
 
 export const PRODUCT_STATUS = Object.freeze([
   "VALID",
@@ -123,33 +123,41 @@ export function buildMarketViewModel({
 }
 
 export function homeText({marketCount=0,systemStatus="ONLINE"}={}) {
+  const online=String(systemStatus).toUpperCase()==="ONLINE";
   return [
-    "🧠 TCX v2 · COMMAND CENTER",
+    "⚡ TCX · MARKT- & PROGNOSE-SYSTEM",
     "",
-    "System: "+safeText(systemStatus),
-    "Mode: SHADOW_ONLY",
-    "Action: ABSTAIN",
-    "Markets: "+(Number(marketCount)||0),
+    "TCX analysiert Kryptomärkte, vergleicht mehrere Datenquellen",
+    "und lernt aus früheren Marktsituationen.",
     "",
-    "Market intelligence · no order execution"
+    (online?"🟢":"🟡")+" System: "+safeText(systemStatus),
+    "📊 Beobachtete Märkte: "+(Number(marketCount)||0),
+    "",
+    "Wichtig: TCX führt keine echten Käufe oder Verkäufe aus.",
+    "Es bewertet den Markt und zeigt Unsicherheit sichtbar an.",
+    "",
+    "Was möchtest du machen?"
   ].join("\n");
 }
 
 export function homeKeyboard() {
   return {inline_keyboard:[
     [
-      {text:"📊 Märkte",callback_data:"home:markets"},
-      {text:"🧠 TCX Radar",callback_data:"home:radar"}
+      {text:"🔮 Kursprognose",callback_data:"cmd:forecast"},
+      {text:"📊 Coin analysieren",callback_data:"home:markets"}
     ],
     [
-      {text:"⭐ Watchlist",callback_data:"home:watchlist"},
-      {text:"🔔 Alerts",callback_data:"home:alerts"}
+      {text:"🎯 Chancen & Bewegungen",callback_data:"home:radar"},
+      {text:"⭐ Watchlist",callback_data:"home:watchlist"}
     ],
     [
-      {text:"📈 Performance",callback_data:"home:performance"},
-      {text:"🩺 System",callback_data:"home:system"}
+      {text:"🔔 Alerts",callback_data:"home:alerts"},
+      {text:"🧠 Was TCX gelernt hat",callback_data:"home:performance"}
     ],
-    [{text:"⚙️ Einstellungen",callback_data:"home:settings"}]
+    [
+      {text:"🖥 System",callback_data:"home:system"},
+      {text:"⚙️ Alle Funktionen",callback_data:"commands"}
+    ]
   ]};
 }
 
@@ -173,40 +181,84 @@ export function marketCardText(vm,{live=false,detailMode="SIMPLE"}={}) {
   if(!vm?.market || !vm?.state || !vm?.safety) throw new Error("invalid MarketViewModel");
   const p=vm.market;
   const sign=(p.change24hPct??0)>=0?"+":"";
+  const rawBias=String(vm.state.mtfBias||"").toUpperCase();
+  const rawFlow=String(vm.state.flow||"").toUpperCase();
+  const rawRegime=String(vm.state.regime||"").toUpperCase();
+  const direction=rawBias.includes("BULL")||rawBias.includes("UP")
+    ?"🟢 eher steigend"
+    :rawBias.includes("BEAR")||rawBias.includes("DOWN")
+      ?"🔴 eher fallend"
+      :"🟡 keine klare Richtung";
+  const pressure=rawFlow.includes("BID")||rawFlow.includes("BUY")
+    ?"🟢 Käufer stärker"
+    :rawFlow.includes("ASK")||rawFlow.includes("SELL")
+      ?"🔴 Verkäufer stärker"
+      :rawFlow.includes("BALANC")
+        ?"⚪ ausgeglichen"
+        :"⚪ noch unklar";
+  const phase=rawRegime.includes("TREND")
+    ?"Trendmarkt"
+    :rawRegime.includes("RANGE")||rawRegime.includes("SIDE")
+      ?"Seitwärtsmarkt"
+      :rawRegime.includes("VOL")
+        ?"stark schwankender Markt"
+        :safeText(vm.state.regime,"noch unklar");
+  const risk=vm.safety.status==="VALID"
+    ?"🟢 normal"
+    :vm.safety.status==="CAUTION"
+      ?"🟡 erhöht"
+      :"🔴 hoch / Aussage eingeschränkt";
+  const simpleSummary=direction.includes("steigend")
+    ?"Mehr Signale zeigen aktuell nach oben, aber die Lage kann sich ändern."
+    :direction.includes("fallend")
+      ?"Mehr Signale zeigen aktuell nach unten, aber die Lage kann sich ändern."
+      :"TCX sieht gerade keinen eindeutigen Vorteil für steigende oder fallende Kurse.";
+
   const lines=[
-    "📊 "+vm.symbol.replace("USDT","/USDT"),
+    "📊 "+vm.symbol.replace("USDT","/USDT")+" · MARKTCHECK",
     "",
     "Preis: "+fmt(p.price,p.price!=null&&Math.abs(p.price)<1?6:2)+" USDT",
-    "24h: "+(p.change24hPct==null?"—":sign+fmt(p.change24hPct,2)+" %"),
-    "Spread: "+fmt(p.spreadBps,3)+" bps",
+    "24 Stunden: "+(p.change24hPct==null?"—":sign+fmt(p.change24hPct,2)+" %"),
     "",
-    "Regime: "+vm.state.regime,
-    "MTF: "+vm.state.mtfBias,
-    "Liquidity: "+vm.state.liquidity,
-    "Flow: "+vm.state.flow,
+    "TCX EINSCHÄTZUNG",
+    "Richtung: "+direction,
+    "Marktphase: "+phase,
+    "Kauf-/Verkaufsdruck: "+pressure,
+    "Risiko: "+risk,
     "",
-    "TCX Status: "+vm.safety.status,
-    "Action: "+vm.safety.action+" / "+vm.safety.execution
+    "EINFACH GESAGT",
+    simpleSummary
   ];
 
   if(detailMode!=="SIMPLE") {
     lines.push(
       "",
-      "Witness agreement: "+(vm.evidence.witnessAgreement==null?"—":fmt(vm.evidence.witnessAgreement*100,0)+" %"),
-      "Memory support: "+(vm.evidence.memorySupport??"—"),
-      "Data quality: "+(vm.evidence.dataQuality==null?"—":fmt(vm.evidence.dataQuality,1))
+      "PROFI-DETAILS",
+      "Regime: "+vm.state.regime,
+      "MTF-Bias: "+vm.state.mtfBias,
+      "Liquidität: "+vm.state.liquidity,
+      "Flow: "+vm.state.flow,
+      "Spread: "+fmt(p.spreadBps,3)+" bps",
+      "Quellen-Übereinstimmung: "+(vm.evidence.witnessAgreement==null?"—":fmt(vm.evidence.witnessAgreement*100,0)+" %"),
+      "Historische Vergleichsfälle: "+(vm.evidence.memorySupport??"—"),
+      "Datenqualität: "+(vm.evidence.dataQuality==null?"—":fmt(vm.evidence.dataQuality,1))
     );
   }
   if(detailMode==="RESEARCH") {
     lines.push(
       "",
+      "FORSCHUNGSDATEN",
       "availableAt: "+(vm.provenance.availableAt?new Date(vm.provenance.availableAt).toISOString():"—"),
       "source: "+vm.provenance.source,
       "version: "+vm.provenance.version
     );
   }
 
-  lines.push("",live?"⚡ LIVE":"⏸ Live aus");
+  lines.push(
+    "",
+    live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht",
+    "Systemmodus: ABSTAIN / SHADOW_ONLY"
+  );
   return lines.join("\n");
 }
 
@@ -215,45 +267,25 @@ export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
   if(!s) throw new Error("symbol required");
   return {inline_keyboard:[
     [
+      {text:"🔮 Prognose",callback_data:"forecast:"+s},
+      {text:"🔎 Warum?",callback_data:"why:"+s}
+    ],
+    [
       {text:"📈 Chart",callback_data:"chart:"+s+":5m"},
-      {text:"🧠 TCX",callback_data:"tcx:"+s}
-    ],
-    [
-      {text:"🔮 Forecast",callback_data:"forecast:"+s},
-      {text:"❓ Warum?",callback_data:"why:"+s}
-    ],
-    [
-      {text:"🧬 Regime",callback_data:"regime:"+s},
-      {text:"🧬 Memory",callback_data:"memory:"+s}
-    ],
-    [
-      {text:"🛰 Witness",callback_data:"witness:"+s},
-      {text:"🧩 Evidence",callback_data:"evidence:"+s}
-    ],
-    [
-      {text:"🧾 Shadow OMS",callback_data:"oms:"+s},
-      {text:"🧭 Shadow SOR",callback_data:"sor:"+s}
-    ],
-    [
-      {text:"🧠 Venue Memory",callback_data:"vqm:"+s},
-      {text:"🧪 Exec Lab",callback_data:"erl:"+s}
-    ],
-    [
-      {text:"⏱ Validity",callback_data:"validity:"+s},
-      {text:"📜 History",callback_data:"history:"+s}
-    ],
-    [
-      {text:"🎬 Replay",callback_data:"replaymenu:"+s}
+      {text:"🧭 Marktstruktur",callback_data:"regime:"+s}
     ],
     [
       {text:"🔔 Alert",callback_data:"alerthelp:"+s},
-      {text:isFavorite?"★ Favorit":"☆ Favorit",callback_data:"fav:"+s}
+      {text:isFavorite?"★ Beobachtet":"☆ Beobachten",callback_data:"fav:"+s}
+    ],
+    [
+      {text:"🧠 Profi-Details",callback_data:"tcx:"+s},
+      {text:"🔄 Aktualisieren",callback_data:"refresh:"+s}
     ],
     [
       {text:live?"⏸ Live aus":"⚡ Live an",callback_data:"live:"+s+":"+(live?"off":"on")},
-      {text:"🔄 Update",callback_data:"refresh:"+s}
-    ],
-    [{text:"🏠 Home",callback_data:"home"}]
+      {text:"🏠 Start",callback_data:"home"}
+    ]
   ]};
 }
 
