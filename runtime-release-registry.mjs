@@ -75,7 +75,11 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'science-runtime/sequential-evidence.mjs',
   'science-runtime/specification-multiverse.mjs',
   'science-runtime/transportability.mjs',
-  'science-runtime/evidence-lineage-independence.mjs'
+  'science-runtime/evidence-lineage-independence.mjs',
+
+  'expansion-runtime/source-intelligence.mjs',
+  'expansion-runtime/event-impact-memory.mjs',
+  'expansion-runtime/liquidity-intelligence.mjs'
 ];
 
 export function institutionalRuntimeFiles(){
