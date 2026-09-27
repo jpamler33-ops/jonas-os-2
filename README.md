@@ -1051,3 +1051,114 @@ Research validity != trade probability
 canExecute = false
 Execution = SHADOW_ONLY
 ```
+
+
+## TCX Execution Research Lab v1
+
+TCX now evaluates the quality of the Shadow SOR policy using accumulated Venue Quality Memory.
+
+Telegram:
+
+```text
+/executionlab BTC
+/executionlab BTC BUY
+/erl BTC SELL
+```
+
+The lab evaluates execution quality, not PnL and not trade direction.
+
+### Policy vs baseline
+
+Each historical Shadow SOR route is compared against full-fill single-venue counterfactuals from the same point-in-time venue-book snapshot.
+
+Single-venue benchmark cost is normalized against the same consolidated reference mid as the multi-venue route.
+
+Metrics include:
+
+- policy all-in execution cost in bps
+- policy fill ratio
+- execution-cost edge vs best comparable single venue
+- positive-edge share
+- 95% interval on mean execution-cost edge
+
+A positive execution edge means lower simulated execution cost than the comparable single-venue baseline. It is not a trading-return claim.
+
+### Temporal OOS
+
+The lab uses chronological train/test separation rather than random shuffling.
+
+Default minimum evidence:
+
+```text
+20 earlier routes
+10 later OOS routes
+```
+
+It reports train/test execution-cost edge, generalization gap and OOS evidence status.
+
+### Walk-forward stability
+
+TCX also evaluates sequential unseen route windows.
+
+Default:
+
+```text
+minimum historical window = 30 routes
+test window = 10 routes
+step = 10 routes
+```
+
+The report includes:
+
+- number of valid folds
+- mean fold execution edge
+- positive-fold share
+- worst fold
+- best fold
+
+### Toxicity calibration
+
+For matured 5-minute same-venue markouts, TCX compares predicted toxicity penalty with realized adverse selection.
+
+Diagnostics include sample count, prediction bias, MAE, RMSE, correlation and calibration buckets.
+
+Missed markout capture windows do not enter calibration.
+
+### Execution drift
+
+Recent route outcomes are compared with an earlier reference window using:
+
+- policy all-in cost
+- execution edge vs single-venue baseline
+- fill ratio
+
+States:
+
+```text
+STABLE
+WATCH
+DRIFT
+INSUFFICIENT_DRIFT_SAMPLES
+```
+
+### Segment diagnostics
+
+Research results are decomposed by regime, order-size bucket, BUY/SELL and Venue Quality Memory active/inactive.
+
+Segments with insufficient samples are omitted instead of being promoted to conclusions.
+
+### Epistemic boundary
+
+```text
+Objective: EXECUTION_QUALITY_NOT_PNL
+Route outcomes: COUNTERFACTUAL_SHADOW_SIMULATION
+Future markouts: OBSERVED only inside valid capture windows
+OOS result: DESCRIPTIVE TEMPORAL EVALUATION
+Causal status: NOT_IDENTIFIED
+Action: ABSTAIN
+Execution: SHADOW_ONLY
+```
+
+Every manually generated Execution Research Lab report can be appended to the Institutional Audit Ledger.
+
+`execution-research-lab.mjs` is included in the deterministic Runtime Release hash.
