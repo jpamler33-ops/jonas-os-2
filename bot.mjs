@@ -3821,6 +3821,19 @@ const server = http.createServer((req,res) => {
         },
         capabilities:SHADOW_SOR_CAPABILITIES
       },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -3873,6 +3886,7 @@ async function gracefulShutdown(signal) {
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
   await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0),5000).unref();
 }
@@ -3936,6 +3950,19 @@ console.log(JSON.stringify({
     },
     capabilities:SHADOW_SOR_CAPABILITIES
   },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
@@ -3959,4 +3986,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),shadowOmsWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
