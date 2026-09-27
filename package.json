@@ -1,11 +1,11 @@
 {
   "name": "tcx-telegram-railway",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node bot.mjs",
-    "check": "node --check bot.mjs && node --check state-store.mjs && node --check market-structure.mjs && node --check chart-renderer.mjs && node --check dashboard-state.mjs && node --check episode-memory.mjs && node --check mechanism-transition-engine.mjs && node --check independent-witness-network.mjs && node --check institutional-kernel.mjs && node --check market-data-fabric.mjs && node --check deterministic-replay.mjs",
+    "check": "node --check bot.mjs && node --check state-store.mjs && node --check market-structure.mjs && node --check chart-renderer.mjs && node --check dashboard-state.mjs && node --check episode-memory.mjs && node --check mechanism-transition-engine.mjs && node --check independent-witness-network.mjs && node --check institutional-kernel.mjs && node --check market-data-fabric.mjs && node --check deterministic-replay.mjs && node --check runtime-release-registry.mjs",
     "test": "node --test *.test.mjs"
   },
   "engines": {
