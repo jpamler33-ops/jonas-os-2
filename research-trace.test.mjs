@@ -95,3 +95,22 @@ test('summary exposes integrity and never execution permission',()=>{
   assert.equal(s.forecastPresent,true);
   assert.equal(s.sciencePresent,true);
 });
+
+
+test('research trace immutably binds expansion evidence',()=>{
+  const expansion={
+    version:'TCX_INSTITUTIONAL_EXPANSION_V1',
+    asOf:999,
+    fingerprint:'e'.repeat(64),
+    evidenceGate:'CAUTION',
+    executionMode:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false
+  };
+  const t=createResearchTrace(base({expansion}));
+  assert.equal(t.expansion.fingerprint,expansion.fingerprint);
+  assert.equal(researchTraceSummary(t).expansionPresent,true);
+  const tampered=structuredClone(t);
+  tampered.expansion.evidenceGate='PASS';
+  assert.equal(verifyResearchTrace(tampered).ok,false);
+});
