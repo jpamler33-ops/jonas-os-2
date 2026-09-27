@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, writeFile, stat } from 'node:fs/promises';
-import { inflateRawSync } from 'node:zlib';
+import { inflateRawSync, createInflateRaw } from 'node:zlib';
+import { Readable } from 'node:stream';
 
 import { sha256 } from '../institutional-kernel.mjs';
 
@@ -68,11 +69,54 @@ function firstCsvFromZip(buf){
   throw new Error('ZIP_CSV_NOT_FOUND');
 }
 
+function okxEntryFromRow(row,idx,{reportId,reportDate,sourceUrl}){
+  const chain=normalizeChain(row[idx.network]);
+  const address=String(row[idx.address]||'').trim();
+  if(!validAddress(chain,address)) return null;
+  const message=String(row[idx.message]||'').trim();
+  const signature1=String(row[idx.signature1]||'').trim();
+  const amount=finite(row[idx.amount]);
+  const snapshotHeight=String(row[idx['snapshot height']]||'').trim();
+  const coin=String(row[idx.coin]||'').trim().toUpperCase();
+  const type=String(row[idx.type]||'').trim();
+  const core={
+    entityId:'OKX',
+    entityType:'EXCHANGE',
+    chain,
+    address,
+    coin,
+    assetType:type,
+    snapshotHeight,
+    snapshotAmount:amount,
+    ownershipMessage:message,
+    signaturePresent:Boolean(signature1),
+    verificationStatus:message==='I am an OKX address'&&signature1
+      ?'OFFICIAL_SOURCE_ATTESTED_WITH_SIGNATURE'
+      :'OFFICIAL_SOURCE_ATTESTED',
+    source:{
+      publisher:'OKX',
+      reportId:String(reportId),
+      reportDate:reportDate?String(reportDate):null,
+      url:String(sourceUrl),
+      sourceType:'OFFICIAL_PROOF_OF_RESERVES'
+    },
+    restrictions:{
+      publicAddressOnly:true,
+      naturalPersonIdentity:false,
+      ownershipInferenceBeyondSource:false,
+      mayExecute:false
+    }
+  };
+  return {...core,entryId:sha256(core)};
+}
+
 export function parseOfficialOkxPorCsv(text,{
   reportId='UNKNOWN',
   reportDate=null,
   sourceUrl='UNKNOWN',
-  importedAt=Date.now()
+  importedAt=Date.now(),
+  allowedChains=['BITCOIN','ETHEREUM','SOLANA'],
+  maxEntriesPerChain=5000
 }={}){
   const lines=String(text||'').split(/\r?\n/);
   const headerIndex=lines.findIndex(line=>/^coin,Type,Network,Snapshot Height,address,amount,message,/i.test(line.trim()));
@@ -80,47 +124,17 @@ export function parseOfficialOkxPorCsv(text,{
   const header=csvRow(lines[headerIndex]).map(x=>x.trim());
   const idx=Object.fromEntries(header.map((x,i)=>[x.toLowerCase(),i]));
   const entries=[];
+  const allowed=new Set((allowedChains||[]).map(normalizeChain));
+  const counts=new Map();
+  const cap=Math.max(1,Number(maxEntriesPerChain)||5000);
   for(let i=headerIndex+1;i<lines.length;i++){
     if(!lines[i].trim()) continue;
     const row=csvRow(lines[i]);
-    const chain=normalizeChain(row[idx.network]);
-    const address=String(row[idx.address]||'').trim();
-    if(!validAddress(chain,address)) continue;
-    const message=String(row[idx.message]||'').trim();
-    const signature1=String(row[idx.signature1]||'').trim();
-    const amount=finite(row[idx.amount]);
-    const snapshotHeight=String(row[idx['snapshot height']]||'').trim();
-    const coin=String(row[idx.coin]||'').trim().toUpperCase();
-    const type=String(row[idx.type]||'').trim();
-    const core={
-      entityId:'OKX',
-      entityType:'EXCHANGE',
-      chain,
-      address,
-      coin,
-      assetType:type,
-      snapshotHeight,
-      snapshotAmount:amount,
-      ownershipMessage:message,
-      signaturePresent:Boolean(signature1),
-      verificationStatus:message==='I am an OKX address'&&signature1
-        ?'OFFICIAL_SOURCE_ATTESTED_WITH_SIGNATURE'
-        :'OFFICIAL_SOURCE_ATTESTED',
-      source:{
-        publisher:'OKX',
-        reportId:String(reportId),
-        reportDate:reportDate?String(reportDate):null,
-        url:String(sourceUrl),
-        sourceType:'OFFICIAL_PROOF_OF_RESERVES'
-      },
-      restrictions:{
-        publicAddressOnly:true,
-        naturalPersonIdentity:false,
-        ownershipInferenceBeyondSource:false,
-        mayExecute:false
-      }
-    };
-    entries.push({...core,entryId:sha256(core)});
+    const entry=okxEntryFromRow(row,idx,{reportId,reportDate,sourceUrl});
+    if(!entry||!allowed.has(entry.chain)) continue;
+    if((counts.get(entry.chain)||0)>=cap) continue;
+    counts.set(entry.chain,(counts.get(entry.chain)||0)+1);
+    entries.push(entry);
   }
   const dedup=new Map();
   for(const e of entries) dedup.set(e.chain+'\u0000'+e.address.toLowerCase(),e);
@@ -162,6 +176,182 @@ export async function fetchOfficialOkxPorRegistry({
       url:sourceUrl,
       archiveEntry:csv.name,
       verificationClass:'OFFICIAL_PROOF_OF_RESERVES_SIGNED_ADDRESS_LIST'
+    }],
+    entries,
+    restrictions:{
+      publicDataOnly:true,
+      naturalPersonIdentity:false,
+      mayExecute:false,
+      mayMutateProductionForecast:false
+    }
+  };
+  return deepFreeze({...core,fingerprint:sha256(core)});
+}
+
+
+function findZipEocd(bytes){
+  for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--){
+    if(bytes.readUInt32LE(i)===0x06054b50) return i;
+  }
+  return -1;
+}
+
+async function rangeBuffer(fetchImpl,url,start,end,{timeoutMs=15000}={}){
+  const res=await fetchImpl(url,{
+    signal:AbortSignal.timeout(Math.max(1000,Number(timeoutMs)||15000)),
+    headers:{
+      accept:'application/octet-stream',
+      range:'bytes='+start+'-'+end,
+      'user-agent':'TCX-SHADOW-RESEARCH'
+    }
+  });
+  if(res.status!==206) throw new Error('RANGE_UNSUPPORTED_'+res.status);
+  return {buffer:Buffer.from(await res.arrayBuffer()),headers:res.headers};
+}
+
+function parseCentralForCsv(cd,totalEntries){
+  let p=0;
+  for(let i=0;i<totalEntries;i++){
+    if(p+46>cd.length||cd.readUInt32LE(p)!==0x02014b50) throw new Error('ZIP_CENTRAL_DIRECTORY_INVALID');
+    const method=cd.readUInt16LE(p+10);
+    const compressedSize=cd.readUInt32LE(p+20);
+    const uncompressedSize=cd.readUInt32LE(p+24);
+    const nameLen=cd.readUInt16LE(p+28);
+    const extraLen=cd.readUInt16LE(p+30);
+    const commentLen=cd.readUInt16LE(p+32);
+    const localOffset=cd.readUInt32LE(p+42);
+    const name=cd.subarray(p+46,p+46+nameLen).toString('utf8');
+    if(/\.csv$/i.test(name)) return {name,method,compressedSize,uncompressedSize,localOffset};
+    p+=46+nameLen+extraLen+commentLen;
+  }
+  throw new Error('ZIP_CSV_NOT_FOUND');
+}
+
+async function parseOkxCsvReadable(readable,{
+  reportId,
+  reportDate,
+  sourceUrl,
+  allowedChains=['BITCOIN','ETHEREUM','SOLANA'],
+  maxEntriesPerChain=5000,
+  maxExpandedBytes=300*1024*1024
+}={}){
+  const allowed=new Set((allowedChains||[]).map(normalizeChain));
+  const cap=Math.max(1,Number(maxEntriesPerChain)||5000);
+  const counts=new Map();
+  const dedup=new Map();
+  let header=null,idx=null,tail='',expanded=0;
+
+  const processLine=line=>{
+    const clean=String(line||'').replace(/\r$/,'');
+    if(!header){
+      if(/^coin,Type,Network,Snapshot Height,address,amount,message,/i.test(clean.trim())){
+        header=csvRow(clean).map(x=>x.trim());
+        idx=Object.fromEntries(header.map((x,i)=>[x.toLowerCase(),i]));
+      }
+      return;
+    }
+    if(!clean.trim()) return;
+    const row=csvRow(clean);
+    const entry=okxEntryFromRow(row,idx,{reportId,reportDate,sourceUrl});
+    if(!entry||!allowed.has(entry.chain)) return;
+    const key=entry.chain+'\u0000'+entry.address.toLowerCase();
+    if(dedup.has(key)) return;
+    if((counts.get(entry.chain)||0)>=cap) return;
+    counts.set(entry.chain,(counts.get(entry.chain)||0)+1);
+    dedup.set(key,entry);
+  };
+
+  for await(const chunk of readable){
+    const buf=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);
+    expanded+=buf.length;
+    if(expanded>Math.max(1024*1024,Number(maxExpandedBytes)||300*1024*1024)){
+      throw new Error('OKX_POR_EXPANDED_LIMIT_EXCEEDED');
+    }
+    const text=tail+buf.toString('utf8');
+    const lines=text.split('\n');
+    tail=lines.pop()||'';
+    for(const line of lines) processLine(line);
+    if([...allowed].every(chain=>(counts.get(chain)||0)>=cap)) break;
+  }
+  if(tail) processLine(tail);
+  if(!header) throw new Error('OKX_POR_ADDRESS_HEADER_NOT_FOUND');
+  return [...dedup.values()].sort((a,b)=>a.chain.localeCompare(b.chain)||a.address.localeCompare(b.address));
+}
+
+export async function fetchOfficialOkxPorRegistryStreaming({
+  fetchImpl=globalThis.fetch,
+  url,
+  reportId,
+  reportDate,
+  timeoutMs=20000,
+  allowedChains=['BITCOIN','ETHEREUM','SOLANA'],
+  maxEntriesPerChain=5000,
+  maxExpandedBytes=300*1024*1024,
+  now=()=>Date.now()
+}={}){
+  if(typeof fetchImpl!=='function') throw new Error('fetchImpl required');
+  const sourceUrl=String(url||'').trim();
+  if(!/^https:\/\//i.test(sourceUrl)) throw new Error('official source url required');
+
+  const tailRes=await fetchImpl(sourceUrl,{
+    signal:AbortSignal.timeout(Math.max(1000,Number(timeoutMs)||20000)),
+    headers:{accept:'application/octet-stream',range:'bytes=-65557','user-agent':'TCX-SHADOW-RESEARCH'}
+  });
+  if(tailRes.status!==206) throw new Error('RANGE_UNSUPPORTED_'+tailRes.status);
+  const contentRange=String(tailRes.headers?.get?.('content-range')||'');
+  const match=contentRange.match(/bytes\s+(\d+)-(\d+)\/(\d+)/i);
+  if(!match) throw new Error('CONTENT_RANGE_MISSING');
+  const tailStart=Number(match[1]);
+  const totalSize=Number(match[3]);
+  const tail=Buffer.from(await tailRes.arrayBuffer());
+  const eocd=findZipEocd(tail);
+  if(eocd<0) throw new Error('ZIP_EOCD_NOT_FOUND');
+  const totalEntries=tail.readUInt16LE(eocd+10);
+  const cdSize=tail.readUInt32LE(eocd+12);
+  const cdOffset=tail.readUInt32LE(eocd+16);
+
+  let cd;
+  if(cdOffset>=tailStart&&cdOffset+cdSize<=tailStart+tail.length){
+    cd=tail.subarray(cdOffset-tailStart,cdOffset-tailStart+cdSize);
+  }else{
+    cd=(await rangeBuffer(fetchImpl,sourceUrl,cdOffset,cdOffset+cdSize-1,{timeoutMs})).buffer;
+  }
+  const entry=parseCentralForCsv(cd,totalEntries);
+  const local=(await rangeBuffer(fetchImpl,sourceUrl,entry.localOffset,entry.localOffset+29,{timeoutMs})).buffer;
+  if(local.length<30||local.readUInt32LE(0)!==0x04034b50) throw new Error('ZIP_LOCAL_HEADER_INVALID');
+  const nameLen=local.readUInt16LE(26);
+  const extraLen=local.readUInt16LE(28);
+  const dataStart=entry.localOffset+30+nameLen+extraLen;
+  const dataEnd=dataStart+entry.compressedSize-1;
+
+  const dataRes=await fetchImpl(sourceUrl,{
+    signal:AbortSignal.timeout(Math.max(1000,Number(timeoutMs)||20000)),
+    headers:{accept:'application/octet-stream',range:'bytes='+dataStart+'-'+dataEnd,'user-agent':'TCX-SHADOW-RESEARCH'}
+  });
+  if(dataRes.status!==206) throw new Error('CSV_RANGE_UNSUPPORTED_'+dataRes.status);
+  const source=dataRes.body?Readable.fromWeb(dataRes.body):Readable.from(Buffer.from(await dataRes.arrayBuffer()));
+  let readable;
+  if(entry.method===0) readable=source;
+  else if(entry.method===8) readable=source.pipe(createInflateRaw());
+  else throw new Error('ZIP_COMPRESSION_UNSUPPORTED_'+entry.method);
+
+  const importedAt=now();
+  const entries=await parseOkxCsvReadable(readable,{
+    reportId,reportDate,sourceUrl,allowedChains,maxEntriesPerChain,maxExpandedBytes
+  });
+  const core={
+    version:VERIFIED_ENTITY_REGISTRY_VERSION,
+    importedAt,
+    sources:[{
+      entityId:'OKX',
+      publisher:'OKX',
+      reportId:String(reportId||'UNKNOWN'),
+      reportDate:reportDate?String(reportDate):null,
+      url:sourceUrl,
+      archiveEntry:entry.name,
+      archiveBytes:totalSize,
+      verificationClass:'OFFICIAL_PROOF_OF_RESERVES_SIGNED_ADDRESS_LIST',
+      importMode:'HTTP_RANGE_STREAM'
     }],
     entries,
     restrictions:{
