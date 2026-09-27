@@ -1029,6 +1029,7 @@ function memoryKeyboard(symbol) {
       { text:"🛰 Witness", callback_data:`witness:${symbol}` }
     ],
     [
+      { text:"🔮 Forecast", callback_data:`forecast:${symbol}` },
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
       { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
     ]
@@ -1124,6 +1125,7 @@ function helpText() {
     '/validity BTC – Drift/Expiry der letzten Research-Sicht',
     '/history BTC – persistenter Evidence-Verlauf',
     '/engine BTC – Mechanism Transition Lattice',
+    '/forecast BTC – institutioneller Multi-Horizon Forecast',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
     '/audit – Institutional Kernel / Ledger-Integrität',
     '/fabric – Event-Sourced Market Data Fabric',
@@ -2940,6 +2942,7 @@ function parseAction(data='') {
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
   if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
   if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
   if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
@@ -2970,6 +2973,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showAudit,
   showWitness,
   showEngine,
+  showForecast,
   showMemory,
   showEvidence,
   showEvidenceHistory,
@@ -3184,6 +3188,12 @@ async function handle(update) {
     if (a.kind === "ENGINE") {
       await showEngine(chatId,a.symbol);
       await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
       return;
     }
 
