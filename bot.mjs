@@ -4844,6 +4844,7 @@ async function gracefulShutdown(signal) {
   await persistEvidenceHistory(`shutdown:${signal}`);
   await persistForecastRuntime(`shutdown:${signal}`);
   await researchDataPlaneAppendQueue.catch(()=>{});
+  await saveResearchDataGovernance(researchGovernanceFile,researchDataGovernance).catch(()=>{});
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
   await persistShadowOms(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
