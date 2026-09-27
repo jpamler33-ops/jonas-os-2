@@ -43,6 +43,8 @@ import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_
 import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
 import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
+import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
+import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -255,6 +257,12 @@ const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.j
 const auditLedger = await openAuditLedger(auditFile);
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
 const marketFabric = await openMarketDataFabric(marketFabricFile);
+const researchDataPlaneFile=process.env.TCX_RESEARCH_DATA_PLANE_FILE||'/data/tcx-research-data-plane.jsonl';
+const researchDataPlane=await openResearchDataPlane(researchDataPlaneFile,{
+  maxInMemoryRecords:Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS||50000),
+  warnBytes:Number(process.env.TCX_RESEARCH_DATA_PLANE_WARN_BYTES||125829120),
+  hardBytes:Number(process.env.TCX_RESEARCH_DATA_PLANE_HARD_BYTES||167772160)
+});
 const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-release-registry.jsonl';
 const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
 const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
@@ -272,6 +280,7 @@ let shadowOmsPersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 let forecastRuntimePersistenceQueue = Promise.resolve();
+let researchDataPlaneAppendQueue=Promise.resolve();
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
   marketMaxAgeMs:institutionalMarketMaxAgeMs,
@@ -1749,6 +1758,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Wallet-Cohorts: ${walletCohortResearchProvider.configuredCohorts>0?'🟢 '+walletCohortResearchProvider.configuredCohorts+' manuell':'⚪ keine manuellen'}`,
       `Entity-Registry: ${entityRegistrySummary(entityRegistry||{}).entries} Adressen · ${entityRegistryRefreshError?'🟡 Cache':'🟢 offizieller PoR'}`,
       `Entity-Flow: ${entityFlowAddressIndex.addressCount>0?'🟢 '+entityFlowAddressIndex.addressCount+' ETH-Adressen':'⚪ keine Adressen'} · finalisiert · Native ETH`,
+      `Research Data Plane: ${researchDataPlane.healthy?'🟢':'🔴'} seq ${researchDataPlane.seq} · ${researchDataPlane.totalRecords} Snapshots · ${researchDataPlane.capacityState}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -3248,17 +3258,37 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
     state.availableAt
   );
-  const derivativesExtraFeatures=derivativesSnapshotToExtraFeatures(derivativesResearchSnapshot)
-    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const liquidationExtraFeatures=liquidationSnapshotToExtraFeatures(liquidationResearchSnapshot)
-    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const onchainExtraFeatures=onchainSnapshotToExtraFeatures(onchainResearchSnapshot)
-    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const entityFlowExtraFeatures=entityFlowSnapshotToExtraFeatures(entityFlowResearchSnapshot,{entityId:'OKX'})
-    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const walletExtraFeatures=walletCohortSnapshotToExtraFeatures(walletResearchSnapshot)
-    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures,...onchainExtraFeatures,...entityFlowExtraFeatures,...walletExtraFeatures];
+  let researchPlaneWrite={ok:researchDataPlane.healthy,appended:0,duplicates:0};
+  if(issuanceSource==='TCX_AUTOLEARN_V1'&&researchDataPlane.healthy){
+    try{
+      const snapshots=buildResearchDataPlaneSnapshots({
+        symbol,
+        ingestedAt:Date.now(),
+        derivativesSnapshot:derivativesResearchSnapshot,
+        liquidationSnapshot:liquidationResearchSnapshot,
+        onchainSnapshot:onchainResearchSnapshot,
+        entityFlowSnapshot:entityFlowResearchSnapshot,
+        walletSnapshot:walletResearchSnapshot
+      });
+      researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'research_data_plane.capture',message:msg});
+      researchPlaneWrite={ok:false,appended:0,duplicates:0,reason:msg};
+    }
+  }
+  const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{
+    streamKey:symbol,
+    asOf:Number(state.availableAt),
+    minCompleteness:.5
+  });
+  const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
+  const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
+  const liquidationExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='LIQUIDATION');
+  const onchainExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ONCHAIN');
+  const entityFlowExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ENTITY_FLOW');
+  const walletExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='WALLET_COHORT');
+  const extraFeatures=[...episodeExtraFeatures,...researchPlaneExtraFeatures];
   const runtimeQuality=deriveForecastRuntimeQuality({
     safety,
     marketAudit,
@@ -3385,6 +3415,16 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     },
     expansion:expansionEvidence,
     evidence:[
+      ...(researchPlaneView.ok?[{
+        type:'RESEARCH_DATA_PLANE',
+        version:RESEARCH_DATA_PLANE_VERSION,
+        adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+        seq:researchPlaneView.planeSeq,
+        tailHash:researchPlaneView.tailHash,
+        featureCount:researchPlaneExtraFeatures.length,
+        recordsConsidered:researchPlaneView.recordsConsidered,
+        epistemic:'POINT_IN_TIME_RESEARCH_FEATURES'
+      }]:[]),
       ...(expansionEvidence?[{
         type:'EXPANSION_EVIDENCE',
         version:INSTITUTIONAL_EXPANSION_VERSION,
@@ -3468,7 +3508,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       entityFlowNet5m:Number(entityFlowResearchSnapshot?.entities?.OKX?.['5m']?.netExternalEth??NaN),
       entityFlowBaselineSamples:Number(entityFlowResearchSnapshot?.entities?.OKX?.['5m']?.baselineSamples||0),
       walletFeatureCount:walletExtraFeatures.length,
-      walletCohorts:walletCohortResearchProvider.configuredCohorts
+      walletCohorts:walletCohortResearchProvider.configuredCohorts,
+      researchDataPlaneSeq:researchPlaneView.planeSeq||0,
+      researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
+      researchDataPlaneAppendOk:researchPlaneWrite?.ok===true
     };
   }
 
@@ -4115,6 +4158,26 @@ async function venueQualityWatcher() {
   }
 }
 
+async function appendResearchDataPlaneQueued(inputs,reason='capture'){
+  if(!researchDataPlane.healthy) return {ok:false,appended:0,duplicates:0,reason:'RDP_UNHEALTHY'};
+  const job=researchDataPlaneAppendQueue.then(async()=>{
+    const result=await appendResearchDataPlane(researchDataPlane,inputs);
+    recordOperation(observability,{
+      name:'research_data_plane_append',
+      ok:true,
+      latencyMs:0,
+      error:null
+    });
+    return {ok:true,appended:result.appended.length,duplicates:result.duplicates};
+  });
+  researchDataPlaneAppendQueue=job.catch(err=>{
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'research_data_plane.append',message:msg});
+    console.error('research data plane append error',reason,msg);
+  });
+  return job;
+}
+
 async function onchainResearchStartupProbe(){
   const symbols=['BTCUSDT','ETHUSDT','SOLUSDT'];
   const results=[];
@@ -4213,6 +4276,9 @@ async function autoLearnForecastWatcher() {
               entityFlowBaselineSamples:result.entityFlowBaselineSamples||0,
               walletFeatures:result.walletFeatureCount||0,
               walletCohorts:result.walletCohorts||0,
+              researchDataPlaneSeq:result.researchDataPlaneSeq||0,
+              researchDataPlaneFeatures:result.researchDataPlaneFeatures||0,
+              researchDataPlaneAppendOk:result.researchDataPlaneAppendOk===true,
               duplicate:result.duplicate===true
             }));
           }else{
@@ -4502,7 +4568,8 @@ function currentPersistenceCompatibility(){
       },
       AUDIT_LEDGER:{healthy:auditLedger.healthy},
       MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
-      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy},
+      RESEARCH_DATA_PLANE:{healthy:researchDataPlane.healthy}
     },
     localFilePersistence:true,
     replicaCount:configuredReplicaCount
@@ -4705,6 +4772,7 @@ const server = http.createServer((req,res) => {
         file:forecastRuntimeFile,
         outcomeCheckMs:forecastOutcomeCheckMs
       },
+      researchDataPlane:researchDataPlaneSummary(researchDataPlane),
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -4762,6 +4830,7 @@ console.log(JSON.stringify({
   walletCohortResearch:{version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:walletCohortResearchProvider.configuredCohorts,mode:'MANUAL_PUBLIC_COHORTS_ONLY'},
   entityRegistry:{version:VERIFIED_ENTITY_REGISTRY_VERSION,file:entityRegistryFile,summary:entityRegistrySummary(entityRegistry||{}),refreshError:entityRegistryRefreshError,source:okxPorSource},
   entityFlowResearch:{version:ENTITY_FLOW_ENGINE_VERSION,file:entityFlowMemoryFile,addressCount:entityFlowAddressIndex.addressCount,entityCount:entityFlowAddressIndex.entityCount,memory:entityFlowMemorySummary(entityFlowMemory),finality:'FINALIZED',assetScope:'NATIVE_ETH',coverage:'BOUNDED_VERIFIED_ADDRESS_SAMPLE'},
+  researchDataPlane:{version:RESEARCH_DATA_PLANE_VERSION,adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,...researchDataPlaneSummary(researchDataPlane)},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
