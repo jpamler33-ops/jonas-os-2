@@ -271,6 +271,7 @@ function correlation(xs,ys){
 export function toxicityCalibration(records,{minN=20}={}){
   const rows=(records||[]).filter(r=>
     r?.eligible===true &&
+    r?.markouts?.['300000']?.status==='OBSERVED' &&
     Number.isFinite(Number(r.predictedToxicityBps)) &&
     Number.isFinite(Number(r.markouts?.['300000']?.adverseSelectionBps))
   );
