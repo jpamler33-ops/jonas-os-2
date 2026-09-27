@@ -14,6 +14,7 @@ COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.
 
 RUN npm run check
 RUN npm run test:ui
+RUN npm run test:intel
 RUN mkdir -p /data && chown -R node:node /data /app
 
 ENV NODE_ENV=production
