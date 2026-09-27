@@ -331,6 +331,54 @@ export function buildResearchDependencyGraph({
   return deepFreeze({...core,fingerprint:sha256(core)});
 }
 
+
+const RESEARCH_VALIDITY_RANK=Object.freeze({
+  VALID:0,PASS:0,
+  BASELINE:1,CAUTION:1,STALE:1,DRIFTED:1,
+  INSUFFICIENT:2,UNKNOWN:2,
+  ABSTAIN:3,EXPIRED:3,INVALIDATED:3
+});
+
+function researchValidityStatus(v,fallback='UNKNOWN'){
+  const x=String(v??fallback).toUpperCase();
+  return Object.hasOwn(RESEARCH_VALIDITY_RANK,x)?x:fallback;
+}
+
+/**
+ * Binds dependency integrity into institutional research admission.
+ * A dependency problem may only make research validity stricter, never looser.
+ */
+export function bindResearchDependencyGateToValidity(baseValidity,graph){
+  const baseStatus=researchValidityStatus(baseValidity?.status??baseValidity?.state,'UNKNOWN');
+  const graphGate=String(graph?.gate??'ABSTAIN').toUpperCase();
+  const dependencyStatus=
+    graphGate==='PASS'?'VALID':
+    graphGate==='CAUTION'?'CAUTION':
+    graphGate==='INSUFFICIENT'?'INSUFFICIENT':
+    'ABSTAIN';
+
+  const status=
+    RESEARCH_VALIDITY_RANK[dependencyStatus]>RESEARCH_VALIDITY_RANK[baseStatus]
+      ? dependencyStatus
+      : baseStatus;
+
+  const baseReasons=Array.isArray(baseValidity?.reasons)?baseValidity.reasons.map(String):[];
+  const dependencyReasons=graph
+    ? (Array.isArray(graph.reasons)?graph.reasons:[]).map(x=>'DEPENDENCY_'+String(x))
+    : ['DEPENDENCY_GRAPH_UNAVAILABLE'];
+  if(graphGate!=='PASS'&&!dependencyReasons.length) dependencyReasons.push('DEPENDENCY_GATE_'+graphGate);
+
+  return deepFreeze({
+    status,
+    reasons:uniqueSorted([...baseReasons,...dependencyReasons]),
+    dependencyGate:graphGate,
+    dependencyFingerprint:graph?.fingerprint??null,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false
+  });
+}
+
 export function verifyResearchDependencyGraph(graph){
   const reasons=[];
   try{

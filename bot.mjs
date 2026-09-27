@@ -20,6 +20,7 @@ import { createExperimentGovernor, evaluateExperimentGovernor, experimentGoverno
 import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, WALLET_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
+import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -46,7 +47,7 @@ import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFl
 import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
-import { buildResearchDependencyGraph, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
+import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -108,6 +109,13 @@ const shadowDefaultLatencyMs = Math.max(0, Math.min(5000, Number(process.env.TCX
 const shadowMakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_MAKER_FEE_BPS || 10));
 const shadowTakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_TAKER_FEE_BPS || 10));
 const shadowHiddenQueueBufferPct = Math.max(0, Math.min(2, Number(process.env.TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT || 0.15)));
+const autoShadowTradingEnabled = String(process.env.TCX_AUTO_SHADOW_TRADING_ENABLED || '1') !== '0';
+const autoShadowNotionalQuote = Math.max(1, Number(process.env.TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 100));
+const autoShadowCooldownMs = Math.max(5*60_000, Number(process.env.TCX_AUTO_SHADOW_COOLDOWN_MS || 30*60_000));
+const autoShadowMaxPerSymbolPerDay = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_PER_SYMBOL_DAY || 8) || 8));
+const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MIN_EXPECTED_RETURN || 0.002));
+const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
+const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
 const sorMaxBookAgeMs = Math.max(1000, Number(process.env.TCX_SOR_MAX_BOOK_AGE_MS || 15000));
 const sorBinanceFeeBps = Math.max(0, Number(process.env.TCX_SOR_BINANCE_FEE_BPS || shadowTakerFeeBps));
 const sorOkxFeeBps = Math.max(0, Number(process.env.TCX_SOR_OKX_FEE_BPS || shadowTakerFeeBps));
@@ -991,7 +999,7 @@ function shadowAuditPayload(event,order,extra={}) {
   };
 }
 
-async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,latencyMs=shadowDefaultLatencyMs}) {
+async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,latencyMs=shadowDefaultLatencyMs,strategyMeta=null}) {
   if(!shadowOmsHealthy) throw new Error('Shadow OMS unhealthy');
   const started=Date.now();
   const decisionBook=await fetchExecutionBook(symbol);
@@ -1013,11 +1021,86 @@ async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,
   if(order.liquidity==='MAKER' && lastAggTradeId==null){
     order.dataQuality='DEGRADED_NO_TRADE_CURSOR';
   }
+  if(strategyMeta&&typeof strategyMeta==='object'){
+    order.strategyMeta={
+      ...structuredClone(strategyMeta),
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    };
+  }
   shadowOrders.push(order);
   await persistShadowOms('placed');
   if(auditLedger.healthy) await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('PLACED',order));
   recordOperation(observability,{name:'shadow_oms.place',ok:true,latencyMs:Date.now()-started});
   return order;
+}
+
+async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={}){
+  const now=Date.now();
+  if(!autoShadowTradingEnabled){
+    return {placed:false,eligible:false,reason:'AUTO_SHADOW_DISABLED',execution:'SHADOW_ONLY'};
+  }
+  const decision=deriveAutonomousShadowTrade(issuance,{
+    now,
+    notionalQuote:autoShadowNotionalQuote,
+    minExpectedReturn:autoShadowMinExpectedReturn,
+    minDirectionalProbability:autoShadowMinDirectionalProbability,
+    minProbabilityEdge:autoShadowMinProbabilityEdge
+  });
+  if(!decision.eligible) return {...decision,placed:false};
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy){
+    return {...decision,placed:false,reason:'RUNTIME_AUDIT_OR_OMS_UNHEALTHY'};
+  }
+  if(shadowOrders.some(o=>o?.strategyMeta?.decisionKey===decision.decisionKey)){
+    return {...decision,placed:false,reason:'DECISION_ALREADY_TRADED'};
+  }
+
+  const prior=shadowOrders
+    .filter(o=>o?.strategyMeta?.strategy===AUTONOMOUS_SHADOW_TRADER_VERSION&&o.symbol===decision.symbol)
+    .sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
+  if(prior.length&&now-Number(prior[0].createdAt||0)<autoShadowCooldownMs){
+    return {...decision,placed:false,reason:'SYMBOL_COOLDOWN'};
+  }
+
+  const dayStart=new Date(now);
+  dayStart.setUTCHours(0,0,0,0);
+  const todayCount=prior.filter(o=>Number(o.createdAt||0)>=dayStart.getTime()).length;
+  if(todayCount>=autoShadowMaxPerSymbolPerDay){
+    return {...decision,placed:false,reason:'DAILY_SYMBOL_CAP'};
+  }
+
+  const order=await placeShadowOrder({
+    symbol:decision.symbol,
+    side:decision.side,
+    type:'MARKET',
+    notionalQuote:decision.notionalQuote,
+    strategyMeta:{
+      strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+      decisionKey:decision.decisionKey,
+      issuanceId:decision.issuanceId,
+      forecastFingerprint:decision.forecastFingerprint,
+      horizonId:decision.horizonId,
+      horizonMs:decision.horizonMs,
+      admissionGate:decision.admissionGate,
+      expectedReturn:decision.expectedReturn,
+      directionalProbability:decision.directionalProbability,
+      probabilityEdge:decision.probabilityEdge,
+      generatedAt:decision.generatedAt
+    }
+  });
+  recordOperation(observability,{name:'auto_shadow_trade',ok:true,latencyMs:0,error:null});
+  console.log('auto shadow trade placed',JSON.stringify({
+    symbol:decision.symbol,
+    side:decision.side,
+    notionalQuote:decision.notionalQuote,
+    horizonId:decision.horizonId,
+    expectedReturn:decision.expectedReturn,
+    directionalProbability:decision.directionalProbability,
+    admissionGate:decision.admissionGate,
+    orderId:order.id,
+    execution:'SHADOW_ONLY'
+  }));
+  return {...decision,placed:true,orderId:order.id,status:order.status};
 }
 
 async function tg(method, body) {
@@ -3293,11 +3376,13 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   }
   const researchGovernanceView=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});
+  const blockedResearchSourceKeys=quarantinedResearchSourceKeys(researchDataGovernance);
   const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{
     streamKey:symbol,
     asOf:Number(state.availableAt),
     minCompleteness:.5,
-    requireGoverned:true
+    requireGoverned:true,
+    blockedSourceKeys:blockedResearchSourceKeys
   });
   const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
   const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
@@ -3458,6 +3543,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         tailHash:researchPlaneView.tailHash,
         featureCount:researchPlaneExtraFeatures.length,
         recordsConsidered:researchPlaneView.recordsConsidered,
+        blockedSourceCount:blockedResearchSourceKeys.length,
         epistemic:'POINT_IN_TIME_RESEARCH_FEATURES'
       }]:[]),
       {type:'RESEARCH_DATA_GOVERNANCE',version:RESEARCH_DATA_GOVERNANCE_VERSION,fingerprint:researchGovernanceView.fingerprint,epistemic:'POINT_IN_TIME_DATA_POLICY'},
@@ -3504,11 +3590,15 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   };
 
+  const researchAdmissionValidity=bindResearchDependencyGateToValidity(
+    forecastResearchValidity(evidenceAppend),
+    researchDependencyGraph
+  );
   const issued=issueInstitutionalForecast(forecastRuntime,{
     input,
     scientificValidity:scienceCore.validity,
     dataSafety:safety,
-    researchValidity:forecastResearchValidity(evidenceAppend),
+    researchValidity:researchAdmissionValidity,
     traceContext,
     generatedAt:Math.max(Date.now(),input.asOf)
   });
@@ -3518,6 +3608,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
 
   const issuance=issued.issuance;
   const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  let autoShadowTrade=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      autoShadowTrade=await maybePlaceAutonomousShadowTrade(issuance,{auditHealthy:auditHealthyAfter});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      autoShadowTrade={placed:false,eligible:false,reason:'AUTO_SHADOW_ERROR'};
+      recordError(observability,{scope:'auto_shadow_trade',message:msg});
+      console.error('auto shadow trade error',symbol,msg);
+    }
+  }
   const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
   const scienceGuardLines=Object.entries(scienceAdapter.profile)
     .filter(([,cfg])=>cfg.required===true)
@@ -3561,11 +3662,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
       researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,
       researchGovernanceIssueCount:Number(researchGovernanceView.statuses?.QUARANTINED||0),
+      researchGovernanceBlockedSources:blockedResearchSourceKeys.length,
       researchGovernanceFingerprint:researchGovernanceView.fingerprint,
       researchDependencyGate:researchDependencyGraph?.gate||'UNAVAILABLE',
       researchDependencyCoverage:Number(researchDependencyGraph?.impact?.coverage||0),
       researchDependencyBlockedFeatures:Number(researchDependencyGraph?.impact?.blockedFeatures||0),
-      researchDependencyFingerprint:researchDependencyGraph?.fingerprint||null
+      researchDependencyFingerprint:researchDependencyGraph?.fingerprint||null,
+      autoShadowTradePlaced:autoShadowTrade?.placed===true,
+      autoShadowTradeEligible:autoShadowTrade?.eligible===true,
+      autoShadowTradeReason:autoShadowTrade?.reason||null,
+      autoShadowOrderId:autoShadowTrade?.orderId||null,
+      autoShadowSide:autoShadowTrade?.side||null
     };
   }
 
@@ -4414,11 +4521,17 @@ async function autoLearnForecastWatcher() {
               researchDataPlaneFeatures:result.researchDataPlaneFeatures||0,
               researchDataPlaneAppendOk:result.researchDataPlaneAppendOk===true,
               researchGovernanceIssueCount:result.researchGovernanceIssueCount||0,
+              researchGovernanceBlockedSources:result.researchGovernanceBlockedSources||0,
               researchGovernanceFingerprint:result.researchGovernanceFingerprint||null,
               researchDependencyGate:result.researchDependencyGate||'UNAVAILABLE',
               researchDependencyCoverage:result.researchDependencyCoverage||0,
               researchDependencyBlockedFeatures:result.researchDependencyBlockedFeatures||0,
               researchDependencyFingerprint:result.researchDependencyFingerprint||null,
+              autoShadowTradePlaced:result.autoShadowTradePlaced===true,
+              autoShadowTradeEligible:result.autoShadowTradeEligible===true,
+              autoShadowTradeReason:result.autoShadowTradeReason||null,
+              autoShadowOrderId:result.autoShadowOrderId||null,
+              autoShadowSide:result.autoShadowSide||null,
               duplicate:result.duplicate===true
             }));
           }else{

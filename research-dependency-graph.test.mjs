@@ -4,7 +4,8 @@ import {
   buildResearchDependencyGraph,
   verifyResearchDependencyGraph,
   explainResearchFeatureLineage,
-  researchDependencyGraphSummary
+  researchDependencyGraphSummary,
+  bindResearchDependencyGateToValidity
 } from './research-dependency-graph.mjs';
 
 const H='a'.repeat(64);
@@ -118,4 +119,44 @@ test('summary remains research-only',()=>{
   assert.equal(s.execution,'SHADOW_ONLY');
   assert.equal(s.action,'ABSTAIN');
   assert.equal(s.canExecute,false);
+});
+
+
+test('dependency admission binding fails closed when graph is unavailable',()=>{
+  const v=bindResearchDependencyGateToValidity({status:'VALID',reasons:[]},null);
+  assert.equal(v.status,'ABSTAIN');
+  assert.equal(v.dependencyGate,'ABSTAIN');
+  assert.ok(v.reasons.includes('DEPENDENCY_GRAPH_UNAVAILABLE'));
+  assert.equal(v.execution,'SHADOW_ONLY');
+  assert.equal(v.canExecute,false);
+});
+
+test('dependency admission binding makes blocked graph stricter than valid research',()=>{
+  const g=buildResearchDependencyGraph({
+    plane:plane([rec()]),
+    governanceSummary:gov([{sourceKey:'DERIVATIVES:SRC_A',status:'QUARANTINED'}]),
+    streamKey:'BTCUSDT',
+    asOf:1500,
+    knowledgeTime:1600,
+    forecastInputFingerprint:H
+  });
+  const v=bindResearchDependencyGateToValidity({status:'VALID',reasons:['BASE_OK']},g);
+  assert.equal(g.gate,'ABSTAIN');
+  assert.equal(v.status,'ABSTAIN');
+  assert.ok(v.reasons.includes('DEPENDENCY_BLOCKED_FEATURE_DEPENDENCIES'));
+  assert.ok(v.reasons.includes('BASE_OK'));
+});
+
+test('dependency admission binding preserves stricter existing validity',()=>{
+  const g=buildResearchDependencyGraph({
+    plane:plane([rec()]),
+    streamKey:'BTCUSDT',
+    asOf:1500,
+    knowledgeTime:1600,
+    forecastInputFingerprint:H
+  });
+  assert.equal(g.gate,'PASS');
+  const v=bindResearchDependencyGateToValidity({status:'EXPIRED',reasons:['OLD_STATE']},g);
+  assert.equal(v.status,'EXPIRED');
+  assert.ok(v.reasons.includes('OLD_STATE'));
 });
