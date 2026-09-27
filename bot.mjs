@@ -19,6 +19,7 @@ import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_
 import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
 import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecycle, compactValidity, RESEARCH_LIFECYCLE_VERSION } from './research-lifecycle.mjs';
 import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market-data-provider.mjs';
+import { createTelegramCommandRouter, TELEGRAM_COMMAND_ROUTER_VERSION } from './telegram-command-router.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
@@ -209,6 +210,7 @@ try {
       stateValidity:STATE_VALIDITY_VERSION,
       researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
       marketDataProvider:MARKET_DATA_PROVIDER_VERSION,
+      telegramCommandRouter:TELEGRAM_COMMAND_ROUTER_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
       executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION
@@ -2624,75 +2626,74 @@ function parseAction(data='') {
   return { kind:'UNKNOWN' };
 }
 
-async function handleCommand(msg) {
+
+const routePrimaryCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:{
+    "/start":async ({chatId})=>{
+      await showStart(chatId);
+    },
+    "/help":async ({chatId})=>{
+      await tg("sendMessage",{chat_id:chatId,text:helpText()});
+    },
+    "/favorites":async ({chatId})=>{
+      await showFavorites(chatId);
+    },
+    "/compare":async ({chatId})=>{
+      await showCompare(chatId,null);
+    },
+    "/coin":async ({chatId,args})=>{
+      const symbol=normalizeSymbol(args[0]||"");
+      if(!symbol){
+        await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /coin BTC"});
+        return;
+      }
+      try{
+        await showMarket(chatId,null,symbol,false);
+      }catch{
+        await tg("sendMessage",{chat_id:chatId,text:"Kein Binance-USDT-Markt für "+(args[0]||symbol)+" gefunden."});
+      }
+    },
+    "/chart":async ({chatId,args})=>{
+      const symbol=normalizeSymbol(args[0]||"");
+      const interval=["1m","5m","15m","1h","4h"].includes(args[1])?args[1]:"5m";
+      if(!symbol){
+        await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /chart BTC 5m"});
+        return;
+      }
+      try{
+        await showChart(chatId,symbol,interval);
+      }catch(err){
+        console.error("chart command error",err instanceof Error?err.message:String(err));
+        await tg("sendMessage",{chat_id:chatId,text:"Chart-Daten gerade nicht verfügbar."});
+      }
+    },
+    "/structure":async ({chatId,args})=>{
+      const symbol=normalizeSymbol(args[0]||"");
+      if(!symbol){
+        await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /structure BTC"});
+        return;
+      }
+      try{
+        await showStructure(chatId,symbol);
+      }catch(err){
+        console.error("structure command error",err instanceof Error?err.message:String(err));
+        await tg("sendMessage",{chat_id:chatId,text:"Struktur-Daten gerade nicht verfügbar."});
+      }
+    }
+  }
+});
+
+async function handleCommand(msg){
+  if(await routePrimaryCommand(msg)) return true;
+  return handleCommandLegacy(msg);
+}
+
+async function handleCommandLegacy(msg) {
   const chatId = msg.chat.id;
   if (!permitted(chatId)) return true;
   const parts = msg.text.trim().split(/\s+/);
   const command = parts[0].split('@')[0].toLowerCase();
-
-  if (command === '/start') {
-    await showStart(chatId);
-    return true;
-  }
-
-  if (command === '/help') {
-    await tg('sendMessage',{ chat_id:chatId, text:helpText() });
-    return true;
-  }
-
-  if (command === '/favorites') {
-    await showFavorites(chatId);
-    return true;
-  }
-
-  if (command === '/compare') {
-    await showCompare(chatId,null);
-    return true;
-  }
-
-  if (command === '/coin') {
-    const symbol = normalizeSymbol(parts[1] || '');
-    if (!symbol) {
-      await tg('sendMessage',{ chat_id:chatId, text:'Beispiel: /coin BTC' });
-      return true;
-    }
-    try {
-      await showMarket(chatId,null,symbol,false);
-    } catch {
-      await tg('sendMessage',{ chat_id:chatId, text:`Kein Binance-USDT-Markt für ${parts[1] || symbol} gefunden.` });
-    }
-    return true;
-  }
-
-  if (command === "/chart") {
-    const symbol = normalizeSymbol(parts[1] || "");
-    const interval = ["1m","5m","15m","1h","4h"].includes(parts[2]) ? parts[2] : "5m";
-    if (!symbol) {
-      await tg("sendMessage",{ chat_id:chatId, text:"Beispiel: /chart BTC 5m" });
-      return true;
-    }
-    try { await showChart(chatId,symbol,interval); }
-    catch (err) {
-      console.error("chart command error",err instanceof Error ? err.message : String(err));
-      await tg("sendMessage",{ chat_id:chatId, text:"Chart-Daten gerade nicht verfügbar." });
-    }
-    return true;
-  }
-
-  if (command === "/structure") {
-    const symbol = normalizeSymbol(parts[1] || "");
-    if (!symbol) {
-      await tg("sendMessage",{ chat_id:chatId, text:"Beispiel: /structure BTC" });
-      return true;
-    }
-    try { await showStructure(chatId,symbol); }
-    catch (err) {
-      console.error("structure command error",err instanceof Error ? err.message : String(err));
-      await tg("sendMessage",{ chat_id:chatId, text:"Struktur-Daten gerade nicht verfügbar." });
-    }
-    return true;
-  }
-
 
   if (command === "/obs") {
     try { await showObservability(chatId); }
@@ -3721,6 +3722,11 @@ const server = http.createServer((req,res) => {
         binanceFallbacks:binanceBases.length,
         okxHost:new URL(okxBase).host,
         krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        primaryCommands:7,
+        legacyFallback:true
       },
       episodeMemory:{
         file:episodeFile,
