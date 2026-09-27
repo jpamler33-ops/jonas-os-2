@@ -1856,6 +1856,78 @@ async function handleCommand(msg) {
     }
     return true;
   }
+  if (command === "/oms") {
+    try { await showOms(chatId); }
+    catch(err){
+      recordError(observability,{scope:'command.oms',message:err instanceof Error?err.message:String(err)});
+      await tg("sendMessage",{chat_id:chatId,text:"Shadow OMS gerade nicht verfügbar."});
+    }
+    return true;
+  }
+
+  if (command === "/shadoworders") {
+    const symbol=parts[1]?normalizeSymbol(parts[1]):null;
+    if(parts[1] && !symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /shadoworders BTC"});
+      return true;
+    }
+    await showShadowOrders(chatId,symbol);
+    return true;
+  }
+
+  if (command === "/shadowcancel") {
+    const ref=String(parts[1]||"").trim();
+    if(!ref){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /shadowcancel sh_..."});
+      return true;
+    }
+    const matches=shadowOrders.filter(o=>o.id===ref || (ref.length>=8 && o.id.startsWith(ref)));
+    if(matches.length!==1){
+      await tg("sendMessage",{chat_id:chatId,text:matches.length?"Order-ID nicht eindeutig.":"Shadow-Order nicht gefunden."});
+      return true;
+    }
+    const idx=shadowOrders.findIndex(o=>o.id===matches[0].id);
+    const before=shadowOrders[idx];
+    const after=cancelShadowOrder(before,{at:Date.now()});
+    if(after.status===before.status){
+      await tg("sendMessage",{chat_id:chatId,text:`Order ${before.id} ist nicht mehr aktiv (${before.status}).`});
+      return true;
+    }
+    shadowOrders[idx]=after;
+    await persistShadowOms("cancelled");
+    if(auditLedger.healthy) await appendInstitutionalAudit("TCX_SHADOW_ORDER_EVENT",shadowAuditPayload("CANCELLED",after));
+    await showPlacedShadowOrder(chatId,after);
+    return true;
+  }
+
+  if (command === "/shadow") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    const side=String(parts[2]||"").toUpperCase();
+    const notional=Number(String(parts[3]||"").replace(",","."));
+    const type=String(parts[4]||"").toUpperCase();
+    const limitPrice=type==="LIMIT"?Number(String(parts[5]||"").replace(",",".")):null;
+    const latencyRaw=type==="LIMIT"?parts[6]:parts[5];
+    const latencyMs=latencyRaw==null?shadowDefaultLatencyMs:Number(latencyRaw);
+    const valid=symbol && ["BUY","SELL"].includes(side) && ["MARKET","LIMIT"].includes(type) && Number.isFinite(notional) && notional>0 && notional<=1_000_000_000 && Number.isFinite(latencyMs) && latencyMs>=0 && latencyMs<=5000 && (type!=="LIMIT" || (Number.isFinite(limitPrice)&&limitPrice>0));
+    if(!valid){
+      await tg("sendMessage",{chat_id:chatId,text:["Syntax:","/shadow BTC BUY 100 MARKET [latencyMs]","/shadow BTC BUY 100 LIMIT 65000 [latencyMs]","","Das erzeugt ausschließlich eine virtuelle Shadow-Order."].join("\n")});
+      return true;
+    }
+    if(!shadowOmsHealthy){
+      await tg("sendMessage",{chat_id:chatId,text:`Shadow OMS ist fail-closed deaktiviert: ${shadowOmsLastError||"state unhealthy"}`.slice(0,4096)});
+      return true;
+    }
+    try {
+      const order=await placeShadowOrder({symbol,side,type,notionalQuote:notional,limitPrice,latencyMs});
+      await showPlacedShadowOrder(chatId,order);
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'command.shadow',message:msg});
+      recordOperation(observability,{name:"shadow_oms.place",ok:false,latencyMs:0,error:msg});
+      await tg("sendMessage",{chat_id:chatId,text:`Shadow-Order konnte nicht simuliert werden: ${msg}`.slice(0,4096)});
+    }
+    return true;
+  }
   if (command === "/release") {
     try { await showRelease(chatId); }
     catch(err){
