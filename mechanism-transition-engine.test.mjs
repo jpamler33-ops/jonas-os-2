@@ -23,7 +23,7 @@ test('mechanism channels are bounded and separated',()=>{
   assert.ok(c.LIQUIDITY_STRESS>=0);
 });
 
-test('evidence audit detects flow/trend contradiction and never claims independent witness',()=>{
+test('evidence audit detects flow/trend contradiction without witness report',()=>{
   const v=vector({localTrend:'BEARISH',flow:'BID_PRESSURE'});
   const c=mechanismChannels(v);
   const a=evidenceAudit(v,c);
@@ -75,6 +75,65 @@ test('full engine keeps action ABSTAIN and causal status NOT_IDENTIFIED',()=>{
     episodes,
     symbol:'BTCUSDT',
     horizonMinutes:15
+  });
+  assert.equal(result.action,'ABSTAIN');
+  assert.equal(result.execution,'SHADOW_ONLY');
+  assert.equal(result.hypothesis.causalStatus,'NOT_IDENTIFIED');
+});
+
+
+test('independent multi-venue witness can satisfy witness gate without claiming causality',()=>{
+  const v=vector();
+  const c=mechanismChannels(v);
+  const witness={
+    sourceIndependence:'MULTI_VENUE_INDEPENDENT',
+    independentWitnessSatisfied:true,
+    agreementScore:0.82,
+    externalWitnessCount:2,
+    contradictions:[],
+    caveats:['ORDERBOOK_IMBALANCE_IS_VENUE_LOCAL']
+  };
+  const a=evidenceAudit(v,c,witness);
+  assert.equal(a.independentWitnessSatisfied,true);
+  assert.equal(a.sourceIndependence,'MULTI_VENUE_INDEPENDENT');
+  assert.equal(a.witnessCoverage,2);
+});
+
+test('identifiability review requires strict witness but causal status remains NOT_IDENTIFIED',()=>{
+  const v=vector();
+  const c=mechanismChannels(v);
+  const a=evidenceAudit(v,c,{
+    sourceIndependence:'MULTI_VENUE_INDEPENDENT',
+    independentWitnessSatisfied:true,
+    agreementScore:0.9,
+    externalWitnessCount:2,
+    contradictions:[],
+    caveats:[]
+  });
+  const h=mechanismHypothesis(v,c,a,{support:20,novelty:0.05,transitionCoherence:0.9});
+  assert.equal(h.gate,'IDENTIFIABILITY_REVIEW');
+  assert.equal(h.causalStatus,'NOT_IDENTIFIED');
+});
+
+test('full engine stays ABSTAIN even with strict independent witness',()=>{
+  const episodes=[];
+  for(let i=0;i<12;i++){
+    episodes.push(ep(i*2,vector()),ep(i*2+1,vector({regime:'TREND_EXPANSION'})));
+  }
+  const result=runMechanismTransitionEngine({
+    analysis:{lastClose:100,ema20:101,ema50:100,support:98,resistance:103,trend:'BULLISH',pattern:null},
+    dashboard:{...vector(),bias:'BULLISH'},
+    episodes,
+    symbol:'BTCUSDT',
+    horizonMinutes:15,
+    witnessReport:{
+      sourceIndependence:'MULTI_VENUE_INDEPENDENT',
+      independentWitnessSatisfied:true,
+      agreementScore:0.9,
+      externalWitnessCount:2,
+      contradictions:[],
+      caveats:[]
+    }
   });
   assert.equal(result.action,'ABSTAIN');
   assert.equal(result.execution,'SHADOW_ONLY');
