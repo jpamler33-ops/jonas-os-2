@@ -21,6 +21,12 @@ import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearc
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
+import {
+  loadShadowPortfolioLedger, saveShadowPortfolioLedger,
+  reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
+  markShadowPosition, closeShadowPosition, shadowPortfolioSummary,
+  SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
+} from './shadow-portfolio-ledger.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -116,6 +122,8 @@ const autoShadowMaxPerSymbolPerDay = Math.max(1, Math.floor(Number(process.env.T
 const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MIN_EXPECTED_RETURN || 0.002));
 const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
+const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
+const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
 const sorMaxBookAgeMs = Math.max(1000, Number(process.env.TCX_SOR_MAX_BOOK_AGE_MS || 15000));
 const sorBinanceFeeBps = Math.max(0, Number(process.env.TCX_SOR_BINANCE_FEE_BPS || shadowTakerFeeBps));
 const sorOkxFeeBps = Math.max(0, Number(process.env.TCX_SOR_OKX_FEE_BPS || shadowTakerFeeBps));
@@ -282,6 +290,8 @@ const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-
 const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
 const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
 const loadedShadowOms = await loadShadowOms(shadowOmsFile);
+const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-shadow-portfolio.json';
+const loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
 const loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
 let venueQualityRecords = loadedVenueQuality.records;
@@ -292,6 +302,10 @@ let shadowOrders = loadedShadowOms.orders;
 let shadowOmsHealthy = loadedShadowOms.healthy;
 let shadowOmsLastError = loadedShadowOms.error || null;
 let shadowOmsPersistenceQueue = Promise.resolve();
+let shadowPortfolioLedger = loadedShadowPortfolio.ledger;
+let shadowPortfolioHealthy = loadedShadowPortfolio.healthy;
+let shadowPortfolioLastError = loadedShadowPortfolio.error || null;
+let shadowPortfolioPersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 let forecastRuntimePersistenceQueue = Promise.resolve();
@@ -311,6 +325,13 @@ const institutionalConfig = Object.freeze({
     makerFeeBps:shadowMakerFeeBps,
     takerFeeBps:shadowTakerFeeBps,
     hiddenQueueBufferPct:shadowHiddenQueueBufferPct
+  },
+  shadowPortfolio:{
+    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+    canExecuteLive:false,
+    initialEquityQuote:shadowPortfolioInitialEquity,
+    watchMs:shadowPortfolioWatchMs,
+    objective:'MEASURE_AUTONOMOUS_SHADOW_STRATEGY_PNL_AND_DRAWDOWN'
   },
   shadowSor:{
     version:SHADOW_SOR_VERSION,
@@ -373,6 +394,7 @@ try {
       persistenceContracts:PERSISTENCE_CONTRACTS_VERSION,
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
+      shadowPortfolio:SHADOW_PORTFOLIO_LEDGER_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -451,6 +473,24 @@ async function persistShadowOms(reason='mutation') {
     }
   });
   return shadowOmsPersistenceQueue;
+}
+
+async function persistShadowPortfolio(reason='mutation') {
+  shadowPortfolioPersistenceQueue = shadowPortfolioPersistenceQueue.then(async()=>{
+    if(!shadowPortfolioHealthy) return false;
+    try{
+      shadowPortfolioLedger = await saveShadowPortfolioLedger(shadowPortfolioFile,shadowPortfolioLedger,{maxPositions:5000});
+      shadowPortfolioLastError=null;
+      return true;
+    }catch(err){
+      shadowPortfolioHealthy=false;
+      shadowPortfolioLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'shadow_portfolio.persistence',message:shadowPortfolioLastError});
+      console.error('shadow portfolio persistence error',reason,shadowPortfolioLastError);
+      return false;
+    }
+  });
+  return shadowPortfolioPersistenceQueue;
 }
 
 async function persistState(reason='mutation') {
@@ -1054,9 +1094,12 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   if(shadowOrders.some(o=>o?.strategyMeta?.decisionKey===decision.decisionKey)){
     return {...decision,placed:false,reason:'DECISION_ALREADY_TRADED'};
   }
+  if((shadowPortfolioLedger?.positions||[]).some(p=>p.status==='OPEN'&&p.symbol===decision.symbol)){
+    return {...decision,placed:false,reason:'OPEN_POSITION_EXISTS'};
+  }
 
   const prior=shadowOrders
-    .filter(o=>o?.strategyMeta?.strategy===AUTONOMOUS_SHADOW_TRADER_VERSION&&o.symbol===decision.symbol)
+    .filter(o=>o?.strategyMeta?.strategy===AUTONOMOUS_SHADOW_TRADER_VERSION&&String(o?.strategyMeta?.role||'ENTRY').toUpperCase()==='ENTRY'&&o.symbol===decision.symbol)
     .sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
   if(prior.length&&now-Number(prior[0].createdAt||0)<autoShadowCooldownMs){
     return {...decision,placed:false,reason:'SYMBOL_COOLDOWN'};
@@ -1076,6 +1119,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     notionalQuote:decision.notionalQuote,
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+      role:'ENTRY',
       decisionKey:decision.decisionKey,
       issuanceId:decision.issuanceId,
       forecastFingerprint:decision.forecastFingerprint,
@@ -1362,7 +1406,7 @@ function helpText() {
     'PROFI-FUNKTIONEN',
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
-    '/oms · /sorstatus · /venuequality · /executionlab','',
+    '/portfolio · /oms · /sorstatus · /venuequality · /executionlab','',
     'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
   ].join('\n');
 }
@@ -1799,6 +1843,7 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='MEMECOINS') return showMemecoinRadar(chatId,messageId);
   if(section==='TRENDS') return showTrendContext(chatId,messageId);
   if(section==='PERFORMANCE') return showLearningCenter(chatId,messageId);
+  if(section==='PORTFOLIO') return showShadowPortfolio(chatId,messageId);
 
   let text='';
   if(section==='ALERTS') {
@@ -1847,6 +1892,8 @@ async function showHomeSection(chatId,messageId,section) {
       'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
       'Marktstimmung: 🟢 Live-Provider eingebaut',
       `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
+      `Auto-Shadow-Trading: ${autoShadowTradingEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).openPositions} offene Positionen`,
+      `Shadow-Portfolio: ${shadowPortfolioHealthy?'🟢':'🟡'} · Equity ${fmt(shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).equityQuote,2)} USDT`,
       `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
       `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
       `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
@@ -2545,6 +2592,60 @@ function shadowOrderDetail(order) {
     'Mode: SHADOW_ONLY'
   ];
   return lines.join('\n').slice(0,4096);
+}
+
+async function showShadowPortfolio(chatId,messageId=null){
+  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});
+  if(reconciled.changed){
+    shadowPortfolioLedger=reconciled.ledger;
+    await persistShadowPortfolio('ui-reconcile');
+  }
+  const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
+  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
+  const pctv=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v)*100,2)+'%':'—');
+  const lines=[
+    '💼 TCX AUTONOMES SHADOW-PORTFOLIO','',
+    'VIRTUELLES KONTO',
+    'Startkapital: '+fmt(x.initialEquityQuote,2)+' USDT',
+    'Aktuelle Equity: '+fmt(x.equityQuote,2)+' USDT',
+    'Gesamt-PnL: '+money(x.netPnlQuote)+' · '+pctv(x.returnPct),
+    'Realisiert: '+money(x.realizedPnlQuote),
+    'Offen: '+money(x.unrealizedPnlQuote),'',
+    'PERFORMANCE',
+    'Offene Positionen: '+x.openPositions,
+    'Abgeschlossene Trades: '+x.closedTrades,
+    'Gewonnen / verloren: '+x.wins+' / '+x.losses,
+    'Winrate: '+(x.winRate==null?'noch keine Daten':fmt(x.winRate*100,1)+'%'),
+    'Profit Factor: '+(x.profitFactor==null?'noch nicht messbar':fmt(x.profitFactor,2)),
+    'Ø PnL je Trade: '+(x.expectancyQuote==null?'—':money(x.expectancyQuote)),
+    'Max. Drawdown: '+fmt(x.maxDrawdownQuote,2)+' USDT · '+fmt(x.maxDrawdownPct*100,2)+'%','',
+    'AKTIVE TRADES'
+  ];
+  if(x.active.length){
+    for(const p of x.active.slice(0,8)){
+      lines.push(
+        '• '+p.symbol.replace('USDT','/')+' · '+p.side+
+        ' · Entry '+priceText(p.entryPrice)+
+        ' · PnL '+money(p.unrealizedNetPnlQuote)+
+        ' · SL '+fmt(Number(p.stopLossPct||0)*100,2)+'%'+
+        ' · TP '+fmt(Number(p.takeProfitPct||0)*100,2)+'%'
+      );
+    }
+  }else lines.push('• aktuell keine offene Position');
+  lines.push(
+    '',
+    'Exit-Regeln: Stop-Loss · Take-Profit · Prognose-Horizont.',
+    'Entries und Exits werden gegen öffentliche Orderbuch-Tiefe simuliert.',
+    'Keine echte Börsenorder wird gesendet.',
+    '',
+    'Mode: SHADOW_ONLY · canExecuteLive: NO'
+  );
+  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
+    [{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],
+    [{text:'🏠 Start',callback_data:'home'}]
+  ]}};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
 }
 
 async function showOms(chatId) {
@@ -3771,6 +3872,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showObservability,
   showChaos,
   showOms,
+  showShadowPortfolio,
   showExecutionResearch,
   showVenueQuality,
   showSorStatus,
@@ -4282,6 +4384,103 @@ async function shadowOmsWatcher() {
       const msg=err instanceof Error?err.message:String(err);
       recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
       recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function shadowPortfolioWatcher(){
+  while(running){
+    await sleep(shadowPortfolioWatchMs);
+    if(!shadowPortfolioHealthy||!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false,opened=0,closed=0;
+    try{
+      const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});
+      if(reconciled.changed){
+        shadowPortfolioLedger=reconciled.ledger;
+        changed=true;
+        opened+=reconciled.added;
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_SHADOW_PORTFOLIO_OPEN',{
+            version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+            at:Date.now(),
+            opened:reconciled.added,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          });
+        }
+      }
+
+      const openPositions=(shadowPortfolioLedger.positions||[]).filter(p=>p.status==='OPEN');
+      const symbols=[...new Set(openPositions.map(p=>p.symbol))];
+      const books=new Map();
+      for(const symbol of symbols){
+        try{ books.set(symbol,await fetchExecutionBook(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'shadow_portfolio.book',message:err instanceof Error?err.message:String(err)});
+        }
+      }
+
+      for(const current of [...(shadowPortfolioLedger.positions||[])]){
+        if(current.status!=='OPEN') continue;
+        const book=books.get(current.symbol);
+        if(!book) continue;
+        const marked=markShadowPosition(current,book,{at:Number(book.availableAt||Date.now()),feeBps:shadowTakerFeeBps});
+        if(marked.changed){
+          shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,marked.position);
+          changed=true;
+        }
+        if(marked.trigger){
+          const closedPosition=closeShadowPosition(marked.position,{reason:marked.trigger,at:Number(book.availableAt||Date.now())});
+          shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,closedPosition);
+          changed=true;closed++;
+          if(auditLedger.healthy){
+            await appendInstitutionalAudit('TCX_SHADOW_POSITION_CLOSED',{
+              version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+              at:closedPosition.closedAt,
+              position:{
+                positionId:closedPosition.positionId,
+                entryOrderId:closedPosition.entryOrderId,
+                symbol:closedPosition.symbol,
+                side:closedPosition.side,
+                closeReason:closedPosition.closeReason,
+                entryPrice:closedPosition.entryPrice,
+                exitPrice:closedPosition.exitPrice,
+                realizedNetPnlQuote:closedPosition.realizedNetPnlQuote,
+                realizedReturnPct:closedPosition.realizedReturnPct,
+                openedAt:closedPosition.openedAt,
+                closedAt:closedPosition.closedAt
+              },
+              exitModel:SHADOW_PORTFOLIO_CAPABILITIES.exitModel,
+              execution:'SHADOW_ONLY',
+              canExecuteLive:false
+            });
+          }
+          console.log('auto shadow position closed',JSON.stringify({
+            symbol:closedPosition.symbol,
+            side:closedPosition.side,
+            reason:closedPosition.closeReason,
+            pnlQuote:closedPosition.realizedNetPnlQuote,
+            returnPct:closedPosition.realizedReturnPct,
+            execution:'SHADOW_ONLY'
+          }));
+        }
+      }
+
+      if(changed) await persistShadowPortfolio('watcher');
+      const summary=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
+      recordOperation(observability,{name:'shadow_portfolio_watch',ok:true,latencyMs:Date.now()-started,error:null});
+      if(opened||closed){
+        console.log('shadow portfolio cycle',JSON.stringify({
+          opened,closed,openPositions:summary.openPositions,closedTrades:summary.closedTrades,
+          netPnlQuote:summary.netPnlQuote,equityQuote:summary.equityQuote
+        }));
+      }
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'shadow_portfolio.watch',message:msg});
+      recordOperation(observability,{name:'shadow_portfolio_watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      console.error('shadow portfolio watcher error',msg);
     }
   }
 }
@@ -4815,6 +5014,10 @@ function currentPersistenceCompatibility(){
         healthy:shadowOmsHealthy,
         recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
       },
+      SHADOW_PORTFOLIO:{
+        healthy:shadowPortfolioHealthy,
+        recoveredFromCorrupt:loadedShadowPortfolio.recoveredFromCorrupt
+      },
       VENUE_QUALITY_MEMORY:{
         healthy:venueQualityHealthy,
         recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
@@ -5144,6 +5347,17 @@ console.log(JSON.stringify({
     watchMs:shadowWatchMs,
     capabilities:SHADOW_OMS_CAPABILITIES
   },
+  shadowPortfolio:{
+    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+    file:shadowPortfolioFile,
+    healthy:shadowPortfolioHealthy,
+    loaded:(shadowPortfolioLedger.positions||[]).length,
+    recoveredFromCorrupt:loadedShadowPortfolio.recoveredFromCorrupt,
+    watchMs:shadowPortfolioWatchMs,
+    initialEquityQuote:shadowPortfolioInitialEquity,
+    summary:shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),
+    capabilities:SHADOW_PORTFOLIO_CAPABILITIES
+  },
   shadowSor:{
     version:SHADOW_SOR_VERSION,
     routeQuote:'USDT',
@@ -5196,4 +5410,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),venueQualityWatcher()]);

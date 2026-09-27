@@ -17,6 +17,7 @@ export function createReadCommandHandlers(deps={}){
     showObservability,
     showChaos,
     showOms,
+    showShadowPortfolio,
     showExecutionResearch,
     showVenueQuality,
     showSorStatus,
@@ -160,6 +161,23 @@ export function createReadCommandHandlers(deps={}){
         const msg=message(err);
         recordError(observability,{scope:"command.oms",message:msg});
         await tg("sendMessage",{chat_id:chatId,text:"Shadow OMS gerade nicht verfügbar."});
+      }
+    },
+
+    "/portfolio":async ({chatId})=>{
+      try{ await showShadowPortfolio(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.portfolio",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Shadow-Portfolio gerade nicht verfügbar."});
+      }
+    },
+    "/trades":async ({chatId})=>{
+      try{ await showShadowPortfolio(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.trades",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Shadow-Portfolio gerade nicht verfügbar."});
       }
     },
 

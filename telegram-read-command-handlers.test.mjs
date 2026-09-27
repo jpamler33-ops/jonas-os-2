@@ -18,6 +18,7 @@ function deps(overrides={}){
     showObservability:async(...x)=>calls.push(["obs",...x]),
     showChaos:async(...x)=>calls.push(["chaos",...x]),
     showOms:async(...x)=>calls.push(["oms",...x]),
+    showShadowPortfolio:async(...x)=>calls.push(["portfolio",...x]),
     showExecutionResearch:async(...x)=>calls.push(["erl",...x]),
     showVenueQuality:async(...x)=>calls.push(["vqm",...x]),
     showSorStatus:async(...x)=>calls.push(["sorstatus",...x]),
@@ -79,4 +80,13 @@ test("research symbol handler forwards normalized symbol",async()=>{
   const h=createReadCommandHandlers(d);
   await h["/memory"]({chatId:7,args:["BTC"]});
   assert.deepEqual(calls.find(x=>x[0]==="memory"),["memory",7,"BTCUSDT"]);
+});
+
+
+test("portfolio and trades aliases open the same shadow portfolio",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/portfolio"]({chatId:9,args:[]});
+  await h["/trades"]({chatId:9,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="portfolio").length,2);
 });

@@ -159,6 +159,10 @@ export function homeKeyboard() {
       {text:"🧪 TCX Lernzentrum",callback_data:"home:performance"}
     ],
     [
+      {text:"💼 Shadow-Portfolio",callback_data:"home:portfolio"},
+      {text:"🧾 Shadow OMS",callback_data:"home:system"}
+    ],
+    [
       {text:"🖥 System",callback_data:"home:system"},
       {text:"⚙️ Alle Funktionen",callback_data:"commands"}
     ]

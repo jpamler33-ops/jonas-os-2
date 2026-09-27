@@ -3,17 +3,18 @@ WORKDIR /app
 
 COPY package.json ./
 
-COPY bot.mjs state-store.mjs market-structure.mjs chart-renderer.mjs dashboard-state.mjs episode-memory.mjs mechanism-transition-engine.mjs independent-witness-network.mjs institutional-kernel.mjs market-data-fabric.mjs deterministic-replay.mjs runtime-release-registry.mjs observability.mjs operational-readiness.mjs persistence-contracts.mjs persistence-smoke.mjs chaos-engineering.mjs shadow-oms.mjs autonomous-shadow-trader.mjs portfolio-brain.mjs multi-venue-shadow-sor.mjs venue-quality-memory.mjs execution-research-lab.mjs telegram-product-ui.mjs alert-engine.mjs evidence-history.mjs state-validity.mjs research-lifecycle.mjs market-data-provider.mjs telegram-command-router.mjs telegram-read-command-handlers.mjs telegram-mutation-command-handlers.mjs telegram-ui-runtime.mjs ./
+COPY bot.mjs state-store.mjs market-structure.mjs chart-renderer.mjs dashboard-state.mjs episode-memory.mjs mechanism-transition-engine.mjs independent-witness-network.mjs institutional-kernel.mjs market-data-fabric.mjs deterministic-replay.mjs runtime-release-registry.mjs observability.mjs operational-readiness.mjs persistence-contracts.mjs persistence-smoke.mjs chaos-engineering.mjs shadow-oms.mjs autonomous-shadow-trader.mjs shadow-portfolio-ledger.mjs portfolio-brain.mjs multi-venue-shadow-sor.mjs venue-quality-memory.mjs execution-research-lab.mjs telegram-product-ui.mjs alert-engine.mjs evidence-history.mjs state-validity.mjs research-lifecycle.mjs market-data-provider.mjs telegram-command-router.mjs telegram-read-command-handlers.mjs telegram-mutation-command-handlers.mjs telegram-ui-runtime.mjs ./
 
 COPY research-data-plane.mjs research-data-plane-adapters.mjs research-feature-catalog.mjs research-source-contracts.mjs research-data-governance.mjs research-dependency-graph.mjs research-trace.mjs scientific-validity.mjs scientific-core.mjs institutional-admission.mjs institutional-forecast-issuance.mjs institutional-forecast-runtime.mjs institutional-audit-binding.mjs forecast-input-adapter.mjs forecast-science-adapter.mjs forecast-contract.mjs forecast-product.mjs forecast-candidate-lab.mjs forecast-learning-center.mjs forecast-hypothesis-generator.mjs forecast-shadow-competition.mjs forecast-experiment-governor.mjs forecast-feature-research.mjs model-promotion-ladder.mjs model-candidate-registry.mjs model-release-binding.mjs model-governance-audit.mjs ./
 
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY autonomous-shadow-trader.test.mjs shadow-oms.test.mjs research-data-plane.test.mjs research-data-plane-adapters.test.mjs research-data-governance.test.mjs research-dependency-graph.test.mjs telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs expansion-runtime/entity-flow-engine.test.mjs ./
+COPY autonomous-shadow-trader.test.mjs shadow-portfolio-ledger.test.mjs shadow-oms.test.mjs portfolio-brain.test.mjs telegram-read-command-handlers.test.mjs research-data-plane.test.mjs research-data-plane-adapters.test.mjs research-data-governance.test.mjs research-dependency-graph.test.mjs telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs expansion-runtime/entity-flow-engine.test.mjs ./
 
 RUN npm run check
 RUN npm run test:auto-shadow
+RUN npm run test:portfolio
 RUN npm run test:ui
 RUN npm run test:intel
 RUN npm run test:forecast-core
@@ -32,6 +33,7 @@ ENV TCX_AUDIT_LEDGER_FILE=/data/tcx-audit-ledger.jsonl
 ENV TCX_MARKET_FABRIC_FILE=/data/tcx-market-events.jsonl
 ENV TCX_RELEASE_REGISTRY_FILE=/data/tcx-release-registry.jsonl
 ENV TCX_SHADOW_OMS_FILE=/data/tcx-shadow-oms.json
+ENV TCX_SHADOW_PORTFOLIO_FILE=/data/tcx-shadow-portfolio.json
 ENV TCX_VENUE_QUALITY_MEMORY_FILE=/data/tcx-venue-quality-memory.json
 ENV TCX_FORECAST_RUNTIME_FILE=/data/tcx-forecast-runtime.json
 ENV TCX_SHADOW_COMPETITION_FILE=/data/tcx-shadow-competition.json
