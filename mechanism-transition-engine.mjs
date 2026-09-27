@@ -65,7 +65,7 @@ export function mechanismChannels(vector){
   };
 }
 
-export function evidenceAudit(vector,channels){
+export function evidenceAudit(vector,channels,witnessReport=null){
   const modalities={
     ORDERBOOK:Number.isFinite(Number(vector?.spreadBps))&&Number.isFinite(Number(vector?.imbalance)),
     PRICE_STRUCTURE:['BULLISH','BEARISH','NEUTRAL'].includes(String(vector?.localTrend)),
@@ -86,15 +86,27 @@ export function evidenceAudit(vector,channels){
   if(finite(vector?.spreadBps)>4&&finite(vector?.pressureScore)<35) conflictFlags.push('SPREAD_VS_PRESSURE');
   if(finite(vector?.volumeRatio)<0.7&&channels.FORCED_FLOW>0.65) conflictFlags.push('FLOW_WITHOUT_VOLUME');
 
-  const contradictionScore=clamp(conflictFlags.length/4);
-  const sourceIndependence='SINGLE_PROVIDER_MULTI_MODALITY';
+  const baseContradiction=clamp(conflictFlags.length/4);
+  const witnessConflicts=(witnessReport?.contradictions||[])
+    .filter(x=>!String(x).startsWith('QUOTE_BASIS_RISK_'));
+  const witnessDenom=Math.max(2,Number(witnessReport?.externalWitnessCount||0)*2);
+  const witnessContradiction=clamp(witnessConflicts.length/witnessDenom);
+  const contradictionScore=witnessReport
+    ? clamp(baseContradiction*0.70+witnessContradiction*0.30)
+    : baseContradiction;
+
   return {
     modalities,
     modalityCoverage:coverage,
     contradictionScore,
-    conflictFlags,
-    sourceIndependence,
-    independentWitnessSatisfied:false
+    baseContradiction,
+    witnessContradiction,
+    conflictFlags:[...new Set([...conflictFlags,...witnessConflicts])],
+    sourceIndependence:witnessReport?.sourceIndependence||'SINGLE_PROVIDER_MULTI_MODALITY',
+    independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true,
+    witnessAgreement:finite(witnessReport?.agreementScore,0),
+    witnessCoverage:Number(witnessReport?.externalWitnessCount||0),
+    witnessCaveats:witnessReport?.caveats||[]
   };
 }
 
@@ -216,16 +228,20 @@ export function mechanismHypothesis(vector,channels,audit,lattice){
     gate,
     causalStatus:'NOT_IDENTIFIED',
     independentWitnessSatisfied:audit.independentWitnessSatisfied,
-    reason:gate==='HYPOTHESIS_SUPPORTED'
-      ? 'multiple modalities + historical transition coherence; still single-provider observational evidence'
-      : 'evidence, support, novelty, contradiction, or witness requirements not met'
+    reason:gate==='IDENTIFIABILITY_REVIEW'
+      ? 'multi-venue independent witness + historical transition coherence qualifies the hypothesis for identifiability review; causal status remains not identified'
+      : gate==='HYPOTHESIS_SUPPORTED'
+        ? (audit.sourceIndependence==='SINGLE_PROVIDER_MULTI_MODALITY'
+            ? 'multiple modalities + historical transition coherence; still single-provider observational evidence'
+            : 'multiple modalities + partial cross-venue support; identifiability requirements still incomplete')
+        : 'evidence, support, novelty, contradiction, or witness requirements not met'
   };
 }
 
-export function runMechanismTransitionEngine({analysis,dashboard,episodes,symbol,horizonMinutes=15}){
+export function runMechanismTransitionEngine({analysis,dashboard,episodes,symbol,horizonMinutes=15,witnessReport=null}){
   const vector=episodeVector({analysis,dashboard});
   const channels=mechanismChannels(vector);
-  const audit=evidenceAudit(vector,channels);
+  const audit=evidenceAudit(vector,channels,witnessReport);
   const lattice=queryTransitionLattice(vector,episodes,{symbol,horizonMinutes});
   const hypothesis=mechanismHypothesis(vector,channels,audit,lattice);
   return {
@@ -235,6 +251,7 @@ export function runMechanismTransitionEngine({analysis,dashboard,episodes,symbol
     audit,
     lattice,
     hypothesis,
+    witnessReport,
     action:'ABSTAIN',
     execution:'SHADOW_ONLY'
   };
