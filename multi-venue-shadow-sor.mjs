@@ -195,7 +195,14 @@ export function buildShadowSmartRoute(intent,venueBooks,opts={}){
 
   const normalized={side,notionalQuote};
   const route=simulateRouteCore(normalized,venueBooks,opts);
-  const singles=venueBooks.map(book=>({...simulateRouteCore(normalized,[book],opts),venue:book.venue}));
+  const singles=venueBooks.map(book=>({
+    ...simulateRouteCore(normalized,[book],opts),
+    venue:book.venue,
+    quote:book.quote,
+    source:book.source,
+    fetchLatencyMs:book.fetchLatencyMs,
+    feeBps:book.feeBps
+  }));
   const bestSingle=chooseBestSingle(side,singles);
 
   let improvementQuote=null,improvementBps=null;
@@ -209,6 +216,21 @@ export function buildShadowSmartRoute(intent,venueBooks,opts={}){
     version:SHADOW_SOR_VERSION,execution:'SHADOW_ONLY',canExecuteLive:false,
     routeQuote:String(opts.routeQuote||'USDT').toUpperCase(),createdAt:Number(opts.asOf||Date.now()),
     intent:normalized,route,
+    singleVenueCounterfactuals:singles.map(x=>({
+      venue:x.venue,
+      source:x.source,
+      quote:x.quote,
+      fillRatio:x.fillRatio,
+      avgFillPrice:x.avgFillPrice,
+      netCashQuote:x.netCashQuote,
+      feesQuote:x.feesQuote,
+      slippageBps:x.slippageBps,
+      allInBps:x.allInBps,
+      depthExhausted:x.depthExhausted,
+      fetchLatencyMs:x.fetchLatencyMs,
+      feeBps:x.feeBps,
+      exclusionReasons:(x.excluded||[]).flatMap(e=>e.reasons||[])
+    })),
     bestSingleVenue:bestSingle?{
       venue:bestSingle.venue,fillRatio:bestSingle.fillRatio,avgFillPrice:bestSingle.avgFillPrice,
       netCashQuote:bestSingle.netCashQuote,feesQuote:bestSingle.feesQuote
