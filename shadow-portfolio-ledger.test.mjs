@@ -182,3 +182,22 @@ test('position preserves asset class and strategy lane',()=>{
   assert.equal(p.assetClass,'MEME');
   assert.equal(p.strategyLane,'BTCUSDT:1m:BUY');
 });
+
+
+test('Berlin day statistics use local midnight across UTC offset',()=>{
+  const base=createEmptyShadowPortfolioLedger({initialEquityQuote:1000});
+  const mk=(id,closedAt,pnl)=>({
+    ...shadowPositionFromEntryOrder(entry({id,createdAt:closedAt-60_000,updatedAt:closedAt-60_000}),{openedAt:closedAt-60_000}),
+    status:'CLOSED',closedAt,realizedNetPnlQuote:pnl,realizedReturnPct:pnl/100,
+    exitPrice:100+pnl,exitQuote:100+pnl,exitFeesQuote:0
+  });
+  const asOf=Date.UTC(2026,8,27,12,0,0);
+  const l={...base,positions:[
+    mk('before-local-midnight',Date.UTC(2026,8,26,21,30,0),1),
+    mk('after-local-midnight',Date.UTC(2026,8,26,22,30,0),2)
+  ]};
+  const day=shadowPortfolioPeriodStats(l,{period:'DAY',asOf,timeZone:'Europe/Berlin'});
+  assert.equal(day.trades,1);
+  assert.equal(day.realizedPnlQuote,2);
+  assert.equal(day.timeZone,'Europe/Berlin');
+});
