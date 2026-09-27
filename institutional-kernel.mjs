@@ -120,11 +120,12 @@ export function auditEngineResult(result){
   return {ok:errors.length===0,errors,warnings};
 }
 
-export function determineSafetyState({marketAudit,witnessAudit,engineAudit,ledgerHealthy=true,fabricHealthy=true}){
+export function determineSafetyState({marketAudit,witnessAudit,engineAudit,ledgerHealthy=true,fabricHealthy=true,registryHealthy=true}){
   const hard=[];
   const soft=[];
   if(!ledgerHealthy) hard.push('AUDIT_LEDGER_UNHEALTHY');
   if(!fabricHealthy) hard.push('MARKET_DATA_FABRIC_UNHEALTHY');
+  if(!registryHealthy) hard.push('RELEASE_REGISTRY_UNHEALTHY');
   if(!marketAudit?.ok) hard.push(...(marketAudit?.errors||['PRIMARY_DATA_INVALID']));
   if(!engineAudit?.ok) hard.push(...(engineAudit?.errors||['ENGINE_INVALID']));
   soft.push(...(marketAudit?.warnings||[]),...(witnessAudit?.warnings||[]),...(engineAudit?.warnings||[]));
