@@ -3234,6 +3234,17 @@ const server = http.createServer((req,res) => {
         recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
         capabilities:SHADOW_OMS_CAPABILITIES
       },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -3324,6 +3335,17 @@ console.log(JSON.stringify({
     recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
     watchMs:shadowWatchMs,
     capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
   },
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
