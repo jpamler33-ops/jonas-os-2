@@ -105,6 +105,26 @@ export const DEFAULT_RESEARCH_FEATURES=Object.freeze([
     id:'SOL_PRIORITY_FEE',
     label:'SOL Priority Fee',
     featureIds:Object.freeze(['research.onchain.sol.priorityFeeMedian'])
+  }),
+  Object.freeze({
+    id:'ENTITY_FLOW_NET_5M',
+    label:'Verified Entity Net Flow 5m',
+    featureIds:Object.freeze(['research.entityflow.eth.netExternal5m'])
+  }),
+  Object.freeze({
+    id:'ENTITY_FLOW_GROSS_5M',
+    label:'Verified Entity Gross Flow 5m',
+    featureIds:Object.freeze(['research.entityflow.eth.grossExternal5m'])
+  }),
+  Object.freeze({
+    id:'ENTITY_FLOW_INFLOW_SHARE_5M',
+    label:'Verified Entity Inflow Share 5m',
+    featureIds:Object.freeze(['research.entityflow.eth.inflowShare5m'])
+  }),
+  Object.freeze({
+    id:'ENTITY_FLOW_ANOMALY_5M',
+    label:'Verified Entity Flow Anomaly 5m',
+    featureIds:Object.freeze(['research.entityflow.eth.grossAnomaly5m'])
   })
 ]);
 

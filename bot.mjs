@@ -41,7 +41,8 @@ import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DE
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
 import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
-import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, registryToWalletCohorts, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
+import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
+import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -192,16 +193,28 @@ if(entityRegistryRefreshEnabled){
 }else if(!entityRegistry){
   entityRegistryRefreshError='LIVE_REFRESH_DISABLED_BY_CONFIG';
 }
-const registryWalletCohorts=registryToWalletCohorts(entityRegistry||{entries:[]},{
-  entityIds:['OKX'],
-  chains:['ETHEREUM'],
-  maxAddressesPerCohort:20000
+const entityFlowAddressIndex=buildEntityAddressIndex(entityRegistry||{entries:[]},{
+  chain:'ETHEREUM',
+  allowedEntityTypes:['EXCHANGE'],
+  requireOfficialSource:true
+});
+const entityFlowEntityIds=[...entityFlowAddressIndex.entityMeta.keys()];
+const entityFlowMemoryFile=process.env.TCX_ENTITY_FLOW_MEMORY_FILE||'/data/tcx-entity-flow-memory.json';
+let entityFlowMemory=await loadEntityFlowMemory(entityFlowMemoryFile);
+const entityFlowResearchProvider=createEthereumEntityFlowProvider({
+  fetchImpl:globalThis.fetch,
+  rpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
+  addressIndex:entityFlowAddressIndex,
+  entityIds:entityFlowEntityIds,
+  maxBlocks:96,
+  batchSize:6,
+  timeoutMs:15000,
+  cacheMs:45000
 });
 const manuallyConfiguredWalletCohorts=parseWalletCohorts(process.env.TCX_WALLET_RESEARCH_COHORTS_JSON||'');
-const walletCohorts=[...registryWalletCohorts,...manuallyConfiguredWalletCohorts];
 const walletCohortResearchProvider=createWalletCohortPublicProvider({
   fetchImpl:globalThis.fetch,
-  cohorts:walletCohorts,
+  cohorts:manuallyConfiguredWalletCohorts,
   ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
   solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
 });
@@ -1733,8 +1746,9 @@ async function showHomeSection(chatId,messageId,section) {
       `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
       `Liquidation-Stream: ${liquidationResearchStream.health().connected?'🟢 verbunden':'🟡 verbindet'} · ${LIQUIDATION_PUBLIC_STREAM_VERSION}`,
       `On-Chain-Research: 🟢 BTC/ETH/SOL · ${ONCHAIN_RESEARCH_PROVIDER_VERSION}`,
-      `Wallet-Cohorts: ${walletCohortResearchProvider.configuredCohorts>0?'🟢 '+walletCohortResearchProvider.configuredCohorts+' konfiguriert':'⚪ keine konfiguriert'}`,
+      `Wallet-Cohorts: ${walletCohortResearchProvider.configuredCohorts>0?'🟢 '+walletCohortResearchProvider.configuredCohorts+' manuell':'⚪ keine manuellen'}`,
       `Entity-Registry: ${entityRegistrySummary(entityRegistry||{}).entries} Adressen · ${entityRegistryRefreshError?'🟡 Cache':'🟢 offizieller PoR'}`,
+      `Entity-Flow: ${entityFlowAddressIndex.addressCount>0?'🟢 '+entityFlowAddressIndex.addressCount+' ETH-Adressen':'⚪ keine Adressen'} · finalisiert · Native ETH`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -3066,6 +3080,13 @@ async function showIntelligence(chatId,symbol){
   try{
     onchain=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
   }catch{}
+  let entityFlow=null;
+  if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
+    try{
+      const rawEntityFlow=await entityFlowResearchProvider.fetchSnapshot();
+      entityFlow=scoreEntityFlowSnapshot(rawEntityFlow,entityFlowMemory,{minBaselineSamples:20});
+    }catch{}
+  }
   let walletCohort=null;
   if(walletCohortResearchProvider.configuredCohorts>0){
     try{walletCohort=await walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:Date.now()});}catch{}
@@ -3115,17 +3136,23 @@ async function showIntelligence(chatId,symbol){
       `• Priority Fee Median: ${Number.isFinite(onchain.metrics?.priorityFeeMedian)?onchain.metrics.priorityFeeMedian.toFixed(0):'—'}`
     ]:[]),
     'Nur öffentlich beobachtbare Chain-Daten; kein Identitäts-Matching.','',
+    'ENTITY-FLOW-RESEARCH',
+    `🏦 Verifizierter ETH-Adress-Sample: ${entityFlowAddressIndex.addressCount} Adressen · ${entityFlowAddressIndex.entityCount} Entity`,
+    `• Finalität: ${entityFlow?.ok?'finalisierte Blöcke':'—'} · Native ETH only`,
+    ...(entityFlow?.entities?.OKX?.['5m']?[
+      `• OKX extern 5m: rein ${entityFlow.entities.OKX['5m'].inflowEth.toFixed(2)} ETH · raus ${entityFlow.entities.OKX['5m'].outflowEth.toFixed(2)} ETH`,
+      `• Netto extern: ${entityFlow.entities.OKX['5m'].netExternalEth>=0?'+':''}${entityFlow.entities.OKX['5m'].netExternalEth.toFixed(2)} ETH`,
+      `• Bekannte interne Transfers ausgeschlossen: ${entityFlow.entities.OKX['5m'].internalEth.toFixed(2)} ETH`,
+      `• Bekannte Entity↔Entity-Transfers ausgeschlossen: ${entityFlow.entities.OKX['5m'].interEntityEth.toFixed(2)} ETH`,
+      `• Baseline: n=${entityFlow.entities.OKX['5m'].baselineSamples} · robuste Anomalie ${Number.isFinite(entityFlow.entities.OKX['5m'].grossExternalRobustZ)?entityFlow.entities.OKX['5m'].grossExternalRobustZ.toFixed(2):'—'}`
+    ]:['• Für diesen Markt kein Entity-Flow-Snapshot verfügbar.']),
+    'Wichtig: Das Registry-Set ist ein begrenzter verifizierter Adress-Sample, keine vollständige Exchange-Bilanz.','',
     'WALLET-COHORT-RESEARCH',
-    `👛 Öffentliche Kohorten: ${walletCohortResearchProvider.configuredCohorts}`,
-    `• Verifizierte Entity-Adressen: ${entityRegistrySummary(entityRegistry||{}).entries}`,
-    `• Quelle: ${entityRegistry?.sources?.[0]?.publisher||'—'} PoR · Report ${entityRegistry?.sources?.[0]?.reportId||'—'}`,
+    `👛 Manuell konfigurierte öffentliche Kohorten: ${walletCohortResearchProvider.configuredCohorts}`,
     walletCohortResearchProvider.configuredCohorts===0
-      ?'• Keine verwertbare Kohorte aktiv.'
+      ?'• Keine zusätzlichen Wallet-Kohorten konfiguriert.'
       :`• Aktivität 5m: ${walletCohort?.ok?walletCohort.metrics.activity5m:'—'} · 15m: ${walletCohort?.ok?walletCohort.metrics.activity15m:'—'}`,
-    walletCohort?.ok
-      ?`• Native Netto-Flow: ${Number.isFinite(walletCohort.metrics.nativeNetFlow)?walletCohort.metrics.nativeNetFlow.toFixed(4):'—'} ETH`
-      :'• Native Netto-Flow: —',
-    'Nur öffentlich belegte Entity-Adressen; keine Zuordnung zu natürlichen Personen.','',
+    'Keine Zuordnung von Wallets zu natürlichen Personen.','',
     'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
     '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
@@ -3158,6 +3185,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let derivativesResearchSnapshot=null;
   let liquidationResearchSnapshot=null;
   let onchainResearchSnapshot=null;
+  let entityFlowResearchSnapshot=null;
   let walletResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
@@ -3180,6 +3208,16 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       onchainResearchSnapshot=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
     }catch(err){
       recordError(observability,{scope:'onchain_research',message:err instanceof Error?err.message:String(err)});
+    }
+    if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
+      try{
+        const rawEntityFlow=await entityFlowResearchProvider.fetchSnapshot();
+        entityFlowResearchSnapshot=scoreEntityFlowSnapshot(rawEntityFlow,entityFlowMemory,{minBaselineSamples:20});
+        observeEntityFlowMemory(entityFlowMemory,rawEntityFlow,{observedAt:Date.now()});
+        await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory);
+      }catch(err){
+        recordError(observability,{scope:'entity_flow_research',message:err instanceof Error?err.message:String(err)});
+      }
     }
     if(walletCohortResearchProvider.configuredCohorts>0){
       try{
@@ -3216,9 +3254,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
   const onchainExtraFeatures=onchainSnapshotToExtraFeatures(onchainResearchSnapshot)
     .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
+  const entityFlowExtraFeatures=entityFlowSnapshotToExtraFeatures(entityFlowResearchSnapshot,{entityId:'OKX'})
+    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
   const walletExtraFeatures=walletCohortSnapshotToExtraFeatures(walletResearchSnapshot)
     .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures,...onchainExtraFeatures,...walletExtraFeatures];
+  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures,...onchainExtraFeatures,...entityFlowExtraFeatures,...walletExtraFeatures];
   const runtimeQuality=deriveForecastRuntimeQuality({
     safety,
     marketAudit,
@@ -3424,6 +3464,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       liquidationReady5m:liquidationResearchSnapshot?.ready5m===true,
       onchainFeatureCount:onchainExtraFeatures.length,
       onchainChain:onchainResearchSnapshot?.chain||null,
+      entityFlowFeatureCount:entityFlowExtraFeatures.length,
+      entityFlowNet5m:Number(entityFlowResearchSnapshot?.entities?.OKX?.['5m']?.netExternalEth??NaN),
+      entityFlowBaselineSamples:Number(entityFlowResearchSnapshot?.entities?.OKX?.['5m']?.baselineSamples||0),
       walletFeatureCount:walletExtraFeatures.length,
       walletCohorts:walletCohortResearchProvider.configuredCohorts
     };
@@ -4165,6 +4208,9 @@ async function autoLearnForecastWatcher() {
               liquidationReady5m:result.liquidationReady5m===true,
               onchainFeatures:result.onchainFeatureCount||0,
               onchainChain:result.onchainChain||null,
+              entityFlowFeatures:result.entityFlowFeatureCount||0,
+              entityFlowNet5m:Number.isFinite(result.entityFlowNet5m)?result.entityFlowNet5m:null,
+              entityFlowBaselineSamples:result.entityFlowBaselineSamples||0,
               walletFeatures:result.walletFeatureCount||0,
               walletCohorts:result.walletCohorts||0,
               duplicate:result.duplicate===true
@@ -4713,8 +4759,9 @@ console.log(JSON.stringify({
   featureResearch:{version:FORECAST_FEATURE_RESEARCH_VERSION,file:featureResearchFile,status:featureResearchState?.status||'UNINITIALIZED',generationNumber:featureResearchState?.generationNumber||0,provider:DERIVATIVES_PUBLIC_PROVIDER_VERSION},
   liquidationResearch:{version:LIQUIDATION_PUBLIC_STREAM_VERSION,health:liquidationResearchStream.health()},
   onchainResearch:{version:ONCHAIN_RESEARCH_PROVIDER_VERSION,assets:['BTCUSDT','ETHUSDT','SOLUSDT']},
-  walletCohortResearch:{version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:walletCohortResearchProvider.configuredCohorts},
+  walletCohortResearch:{version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:walletCohortResearchProvider.configuredCohorts,mode:'MANUAL_PUBLIC_COHORTS_ONLY'},
   entityRegistry:{version:VERIFIED_ENTITY_REGISTRY_VERSION,file:entityRegistryFile,summary:entityRegistrySummary(entityRegistry||{}),refreshError:entityRegistryRefreshError,source:okxPorSource},
+  entityFlowResearch:{version:ENTITY_FLOW_ENGINE_VERSION,file:entityFlowMemoryFile,addressCount:entityFlowAddressIndex.addressCount,entityCount:entityFlowAddressIndex.entityCount,memory:entityFlowMemorySummary(entityFlowMemory),finality:'FINALIZED',assetScope:'NATIVE_ETH',coverage:'BOUNDED_VERIFIED_ADDRESS_SAMPLE'},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile

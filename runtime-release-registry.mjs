@@ -100,7 +100,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'expansion-runtime/liquidation-public-stream.mjs',
   'expansion-runtime/onchain-research-provider.mjs',
   'expansion-runtime/wallet-cohort-public-provider.mjs',
-  'expansion-runtime/verified-entity-registry.mjs'
+  'expansion-runtime/verified-entity-registry.mjs',
+  'expansion-runtime/entity-flow-engine.mjs'
 ];
 
 export function institutionalRuntimeFiles(){

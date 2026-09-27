@@ -402,8 +402,9 @@ export function createEthereumEntityFlowProvider({
       entities:entitiesOut,
       restrictions:{
         finalizedBlocksOnly:true,
-        internalTransfersExcludedFromExternalNet:true,
-        interEntityTransfersExcludedFromExternalNet:true,
+        knownInternalTransfersExcludedFromExternalNet:true,
+        knownInterEntityTransfersExcludedFromExternalNet:true,
+        registryCoverage:'BOUNDED_VERIFIED_ADDRESS_SAMPLE',
         nativeAssetOnly:true,
         researchOnly:true,
         mayExecute:false,
@@ -443,7 +444,8 @@ export function observeEntityFlowMemory(memory,snapshot,{observedAt=Date.now()}=
     for(const [windowId,metrics] of Object.entries(windows||{})){
       additions.push({
         observationId:sha256({
-          fingerprint:snapshot.fingerprint,
+          chain:String(snapshot.chain||'ETHEREUM'),
+          finalizedBlockNumber:Number(snapshot.finalizedBlockNumber),
           entityId,
           windowId
         }),
