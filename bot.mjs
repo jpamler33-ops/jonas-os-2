@@ -4,6 +4,7 @@ import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimefra
 import { renderCandlestickPng } from './chart-renderer.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
+import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -236,6 +237,9 @@ function marketKeyboard(chatId, symbol, live) {
       { text:'🧬 Memory', callback_data:`memory:${symbol}` }
     ],
     [
+      { text:'🧪 MTL Engine', callback_data:`engine:${symbol}` }
+    ],
+    [
       { text:isFav?'★ Favorit':'☆ Favorit', callback_data:`fav:${symbol}` },
       { text:'🔔 Alarm', callback_data:`alerthelp:${symbol}` },
       { text:'🧠 TCX', callback_data:`tcx:${symbol}` }
@@ -287,6 +291,7 @@ function chartKeyboard(symbol, interval) {
     [
       { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
       { text:"🧬 Memory", callback_data:`memory:${symbol}` },
+      { text:"🧪 MTL", callback_data:`engine:${symbol}` },
       { text:"📊 Markt", callback_data:`refresh:${symbol}` }
     ]
   ]};
@@ -301,6 +306,7 @@ function structureKeyboard(symbol) {
     [
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
       { text:"🧬 Memory", callback_data:`memory:${symbol}` },
+      { text:"🧪 MTL", callback_data:`engine:${symbol}` },
       { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
     ]
   ]};
@@ -310,7 +316,8 @@ function memoryKeyboard(symbol) {
   return { inline_keyboard:[
     [
       { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
-      { text:"🧭 Struktur", callback_data:`structure:${symbol}` }
+      { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
+      { text:"🧪 MTL", callback_data:`engine:${symbol}` }
     ],
     [
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
@@ -403,6 +410,7 @@ function helpText() {
     '/chart BTC 5m – Candlestick-Chart',
     '/structure BTC – 4H/1H/15m/5m Struktur',
     '/memory BTC – ähnliche historische TCX-Episoden',
+    '/engine BTC – Mechanism Transition Lattice',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -693,6 +701,65 @@ async function showStructure(chatId, symbol) {
   });
 }
 
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function showEngine(chatId,symbol){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"])) await persistEpisodeMemory("engine-maturity");
+
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180
+  });
+
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
 function parseAction(data='') {
   if (data === 'back') return { kind:'BACK' };
   if (data === 'favorites') return { kind:'FAVORITES' };
@@ -707,6 +774,7 @@ function parseAction(data='') {
   if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
   return { kind:'UNKNOWN' };
 }
@@ -775,6 +843,20 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/engine") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    if(!symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /engine BTC"});
+      return true;
+    }
+    try { await showEngine(chatId,symbol); }
+    catch(err){
+      console.error("engine command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"MTL Engine gerade nicht verfügbar."});
+    }
+    return true;
+  }
 
   if (command === "/memory") {
     const symbol=normalizeSymbol(parts[1]||"");
@@ -912,6 +994,12 @@ async function handle(update) {
       return;
     }
 
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
 
     if (a.kind === "MEMORY") {
       await showMemory(chatId,a.symbol);
