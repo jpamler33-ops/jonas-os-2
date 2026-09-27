@@ -18,6 +18,7 @@ import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_
 import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
 import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
 import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecycle, compactValidity, RESEARCH_LIFECYCLE_VERSION } from './research-lifecycle.mjs';
+import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market-data-provider.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 
@@ -83,6 +84,32 @@ const witnessCache = new Map();
 const radarCache = new Map();
 const researchAlertContextCache = new Map();
 const observability = createObservability({sampleLimit:500});
+const marketDataProvider=createMarketDataProvider({
+  binanceBases,
+  okxBase,
+  krakenBase,
+  normalizeExecutionBook,
+  normalizeVenueBook,
+  okxInstrument,
+  krakenPair,
+  sorFees:{
+    BINANCE:sorBinanceFeeBps,
+    OKX:sorOkxFeeBps,
+    KRAKEN:sorKrakenFeeBps
+  },
+  onProviderCall:event=>recordProviderCall(observability,event),
+  onError:event=>recordError(observability,event),
+  onOperation:event=>recordOperation(observability,event)
+});
+const {
+  fetchJson,
+  fetchMarketParts,
+  fetchKlines,
+  fetchExecutionBook,
+  fetchSorVenueBooks,
+  fetchLatestAggTradeId,
+  fetchAggTradesSince
+}=marketDataProvider;
 const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
 const loadedState = await loadPersistentState(stateFile);
 const favorites = loadedState.favorites;
@@ -175,6 +202,7 @@ try {
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
       researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+      marketDataProvider:MARKET_DATA_PROVIDER_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION
     }
@@ -707,240 +735,6 @@ function alertCurrentStateLines(ctx) {
   ];
 }
 
-function providerNameFromUrl(url) {
-  try {
-    const host=new URL(url).host.toLowerCase();
-    if(host.includes('binance')) return 'BINANCE';
-    if(host.includes('okx')) return 'OKX';
-    if(host.includes('kraken')) return 'KRAKEN';
-    return host.toUpperCase();
-  } catch { return 'UNKNOWN'; }
-}
-async function fetchJson(url) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
-  const started=Date.now();
-  const provider=providerNameFromUrl(url);
-  let status=null;
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { 'user-agent':'TCX-v2-SHADOW_ONLY', accept:'application/json' }
-    });
-    status=res.status;
-    const body = await res.text();
-    if (!res.ok) {
-      const detail = body.slice(0,180).replace(/\s+/g,' ');
-      throw new Error(`HTTP ${res.status} ${new URL(url).host}: ${detail}`);
-    }
-    let parsed;
-    try { parsed=JSON.parse(body); }
-    catch { throw new Error(`Invalid JSON from ${new URL(url).host}`); }
-    recordProviderCall(observability,{provider,ok:true,latencyMs:Date.now()-started,status});
-    return parsed;
-  } catch(err) {
-    const message=err instanceof Error?err.message:String(err);
-    recordProviderCall(observability,{provider,ok:false,latencyMs:Date.now()-started,status,error:message});
-    recordError(observability,{scope:`provider.${provider}`,message});
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function fetchMarketParts(symbol) {
-  const encoded = encodeURIComponent(symbol);
-  const errors = [];
-  for (const base of binanceBases) {
-    try {
-      const [ticker, book, depth] = await Promise.all([
-        fetchJson(`${base}/api/v3/ticker/24hr?symbol=${encoded}`),
-        fetchJson(`${base}/api/v3/ticker/bookTicker?symbol=${encoded}`),
-        fetchJson(`${base}/api/v3/depth?symbol=${encoded}&limit=20`)
-      ]);
-      return { ticker, book, depth, base };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`${base}: ${msg}`);
-      console.warn('market-data endpoint failed', base, msg);
-    }
-  }
-  throw new Error(`All Binance market-data endpoints failed: ${errors.join(' | ')}`);
-}
-
-async function fetchKlines(symbol, interval, limit=30) {
-  const encoded = encodeURIComponent(symbol);
-  const allowed = new Set(['1m','5m','15m','1h','4h']);
-  if (!allowed.has(interval)) throw new Error('Unsupported interval');
-  const errors = [];
-  for (const base of binanceBases) {
-    try {
-      const rows = await fetchJson(`${base}/api/v3/klines?symbol=${encoded}&interval=${interval}&limit=${limit}`);
-      if (!Array.isArray(rows) || rows.length < 2) throw new Error('Insufficient kline data');
-      return { rows, base };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`${base}: ${msg}`);
-    }
-  }
-  throw new Error(`Klines unavailable: ${errors.join(' | ')}`);
-}
-
-async function fetchExecutionBook(symbol) {
-  const encoded=encodeURIComponent(symbol);
-  const errors=[];
-  for(const base of binanceBases){
-    try {
-      const depth=await fetchJson(`${base}/api/v3/depth?symbol=${encoded}&limit=100`);
-      const availableAt=Date.now();
-      return normalizeExecutionBook({
-        symbol,
-        bids:depth.bids||[],
-        asks:depth.asks||[],
-        availableAt,
-        source:'BINANCE_PUBLIC_REST_DEPTH100',
-        provenance:`host=${new URL(base).host}; lastUpdateId=${depth.lastUpdateId??'UNKNOWN'}`
-      });
-    } catch(err) {
-      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
-    }
-  }
-  throw new Error(`Execution book unavailable: ${errors.join(' | ')}`);
-}
-
-async function fetchBinanceSorBook(symbol) {
-  const encoded=encodeURIComponent(symbol);
-  const errors=[];
-  for(const base of binanceBases){
-    const started=Date.now();
-    try {
-      const depth=await fetchJson(`${base}/api/v3/depth?symbol=${encoded}&limit=100`);
-      const availableAt=Date.now();
-      return normalizeVenueBook({
-        venue:'BINANCE',
-        source:'BINANCE_PUBLIC_REST_DEPTH100',
-        symbol,quote:'USDT',
-        bids:depth.bids||[],asks:depth.asks||[],
-        availableAt,fetchLatencyMs:availableAt-started,
-        feeBps:sorBinanceFeeBps,
-        provenance:`host=${new URL(base).host}; lastUpdateId=${depth.lastUpdateId??'UNKNOWN'}`
-      });
-    } catch(err){
-      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
-    }
-  }
-  throw new Error(`Binance SOR book unavailable: ${errors.join(' | ')}`);
-}
-
-async function fetchOkxSorBook(symbol) {
-  const instId=okxInstrument(symbol);
-  if(!instId) throw new Error('OKX instrument unavailable');
-  const started=Date.now();
-  const payload=await fetchJson(`${okxBase}/api/v5/market/books?instId=${encodeURIComponent(instId)}&sz=100`);
-  if(String(payload?.code)!=='0') throw new Error(`OKX error ${payload?.code||'UNKNOWN'} ${payload?.msg||''}`);
-  const row=payload?.data?.[0];
-  if(!row) throw new Error('OKX missing book');
-  const availableAt=Date.now();
-  return normalizeVenueBook({
-    venue:'OKX',source:'OKX_PUBLIC_BOOKS100',symbol,quote:'USDT',
-    bids:row.bids||[],asks:row.asks||[],
-    availableAt,fetchLatencyMs:availableAt-started,
-    feeBps:sorOkxFeeBps,
-    provenance:`OKX /api/v5/market/books instId=${instId}; exchangeTs=${row.ts||'UNKNOWN'}`
-  });
-}
-
-async function fetchKrakenSorBook(symbol) {
-  const pair=krakenPair(symbol);
-  if(!pair) throw new Error('Kraken pair unavailable');
-  const started=Date.now();
-  const payload=await fetchJson(`${krakenBase}/0/public/Depth?pair=${encodeURIComponent(pair)}&count=100`);
-  if(Array.isArray(payload?.error)&&payload.error.length) throw new Error(`Kraken error ${payload.error.join(',')}`);
-  const result=payload?.result;
-  const key=result&&Object.keys(result)[0];
-  const row=key?result[key]:null;
-  if(!row) throw new Error('Kraken missing book');
-  const availableAt=Date.now();
-  return normalizeVenueBook({
-    venue:'KRAKEN',source:'KRAKEN_PUBLIC_DEPTH100',symbol,quote:'USD',
-    bids:row.bids||[],asks:row.asks||[],
-    availableAt,fetchLatencyMs:availableAt-started,
-    feeBps:sorKrakenFeeBps,
-    provenance:`Kraken /0/public/Depth pair=${key||pair}`
-  });
-}
-
-async function fetchSorVenueBooks(symbol) {
-  const started=Date.now();
-  const results=await Promise.allSettled([
-    fetchBinanceSorBook(symbol),
-    fetchOkxSorBook(symbol),
-    fetchKrakenSorBook(symbol)
-  ]);
-  const books=[];
-  const errors=[];
-  const names=['BINANCE','OKX','KRAKEN'];
-  results.forEach((r,i)=>{
-    if(r.status==='fulfilled') books.push(r.value);
-    else errors.push({venue:names[i],error:r.reason instanceof Error?r.reason.message:String(r.reason)});
-  });
-  recordOperation(observability,{
-    name:'shadow_sor.books',
-    ok:books.length>0,
-    latencyMs:Date.now()-started,
-    error:books.length?null:errors.map(x=>x.venue+':'+x.error).join(' | ')
-  });
-  return {books,errors,capturedAt:Date.now()};
-}
-
-async function fetchLatestAggTradeId(symbol) {
-  const encoded=encodeURIComponent(symbol);
-  const errors=[];
-  for(const base of binanceBases){
-    try {
-      const rows=await fetchJson(`${base}/api/v3/aggTrades?symbol=${encoded}&limit=1`);
-      const row=Array.isArray(rows)?rows.at(-1):null;
-      const id=Number(row?.a);
-      if(!Number.isFinite(id)) throw new Error('Missing aggregate trade id');
-      return id;
-    } catch(err) {
-      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
-    }
-  }
-  throw new Error(`Latest aggTrade unavailable: ${errors.join(' | ')}`);
-}
-
-async function fetchAggTradesSince(symbol,fromId,{maxPages=3}={}) {
-  const start=Number(fromId);
-  if(!Number.isFinite(start)||start<0) throw new Error('Invalid aggTrade fromId');
-  const encoded=encodeURIComponent(symbol);
-  const errors=[];
-  for(const base of binanceBases){
-    try {
-      let next=start;
-      const out=[];
-      let truncated=false;
-      for(let page=0;page<maxPages;page++){
-        const rows=await fetchJson(`${base}/api/v3/aggTrades?symbol=${encoded}&fromId=${next}&limit=1000`);
-        if(!Array.isArray(rows)) throw new Error('Invalid aggTrades payload');
-        for(const r of rows){
-          const id=Number(r.a),price=Number(r.p),qty=Number(r.q),time=Number(r.T);
-          if(!Number.isFinite(id)||!Number.isFinite(price)||!Number.isFinite(qty)) continue;
-          out.push({id,price,qty,time,buyerMaker:r.m===true});
-        }
-        if(rows.length<1000){ truncated=false; break; }
-        const last=Number(rows.at(-1)?.a);
-        if(!Number.isFinite(last)||last<next) break;
-        next=last+1;
-        truncated=page===maxPages-1;
-      }
-      return {trades:out,truncated,base};
-    } catch(err) {
-      errors.push(`${base}: ${err instanceof Error?err.message:String(err)}`);
-    }
-  }
-  throw new Error(`aggTrades unavailable: ${errors.join(' | ')}`);
-}
 
 function shadowAuditPayload(event,order,extra={}) {
   return {
@@ -3809,6 +3603,12 @@ const server = http.createServer((req,res) => {
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
       },
       episodeMemory:{
         file:episodeFile,
