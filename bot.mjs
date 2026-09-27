@@ -1098,6 +1098,11 @@ async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,
 
 async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={}){
   const now=Date.now();
+  const preReconcile=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+  if(preReconcile.changed){
+    shadowPortfolioLedger=preReconcile.ledger;
+    await persistShadowPortfolio('pre-auto-trade-reconcile');
+  }
   if(!autoShadowTradingEnabled){
     return {placed:false,eligible:false,reason:'AUTO_SHADOW_DISABLED',execution:'SHADOW_ONLY'};
   }
