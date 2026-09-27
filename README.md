@@ -1162,3 +1162,76 @@ Execution: SHADOW_ONLY
 Every manually generated Execution Research Lab report can be appended to the Institutional Audit Ledger.
 
 `execution-research-lab.mjs` is included in the deterministic Runtime Release hash.
+
+
+## TCX Runtime Architecture v2
+
+The Telegram runtime is no longer implemented as one command / exchange-I/O monolith.
+
+### Market Data Provider Architecture
+
+`market-data-provider.mjs` owns external exchange I/O:
+
+- Binance REST fallback sequence
+- market ticker / book / depth requests
+- closed-kline retrieval
+- Shadow OMS execution books
+- Binance / OKX / Kraken Shadow SOR books
+- aggregate-trade cursor and pagination
+- provider-level timeout, provenance, error and observability hooks
+- partial multi-venue failure isolation
+
+The provider uses dependency injection for fetch, normalizers, venue symbol mappings, clocks and telemetry. Unit tests therefore verify fallback and degraded-venue behavior without calling live exchanges.
+
+`bot.mjs` retains research orchestration and consumes the provider through a narrow method surface.
+
+### Telegram Command Router Architecture
+
+Telegram commands now flow through:
+
+```text
+Telegram update
+    ↓
+telegram-command-router.mjs
+    ↓
+┌──────────────────────────────────┐
+│ telegram-read-command-handlers   │
+│ telegram-mutation-command-handlers│
+└──────────────────────────────────┘
+    ↓
+domain services / views / persistence
+```
+
+`telegram-command-router.mjs` owns command parsing, bot-suffix normalization, permission gating, dispatch and error isolation.
+
+`telegram-read-command-handlers.mjs` owns UI / research commands such as market views, charts, observability, Execution Research Lab, Venue Quality diagnostics, release / fabric / replay / audit, witness, engine, memory, evidence, history and validity.
+
+`telegram-mutation-command-handlers.mjs` owns Shadow OMS, Shadow SOR and alert mutations. Mutable bot state is accessed through explicit getters / setters so handlers do not keep stale references after persistence reloads or array reassignment.
+
+The old sequential `handleCommandLegacy` chain has been removed.
+
+### Research Lifecycle Services
+
+Research lifecycle logic remains separated into:
+
+- `state-validity.mjs` — state fingerprints, drift, stale / expiry / hard invalidation
+- `research-lifecycle.mjs` — evidence snapshot lifecycle and state-based deduplication
+- `evidence-history.mjs` — persistent evidence history
+
+### Deployment identity
+
+All runtime modules above are included in:
+
+- `npm run check`
+- Railway Docker image
+- deterministic runtime release hashing
+
+This prevents CI/source success from diverging from the actual deployed module set.
+
+Hard execution boundary remains:
+
+```text
+LIVE_EXECUTION = DISABLED
+canExecute = false
+Execution = SHADOW_ONLY
+```
