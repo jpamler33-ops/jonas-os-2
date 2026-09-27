@@ -20,6 +20,7 @@ function deps(overrides={}){
     showOms:async(...x)=>calls.push(["oms",...x]),
     showShadowPortfolio:async(...x)=>calls.push(["portfolio",...x]),
     showShadowTradeStats:async(...x)=>calls.push(["stats",...x]),
+    showShadowCapitalAcademy:async(...x)=>calls.push(["academy",...x]),
     showExecutionResearch:async(...x)=>calls.push(["erl",...x]),
     showVenueQuality:async(...x)=>calls.push(["vqm",...x]),
     showSorStatus:async(...x)=>calls.push(["sorstatus",...x]),
@@ -103,4 +104,13 @@ test("stats commands map to requested periods",async()=>{
   assert.equal(calls.filter(x=>x[0]==="stats"&&x[3]==="DAY").length,2);
   assert.equal(calls.filter(x=>x[0]==="stats"&&x[3]==="WEEK").length,1);
   assert.equal(calls.filter(x=>x[0]==="stats"&&x[3]==="MONTH").length,1);
+});
+
+
+test("academy and challenge aliases open the capital academy",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/academy"]({chatId:11,args:[]});
+  await h["/challenge"]({chatId:11,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="academy").length,2);
 });

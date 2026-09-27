@@ -19,6 +19,7 @@ export function createReadCommandHandlers(deps={}){
     showOms,
     showShadowPortfolio,
     showShadowTradeStats,
+    showShadowCapitalAcademy,
     showExecutionResearch,
     showVenueQuality,
     showSorStatus,
@@ -212,6 +213,23 @@ export function createReadCommandHandlers(deps={}){
         const msg=message(err);
         recordError(observability,{scope:"command.monthstats",message:msg});
         await tg("sendMessage",{chat_id:chatId,text:"Monatsstatistik gerade nicht verfügbar."});
+      }
+    },
+
+    "/academy":async ({chatId})=>{
+      try{ await showShadowCapitalAcademy(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.academy",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Capital Academy gerade nicht verfügbar."});
+      }
+    },
+    "/challenge":async ({chatId})=>{
+      try{ await showShadowCapitalAcademy(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.challenge",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Trading-Challenge gerade nicht verfügbar."});
       }
     },
 

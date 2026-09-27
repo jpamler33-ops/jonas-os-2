@@ -163,6 +163,9 @@ export function homeKeyboard() {
       {text:"📈 Trade-Statistik",callback_data:"home:stats_day"}
     ],
     [
+      {text:"🏆 Capital Academy",callback_data:"home:academy"}
+    ],
+    [
       {text:"🖥 System",callback_data:"home:system"},
       {text:"⚙️ Alle Funktionen",callback_data:"commands"}
     ]
