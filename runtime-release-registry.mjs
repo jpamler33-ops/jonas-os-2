@@ -39,6 +39,7 @@ export const DEFAULT_RUNTIME_FILES=[
 export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-contract.mjs',
   'scientific-validity.mjs',
+  'scientific-core.mjs',
   'institutional-admission.mjs',
   'research-trace.mjs',
   'institutional-forecast-issuance.mjs',
