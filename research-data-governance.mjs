@@ -303,7 +303,8 @@ export function refreshResearchSourceFreshness(state,{now=Date.now(),monitorStar
     const key=sourceContractKey(contract.domain,contract.source);
     const src=state.sources[key];
     if(!src||!Number.isFinite(Number(src.lastSeenAt))) continue;
-    const effectiveLastSeen=Number.isFinite(Number(monitorStartedAt))?Math.max(Number(src.lastSeenAt),Number(monitorStartedAt)):Number(src.lastSeenAt);\n    const silenceMs=Math.max(0,t-effectiveLastSeen);
+    const effectiveLastSeen=Number.isFinite(Number(monitorStartedAt))?Math.max(Number(src.lastSeenAt),Number(monitorStartedAt)):Number(src.lastSeenAt);
+    const silenceMs=Math.max(0,t-effectiveLastSeen);
     let next=src.status;
     let reason=null;
     if(silenceMs>2*contract.maxSilenceMs){
