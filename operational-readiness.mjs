@@ -14,6 +14,7 @@ export function evaluateOperationalReadiness({
   evidenceHistory={},
   providerHealth={},
   slo={},
+  persistenceCompatibility=null,
   localFilePersistence=true,
   replicaCount=1
 }={}){
@@ -49,6 +50,18 @@ export function evaluateOperationalReadiness({
 
   for(const breach of slo?.breaches||[]) warnings.push('SLO_'+String(breach));
 
+  if(persistenceCompatibility){
+    if(persistenceCompatibility.compatible===false){
+      hard.push('PERSISTENCE_CONTRACT_BLOCKED');
+      for(const reason of persistenceCompatibility.hardReasons||[]){
+        hard.push('PERSISTENCE_'+String(reason));
+      }
+    }
+    for(const reason of persistenceCompatibility.warningReasons||[]){
+      warnings.push('PERSISTENCE_'+String(reason));
+    }
+  }
+
   const hardReasons=clean(hard);
   const warningReasons=clean(warnings);
   const ready=hardReasons.length===0;
@@ -75,6 +88,12 @@ export function evaluateOperationalReadiness({
       pending,
       maxPending
     },
+    persistenceCompatibility:persistenceCompatibility?{
+      version:persistenceCompatibility.version||null,
+      state:persistenceCompatibility.state||'UNKNOWN',
+      compatible:persistenceCompatibility.compatible===true,
+      fingerprint:persistenceCompatibility.fingerprint||null
+    }:null,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
     canExecute:false
