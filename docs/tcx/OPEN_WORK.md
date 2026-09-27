@@ -115,10 +115,11 @@ Canonical adaptations:
 - Liquidity Intelligence
 - read-only expansion evidence bundle
 - source-package provenance binding
+- Trader / Wallet Intelligence V1 evidence contract (PIT, cost-adjusted, entity-resolution + survivorship controls)
 
 Still intentionally deferred:
 - Memecoin Intelligence until real on-chain safety/provenance exists
-- Trader Intelligence until wallet/entity resolution + survivorship controls exist
+- Trader Intelligence live-source ingestion remains deferred; V1 evidence contract now includes entity-resolution, cost and survivorship controls
 - Future Intelligence as a separate slow research layer
 - Narrative / Psychology / Reflexivity until empirically validated
 - Portfolio Brain until canonical shadow-portfolio wiring
