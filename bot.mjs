@@ -16,6 +16,7 @@ import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from 
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
+import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
 import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
@@ -1217,25 +1218,6 @@ async function ack(id, text) {
   try { await tg('answerCallbackQuery', { callback_query_id:id, text, show_alert:false }); } catch {}
 }
 
-async function deliverTextCard(chatId,messageId,payload){
-  const base={...payload,chat_id:chatId};
-  if(!messageId) return tg('sendMessage',base);
-  try{
-    return await tg('editMessageText',{...base,message_id:messageId});
-  }catch(err){
-    const msg=err instanceof Error?err.message:String(err);
-    // Telegram cannot edit text on photo/chart messages. Open the requested card as a new message instead.
-    if(
-      msg.includes('there is no text in the message to edit') ||
-      msg.includes('message to edit not found') ||
-      msg.includes('message can\'t be edited')
-    ){
-      return tg('sendMessage',base);
-    }
-    throw err;
-  }
-}
-
 function commandMenuKeyboard(){
   return {inline_keyboard:[
     [{text:'🔮 Kursprognose',callback_data:'cmd:forecast'},{text:'📊 Coin analysieren',callback_data:'cmd:market'}],
@@ -1261,9 +1243,7 @@ async function showCommandMenu(chatId,messageId){
   return tg('sendMessage',payload);
 }
 async function showCommandMarkets(chatId,messageId,command){
-  const buttons=markets.slice(0,12).map(m=>({text:symbolLabel(m.symbol),callback_data:'cmdrun:'+command+':'+m.symbol}));
-  const rows=[];for(let i=0;i<buttons.length;i+=2)rows.push(buttons.slice(i,i+2));
-  rows.push([{text:'⬅️ Funktionen',callback_data:'commands'},{text:'🏠 Start',callback_data:'home'}]);
+  const rows=buildCommandMarketRows(markets,command,{symbolLabel,limit:12});
   const names={
     forecast:'Kursprognose',
     intelligence:'Marktcheck',
@@ -2812,7 +2792,7 @@ async function showForecast(chatId,symbol,messageId=null){
       'Action: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
     const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
-    return deliverTextCard(chatId,messageId,failPayload);
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
   }
 
   const scienceAdapter=buildForecastScienceInputs({
@@ -2912,7 +2892,7 @@ async function showForecast(chatId,symbol,messageId=null){
   });
 
   const payload={text,reply_markup:forecastProductKeyboard(symbol)};
-  return deliverTextCard(chatId,messageId,payload);
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
 }
 
 function parseAction(data='') {
