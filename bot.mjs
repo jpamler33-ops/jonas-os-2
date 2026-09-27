@@ -1849,6 +1849,15 @@ const server = http.createServer((req,res) => {
       deterministicReplay:{
         version:DETERMINISTIC_REPLAY_VERSION
       },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -1917,6 +1926,8 @@ console.log(JSON.stringify({
     tailHash:marketFabric.tailHash
   },
   deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
