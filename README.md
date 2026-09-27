@@ -981,3 +981,73 @@ live execution: DISABLED
 ```
 
 Corrupt VQM state disables learned penalties and further learning; it does not fabricate memory or silently repair history. Base observed-book Shadow SOR can continue without the learned penalty.
+
+
+## TCX Research Validity
+
+TCX 2.5 now fingerprints the research state behind each evidence snapshot and tracks whether that view is still reusable.
+
+Each fingerprint contains quantized research state across:
+
+- regime
+- multi-timeframe bias
+- local structure and structure key
+- liquidity and flow
+- witness agreement / contradiction
+- historical support and novelty
+- engine evidence / contradiction / gate
+- institutional safety state
+
+The fingerprint intentionally does not treat every small tick as a new state. Continuous inputs are quantized before hashing, while the anchor price is retained separately for drift measurement.
+
+Research-view lifecycle:
+
+```text
+VALID
+STALE
+DRIFTED
+EXPIRED
+INVALIDATED
+```
+
+Default semantics:
+
+- `VALID` — view can be reused without refresh
+- `STALE` — refresh recommended because of age
+- `DRIFTED` — enough state dimensions changed that the old view should not be reused
+- `EXPIRED` — time-to-live exceeded even if the market appears similar
+- `INVALIDATED` — hard break such as a structure / MTF directional flip, SAFE_STOP, entry into STRESS, strong witness contradiction, or a major engine-contradiction break
+
+Default thresholds:
+
+```text
+staleAfter = 10 minutes
+expireAfter = 30 minutes
+driftThreshold = 0.28
+```
+
+They can be overridden with:
+
+```text
+TCX_RESEARCH_VALIDITY_STALE_MS
+TCX_RESEARCH_VALIDITY_EXPIRE_MS
+TCX_RESEARCH_VALIDITY_DRIFT_THRESHOLD
+```
+
+Telegram:
+
+```text
+/validity BTC
+```
+
+The market card also exposes `⏱ Validity`.
+
+Evidence History stores the fingerprint plus the latest lifecycle assessment. Radar, Watchlist and Compare surface the current validity state so an old analysis is not silently treated as current.
+
+Hard invariant:
+
+```text
+Research validity != trade probability
+canExecute = false
+Execution = SHADOW_ONLY
+```
