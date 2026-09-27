@@ -12,6 +12,7 @@ import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERS
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
+import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
@@ -30,6 +31,11 @@ const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 1
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
+const shadowWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_WATCH_MS || 10000));
+const shadowDefaultLatencyMs = Math.max(0, Math.min(5000, Number(process.env.TCX_SHADOW_LATENCY_MS || 120)));
+const shadowMakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_MAKER_FEE_BPS || 10));
+const shadowTakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_TAKER_FEE_BPS || 10));
+const shadowHiddenQueueBufferPct = Math.max(0, Math.min(2, Number(process.env.TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT || 0.15)));
 const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').split(',').map(x => x.trim()).filter(Boolean));
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT')
@@ -63,6 +69,12 @@ const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market
 const marketFabric = await openMarketDataFabric(marketFabricFile);
 const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-release-registry.jsonl';
 const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
+const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
+const loadedShadowOms = await loadShadowOms(shadowOmsFile);
+let shadowOrders = loadedShadowOms.orders;
+let shadowOmsHealthy = loadedShadowOms.healthy;
+let shadowOmsLastError = loadedShadowOms.error || null;
+let shadowOmsPersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 const institutionalConfig = Object.freeze({
@@ -72,7 +84,15 @@ const institutionalConfig = Object.freeze({
   witnessProviders:['OKX','KRAKEN'],
   strictWitnessMinExternal:2,
   mechanismCausalStatus:'NOT_IDENTIFIED',
-  orderExecutionPath:false
+  orderExecutionPath:false,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    canExecuteLive:false,
+    defaultLatencyMs:shadowDefaultLatencyMs,
+    makerFeeBps:shadowMakerFeeBps,
+    takerFeeBps:shadowTakerFeeBps,
+    hiddenQueueBufferPct:shadowHiddenQueueBufferPct
+  }
 });
 
 let runtimeManifest=null;
@@ -94,7 +114,8 @@ try {
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
-      chaosEngineering:CHAOS_ENGINEERING_VERSION
+      chaosEngineering:CHAOS_ENGINEERING_VERSION,
+      shadowOms:SHADOW_OMS_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -116,6 +137,24 @@ let episodePersistenceQueue = Promise.resolve();
 let persistenceHealthy = true;
 let persistenceLastError = null;
 let persistenceQueue = Promise.resolve();
+
+async function persistShadowOms(reason='mutation') {
+  shadowOmsPersistenceQueue = shadowOmsPersistenceQueue.then(async()=>{
+    if(!shadowOmsHealthy) return false;
+    try {
+      shadowOrders = await saveShadowOms(shadowOmsFile,shadowOrders,{maxOrders:1000});
+      shadowOmsLastError=null;
+      return true;
+    } catch(err) {
+      shadowOmsHealthy=false;
+      shadowOmsLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'shadow_oms.persistence',message:shadowOmsLastError});
+      console.error('shadow OMS persistence error',reason,shadowOmsLastError);
+      return false;
+    }
+  });
+  return shadowOmsPersistenceQueue;
+}
 
 async function persistState(reason='mutation') {
   persistenceQueue = persistenceQueue.then(async () => {
