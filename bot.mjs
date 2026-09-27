@@ -7,6 +7,8 @@ import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisod
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses } from './independent-witness-network.mjs';
 import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
+import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -52,6 +54,9 @@ const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
 const auditLedger = await openAuditLedger(auditFile);
+const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
+const marketFabric = await openMarketDataFabric(marketFabricFile);
+let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
@@ -118,6 +123,102 @@ async function appendInstitutionalAudit(kind,payload) {
     }
   });
   return auditAppendQueue;
+}
+
+async function appendFabricEvents(inputs) {
+  marketFabricAppendQueue = marketFabricAppendQueue.then(async()=>{
+    if(!marketFabric.healthy) return {appended:[],duplicates:0,skipped:true};
+    try {
+      return await appendMarketEvents(marketFabric,inputs);
+    } catch(err) {
+      marketFabric.healthy=false;
+      marketFabric.verification={
+        ok:false,
+        error:'FABRIC_APPEND_FAILURE',
+        detail:err instanceof Error?err.message:String(err)
+      };
+      console.error('market data fabric append failure',marketFabric.verification.detail);
+      return {appended:[],duplicates:0,skipped:true};
+    }
+  });
+  return marketFabricAppendQueue;
+}
+
+function witnessPayload(report) {
+  return {
+    availableAt:Date.now(),
+    sourceIndependence:String(report?.sourceIndependence||'UNKNOWN'),
+    independentWitnessSatisfied:report?.independentWitnessSatisfied===true,
+    externalWitnessCount:Number(report?.externalWitnessCount||0),
+    venueCount:Number(report?.venueCount||0),
+    distinctVenues:[...(report?.distinctVenues||[])].map(String).sort(),
+    agreementScore:Number(report?.agreementScore||0),
+    flowAgreement:Number(report?.flowAgreement||0),
+    liquidityAgreement:Number(report?.liquidityAgreement||0),
+    sameQuotePriceAgreement:Number(report?.sameQuotePriceAgreement||0),
+    contradictions:[...(report?.contradictions||[])].map(String).sort(),
+    caveats:[...(report?.caveats||[])].map(String).sort(),
+    witnesses:[...(report?.witnesses||[])].map(w=>({
+      source:String(w.source||'UNKNOWN'),
+      venue:String(w.venue||'UNKNOWN'),
+      quote:String(w.quote||'UNKNOWN'),
+      bid:Number(w.bid),
+      ask:Number(w.ask),
+      mid:Number(w.mid),
+      spreadBps:Number(w.spreadBps),
+      imbalance:Number(w.imbalance),
+      publishedAt:Number(w.publishedAt),
+      availableAt:Number(w.availableAt)
+    }))
+  };
+}
+
+async function ingestResearchFabric(state,witnessReport) {
+  const ingestedAt=Date.now();
+  const inputs=[
+    createMarketEventInput({
+      kind:'PRIMARY_MARKET',
+      streamKey:`PRIMARY:${state.symbol}`,
+      source:String(state.market.source||'BINANCE'),
+      sourceEventId:`${state.symbol}:${state.market.timestamp}:${state.market.availableAt}`,
+      eventTime:Number(state.market.timestamp),
+      availableAt:Number(state.market.availableAt),
+      ingestedAt,
+      payload:state.market
+    }),
+    createMarketEventInput({
+      kind:'WITNESS_CONSENSUS',
+      streamKey:`WITNESS:${state.symbol}`,
+      source:'TCX_IWN',
+      sourceEventId:`${state.symbol}:${state.availableAt}`,
+      eventTime:Number(state.availableAt),
+      availableAt:Number(state.availableAt),
+      ingestedAt,
+      payload:witnessPayload(witnessReport)
+    })
+  ];
+
+  for(const tf of state.frames){
+    for(const candle of closedCandles(state.byTf[tf])){
+      inputs.push(createMarketEventInput({
+        kind:'CANDLE_CLOSE',
+        streamKey:`CANDLE:${state.symbol}:${tf}`,
+        source:'BINANCE_PUBLIC_REST_KLINES',
+        sourceEventId:`${state.symbol}:${tf}:${candle.closeTime}`,
+        eventTime:Number(candle.closeTime),
+        availableAt:Number(state.availableAt),
+        ingestedAt,
+        payload:{
+          openTime:Number(candle.openTime),
+          closeTime:Number(candle.closeTime),
+          o:Number(candle.o),h:Number(candle.h),l:Number(candle.l),c:Number(candle.c),v:Number(candle.v),
+          closed:true,
+          interval:tf
+        }
+      }));
+    }
+  }
+  return appendFabricEvents(inputs);
 }
 
 let offset = 0;
@@ -469,6 +570,8 @@ function helpText() {
     '/engine BTC – Mechanism Transition Lattice',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
     '/audit – Institutional Kernel / Ledger-Integrität',
+    '/fabric – Event-Sourced Market Data Fabric',
+    '/replay BTC [ISO-Zeit] – Point-in-Time Replay',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -830,6 +933,62 @@ async function showAudit(chatId) {
   return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
 }
 
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showReplay(chatId,symbol,asOf) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    `⏪ TCX Deterministic Replay · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Replay: ${DETERMINISTIC_REPLAY_VERSION}`,
+    `asOf: ${new Date(asOf).toISOString()}`,
+    `Hash: ${s.replayHash.slice(0,20)}…`,
+    `Future leakage: ${s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')}`,
+    '',
+    `Primary: ${primary?`${priceText(primary.price)} · ${primary.source||'UNKNOWN'}`:'not available'}`,
+    `Witness: ${witness?`${fmt(Number(witness.agreementScore||0)*100,0)}% agreement · external ${witness.externalWitnessCount||0}`:'not available'}`,
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>`• ${tf}: ${n}`),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
 function pct01(x){ return fmt(Number(x)*100,0); }
 
 function transitionLine(label,lattice){
@@ -857,6 +1016,9 @@ async function showEngine(chatId,symbol){
     analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
   });
 
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+
   const marketAudit=auditMarketSnapshot(state.market,{
     now:Date.now(),
     maxAgeMs:institutionalMarketMaxAgeMs
@@ -867,7 +1029,8 @@ async function showEngine(chatId,symbol){
     marketAudit,
     witnessAudit,
     engineAudit,
-    ledgerHealthy:auditLedger.healthy
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy
   });
   let envelope=buildResearchEnvelope({
     symbol,
@@ -881,7 +1044,15 @@ async function showEngine(chatId,symbol){
       institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
       mechanismEngine:r15.version,
       episodeMemory:'V3',
-      witnessNetwork:'IWN_V1'
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:fabricSummary.seq,
+      tailHash:fabricSummary.tailHash,
+      healthy:fabricSummary.healthy
     }
   });
   const auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
@@ -890,7 +1061,8 @@ async function showEngine(chatId,symbol){
       marketAudit,
       witnessAudit,
       engineAudit,
-      ledgerHealthy:false
+      ledgerHealthy:false,
+      fabricHealthy:marketFabric.healthy
     });
     envelope=buildResearchEnvelope({
       symbol,
@@ -904,7 +1076,15 @@ async function showEngine(chatId,symbol){
         institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
         mechanismEngine:r15.version,
         episodeMemory:'V3',
-        witnessNetwork:'IWN_V1'
+        witnessNetwork:'IWN_V1',
+        marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+        deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+      },
+      dataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        healthy:marketFabric.healthy
       }
     });
   }
@@ -940,6 +1120,8 @@ async function showEngine(chatId,symbol){
     `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
     `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
     `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
     `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
     `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
     `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
@@ -1040,6 +1222,30 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/fabric") {
+    try { await showFabric(chatId); }
+    catch(err){
+      console.error("fabric command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Market Data Fabric gerade nicht verfügbar."});
+    }
+    return true;
+  }
+
+  if (command === "/replay") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    const asOf=parseReplayTime(parts.slice(2).join(" "));
+    if(!symbol || asOf==null){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /replay BTC 2026-09-27T14:30:00Z"});
+      return true;
+    }
+    try { await showReplay(chatId,symbol,asOf); }
+    catch(err){
+      console.error("replay command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"PIT-Replay gerade nicht verfügbar."});
+    }
+    return true;
+  }
 
   if (command === "/audit") {
     try { await showAudit(chatId); }
@@ -1385,6 +1591,17 @@ const server = http.createServer((req,res) => {
         canExecute:false,
         execution:'SHADOW_ONLY'
       },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -1436,6 +1653,14 @@ console.log(JSON.stringify({
   episodeSweepMs,
   institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
   auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
