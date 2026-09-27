@@ -2533,6 +2533,11 @@ async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={})
   }
 
   const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
   const r15=runMechanismTransitionEngine({
     analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
   });
@@ -2563,7 +2568,7 @@ async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={})
 
   const makeEnvelope=()=>buildResearchEnvelope({
     symbol,
-    availableAt:state.availableAt,
+    availableAt:contextAvailableAt,
     market:state.market,
     witness:witnessReport,
     engine:r15,
