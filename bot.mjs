@@ -17,7 +17,7 @@ import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistenc
 import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from './forecast-learning-center.mjs';
 import { createShadowCompetition, refreshShadowCompetitionHypotheses, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
 import { createExperimentGovernor, evaluateExperimentGovernor, experimentGovernorSummary, loadExperimentGovernor, saveExperimentGovernor, FORECAST_EXPERIMENT_GOVERNOR_VERSION } from './forecast-experiment-governor.mjs';
-import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
+import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, WALLET_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -39,6 +39,8 @@ import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } 
 import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
+import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
+import { createWalletCohortPublicProvider, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -154,6 +156,21 @@ const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch});
 const liquidationResearchStream=createLiquidationPublicStream({symbols:autoLearnSymbols});
+const onchainResearchProvider=createOnchainResearchProvider({
+  fetchImpl:globalThis.fetch,
+  ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
+  solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
+});
+const walletCohortResearchProvider=createWalletCohortPublicProvider({
+  fetchImpl:globalThis.fetch,
+  cohorts:process.env.TCX_WALLET_RESEARCH_COHORTS_JSON||'',
+  ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
+  solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
+});
+const activeFeatureResearchFeatures=[
+  ...DEFAULT_RESEARCH_FEATURES,
+  ...(walletCohortResearchProvider.configuredCohorts>0?WALLET_RESEARCH_FEATURES:[])
+];
 const {
   fetchJson,
   fetchMarketParts,
@@ -1677,6 +1694,8 @@ async function showHomeSection(chatId,messageId,section) {
       `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
       `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
       `Liquidation-Stream: ${liquidationResearchStream.health().connected?'🟢 verbunden':'🟡 verbindet'} · ${LIQUIDATION_PUBLIC_STREAM_VERSION}`,
+      `On-Chain-Research: 🟢 BTC/ETH/SOL · ${ONCHAIN_RESEARCH_PROVIDER_VERSION}`,
+      `Wallet-Cohorts: ${walletCohortResearchProvider.configuredCohorts>0?'🟢 '+walletCohortResearchProvider.configuredCohorts+' konfiguriert':'⚪ keine konfiguriert'}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -3004,6 +3023,14 @@ async function showIntelligence(chatId,symbol){
   try{
     liquidations=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});
   }catch{}
+  let onchain=null;
+  try{
+    onchain=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
+  }catch{}
+  let walletCohort=null;
+  if(walletCohortResearchProvider.configuredCohorts>0){
+    try{walletCohort=await walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:Date.now()});}catch{}
+  }
   const expansion=buildInstitutionalExpansionEvidence({
     asOf:Number(s.availableAt),
     orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
@@ -3032,8 +3059,30 @@ async function showIntelligence(chatId,symbol){
     `• Long-Liquidationsanteil: ${liquidations?.ready5m?((liquidations.window5m.longShare*100).toFixed(1)+'%'):'—'}`,
     `• Imbalance: ${liquidations?.ready5m?((liquidations.window5m.imbalance*100).toFixed(1)+'%'):'—'}`,
     'Liquidationen werden nur als Forschungsfeature gespeichert; keine Handelsfreigabe.','',
+    'ON-CHAIN-RESEARCH',
+    `⛓ Quelle: ${onchain?.ok?(onchain.chain+' live'):'für diesen Coin nicht verfügbar'}`,
+    ...(onchain?.chain==='BITCOIN'?[
+      `• Mempool-TXs: ${Number.isFinite(onchain.metrics?.mempoolTxCount)?Math.round(onchain.metrics.mempoolTxCount).toLocaleString('en-US'):'—'}`,
+      `• Fastest Fee: ${Number.isFinite(onchain.metrics?.fastestFeeSatVb)?onchain.metrics.fastestFeeSatVb+' sat/vB':'—'}`
+    ]:[]),
+    ...(onchain?.chain==='ETHEREUM'?[
+      `• Gas-Auslastung: ${Number.isFinite(onchain.metrics?.gasUtilization)?(onchain.metrics.gasUtilization*100).toFixed(1)+'%':'—'}`,
+      `• Base Fee: ${Number.isFinite(onchain.metrics?.baseFeeGwei)?onchain.metrics.baseFeeGwei.toFixed(2)+' gwei':'—'}`,
+      `• ≥100 ETH Native Transfers im letzten Block: ${Number(onchain.metrics?.largeNativeTransferCount||0)}`
+    ]:[]),
+    ...(onchain?.chain==='SOLANA'?[
+      `• TPS: ${Number.isFinite(onchain.metrics?.tps)?onchain.metrics.tps.toFixed(0):'—'}`,
+      `• Non-vote TPS: ${Number.isFinite(onchain.metrics?.nonVoteTps)?onchain.metrics.nonVoteTps.toFixed(0):'—'}`,
+      `• Priority Fee Median: ${Number.isFinite(onchain.metrics?.priorityFeeMedian)?onchain.metrics.priorityFeeMedian.toFixed(0):'—'}`
+    ]:[]),
+    'Nur öffentlich beobachtbare Chain-Daten; kein Identitäts-Matching.','',
+    'WALLET-COHORT-RESEARCH',
+    `👛 Konfigurierte öffentliche Kohorten: ${walletCohortResearchProvider.configuredCohorts}`,
+    walletCohortResearchProvider.configuredCohorts===0
+      ?'• Keine Wallet-Adressen automatisch hinzugefügt. Erst explizit konfigurierte öffentliche Adressen werden untersucht.'
+      :`• Aktivität 5m: ${walletCohort?.ok?walletCohort.metrics.activity5m:'—'} · 15m: ${walletCohort?.ok?walletCohort.metrics.activity15m:'—'}`,
+    'TCX versucht nicht, Wallets natürlichen Personen zuzuordnen.','',
     'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
-    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
     '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
@@ -3064,6 +3113,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
 
   let derivativesResearchSnapshot=null;
   let liquidationResearchSnapshot=null;
+  let onchainResearchSnapshot=null;
+  let walletResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
       derivativesResearchSnapshot=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
@@ -3080,6 +3131,18 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       liquidationResearchSnapshot=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});
     }catch(err){
       recordError(observability,{scope:'liquidation_research',message:err instanceof Error?err.message:String(err)});
+    }
+    try{
+      onchainResearchSnapshot=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
+    }catch(err){
+      recordError(observability,{scope:'onchain_research',message:err instanceof Error?err.message:String(err)});
+    }
+    if(walletCohortResearchProvider.configuredCohorts>0){
+      try{
+        walletResearchSnapshot=await walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:Date.now()});
+      }catch(err){
+        recordError(observability,{scope:'wallet_cohort_research',message:err instanceof Error?err.message:String(err)});
+      }
     }
   }
 
@@ -3107,7 +3170,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
   const liquidationExtraFeatures=liquidationSnapshotToExtraFeatures(liquidationResearchSnapshot)
     .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures];
+  const onchainExtraFeatures=onchainSnapshotToExtraFeatures(onchainResearchSnapshot)
+    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
+  const walletExtraFeatures=walletCohortSnapshotToExtraFeatures(walletResearchSnapshot)
+    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
+  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures,...onchainExtraFeatures,...walletExtraFeatures];
   const runtimeQuality=deriveForecastRuntimeQuality({
     safety,
     marketAudit,
@@ -3310,7 +3377,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       derivativesFeatureCount:derivativesExtraFeatures.length,
       derivativesSourceCount:Number(derivativesResearchSnapshot?.witness?.sourceCount||0),
       liquidationFeatureCount:liquidationExtraFeatures.length,
-      liquidationReady5m:liquidationResearchSnapshot?.ready5m===true
+      liquidationReady5m:liquidationResearchSnapshot?.ready5m===true,
+      onchainFeatureCount:onchainExtraFeatures.length,
+      onchainChain:onchainResearchSnapshot?.chain||null,
+      walletFeatureCount:walletExtraFeatures.length,
+      walletCohorts:walletCohortResearchProvider.configuredCohorts
     };
   }
 
@@ -3960,7 +4031,7 @@ async function venueQualityWatcher() {
 async function syncFeatureResearch(reason='update'){
   try{
     const beforeStatus=featureResearchState?.status||'UNINITIALIZED';
-    const expectedFeatureExperimentIds=new Set(DEFAULT_RESEARCH_FEATURES.map(x=>x.id));
+    const expectedFeatureExperimentIds=new Set(activeFeatureResearchFeatures.map(x=>x.id));
     const currentFeatureExperimentIds=new Set((featureResearchState?.experiments||[]).map(x=>x.id));
     const grammarExpanded=[...expectedFeatureExperimentIds].some(id=>!currentFeatureExperimentIds.has(id));
     if(featureResearchState?.status==='COLLECTING_SEED'&&grammarExpanded){
@@ -3970,6 +4041,7 @@ async function syncFeatureResearch(reason='update'){
       featureResearchState=createFeatureResearchRound({
         journalEntries:forecastRuntime.journal.all(),
         incumbentConfig:forecastRuntime.engine.configSnapshot(),
+        features:activeFeatureResearchFeatures,
         generationNumber:1,
         now:Date.now()
       });
@@ -4026,6 +4098,10 @@ async function autoLearnForecastWatcher() {
               derivativesSources:result.derivativesSourceCount||0,
               liquidationFeatures:result.liquidationFeatureCount||0,
               liquidationReady5m:result.liquidationReady5m===true,
+              onchainFeatures:result.onchainFeatureCount||0,
+              onchainChain:result.onchainChain||null,
+              walletFeatures:result.walletFeatureCount||0,
+              walletCohorts:result.walletCohorts||0,
               duplicate:result.duplicate===true
             }));
           }else{
@@ -4570,6 +4646,8 @@ console.log(JSON.stringify({
   experimentGovernor:{version:FORECAST_EXPERIMENT_GOVERNOR_VERSION,file:experimentGovernorFile,status:experimentGovernorState?.status||'UNINITIALIZED',generationNumber:experimentGovernorState?.generationNumber||0},
   featureResearch:{version:FORECAST_FEATURE_RESEARCH_VERSION,file:featureResearchFile,status:featureResearchState?.status||'UNINITIALIZED',generationNumber:featureResearchState?.generationNumber||0,provider:DERIVATIVES_PUBLIC_PROVIDER_VERSION},
   liquidationResearch:{version:LIQUIDATION_PUBLIC_STREAM_VERSION,health:liquidationResearchStream.health()},
+  onchainResearch:{version:ONCHAIN_RESEARCH_PROVIDER_VERSION,assets:['BTCUSDT','ETHUSDT','SOLUSDT']},
+  walletCohortResearch:{version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:walletCohortResearchProvider.configuredCohorts},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
