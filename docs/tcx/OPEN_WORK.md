@@ -122,7 +122,7 @@ Still intentionally deferred:
 - Trader Intelligence live-source ingestion remains deferred; V1 evidence contract now includes entity-resolution, cost and survivorship controls
 - Future Intelligence as a separate slow research layer
 - Narrative / Psychology / Reflexivity until empirically validated
-- Portfolio Brain until canonical shadow-portfolio wiring
+- Portfolio Brain V1 now binds read-only risk diagnostics to canonical Shadow OMS; product wiring remains follow-up
 - causal graph only as a hypothesis graph
 - original competing Expansion orchestrator / Ghost Portfolio / science gates
 
