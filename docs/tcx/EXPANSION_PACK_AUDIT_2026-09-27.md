@@ -2,8 +2,11 @@
 
 Status: CANONICAL INTEGRATION REVIEW
 Target branch: `integration/tcx-institutional-v3`
-Input package: `TCX_V3_EXPANSION_PACK_INSERTABLE_2026-09-27(1).zip`
+Input package: `TCX_V3_EXPANSION_PACK_INSERTABLE_2026-09-27(2).zip`
 Package version: `3.0.0-alpha.insertable.1`
+Package SHA-256: `e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
+
+The newly uploaded `(2)` archive is byte-identical to the previously inspected `(1)` archive, so it is the same expansion version rather than a new delta.
 
 ## Package verification
 
@@ -141,3 +144,37 @@ The expansion pack is considered integrated when its useful unique ideas have be
 - hidden self-modification
 - future leakage
 - loss of release/audit identity
+
+
+## Implemented institutional adaptations
+
+The following unique ideas from the package are now staged as TCX-owned institutional modules rather than copied verbatim:
+
+- `expansion-runtime/source-intelligence.mjs`
+  - only resolved outcomes affect source reliability
+  - future/unresolved evidence is excluded
+  - reliability and market influence are separate
+  - conflicting duplicates fail closed
+
+- `expansion-runtime/event-impact-memory.mjs`
+  - only matured post-outcome reactions enter memory
+  - cohort support is explicit
+  - outputs remain empirical and non-causal
+
+- `expansion-runtime/liquidity-intelligence.mjs`
+  - order-book freshness/PIT checks
+  - crossed/stale books fail closed
+  - visible liquidity is explicitly non-binding
+  - heuristic reaction scores are not probabilities
+
+- `expansion-runtime/institutional-expansion.mjs`
+  - read-only evidence bundle
+  - cannot execute
+  - cannot route strategy
+  - cannot mutate forecasts
+  - cannot bypass Institutional Admission
+
+- `expansion-runtime/provenance.mjs`
+  - cryptographically binds the imported ideas to the verified source package and selected original source-file hashes
+
+These staged expansion modules are included in syntax/test gates and the staged Runtime Release identity.
