@@ -145,7 +145,7 @@ test('snapshot contract rejects future event-time and invalid completeness',()=>
 
 test('hard capacity limit fails closed before writing beyond budget',async()=>{
   const p=await plane({warnBytes:4096,hardBytes:8192});
-  p.fileBytes=8190;
+  p.fileBytes=p.hardBytes-10;
   await assert.rejects(
     appendResearchDataPlane(p,[snap({sourceEventId:'capacity'})]),
     /RDP_CAPACITY_LIMIT/
