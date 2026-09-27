@@ -219,12 +219,16 @@ export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
       {text:"🧠 TCX",callback_data:"tcx:"+s}
     ],
     [
-      {text:"❓ Warum?",callback_data:"why:"+s},
-      {text:"🧬 Regime",callback_data:"regime:"+s}
+      {text:"🔮 Forecast",callback_data:"forecast:"+s},
+      {text:"❓ Warum?",callback_data:"why:"+s}
     ],
     [
-      {text:"🧬 Memory",callback_data:"memory:"+s},
-      {text:"🛰 Witness",callback_data:"witness:"+s}
+      {text:"🧬 Regime",callback_data:"regime:"+s},
+      {text:"🧬 Memory",callback_data:"memory:"+s}
+    ],
+    [
+      {text:"🛰 Witness",callback_data:"witness:"+s},
+      {text:"🧩 Evidence",callback_data:"evidence:"+s}
     ],
     [
       {text:"🧾 Shadow OMS",callback_data:"oms:"+s},
@@ -235,7 +239,6 @@ export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
       {text:"🧪 Exec Lab",callback_data:"erl:"+s}
     ],
     [
-      {text:"🧩 Evidence",callback_data:"evidence:"+s},
       {text:"⏱ Validity",callback_data:"validity:"+s},
       {text:"📜 History",callback_data:"history:"+s}
     ],
@@ -259,6 +262,7 @@ export function parseProductCallback(data="") {
   if(raw==="home") return {kind:"HOME"};
   if(raw.startsWith("home:")) return {kind:"HOME_SECTION",section:raw.slice(5).toUpperCase()};
   const p=raw.split(":");
+  if(p[0]==="forecast"&&p[1]) return {kind:"FORECAST",symbol:p[1]};
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
