@@ -3023,6 +3023,7 @@ const readCommandHandlers=createReadCommandHandlers({
   helpText,
   normalizeSymbol,
   showStart,
+  showCommandMenu,
   showFavorites,
   showCompare,
   showMarket,
