@@ -3707,6 +3707,11 @@ const server = http.createServer((req,res) => {
         minToxicitySamples:vqmMinToxicitySamples,
         capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
       },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -3846,6 +3851,10 @@ console.log(JSON.stringify({
     minToxicitySamples:vqmMinToxicitySamples,
     halfLifeDays:vqmHalfLifeDays,
     capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
   },
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
