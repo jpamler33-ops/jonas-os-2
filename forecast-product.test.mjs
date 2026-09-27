@@ -136,3 +136,27 @@ test('forecast card explains the signal in plain German',()=>{
   assert.doesNotMatch(rendered,/P↑/);
   assert.match(rendered,/SHADOW_ONLY/);
 });
+
+
+test('forecast card explains governed research dependency coverage',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1000,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    probabilityDisplayAllowed:false,
+    admission:{gate:'INSUFFICIENT',researchDisposition:'ABSTAIN'},
+    trace:{
+      validity:{state:'VALID'},
+      safety:{state:'NORMAL'},
+      evidence:[{type:'RESEARCH_DEPENDENCY_GRAPH',totalFeatures:12,usableFeatures:10,blockedFeatures:2}]
+    },
+    forecast:{
+      scienceGate:'INSUFFICIENT',overallGate:'INSUFFICIENT',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'INSUFFICIENT',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:false,suppressionReasons:['CALIBRATION_INSUFFICIENT'],probabilities:null}
+      }]
+    }
+  };
+  const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
+  assert.match(rendered,/Forschungsdaten: 🟡 10\/12 Zusatzmerkmale nutzbar · 2 gesperrt/);
+});
