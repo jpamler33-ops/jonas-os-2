@@ -80,6 +80,7 @@ test('release registry detects historical manifest tampering',async()=>{
 test('institutional staged release set hashes forecast, science, admission and trace code',()=>{
   const files=institutionalRuntimeFiles();
   for(const required of [
+    'operational-readiness.mjs',
     'forecast-contract.mjs',
     'scientific-validity.mjs',
     'institutional-admission.mjs',
