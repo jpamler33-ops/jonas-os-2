@@ -1771,6 +1771,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Entity-Registry: ${entityRegistrySummary(entityRegistry||{}).entries} Adressen · ${entityRegistryRefreshError?'🟡 Cache':'🟢 offizieller PoR'}`,
       `Entity-Flow: ${entityFlowAddressIndex.addressCount>0?'🟢 '+entityFlowAddressIndex.addressCount+' ETH-Adressen':'⚪ keine Adressen'} · finalisiert · Native ETH`,
       `Research Data Plane: ${researchDataPlane.healthy?'🟢':'🔴'} seq ${researchDataPlane.seq} · ${researchDataPlane.totalRecords} Snapshots · ${researchDataPlane.capacityState}`,
+      `Data Governance: ${researchGovernanceHealthy?'🟢':'🟡'} · Katalog ${researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}).featureCatalog.featureCount} Features · problematische Quellen ${Number(researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}).statuses.DEGRADED||0)+Number(researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}).statuses.QUARANTINED||0)}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
