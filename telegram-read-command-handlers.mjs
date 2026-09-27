@@ -20,6 +20,7 @@ export function createReadCommandHandlers(deps={}){
     showShadowPortfolio,
     showShadowTradeStats,
     showShadowCapitalAcademy,
+    showShadowTrainingCoach,
     showExecutionResearch,
     showVenueQuality,
     showSorStatus,
@@ -230,6 +231,23 @@ export function createReadCommandHandlers(deps={}){
         const msg=message(err);
         recordError(observability,{scope:"command.challenge",message:msg});
         await tg("sendMessage",{chat_id:chatId,text:"Trading-Challenge gerade nicht verfügbar."});
+      }
+    },
+
+    "/coach":async ({chatId})=>{
+      try{ await showShadowTrainingCoach(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.coach",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Training Coach gerade nicht verfügbar."});
+      }
+    },
+    "/training":async ({chatId})=>{
+      try{ await showShadowTrainingCoach(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.training",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Training Coach gerade nicht verfügbar."});
       }
     },
 
