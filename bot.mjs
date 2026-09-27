@@ -15,6 +15,7 @@ import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './o
 import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from './persistence-contracts.mjs';
 import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistence-smoke.mjs';
 import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from './forecast-learning-center.mjs';
+import { createShadowCompetition, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -83,6 +84,10 @@ const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_O
 const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
+const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
+const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
+const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
+const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
@@ -162,6 +167,9 @@ let episodes = loadedEpisodeMemory.episodes;
 const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
 const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile);
 const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
+let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
+let shadowCompetitionLastHistorySize = Number(shadowCompetitionState?.evaluatedHistoryRows||0);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
 const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
@@ -1495,14 +1503,41 @@ function renderLearningCenterText(){
         :'  Messwerte werden ab 30 ausgewerteten Fällen angezeigt.'
     );
   }
+  const comp=shadowCompetitionSummary(shadowCompetitionState||{});
   lines.push(
     '',
-    'MODELL-KANDIDATEN',
+    'SHADOW-MODELLWETTBEWERB',
+    'Status: '+(
+      comp.status==='ACTIVE'?'🟢 aktiv':
+      comp.status==='WAITING_FOR_SEED_HISTORY'?'🟡 wartet auf Trainingshistorie':
+      comp.status==='STALE_INCUMBENT_CONFIG'?'🟠 Basismodell geändert':
+      '⚪ noch nicht gestartet'
+    ),
+    'Kandidaten: '+comp.candidates.length
+  );
+  for(const candidate of comp.candidates){
+    const metric=candidate.candidateMetrics;
+    const label=candidate.label||candidate.blueprintId;
+    if(candidate.cases>0&&metric&&Number.isFinite(Number(metric.brier))){
+      lines.push(
+        '• '+label+' · '+candidate.cases+' OOS-Fälle · Brier '+Number(metric.brier).toFixed(3)+' · LogLoss '+Number(metric.logLoss).toFixed(3)
+      );
+    }else{
+      lines.push('• '+label+' · '+String(candidate.status||'WAITING_FOR_OOS').replaceAll('_',' ').toLowerCase());
+    }
+  }
+  if(comp.competition?.bestBrierCandidate){
+    const leader=comp.candidates.find(x=>x.blueprintId===comp.competition.bestBrierCandidate);
+    lines.push('Aktuell niedrigster Brier: '+(leader?.label||comp.competition.bestBrierCandidate)+' (nur Shadow-Vergleich)');
+  }
+  lines.push(
+    '',
+    'MODELL-PROMOTION',
     'Datengate: '+(s.promotion.dataReady?'🟢 bereit':'🟡 sammelt noch'),
     'Fälle: '+s.promotion.resolvedCases+'/'+s.promotion.requiredCases,
     'Unabhängige Episoden: '+s.promotion.independentEpisodes+'/'+s.promotion.requiredIndependentEpisodes,
     s.promotion.dataReady
-      ?'Nächster Schritt: Kandidat im Shadow-Walk-Forward gegen die aktuelle Baseline testen.'
+      ?'Kandidaten dürfen jetzt statistisch geprüft werden. Das Produktionsmodell wird nicht automatisch geändert.'
       :'Eine Modell-Promotion bleibt gesperrt, bis genug unabhängige echte Outcomes vorliegen.',
     '',
     'Wichtig: Treffer-/Kalibrierungswerte werden bei zu wenig Daten bewusst nicht angezeigt.',
@@ -1575,6 +1610,7 @@ async function showHomeSection(chatId,messageId,section) {
       'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
       'Marktstimmung: 🟢 Live-Provider eingebaut',
       `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
+      `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -3859,6 +3895,68 @@ async function autoLearnForecastWatcher() {
   }
 }
 
+async function shadowCompetitionWatcher(){
+  await sleep(30000);
+  while(running){
+    const started=Date.now();
+    try{
+      if(shadowCompetitionEnabled&&forecastRuntime.healthy){
+        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY);
+        const cfg=forecastRuntime.engine.configSnapshot();
+        const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
+
+        if(
+          !shadowCompetitionState||
+          shadowCompetitionState.status==='WAITING_FOR_SEED_HISTORY'||
+          shadowCompetitionState.status==='STALE_INCUMBENT_CONFIG'
+        ){
+          shadowCompetitionState=createShadowCompetition({
+            historyRows:history,
+            incumbentConfig:cfg,
+            parentReleaseId:releaseId,
+            now:Date.now(),
+            minSeedRows:shadowCompetitionMinSeedRows
+          });
+          shadowCompetitionLastHistorySize=history.length;
+          shadowCompetitionState={...shadowCompetitionState,evaluatedHistoryRows:history.length};
+          await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+          console.log('shadow competition initialized',JSON.stringify({
+            status:shadowCompetitionState.status,
+            candidates:shadowCompetitionState.candidates?.length||0,
+            seedRows:shadowCompetitionState.seedRows||0,
+            cutoff:shadowCompetitionState.dataCutoffAt||null
+          }));
+        }else if(history.length>shadowCompetitionLastHistorySize){
+          const evaluated=evaluateShadowCompetition(shadowCompetitionState,{
+            historyRows:history,
+            incumbentConfig:cfg,
+            asOf:Date.now(),
+            minimumTrainCases:shadowCompetitionMinTrainCases
+          });
+          shadowCompetitionLastHistorySize=history.length;
+          shadowCompetitionState={...evaluated,evaluatedHistoryRows:history.length};
+          await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+          const summary=shadowCompetitionSummary(shadowCompetitionState);
+          console.log('shadow competition evaluated',JSON.stringify({
+            historyRows:history.length,
+            oosRows:summary.competition?.oosRows||0,
+            evaluatedCandidates:summary.competition?.evaluatedCandidates||0,
+            bestBrierCandidate:summary.competition?.bestBrierCandidate||null,
+            bestLogLossCandidate:summary.competition?.bestLogLossCandidate||null
+          }));
+        }
+      }
+      recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'forecast_shadow_competition',message:msg});
+      recordOperation(observability,{name:'forecast_shadow_competition',ok:false,latencyMs:Date.now()-started,error:msg});
+      console.error('shadow competition error',msg);
+    }
+    await sleep(shadowCompetitionEvalMs);
+  }
+}
+
 async function forecastOutcomeWatcher() {
   while(running) {
     await sleep(forecastOutcomeCheckMs);
@@ -4233,6 +4331,7 @@ console.log(JSON.stringify({
   episodeSweepMs,
   forecastOutcomeCheckMs,
   autoLearn:{enabled:autoLearnEnabled,symbols:autoLearnSymbols,forecastIntervalMs:autoLearnForecastMs,sweepMs:autoLearnSweepMs,version:FORECAST_LEARNING_CENTER_VERSION},
+  shadowCompetition:{enabled:shadowCompetitionEnabled,evaluationMs:shadowCompetitionEvalMs,minSeedRows:shadowCompetitionMinSeedRows,minTrainCases:shadowCompetitionMinTrainCases,version:FORECAST_SHADOW_COMPETITION_VERSION,status:shadowCompetitionState?.status||'UNINITIALIZED'},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
@@ -4331,4 +4430,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
