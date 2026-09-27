@@ -25,7 +25,7 @@ function snap({
   sourceEventId,
   eventTime=1_000_000,
   availableAt=1_001_000,
-  ingestedAt=1_001_100,
+  ingestedAt=null,
   ttlMs=60_000,
   finality='OBSERVED',
   completeness=1,
@@ -33,7 +33,7 @@ function snap({
 }={}){
   return createResearchFeatureSnapshot({
     streamKey,domain,source,sourceVersion:'V1',sourceEventId,
-    eventTime,availableAt,ingestedAt,ttlMs,finality,
+    eventTime,availableAt,ingestedAt:ingestedAt??availableAt+100,ttlMs,finality,
     quality:{completeness,sourceCount:1,expectedSourceCount:1,status:'OK'},
     features,
     provenance:{provider:'TEST'}
