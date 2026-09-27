@@ -89,6 +89,7 @@ export function createInstitutionalForecastIssuance({
     },
     evidence:cloneList(traceContext?.evidence),
     contradictions:cloneList(traceContext?.contradictions),
+    expansion:traceContext?.expansion==null?null:structuredClone(traceContext.expansion),
     forecast,
     science:scientificValidity,
     safety:{
