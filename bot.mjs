@@ -16,6 +16,7 @@ import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, createEvidenceRecord, appendEvidenceRecord, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
+import { assessResearchValidity, formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 
@@ -34,6 +35,15 @@ const krakenBase = (process.env.TCX_KRAKEN_REST_BASE || 'https://api.kraken.com'
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
 const researchAlertCheckMs = Math.max(30000, Number(process.env.TCX_RESEARCH_ALERT_CHECK_MS || 60000));
+const researchValidityStaleMs = Math.max(60000, Number(process.env.TCX_RESEARCH_VALIDITY_STALE_MS || 600000));
+const researchValidityExpireMs = Math.max(researchValidityStaleMs+60000, Number(process.env.TCX_RESEARCH_VALIDITY_EXPIRE_MS || 1800000));
+const researchValidityDriftThreshold = Math.max(0.05, Math.min(0.95, Number(process.env.TCX_RESEARCH_VALIDITY_DRIFT_THRESHOLD || 0.28)));
+const researchValidityConfig = Object.freeze({
+  ...DEFAULT_STATE_VALIDITY_CONFIG,
+  staleAfterMs:researchValidityStaleMs,
+  expireAfterMs:researchValidityExpireMs,
+  driftThreshold:researchValidityDriftThreshold
+});
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
 const shadowWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_WATCH_MS || 10000));
@@ -162,6 +172,7 @@ try {
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
+      stateValidity:STATE_VALIDITY_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION
     }
@@ -278,14 +289,59 @@ function latestEvidenceRecord(symbol) {
   return evidenceHistoryFor(evidenceRecords,symbol,{limit:1}).at(-1) || null;
 }
 
+function validityForRecordPair(previous,currentRecord,{now=currentRecord?.capturedAt||Date.now()}={}) {
+  if(!previous?.stateFingerprint || !currentRecord?.stateFingerprint) return null;
+  try{
+    return assessResearchValidity({
+      baseline:previous.stateFingerprint,
+      current:currentRecord.stateFingerprint,
+      now,
+      config:researchValidityConfig
+    });
+  }catch(err){
+    recordError(observability,{scope:'state_validity.assess',message:err instanceof Error?err.message:String(err)});
+    return null;
+  }
+}
+
+function updateRadarValidity(symbol,validity) {
+  const r=radarCache.get(symbol);
+  if(!r) return;
+  r.validity=validity?.status||'BASELINE';
+  r.driftScore=Number(validity?.driftScore||0);
+  r.validityAgeMs=Number(validity?.ageMs||0);
+  r.validityReasons=validity?formatValidityReason(validity,{limit:3}):[];
+}
+
 function appendEvidenceFromContext(symbol,context) {
   const previous=latestEvidenceRecord(symbol);
   const record=createEvidenceRecord(symbol,context,previous);
-  if(previous && previous.fingerprint===record.fingerprint && record.capturedAt-previous.capturedAt<15*60*1000){
-    return {record:previous,changed:false};
+  const validity=validityForRecordPair(previous,record,{now:record.capturedAt});
+  let lifecycleChanged=false;
+
+  if(previous && validity){
+    const before=JSON.stringify({
+      validityLast:previous.validityLast||null,
+      closedAt:previous.closedAt||null
+    });
+    previous.validityLast=validity;
+    if(['DRIFTED','EXPIRED','INVALIDATED'].includes(validity.status) && !previous.closedAt){
+      previous.closedAt=record.capturedAt;
+    }
+    lifecycleChanged=before!==JSON.stringify({
+      validityLast:previous.validityLast||null,
+      closedAt:previous.closedAt||null
+    });
   }
+
+  updateRadarValidity(symbol,validity);
+
+  if(previous && previous.fingerprint===record.fingerprint && record.capturedAt-previous.capturedAt<15*60*1000){
+    return {record:previous,validity,changed:lifecycleChanged};
+  }
+  record.transitionFromPrevious=validity;
   evidenceRecords=appendEvidenceRecord(evidenceRecords,record,{maxPerSymbol:2000});
-  return {record,changed:true};
+  return {record,validity,changed:true};
 }
 
 async function appendInstitutionalAudit(kind,payload) {
@@ -1198,6 +1254,7 @@ function helpText() {
     '/structure BTC – 4H/1H/15m/5m Struktur',
     '/memory BTC – ähnliche historische TCX-Episoden',
     '/evidence BTC – Disagreement Map + Evidence-Diagnostik',
+    '/validity BTC – Drift/Expiry der letzten Research-Sicht',
     '/history BTC – persistenter Evidence-Verlauf',
     '/engine BTC – Mechanism Transition Lattice',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
@@ -1342,10 +1399,10 @@ async function showHomeSection(chatId,messageId,section) {
         return `${symbolLabel(symbol)} · warming · Memory ${own.length}`;
       }
       const age=Math.max(0,now-r.capturedAt);
-      return `${symbolLabel(symbol)} · ${r.status} · ${r.regime} · W${fmt(r.witnessAgreement*100,0)}% · M${r.support} · N${fmt(r.novelty*100,0)}% · C${fmt(r.contradiction*100,0)}% · ${Math.round(age/1000)}s`;
+      return `${symbolLabel(symbol)} · ${r.status} · ${r.regime} · V${r.validity||'BASE'} · W${fmt(r.witnessAgreement*100,0)}% · M${r.support} · N${fmt(r.novelty*100,0)}% · C${fmt(r.contradiction*100,0)}% · ${Math.round(age/1000)}s`;
     });
     text=['🧠 TCX RADAR v2','',
-      'Kein Trade-Ranking. W=Witness · M=Memory support · N=Novelty · C=Contradiction.','',
+      'Kein Trade-Ranking. V=View Validity · W=Witness · M=Memory · N=Novelty · C=Contradiction.','',
       ...lines,'',
       'Action bleibt ABSTAIN / SHADOW_ONLY.'
     ].join('\n');
@@ -1474,13 +1531,21 @@ function evidenceRelationIcon(relation) {
   return '·';
 }
 
-async function currentEvidenceRecord(symbol) {
+async function currentEvidenceState(symbol) {
+  const baseline=latestEvidenceRecord(symbol);
   const context=await researchAlertContext(symbol,{force:true});
-  return createEvidenceRecord(symbol,context,latestEvidenceRecord(symbol));
+  const record=createEvidenceRecord(symbol,context,baseline);
+  const validity=validityForRecordPair(baseline,record,{now:record.capturedAt});
+  updateRadarValidity(symbol,validity);
+  return {baseline,context,record,validity};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
 }
 
 async function showEvidence(chatId,messageId,symbol) {
-  const record=await currentEvidenceRecord(symbol);
+  const {record,validity}=await currentEvidenceState(symbol);
   const map=record.map;
   const lines=map.layers.map(x=>
     '• '+x.layer+': '+x.value+' · '+evidenceRelationIcon(x.relation)+' '+x.relation
@@ -1491,7 +1556,9 @@ async function showEvidence(chatId,messageId,symbol) {
     'Evidence Trend: '+record.trend,
     'Directional reference: '+record.reference,
     'Safety: '+record.status,
-    'Gate: '+record.gate,'',
+    'Gate: '+record.gate,
+    'View validity: '+(validity?.status||'BASELINE')+(validity?' · drift '+fmt(validity.driftScore*100,0)+'%':''),
+    'State FP: '+(record.stateFingerprint?.hash?record.stateFingerprint.hash.slice(0,16)+'…':'legacy'),'',
     'DISAGREEMENT MAP',
     ...lines,'',
     'Witness agreement: '+fmt(record.witnessAgreement*100,0)+'%',
@@ -1499,7 +1566,8 @@ async function showEvidence(chatId,messageId,symbol) {
     'Novelty: '+fmt(record.novelty*100,0)+'%',
     'Contradiction: '+fmt(record.contradiction*100,0)+'%',
     'Evidence strength: '+fmt(record.evidenceStrength*100,0)+'%',
-    'Conflicts: '+record.disagreementCount+' · weak/novel: '+record.weakCount,'',
+    'Conflicts: '+record.disagreementCount+' · weak/novel: '+record.weakCount,
+    ...(validity?['Validity reasons: '+(formatValidityReason(validity,{limit:3}).join(', ')||'none')]:[]),'',
     'Der Evidence Index ist ein diagnostischer Forschungsindex, KEINE Eintrittswahrscheinlichkeit.',
     'Epistemic: DERIVED_RESEARCH_DIAGNOSTIC_NOT_PROBABILITY',
     'Action: ABSTAIN / SHADOW_ONLY'
@@ -1538,18 +1606,66 @@ async function showEvidenceHistory(chatId,messageId,symbol) {
         day:'2-digit',
         month:'2-digit'
       }).format(new Date(r.capturedAt));
-      return '• '+ts+' · '+r.index+'/100 · '+r.trend+' · '+r.status+' · '+r.regime;
+      const lifecycle=r.validityLast?.status || (r===latest?'ACTIVE':'LEGACY');
+      return '• '+ts+' · '+r.index+'/100 · '+r.trend+' · '+lifecycle+' · '+r.regime;
     });
     text=[
       '📜 TCX EVIDENCE HISTORY · '+symbol.replace('USDT','/USDT'),'',
       'Snapshots gespeichert: '+total,
       'Aktuell: '+latest.index+'/100 · '+latest.trend,
       'Δ letzter Snapshot: '+(delta==null?'—':(delta>=0?'+':'')+delta),
-      'Conflicts: '+latest.disagreementCount+' · Gate: '+latest.gate,'',
+      'Conflicts: '+latest.disagreementCount+' · Gate: '+latest.gate,
+      'Latest lifecycle: '+(latest.validityLast?.status||'ACTIVE'),'',
       'LETZTE SNAPSHOTS',
       ...entries,'',
       'Index = Evidence-Diagnostik, nicht Preis- oder Trefferwahrscheinlichkeit.',
       'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  };
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=[
+      '⏱ TCX RESEARCH VALIDITY · '+symbol.replace('USDT','/USDT'),'',
+      'Status: BASELINE',
+      'Noch kein fingerprint-fähiger gespeicherter Snapshot vorhanden.',
+      'Der nächste Research-Sweep erzeugt die Vergleichsbasis.','',
+      'Current fingerprint: '+(record.stateFingerprint?.hash?.slice(0,20)||'unavailable')+'…',
+      'Execution: SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    const reasons=formatValidityReason(validity,{limit:6});
+    text=[
+      '⏱ TCX RESEARCH VALIDITY · '+symbol.replace('USDT','/USDT'),'',
+      'Status: '+validity.status,
+      'Age: '+Math.round(validity.ageMs/1000)+'s',
+      'Drift: '+fmt(validity.driftScore*100,1)+'%',
+      'Changed dimensions: '+validity.changedDimensions,
+      'Price drift from baseline: '+fmt(validity.priceMovePct,3)+'%',
+      'Reusable without refresh: '+(validity.reusableWithoutRefresh?'YES':'NO'),
+      'Valid for research: '+(validity.validForResearch?'YES':'NO'),'',
+      'BASELINE',
+      '• '+new Date(baseline.capturedAt).toISOString(),
+      '• '+baseline.stateFingerprint.hash.slice(0,20)+'…',
+      'CURRENT',
+      '• '+new Date(record.capturedAt).toISOString(),
+      '• '+record.stateFingerprint.hash.slice(0,20)+'…','',
+      'REASONS',
+      ...(reasons.length?reasons.map(x=>'• '+x):['• none']),
+      '',
+      'STALE = refresh recommended.',
+      'DRIFTED / EXPIRED / INVALIDATED = alte Research-Sicht nicht weiterverwenden.',
+      'canExecute: false · SHADOW_ONLY'
     ].join('\n');
   }
   const payload={
@@ -1585,11 +1701,11 @@ async function showFavorites(chatId, messageId) {
       const changeText=Number.isFinite(change)?((change>=0?'+':'')+fmt(change,2)+'%'):'—';
       const regime=r?.regime||'warming';
       const status=r?.status||'—';
-      return '• '+symbolLabel(symbol)+' · '+priceText+' · '+changeText+' · '+regime+' · '+status;
+      return '• '+symbolLabel(symbol)+' · '+priceText+' · '+changeText+' · '+regime+' · '+status+' · V '+(r?.validity||'BASE');
     });
     text=[
       '⭐ TCX WATCHLIST v2','',
-      'Preis · 24h · Regime · Safety','',
+      'Preis · 24h · Regime · Safety · Validity','',
       ...lines,
       syms.length>20?'… weitere Favoriten ausgeblendet':'',
       '',
@@ -1643,6 +1759,7 @@ async function showCompare(chatId,messageId) {
       'N '+(r?fmt(r.novelty*100,0)+'%':'—'),
       'C '+(r?fmt(r.contradiction*100,0)+'%':'—'),
       'E '+(e?.index??'—')+'/100',
+      'V '+String(r?.validity||'BASE'),
       'S '+String(r?.status||'—')
     ].join(' · ');
   });
@@ -1658,7 +1775,7 @@ async function showCompare(chatId,messageId) {
 
   const text=[
     '📊 TCX COMPARE','',
-    'P=Preis · R=Regime · W=Witness · M=Memory · N=Novelty · C=Contradiction · E=Evidence · S=Safety','',
+    'P=Preis · R=Regime · W=Witness · M=Memory · N=Novelty · C=Contradiction · E=Evidence · V=Validity · S=Safety','',
     ...lines,'',
     'Keine Rangliste und kein Trade-Winner.',
     'Action: ABSTAIN / SHADOW_ONLY'
@@ -2984,6 +3101,20 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/validity") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    if(!symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /validity BTC"});
+      return true;
+    }
+    try { await showValidity(chatId,null,symbol); }
+    catch(err){
+      console.error("validity command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Research-Validity gerade nicht verfügbar."});
+    }
+    return true;
+  }
   if (command === '/alert') {
     const symbol = normalizeSymbol(parts[1] || '');
     const target = Number(String(parts[2] || '').replace(',','.'));
@@ -3141,6 +3272,12 @@ async function handle(update) {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
       await showEvidenceHistory(chatId,messageId,a.symbol);
       await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
       return;
     }
     if (a.kind === 'REPLAY_MENU') {
@@ -3704,6 +3841,13 @@ const server = http.createServer((req,res) => {
         lastError:evidenceHistoryLastError,
         recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
       },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -3766,6 +3910,12 @@ console.log(JSON.stringify({
   observability:OBSERVABILITY_VERSION,
   chaosEngineering:CHAOS_ENGINEERING_VERSION,
   alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
   shadowOms:{
     version:SHADOW_OMS_VERSION,
     file:shadowOmsFile,
