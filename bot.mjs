@@ -15,6 +15,7 @@ import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
+import { loadEvidenceHistory, saveEvidenceHistory, createEvidenceRecord, appendEvidenceRecord, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
@@ -72,6 +73,9 @@ const alerts = loadedState.alerts;
 const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
 const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
+const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
+const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
+let evidenceRecords = loadedEvidenceHistory.records;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
 const auditLedger = await openAuditLedger(auditFile);
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
@@ -137,6 +141,14 @@ try {
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
+  evidenceHistory:{
+    version:EVIDENCE_HISTORY_VERSION,
+    file:evidenceHistoryFile,
+    healthy:evidenceHistoryHealthy,
+    loaded:evidenceRecords.length,
+    recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+  },
+      evidenceHistory:EVIDENCE_HISTORY_VERSION,
       shadowSor:SHADOW_SOR_VERSION
     }
   });
@@ -156,6 +168,9 @@ try {
 let episodePersistenceHealthy = true;
 let episodePersistenceLastError = null;
 let episodePersistenceQueue = Promise.resolve();
+let evidenceHistoryHealthy = true;
+let evidenceHistoryLastError = null;
+let evidenceHistoryQueue = Promise.resolve();
 let persistenceHealthy = true;
 let persistenceLastError = null;
 let persistenceQueue = Promise.resolve();
@@ -208,6 +223,37 @@ async function persistEpisodeMemory(reason='mutation') {
   });
   await episodePersistenceQueue;
   return episodePersistenceHealthy;
+}
+
+async function persistEvidenceHistory(reason='mutation') {
+  evidenceHistoryQueue = evidenceHistoryQueue.then(async () => {
+    try {
+      evidenceRecords = await saveEvidenceHistory(evidenceHistoryFile,evidenceRecords,{maxPerSymbol:2000});
+      evidenceHistoryHealthy = true;
+      evidenceHistoryLastError = null;
+    } catch (err) {
+      evidenceHistoryHealthy = false;
+      evidenceHistoryLastError = err instanceof Error ? err.message : String(err);
+      recordError(observability,{scope:'evidence_history.persistence',message:evidenceHistoryLastError});
+      console.error('evidence history persistence error',reason,evidenceHistoryLastError);
+    }
+  });
+  await evidenceHistoryQueue;
+  return evidenceHistoryHealthy;
+}
+
+function latestEvidenceRecord(symbol) {
+  return evidenceHistoryFor(evidenceRecords,symbol,{limit:1}).at(-1) || null;
+}
+
+function appendEvidenceFromContext(symbol,context) {
+  const previous=latestEvidenceRecord(symbol);
+  const record=createEvidenceRecord(symbol,context,previous);
+  if(previous && previous.fingerprint===record.fingerprint && record.capturedAt-previous.capturedAt<15*60*1000){
+    return {record:previous,changed:false};
+  }
+  evidenceRecords=appendEvidenceRecord(evidenceRecords,record,{maxPerSymbol:2000});
+  return {record,changed:true};
 }
 
 async function appendInstitutionalAudit(kind,payload) {
@@ -1116,6 +1162,8 @@ function helpText() {
     '/chart BTC 5m – Candlestick-Chart',
     '/structure BTC – 4H/1H/15m/5m Struktur',
     '/memory BTC – ähnliche historische TCX-Episoden',
+    '/evidence BTC – Disagreement Map + Evidence-Diagnostik',
+    '/history BTC – persistenter Evidence-Verlauf',
     '/engine BTC – Mechanism Transition Lattice',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
     '/audit – Institutional Kernel / Ledger-Integrität',
@@ -1269,6 +1317,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Release registry: ${releaseRegistry.healthy?'OK':'DEGRADED'} · seq ${releaseRegistry.seq}`,
       `State persistence: ${persistenceHealthy?'OK':'DEGRADED'}`,
       `Episode persistence: ${episodePersistenceHealthy?'OK':'DEGRADED'}`,
+      `Evidence persistence: ${evidenceHistoryHealthy?'OK':'DEGRADED'} · snapshots ${evidenceRecords.length}`,
       `Witness cache: ${witnessCache.size}`,
       `Active sessions: ${sessions.size}`,'',
       'Execution: SHADOW_ONLY',
@@ -1287,6 +1336,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Mature 1h: ${mature1h}`,
       `Mature 3h: ${mature3h}`,
       `Active alerts: ${activeAlerts}`,
+      `Evidence snapshots: ${evidenceRecords.length}`,
       `Tracked markets: ${markets.length}`,'',
       'Noch keine künstliche Winrate und keine erfundenen Forecast-Scores.',
       'Brier/Calibration/Coverage kommen erst mit einem validierten Forecast-Modul.'
@@ -1375,6 +1425,100 @@ async function showRegime(chatId,messageId,symbol) {
     chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
     reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
   });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceRecord(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  return createEvidenceRecord(symbol,context,latestEvidenceRecord(symbol));
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const record=await currentEvidenceRecord(symbol);
+  const map=record.map;
+  const lines=map.layers.map(x=>
+    '• '+x.layer+': '+x.value+' · '+evidenceRelationIcon(x.relation)+' '+x.relation
+  );
+  const text=[
+    '🧩 TCX EVIDENCE · '+symbol.replace('USDT','/USDT'),'',
+    'Evidence Index: '+record.index+'/100',
+    'Evidence Trend: '+record.trend,
+    'Directional reference: '+record.reference,
+    'Safety: '+record.status,
+    'Gate: '+record.gate,'',
+    'DISAGREEMENT MAP',
+    ...lines,'',
+    'Witness agreement: '+fmt(record.witnessAgreement*100,0)+'%',
+    'Historical support: '+record.memorySupport,
+    'Novelty: '+fmt(record.novelty*100,0)+'%',
+    'Contradiction: '+fmt(record.contradiction*100,0)+'%',
+    'Evidence strength: '+fmt(record.evidenceStrength*100,0)+'%',
+    'Conflicts: '+record.disagreementCount+' · weak/novel: '+record.weakCount,'',
+    'Der Evidence Index ist ein diagnostischer Forschungsindex, KEINE Eintrittswahrscheinlichkeit.',
+    'Epistemic: DERIVED_RESEARCH_DIAGNOSTIC_NOT_PROBABILITY',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  };
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=[
+      '📜 TCX EVIDENCE HISTORY · '+symbol.replace('USDT','/USDT'),'',
+      'Noch keine persistente Evidence-Historie.',
+      'Der Research-Sweep schreibt automatisch Zustands-Snapshots.',
+      '',
+      'Evidence ist ein diagnostischer Forschungsindex, keine Trading-Wahrscheinlichkeit.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    const latest=rows.at(-1);
+    const previous=rows.length>1?rows.at(-2):null;
+    const delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        day:'2-digit',
+        month:'2-digit'
+      }).format(new Date(r.capturedAt));
+      return '• '+ts+' · '+r.index+'/100 · '+r.trend+' · '+r.status+' · '+r.regime;
+    });
+    text=[
+      '📜 TCX EVIDENCE HISTORY · '+symbol.replace('USDT','/USDT'),'',
+      'Snapshots gespeichert: '+total,
+      'Aktuell: '+latest.index+'/100 · '+latest.trend,
+      'Δ letzter Snapshot: '+(delta==null?'—':(delta>=0?'+':'')+delta),
+      'Conflicts: '+latest.disagreementCount+' · Gate: '+latest.gate,'',
+      'LETZTE SNAPSHOTS',
+      ...entries,'',
+      'Index = Evidence-Diagnostik, nicht Preis- oder Trefferwahrscheinlichkeit.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  };
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
 }
 
 async function showFavorites(chatId, messageId) {
@@ -2359,6 +2503,34 @@ async function handleCommand(msg) {
     return true;
   }
 
+  if (command === "/evidence") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    if(!symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /evidence BTC"});
+      return true;
+    }
+    try { await showEvidence(chatId,null,symbol); }
+    catch(err){
+      console.error("evidence command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Evidence-Diagnostik gerade nicht verfügbar."});
+    }
+    return true;
+  }
+
+  if (command === "/history") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    if(!symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /history BTC"});
+      return true;
+    }
+    try { await showEvidenceHistory(chatId,null,symbol); }
+    catch(err){
+      console.error("history command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Evidence-Historie gerade nicht verfügbar."});
+    }
+    return true;
+  }
+
   if (command === '/alert') {
     const symbol = normalizeSymbol(parts[1] || '');
     const target = Number(String(parts[2] || '').replace(',','.'));
@@ -2504,6 +2676,18 @@ async function handle(update) {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
       await showRegime(chatId,messageId,a.symbol);
       await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
       return;
     }
     if (a.kind === 'OMS') {
@@ -2835,6 +3019,7 @@ async function shadowOmsWatcher() {
 async function episodeWatcher() {
   while(running) {
     let changed=false;
+    let evidenceChanged=false;
     for(const symbol of requestedSymbols) {
       if(!running) break;
       try {
@@ -2848,6 +3033,8 @@ async function episodeWatcher() {
           const context=buildResearchAlertContext(state,witnessReport);
           researchAlertContextCache.set(symbol,{at:Date.now(),context});
           updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
         } catch(radarErr) {
           console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
         }
@@ -2857,6 +3044,7 @@ async function episodeWatcher() {
       await sleep(250);
     }
     if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
     await sleep(episodeSweepMs);
   }
 }
@@ -2935,6 +3123,14 @@ const server = http.createServer((req,res) => {
         lastError:episodePersistenceLastError,
         recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
       },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -2958,6 +3154,7 @@ async function gracefulShutdown(signal) {
   console.log('shutdown', signal);
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
   await persistShadowOms(`shutdown:${signal}`);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0),5000).unref();
