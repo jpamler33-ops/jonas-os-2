@@ -44,6 +44,7 @@ TCX_EPISODE_SWEEP_MS=300000
 TCX_EPISODE_FILE=/data/tcx-episodes.json
 TCX_AUDIT_LEDGER_FILE=/data/tcx-audit-ledger.jsonl
 TCX_MARKET_FABRIC_FILE=/data/tcx-market-events.jsonl
+TCX_RELEASE_REGISTRY_FILE=/data/tcx-release-registry.jsonl
 TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS=15000
 TCX_OKX_REST_BASE=https://www.okx.com
 TCX_KRAKEN_REST_BASE=https://api.kraken.com
@@ -409,5 +410,71 @@ Institutional Audit Ledger
 If the Market Data Fabric chain is corrupted or unreadable, the Institutional Kernel enters `SAFE_STOP`.
 
 The current replay reconstructs the point-in-time information state. Re-running all historical strategy/engine code versions from archived binaries/configuration is a separate later layer.
+
+Execution remains disabled: `ABSTAIN / SHADOW_ONLY`.
+
+
+## TCX Runtime Release & Configuration Registry v1
+
+Every running TCX deployment now computes an immutable runtime release manifest from the actual source files inside the container.
+
+The manifest hashes:
+
+- `bot.mjs`
+- persistence/state modules
+- structure/chart/dashboard modules
+- Episode Memory
+- MTL
+- Independent Witness Network
+- Institutional Kernel
+- Market Data Fabric
+- Deterministic Replay
+- Release Registry itself
+- `package.json`
+
+Each component is SHA-256 hashed. TCX also hashes the institutional configuration and records safe deployment metadata such as an available Git commit SHA.
+
+Secrets and arbitrary environment variables are **not** copied into the registry.
+
+Persistent registry:
+
+```text
+/data/tcx-release-registry.jsonl
+```
+
+Each unique runtime release receives:
+
+- deterministic `releaseId`
+- manifest hash
+- registry sequence
+- previous-record hash
+- record hash
+
+Identical deployments deduplicate to the same release record. Source-code or institutional-config changes create a new release ID.
+
+Telegram:
+
+```text
+/release
+```
+
+Research Envelopes now bind together:
+
+```text
+Market Data Fabric seq/tail
+        +
+Runtime Release ID
+Release Registry seq/tail
+        +
+Research inputs/config
+        ↓
+Research Envelope hash
+        ↓
+Institutional Audit Ledger
+```
+
+Release Registry corruption is a hard Institutional Kernel failure and produces `SAFE_STOP`.
+
+This closes a major reproducibility gap: TCX can identify not only which data was known at a point in time, but also which exact hashed runtime release processed it.
 
 Execution remains disabled: `ABSTAIN / SHADOW_ONLY`.
