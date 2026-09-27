@@ -75,3 +75,27 @@ test("persistent evidence history round-trips",async()=>{
   assert.equal(evidenceHistoryFor(loaded.records,"BTCUSDT").length,2);
   assert.equal(loaded.recoveredFromCorrupt,false);
 });
+
+
+test("evidence snapshots persist state fingerprints and lifecycle metadata",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-"));
+  const file=path.join(dir,"history.json");
+  const one=createEvidenceRecord("BTCUSDT",ctx(),null);
+  assert.ok(one.stateFingerprint);
+  assert.equal(one.stateFingerprint.hash.length,64);
+  one.validityLast={
+    version:"TCX_STATE_VALIDITY_V1",
+    status:"DRIFTED",
+    driftScore:0.31,
+    ageMs:5000,
+    canExecute:false,
+    execution:"SHADOW_ONLY"
+  };
+  one.closedAt=6000;
+  await saveEvidenceHistory(file,[one]);
+  const loaded=await loadEvidenceHistory(file);
+  const restored=loaded.records[0];
+  assert.equal(restored.stateFingerprint.hash,one.stateFingerprint.hash);
+  assert.equal(restored.validityLast.status,"DRIFTED");
+  assert.equal(restored.closedAt,6000);
+});
