@@ -59,3 +59,28 @@ test('forecast callback data remains compact',()=>{
     assert.ok(Buffer.byteLength(b.callback_data,'utf8')<=64);
   }
 });
+
+
+test('audit failure suppresses otherwise displayable probability',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1100,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    probabilityDisplayAllowed:true,
+    admission:{gate:'PASS',researchDisposition:'ADMIT_RESEARCH'},
+    trace:{validity:{state:'VALID'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'PASS',overallGate:'PASS',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'PASS',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:true,suppressionReasons:[],probabilities:{up:.6,flat:.2,down:.2}},
+        support:{analogCount:50,effectiveSamples:25},
+        calibration:{status:'CALIBRATED'}
+      }],
+      path:{coherence:'COHERENT',dominantArchetype:'TREND'}
+    }
+  };
+  const text=renderInstitutionalForecastCard(issuance,{auditBound:false,now:1200});
+  assert.match(text,/Audit: FAILED/);
+  assert.match(text,/Probability: SUPPRESSED/);
+  assert.doesNotMatch(text,/P↑/);
+});
