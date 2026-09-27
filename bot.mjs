@@ -2993,6 +2993,10 @@ function forecastResearchValidity(evidenceAppend){
 
 async function showIntelligence(chatId,symbol){
   const s=await snapshot(symbol);
+  let derivatives=null;
+  try{
+    derivatives=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
+  }catch{}
   const expansion=buildInstitutionalExpansionEvidence({
     asOf:Number(s.availableAt),
     orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
@@ -3006,6 +3010,14 @@ async function showIntelligence(chatId,symbol){
     `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
     `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
     `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'DERIVATIVES-RESEARCH',
+    `📊 Quellen: ${derivatives?.witness?.sourceCount||0}/2 live`,
+    `• Funding: ${Number.isFinite(derivatives?.binance?.fundingRate)?(derivatives.binance.fundingRate*100).toFixed(4)+'%':'—'}`,
+    `• Perp-Premium: ${Number.isFinite(derivatives?.binance?.premiumPct)?(derivatives.binance.premiumPct*100).toFixed(4)+'%':'—'}`,
+    `• Open Interest Δ 5m: ${Number.isFinite(derivatives?.binance?.openInterestDelta5m)?(derivatives.binance.openInterestDelta5m*100).toFixed(2)+'%':'—'}`,
+    `• Global Long/Short: ${Number.isFinite(derivatives?.binance?.globalLongShortRatio)?derivatives.binance.globalLongShortRatio.toFixed(3):'—'}`,
+    `• Taker Buy/Sell: ${Number.isFinite(derivatives?.binance?.takerBuySellRatio)?derivatives.binance.takerBuySellRatio.toFixed(3):'—'}`,
+    'Diese Werte laufen nur in Feature-Research und verändern das aktive Forecast-Modell nicht.','',
     'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
     '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
@@ -3272,7 +3284,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       symbol,
       issuance,
       auditHealthy:auditHealthyAfter,
-      dataQuality:runtimeQuality.dataQuality
+      dataQuality:runtimeQuality.dataQuality,
+      derivativesFeatureCount:derivativesExtraFeatures.length,
+      derivativesSourceCount:Number(derivativesResearchSnapshot?.witness?.sourceCount||0)
     };
   }
 
@@ -3978,6 +3992,8 @@ async function autoLearnForecastWatcher() {
               symbol,
               gate:result.issuance?.gate||'UNKNOWN',
               dataQuality:result.dataQuality,
+              derivativesFeatures:result.derivativesFeatureCount||0,
+              derivativesSources:result.derivativesSourceCount||0,
               duplicate:result.duplicate===true
             }));
           }else{
