@@ -1235,6 +1235,26 @@ async function ack(id, text) {
   try { await tg('answerCallbackQuery', { callback_query_id:id, text, show_alert:false }); } catch {}
 }
 
+function commandMenuKeyboard(){
+  return {inline_keyboard:[
+    [{text:'🔮 Forecast',callback_data:'cmd:forecast'},{text:'🧠 Intelligence',callback_data:'cmd:intelligence'}],
+    [{text:'📊 Markt',callback_data:'cmd:market'},{text:'📈 Chart',callback_data:'cmd:chart'}],
+    [{text:'🧬 Evidence',callback_data:'cmd:evidence'},{text:'🧠 Memory',callback_data:'cmd:memory'}],
+    [{text:'⚙️ Engine',callback_data:'cmd:engine'},{text:'🩺 System',callback_data:'cmd:system'}],
+    [{text:'🏠 Home',callback_data:'home'}]
+  ]};
+}
+async function showCommandMenu(chatId,messageId){
+  const payload={chat_id:chatId,text:'⌨️ TCX COMMANDS\n\nWähle eine Funktion. Danach wählst du einfach den Markt.',reply_markup:commandMenuKeyboard()};
+  if(messageId)return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+async function showCommandMarkets(chatId,messageId,command){
+  const buttons=markets.slice(0,12).map(symbol=>({text:symbolLabel(symbol),callback_data:'cmdrun:'+command+':'+symbol}));
+  const rows=[];for(let i=0;i<buttons.length;i+=2)rows.push(buttons.slice(i,i+2));
+  rows.push([{text:'⬅️ Commands',callback_data:'commands'},{text:'🏠 Home',callback_data:'home'}]);
+  return tg('editMessageText',{chat_id:chatId,message_id:messageId,text:'Wähle den Markt für /'+command+':',reply_markup:{inline_keyboard:rows}});
+}
 async function showStart(chatId, messageId) {
   sessions.delete(String(chatId));
   const payload = {
@@ -2971,6 +2991,9 @@ async function showForecast(chatId,symbol,messageId=null){
 function parseAction(data='') {
   const product=parseProductCallback(data);
   if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
   if (data === 'back') return { kind:'BACK' };
   if (data === 'favorites') return { kind:'FAVORITES' };
   if (data === 'compare') return { kind:'COMPARE' };
@@ -3094,6 +3117,22 @@ async function handle(update) {
 
   const a = parseAction(q.data);
   try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
     if (a.kind === 'HOME') {
       await showStart(chatId,messageId);
       await ack(q.id);
