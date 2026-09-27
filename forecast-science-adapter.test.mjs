@@ -54,3 +54,20 @@ test('current witness lineage requires actual distinct current venue rows',()=>{
   const r=buildForecastScienceInputs({engine:engine(history()),asOf:1000,symbol:'BTCUSDT',witnessReport:w});
   assert.equal(r.inputs.EVIDENCE_LINEAGE_INDEPENDENCE.length,2);
 });
+
+
+test('empirical rows keep feature-specific ids while sharing forecast sample identity',()=>{
+  const r=buildForecastScienceInputs({engine:engine(history(2)),asOf:1000,symbol:'BTCUSDT'});
+  const xs=r.inputs.EMPIRICAL_SUPPORT.filter(x=>x.sampleId==='r0');
+  assert.equal(xs.length,2);
+  assert.equal(new Set(xs.map(x=>x.id)).size,2);
+  assert.deepEqual(new Set(xs.map(x=>x.sampleId)),new Set(['r0']));
+});
+
+test('cold-start diagnostics are explicit and do not throw',()=>{
+  const r=buildForecastScienceInputs({engine:engine([]),asOf:1000,symbol:'BTCUSDT',witnessReport:witnesses()});
+  assert.equal(r.historyRows,0);
+  assert.equal(r.diagnostics.coldStart,true);
+  assert.equal(r.inputs.EMPIRICAL_SUPPORT.length,0);
+  assert.equal(r.canExecute,false);
+});
