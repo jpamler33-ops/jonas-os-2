@@ -132,13 +132,21 @@ export async function fetchOfficialOkxPorRegistry({
   url,
   reportId,
   reportDate,
+  timeoutMs=15000,
   now=()=>Date.now()
 }={}){
   if(typeof fetchImpl!=='function') throw new Error('fetchImpl required');
   const sourceUrl=String(url||'').trim();
   if(!/^https:\/\//i.test(sourceUrl)) throw new Error('official source url required');
-  const res=await fetchImpl(sourceUrl,{headers:{accept:'application/octet-stream','user-agent':'TCX-SHADOW-RESEARCH'}});
-  if(!res.ok) throw new Error('OKX_POR_HTTP_'+res.status);
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),Math.max(1000,Number(timeoutMs)||15000));
+  let res;
+  try{
+    res=await fetchImpl(sourceUrl,{signal:ctrl.signal,headers:{accept:'application/octet-stream','user-agent':'TCX-SHADOW-RESEARCH'}});
+    if(!res.ok) throw new Error('OKX_POR_HTTP_'+res.status);
+  }finally{
+    clearTimeout(timer);
+  }
   const bytes=Buffer.from(await res.arrayBuffer());
   const csv=firstCsvFromZip(bytes);
   const importedAt=now();
