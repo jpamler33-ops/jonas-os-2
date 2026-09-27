@@ -14,6 +14,7 @@ import { createObservability, recordProviderCall, recordOperation, recordSafety,
 import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './operational-readiness.mjs';
 import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from './persistence-contracts.mjs';
 import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistence-smoke.mjs';
+import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from './forecast-learning-center.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -79,6 +80,9 @@ const researchValidityConfig = Object.freeze({
 });
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_OUTCOME_CHECK_MS || 60000));
+const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
+const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
+const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
@@ -100,6 +104,8 @@ const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').spli
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT')
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT')
+  .split(',').map(x=>x.trim().toUpperCase()).filter(x=>requestedSymbols.includes(x));
 
 const MARKET_META = {
   BTCUSDT:['₿','BTC'], ETHUSDT:['Ξ','ETH'], SOLUSDT:['◎','SOL'], BNBUSDT:['🟡','BNB'],
@@ -1448,11 +1454,79 @@ async function showTrendContext(chatId,messageId,{force=false}={}){
   });
 }
 
+function pct01(v,d=1){
+  const n=Number(v);
+  return Number.isFinite(n)?(n*100).toFixed(d)+'%':'—';
+}
+
+function renderLearningCenterText(){
+  const s=buildForecastLearningSummary(forecastRuntime,{
+    minDisplaySamples:30,
+    autoLearnEnabled,
+    autoLearnSymbols,
+    autoLearnForecastMs,
+    now:Date.now()
+  });
+  const phaseLabel={
+    COLD_START:'⚪ Startphase',
+    LEARNING:'🟡 Lernphase',
+    MEASURING:'🟢 Messphase',
+    CANDIDATE_READY:'🧪 genug Daten für Kandidatenprüfung'
+  }[s.phase]||s.phase;
+  const lines=[
+    '🧪 TCX LERNZENTRUM','',
+    'AUTOLEARN',
+    'Status: '+(s.autoLearn.enabled?'🟢 aktiv':'⏸ aus'),
+    'Coins: '+(s.autoLearn.symbols.map(symbolLabel).join(', ')||'—'),
+    'Neuer Forecast: etwa alle '+Math.round(s.autoLearn.forecastIntervalMs/60000)+' Min. pro Coin','',
+    'LERNSTAND',
+    'Phase: '+phaseLabel,
+    'Erstellte Forecast-Snapshots: '+s.issuedForecasts,
+    'Ausgewertete Horizonte: '+s.resolvedOutcomes,
+    'Noch offen: '+s.pendingOutcomes,
+    'Abgelaufen/zu spät beobachtet: '+s.expiredOutcomes,
+    'Unabhängige Outcome-Fenster: '+s.independentEpisodes,''
+  ];
+  for(const h of s.horizons){
+    lines.push(
+      h.horizonId.toUpperCase()+' · '+h.resolved+' ausgewertet · '+h.pending+' offen',
+      h.metricsReady
+        ?'  Richtung '+pct01(h.metrics.directionalAccuracy,1)+' · Brier '+Number(h.metrics.meanBrier).toFixed(3)+' · Intervall '+pct01(h.metrics.intervalCoverage,1)
+        :'  Messwerte werden ab 30 ausgewerteten Fällen angezeigt.'
+    );
+  }
+  lines.push(
+    '',
+    'MODELL-KANDIDATEN',
+    'Datengate: '+(s.promotion.dataReady?'🟢 bereit':'🟡 sammelt noch'),
+    'Fälle: '+s.promotion.resolvedCases+'/'+s.promotion.requiredCases,
+    'Unabhängige Episoden: '+s.promotion.independentEpisodes+'/'+s.promotion.requiredIndependentEpisodes,
+    s.promotion.dataReady
+      ?'Nächster Schritt: Kandidat im Shadow-Walk-Forward gegen die aktuelle Baseline testen.'
+      :'Eine Modell-Promotion bleibt gesperrt, bis genug unabhängige echte Outcomes vorliegen.',
+    '',
+    'Wichtig: Treffer-/Kalibrierungswerte werden bei zu wenig Daten bewusst nicht angezeigt.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  );
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showLearningCenter(chatId,messageId=null){
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:renderLearningCenterText(),
+    reply_markup:{inline_keyboard:[
+      [{text:'🔄 Aktualisieren',callback_data:'home:performance'},{text:'🖥 System',callback_data:'home:system'}],
+      [{text:'🏠 Start',callback_data:'home'}]
+    ]}
+  });
+}
+
 async function showHomeSection(chatId,messageId,section) {
   if(section==='MARKETS') return showMarkets(chatId,messageId);
   if(section==='WATCHLIST') return showFavorites(chatId,messageId);
   if(section==='MEMECOINS') return showMemecoinRadar(chatId,messageId);
   if(section==='TRENDS') return showTrendContext(chatId,messageId);
+  if(section==='PERFORMANCE') return showLearningCenter(chatId,messageId);
 
   let text='';
   if(section==='ALERTS') {
@@ -1500,6 +1574,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
       'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
       'Marktstimmung: 🟢 Live-Provider eingebaut',
+      `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -2843,9 +2918,13 @@ async function showIntelligence(chatId,symbol){
   await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
 }
 
-async function showForecast(chatId,symbol,messageId=null){
+async function showForecast(chatId,symbol,messageId=null,options={}){
   const started=Date.now();
+  const silent=options?.silent===true;
+  const issuanceSource=String(options?.source||'TCX_TELEGRAM_INSTITUTIONAL_FORECAST');
   if(!forecastRuntime.healthy){
+    const failure={ok:false,skipped:true,reason:'FORECAST_RUNTIME_UNHEALTHY'};
+    if(silent) return failure;
     return tg('sendMessage',{
       chat_id:chatId,
       text:[
@@ -2888,6 +2967,25 @@ async function showForecast(chatId,symbol,messageId=null){
     extraFeatureCount:extraFeatures.length,
     expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
   });
+  if(silent&&issuanceSource==='TCX_AUTOLEARN_V1'){
+    const cleanAudit=
+      marketAudit?.ok===true&&
+      witnessAudit?.ok===true&&
+      engineAudit?.ok===true&&
+      auditLedger.healthy===true&&
+      marketFabric.healthy===true&&
+      safety?.canResearch===true&&
+      runtimeQuality.dataQuality>=0.70;
+    if(!cleanAudit){
+      return {
+        ok:false,
+        skipped:true,
+        reason:'AUTOLEARN_QUALITY_GATE',
+        dataQuality:runtimeQuality.dataQuality,
+        safetyState:String(safety?.state||'UNKNOWN')
+      };
+    }
+  }
   // Expansion V1 is wired only from evidence we actually observe here.
   // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
   let expansionEvidence=null;
@@ -2948,6 +3046,7 @@ async function showForecast(chatId,symbol,messageId=null){
       'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
       'Action: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
+    if(silent) return {ok:false,skipped:true,reason:'AUDIT_BINDING_FAILED'};
     const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
     return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
   }
@@ -3010,7 +3109,7 @@ async function showForecast(chatId,symbol,messageId=null){
       code:String(code)
     })),
     provenance:{
-      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      source:issuanceSource,
       version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
     }
   };
@@ -3042,11 +3141,23 @@ async function showForecast(chatId,symbol,messageId=null){
 
 
   recordOperation(observability,{
-    name:'institutional_forecast',
+    name:silent?'institutional_forecast_autolearn':'institutional_forecast',
     ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
     latencyMs:Date.now()-started,
     error:auditHealthyAfter?null:'forecast audit binding failed'
   });
+
+  if(silent){
+    return {
+      ok:true,
+      skipped:false,
+      duplicate:issued.duplicate,
+      symbol,
+      issuance,
+      auditHealthy:auditHealthyAfter,
+      dataQuality:runtimeQuality.dataQuality
+    };
+  }
 
   const payload={text,reply_markup:forecastProductKeyboard(symbol)};
   return deliverTelegramTextCard(tg,chatId,messageId,payload);
@@ -3691,6 +3802,63 @@ async function venueQualityWatcher() {
   }
 }
 
+async function autoLearnForecastWatcher() {
+  await sleep(15000);
+  while(running) {
+    const started=Date.now();
+    let issued=0,skipped=0,failed=0;
+    if(autoLearnEnabled&&forecastRuntime.healthy){
+      for(const symbol of autoLearnSymbols){
+        if(!running) break;
+        try{
+          const latest=latestInstitutionalForecast(forecastRuntime,symbol);
+          const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
+          if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
+            skipped++;
+            continue;
+          }
+          const result=await showForecast(null,symbol,null,{silent:true,source:'TCX_AUTOLEARN_V1'});
+          if(result?.ok){
+            issued++;
+            console.log('autolearn forecast issued',JSON.stringify({
+              symbol,
+              gate:result.issuance?.gate||'UNKNOWN',
+              dataQuality:result.dataQuality,
+              duplicate:result.duplicate===true
+            }));
+          }else{
+            skipped++;
+            if(result?.reason&&result.reason!=='AUTOLEARN_QUALITY_GATE'){
+              console.log('autolearn forecast skipped',JSON.stringify({symbol,reason:result.reason}));
+            }
+          }
+        }catch(err){
+          failed++;
+          const msg=err instanceof Error?err.message:String(err);
+          recordError(observability,{scope:'forecast_runtime.autolearn',message:msg});
+          console.error('autolearn forecast error',symbol,msg);
+        }
+        await sleep(250);
+      }
+    }
+    recordOperation(observability,{
+      name:'forecast_autolearn_cycle',
+      ok:failed===0,
+      latencyMs:Date.now()-started,
+      error:failed?failed+' symbol(s) failed':null
+    });
+    if(issued||failed){
+      console.log('autolearn cycle',JSON.stringify({
+        issued,skipped,failed,
+        symbols:autoLearnSymbols.length,
+        nextSweepMs:autoLearnSweepMs,
+        forecastIntervalMs:autoLearnForecastMs
+      }));
+    }
+    await sleep(autoLearnSweepMs);
+  }
+}
+
 async function forecastOutcomeWatcher() {
   while(running) {
     await sleep(forecastOutcomeCheckMs);
@@ -4064,6 +4232,7 @@ console.log(JSON.stringify({
   researchAlertCheckMs,
   episodeSweepMs,
   forecastOutcomeCheckMs,
+  autoLearn:{enabled:autoLearnEnabled,symbols:autoLearnSymbols,forecastIntervalMs:autoLearnForecastMs,sweepMs:autoLearnSweepMs,version:FORECAST_LEARNING_CENTER_VERSION},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
@@ -4162,4 +4331,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
