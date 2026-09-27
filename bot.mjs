@@ -5,6 +5,7 @@ import { renderCandlestickPng } from './chart-renderer.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
+import { fetchIndependentWitnesses } from './independent-witness-network.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -15,6 +16,8 @@ const binanceBases = (configuredBinanceBases
   ? configuredBinanceBases.split(',')
   : ['https://data-api.binance.vision','https://api1.binance.com','https://api.binance.com'])
   .map(x => x.trim().replace(/\/+$/, '')).filter(Boolean);
+const okxBase = (process.env.TCX_OKX_REST_BASE || 'https://www.okx.com').replace(/\/+$/,'');
+const krakenBase = (process.env.TCX_KRAKEN_REST_BASE || 'https://api.kraken.com').replace(/\/+$/,'');
 
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
@@ -37,6 +40,7 @@ const markets = requestedSymbols.map(symbol => ({
 }));
 
 const sessions = new Map();
+const witnessCache = new Map();
 const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
 const loadedState = await loadPersistentState(stateFile);
 const favorites = loadedState.favorites;
@@ -104,6 +108,21 @@ function symbolLabel(symbol) {
 
 function symbolIcon(symbol) {
   return MARKET_META[symbol]?.[0] || '•';
+}
+
+async function witnessState(symbol,primarySnapshot,{maxAgeMs=5000}={}) {
+  const cached=witnessCache.get(symbol);
+  const now=Date.now();
+  if(cached && now-cached.fetchedAt<=maxAgeMs) return cached.report;
+  const report=await fetchIndependentWitnesses({
+    symbol,
+    primarySnapshot,
+    fetchJson,
+    okxBase,
+    krakenBase
+  });
+  witnessCache.set(symbol,{fetchedAt:now,report});
+  return report;
 }
 
 function favoriteSet(chatId) {
@@ -237,7 +256,8 @@ function marketKeyboard(chatId, symbol, live) {
       { text:'🧬 Memory', callback_data:`memory:${symbol}` }
     ],
     [
-      { text:'🧪 MTL Engine', callback_data:`engine:${symbol}` }
+      { text:'🧪 MTL Engine', callback_data:`engine:${symbol}` },
+      { text:'🛰 Witness', callback_data:`witness:${symbol}` }
     ],
     [
       { text:isFav?'★ Favorit':'☆ Favorit', callback_data:`fav:${symbol}` },
@@ -292,6 +312,7 @@ function chartKeyboard(symbol, interval) {
       { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
       { text:"🧬 Memory", callback_data:`memory:${symbol}` },
       { text:"🧪 MTL", callback_data:`engine:${symbol}` },
+      { text:"🛰 Witness", callback_data:`witness:${symbol}` },
       { text:"📊 Markt", callback_data:`refresh:${symbol}` }
     ]
   ]};
@@ -307,6 +328,7 @@ function structureKeyboard(symbol) {
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
       { text:"🧬 Memory", callback_data:`memory:${symbol}` },
       { text:"🧪 MTL", callback_data:`engine:${symbol}` },
+      { text:"🛰 Witness", callback_data:`witness:${symbol}` },
       { text:"🧠 TCX", callback_data:`tcx:${symbol}` }
     ]
   ]};
@@ -317,7 +339,8 @@ function memoryKeyboard(symbol) {
     [
       { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
       { text:"🧭 Struktur", callback_data:`structure:${symbol}` },
-      { text:"🧪 MTL", callback_data:`engine:${symbol}` }
+      { text:"🧪 MTL", callback_data:`engine:${symbol}` },
+      { text:"🛰 Witness", callback_data:`witness:${symbol}` }
     ],
     [
       { text:"📊 Markt", callback_data:`refresh:${symbol}` },
@@ -411,6 +434,7 @@ function helpText() {
     '/structure BTC – 4H/1H/15m/5m Struktur',
     '/memory BTC – ähnliche historische TCX-Episoden',
     '/engine BTC – Mechanism Transition Lattice',
+    '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -701,6 +725,47 @@ async function showStructure(chatId, symbol) {
   });
 }
 
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const text=[
+    `🛰 TCX Independent Witness Network · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    witnessSummary(report),
+    "",
+    "EPISTEMIC STATUS",
+    "• Binance / OKX / Kraken: independent venue observations",
+    "• Cross-venue agreement: evidence audit, not causality",
+    "• USD vs USDT: quote-basis caveat where Kraken is used",
+    "• Mechanism: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
 function pct01(x){ return fmt(Number(x)*100,0); }
 
 function transitionLine(label,lattice){
@@ -716,15 +781,16 @@ async function showEngine(chatId,symbol){
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
   if(matureSymbolEpisodes(symbol,state.byTf["5m"])) await persistEpisodeMemory("engine-maturity");
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
 
   const r15=runMechanismTransitionEngine({
-    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
   });
   const r60=runMechanismTransitionEngine({
-    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
   });
   const r180=runMechanismTransitionEngine({
-    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
   });
 
   const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
@@ -737,7 +803,8 @@ async function showEngine(chatId,symbol){
     `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
     `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
     `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
-    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"}`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
     "",
     "PRESSURE CHANNELS",
     ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
@@ -749,6 +816,7 @@ async function showEngine(chatId,symbol){
     "",
     `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
     `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
     "",
     "STATUS",
     "• Transition evidence: OBSERVATIONAL",
@@ -775,6 +843,7 @@ function parseAction(data='') {
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
   if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
   return { kind:'UNKNOWN' };
 }
@@ -843,6 +912,20 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/witness") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    if(!symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /witness BTC"});
+      return true;
+    }
+    try { await showWitness(chatId,symbol); }
+    catch(err){
+      console.error("witness command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Independent Witness Network gerade nicht verfügbar."});
+    }
+    return true;
+  }
 
   if (command === "/engine") {
     const symbol=normalizeSymbol(parts[1]||"");
@@ -994,6 +1077,12 @@ async function handle(update) {
       return;
     }
 
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
 
     if (a.kind === "ENGINE") {
       await showEngine(chatId,a.symbol);
@@ -1151,6 +1240,10 @@ const server = http.createServer((req,res) => {
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
       alerts:activeAlerts,
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
       episodeMemory:{
         file:episodeFile,
         total:episodes.length,
@@ -1200,6 +1293,10 @@ console.log(JSON.stringify({
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
   marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
   persistence:{
     file:stateFile,
     healthy:persistenceHealthy,
