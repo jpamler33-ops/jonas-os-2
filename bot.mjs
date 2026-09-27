@@ -602,6 +602,8 @@ function buildResearchAlertContext(state,witnessReport) {
 function updateRadarCache(symbol,ctx) {
   radarCache.set(symbol,{
     capturedAt:Number(ctx.capturedAt||Date.now()),
+    price:Number(ctx.market?.price),
+    change24hPct:Number(ctx.market?.change24hPct),
     status:String(ctx.safety?.state||'UNKNOWN'),
     regime:String(ctx.state?.regime||'UNKNOWN'),
     bias:String(ctx.state?.mtfBias||'UNKNOWN'),
@@ -1080,7 +1082,8 @@ function favoritesKeyboard(chatId) {
       callback_data:`market:${symbol}`
     })));
   }
-  rows.push([{ text:'⬅️ Zurück', callback_data:'back' }]);
+  if(syms.length>=2) rows.push([{ text:'📊 Compare', callback_data:'compare' }]);
+  rows.push([{ text:'📊 Märkte', callback_data:'home:markets' }, { text:'🏠 Home', callback_data:'home' }]);
   return { inline_keyboard: rows };
 }
 
@@ -1173,6 +1176,7 @@ function helpText() {
     '/sor BTC BUY 100 – Multi-Venue Shadow Smart Order Route',
     '/sorstatus [BTC] – Venue-Qualität / Routing-Fähigkeit',
     '/favorites – Favoriten',
+    '/compare – bis zu vier Favoriten vergleichen',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alertregime BTC – Regime-Wechsel',
     '/alertstructure BTC – Struktur-Wechsel',
@@ -1518,12 +1522,110 @@ async function showEvidenceHistory(chatId,messageId,symbol) {
 
 async function showFavorites(chatId, messageId) {
   const syms = [...favoriteSet(chatId)];
-  const text = syms.length
-    ? `⭐ Favoriten\n\n${syms.map(s => `• ${symbolLabel(s)}/USDT`).join('\n')}`
-    : '⭐ Noch keine Favoriten.\n\nÖffne einen Coin und tippe auf ☆ Favorit.';
-  const payload = { chat_id:chatId, text, reply_markup:favoritesKeyboard(chatId) };
+  let text;
+  if(!syms.length){
+    text='⭐ WATCHLIST\n\nNoch keine Favoriten.\n\nÖffne einen Coin und tippe auf ☆ Favorit.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{
+        const s=await snapshot(symbol);
+        return [symbol,s];
+      }catch{
+        return [symbol,null];
+      }
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=s?.price;
+      const change=s?.changePct;
+      const priceText=Number.isFinite(price)?fmt(price,price<1?6:2):'—';
+      const changeText=Number.isFinite(change)?((change>=0?'+':'')+fmt(change,2)+'%'):'—';
+      const regime=r?.regime||'warming';
+      const status=r?.status||'—';
+      return '• '+symbolLabel(symbol)+' · '+priceText+' · '+changeText+' · '+regime+' · '+status;
+    });
+    text=[
+      '⭐ TCX WATCHLIST v2','',
+      'Preis · 24h · Regime · Safety','',
+      ...lines,
+      syms.length>20?'… weitere Favoriten ausgeblendet':'',
+      '',
+      'Research-Felder werden vom TCX-Sweep aktualisiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].filter(Boolean).join('\n');
+  }
+  const payload = { chat_id:chatId, text:text.slice(0,4096), reply_markup:favoritesKeyboard(chatId) };
   if (messageId) await tg('editMessageText', { ...payload, message_id:messageId });
   else await tg('sendMessage', payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={
+      chat_id:chatId,
+      text:'📊 COMPARE\n\nMindestens zwei Favoriten erforderlich.',
+      reply_markup:favoritesKeyboard(chatId)
+    };
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+    else await tg('sendMessage',payload);
+    return;
+  }
+
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r || Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){
+      try{
+        await researchAlertContext(symbol,{force:true});
+        r=radarCache.get(symbol);
+      }catch{}
+    }
+    let market=null;
+    try{ market=await snapshot(symbol); }catch{}
+    const e=latestEvidenceRecord(symbol);
+    results.push({symbol,r,market,e});
+  }
+
+  const lines=results.map(({symbol,r,market,e})=>{
+    const price=market?.price;
+    return [
+      symbolLabel(symbol),
+      'P '+(Number.isFinite(price)?fmt(price,price<1?6:2):'—'),
+      'R '+String(r?.regime||'—'),
+      'MTF '+String(r?.bias||'—'),
+      'W '+(r?fmt(r.witnessAgreement*100,0)+'%':'—'),
+      'M '+(r?.support??'—'),
+      'N '+(r?fmt(r.novelty*100,0)+'%':'—'),
+      'C '+(r?fmt(r.contradiction*100,0)+'%':'—'),
+      'E '+(e?.index??'—')+'/100',
+      'S '+String(r?.status||'—')
+    ].join(' · ');
+  });
+
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2){
+    rows.push(syms.slice(i,i+2).map(symbol=>({
+      text:symbolIcon(symbol)+' '+symbolLabel(symbol),
+      callback_data:'market:'+symbol
+    })));
+  }
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Home',callback_data:'home'}]);
+
+  const text=[
+    '📊 TCX COMPARE','',
+    'P=Preis · R=Regime · W=Witness · M=Memory · N=Novelty · C=Contradiction · E=Evidence · S=Safety','',
+    ...lines,'',
+    'Keine Rangliste und kein Trade-Winner.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
 }
 
 async function showMarket(chatId, messageId, symbol, live) {
@@ -2330,6 +2432,7 @@ function parseAction(data='') {
   if(product.kind!=='UNKNOWN') return product;
   if (data === 'back') return { kind:'BACK' };
   if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
   if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
   const p = String(data).split(':');
   if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
@@ -2366,6 +2469,11 @@ async function handleCommand(msg) {
 
   if (command === '/favorites') {
     await showFavorites(chatId);
+    return true;
+  }
+
+  if (command === '/compare') {
+    await showCompare(chatId,null);
     return true;
   }
 
@@ -2827,6 +2935,11 @@ async function handle(update) {
     if (a.kind === 'FAVORITES') {
       await showFavorites(chatId,messageId);
       await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
       return;
     }
     if (a.kind === 'SEARCH_HELP') {
