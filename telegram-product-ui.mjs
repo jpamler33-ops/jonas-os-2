@@ -231,6 +231,9 @@ export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
       {text:"🧭 Shadow SOR",callback_data:"sor:"+s}
     ],
     [
+      {text:"🧠 Venue Memory",callback_data:"vqm:"+s}
+    ],
+    [
       {text:"🧩 Evidence",callback_data:"evidence:"+s},
       {text:"⏱ Validity",callback_data:"validity:"+s},
       {text:"📜 History",callback_data:"history:"+s}
@@ -259,6 +262,7 @@ export function parseProductCallback(data="") {
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
   if(p[0]==="sor"&&p[1]) return {kind:"SOR",symbol:p[1]};
+  if(p[0]==="vqm"&&p[1]) return {kind:"VQM",symbol:p[1]};
   if(p[0]==="evidence"&&p[1]) return {kind:"EVIDENCE",symbol:p[1]};
   if(p[0]==="history"&&p[1]) return {kind:"HISTORY",symbol:p[1]};
   if(p[0]==="validity"&&p[1]) return {kind:"VALIDITY",symbol:p[1]};
