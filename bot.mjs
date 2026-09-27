@@ -30,6 +30,8 @@ import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObser
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
 import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
 import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } from './expansion-runtime/institutional-expansion.mjs';
+import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/dexscreener-public-provider.mjs';
+import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -132,6 +134,8 @@ const marketDataProvider=createMarketDataProvider({
   onError:event=>recordError(observability,event),
   onOperation:event=>recordOperation(observability,event)
 });
+const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
+const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const {
   fetchJson,
   fetchMarketParts,
@@ -1154,7 +1158,8 @@ function helpText() {
     '/memory BTC – zeigen, was TCX aus ähnlichen Fällen gelernt hat',
     '/evidence BTC – Daten und Belege hinter der Einschätzung',
     '/validity BTC – prüfen, ob die Einschätzung noch aktuell ist',
-    '/alerts – aktive Alarme anzeigen','',
+    '/alerts – aktive Alarme anzeigen',
+    'Startmenü: 🐸 Memecoin-Radar und 🧭 Stimmung & Trends nutzen öffentliche Live-Quellen.','',
     'PROFI-FUNKTIONEN',
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
@@ -1298,9 +1303,16419 @@ async function showMarkets(chatId,messageId) {
   else await tg('sendMessage',payload);
 }
 
+function compactUsd(v){
+  const n=Number(v);
+  if(!Number.isFinite(n)) return '—';
+  const a=Math.abs(n);
+  if(a>=1e9) return '
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=activeAlerts(chatId);
+    text=list.length
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
+  } else if(section==='RADAR') {
+    const now=Date.now();
+    const lines=requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+    });
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
+      ...lines,'',
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
+      'Marktstimmung: 🟢 Live-Provider eingebaut',
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    text=[
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    text='Dieser Bereich ist noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
+  const contradictions=witness?.contradictions?.length
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
+  const text=[
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
+  });
+  const text=[
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
+    ...rows,'',
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceState(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const {record,validity}=await currentEvidenceState(symbol);
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
+  const text=[
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
+    });
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showFavorites(chatId, messageId) {
+  const syms=[...favoriteSet(chatId)];
+  let text;
+  if(!syms.length){
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
+    });
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+    return;
+  }
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
+  }
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
+  });
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showMarket(chatId, messageId, symbol, live) {
+  const s = await snapshot(symbol);
+  const text = renderMarket(s,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
+  if (messageId) {
+    await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  } else {
+    const sent = await tg('sendMessage', { chat_id:chatId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId:sent.message_id, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  }
+}
+
+async function showTimeframe(chatId, messageId, symbol, interval) {
+  const t = await timeframeSnapshot(symbol, interval);
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTimeframe(t),
+    reply_markup:timeframeKeyboard(symbol)
+  });
+  const live = sessions.get(String(chatId))?.live === true;
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TIMEFRAME', interval, lastRefresh:Date.now() });
+}
+
+async function showTcx(chatId, messageId, symbol) {
+  const s = await snapshot(symbol);
+  const live = sessions.get(String(chatId))?.live === true;
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTcx(s),
+    reply_markup:tcxKeyboard(symbol,live)
+  });
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
+}
+
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
+  const activeVisible=candles.some(c=>c.closed===false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join("\n").slice(0,1024);
+}
+
+async function researchState(symbol,interval="5m") {
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
+  ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const analysis=analyzeStructure(byTf[interval]);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
+  const text=[
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const context=await sorLearningContext(symbol);
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:vqmMinToxicitySamples
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
+  const auditPayload={
+    ...report,
+    symbol,
+    executionContext:context,
+    venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+    '',
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    '',
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
+
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
+  });
+
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+
+  const makeEnvelope=()=>buildResearchEnvelope({
+    symbol,
+    availableAt:contextAvailableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
+    }
+  });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
+  }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
+  const lines=[
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+const me = await tg('getMe',{});
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++(n/1e9).toFixed(2)+'B';
+  if(a>=1e6) return '
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=activeAlerts(chatId);
+    text=list.length
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
+  } else if(section==='RADAR') {
+    const now=Date.now();
+    const lines=requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+    });
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
+      ...lines,'',
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    text=[
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    text='Dieser Bereich ist noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
+  const contradictions=witness?.contradictions?.length
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
+  const text=[
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
+  });
+  const text=[
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
+    ...rows,'',
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceState(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const {record,validity}=await currentEvidenceState(symbol);
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
+  const text=[
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
+    });
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showFavorites(chatId, messageId) {
+  const syms=[...favoriteSet(chatId)];
+  let text;
+  if(!syms.length){
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
+    });
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+    return;
+  }
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
+  }
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
+  });
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showMarket(chatId, messageId, symbol, live) {
+  const s = await snapshot(symbol);
+  const text = renderMarket(s,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
+  if (messageId) {
+    await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  } else {
+    const sent = await tg('sendMessage', { chat_id:chatId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId:sent.message_id, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  }
+}
+
+async function showTimeframe(chatId, messageId, symbol, interval) {
+  const t = await timeframeSnapshot(symbol, interval);
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTimeframe(t),
+    reply_markup:timeframeKeyboard(symbol)
+  });
+  const live = sessions.get(String(chatId))?.live === true;
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TIMEFRAME', interval, lastRefresh:Date.now() });
+}
+
+async function showTcx(chatId, messageId, symbol) {
+  const s = await snapshot(symbol);
+  const live = sessions.get(String(chatId))?.live === true;
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTcx(s),
+    reply_markup:tcxKeyboard(symbol,live)
+  });
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
+}
+
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
+  const activeVisible=candles.some(c=>c.closed===false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join("\n").slice(0,1024);
+}
+
+async function researchState(symbol,interval="5m") {
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
+  ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const analysis=analyzeStructure(byTf[interval]);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
+  const text=[
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const context=await sorLearningContext(symbol);
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:vqmMinToxicitySamples
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
+  const auditPayload={
+    ...report,
+    symbol,
+    executionContext:context,
+    venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+    '',
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    '',
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
+
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
+  });
+
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+
+  const makeEnvelope=()=>buildResearchEnvelope({
+    symbol,
+    availableAt:contextAvailableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
+    }
+  });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
+  }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
+  const lines=[
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+const me = await tg('getMe',{});
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++(n/1e6).toFixed(2)+'M';
+  if(a>=1e3) return '
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=activeAlerts(chatId);
+    text=list.length
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
+  } else if(section==='RADAR') {
+    const now=Date.now();
+    const lines=requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+    });
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
+      ...lines,'',
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    text=[
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    text='Dieser Bereich ist noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
+  const contradictions=witness?.contradictions?.length
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
+  const text=[
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
+  });
+  const text=[
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
+    ...rows,'',
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceState(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const {record,validity}=await currentEvidenceState(symbol);
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
+  const text=[
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
+    });
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showFavorites(chatId, messageId) {
+  const syms=[...favoriteSet(chatId)];
+  let text;
+  if(!syms.length){
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
+    });
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+    return;
+  }
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
+  }
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
+  });
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showMarket(chatId, messageId, symbol, live) {
+  const s = await snapshot(symbol);
+  const text = renderMarket(s,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
+  if (messageId) {
+    await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  } else {
+    const sent = await tg('sendMessage', { chat_id:chatId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId:sent.message_id, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  }
+}
+
+async function showTimeframe(chatId, messageId, symbol, interval) {
+  const t = await timeframeSnapshot(symbol, interval);
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTimeframe(t),
+    reply_markup:timeframeKeyboard(symbol)
+  });
+  const live = sessions.get(String(chatId))?.live === true;
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TIMEFRAME', interval, lastRefresh:Date.now() });
+}
+
+async function showTcx(chatId, messageId, symbol) {
+  const s = await snapshot(symbol);
+  const live = sessions.get(String(chatId))?.live === true;
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTcx(s),
+    reply_markup:tcxKeyboard(symbol,live)
+  });
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
+}
+
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
+  const activeVisible=candles.some(c=>c.closed===false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join("\n").slice(0,1024);
+}
+
+async function researchState(symbol,interval="5m") {
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
+  ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const analysis=analyzeStructure(byTf[interval]);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
+  const text=[
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const context=await sorLearningContext(symbol);
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:vqmMinToxicitySamples
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
+  const auditPayload={
+    ...report,
+    symbol,
+    executionContext:context,
+    venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+    '',
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    '',
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
+
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
+  });
+
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+
+  const makeEnvelope=()=>buildResearchEnvelope({
+    symbol,
+    availableAt:contextAvailableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
+    }
+  });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
+  }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
+  const lines=[
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+const me = await tg('getMe',{});
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++(n/1e3).toFixed(1)+'K';
+  if(a>=1) return '
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=activeAlerts(chatId);
+    text=list.length
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
+  } else if(section==='RADAR') {
+    const now=Date.now();
+    const lines=requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+    });
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
+      ...lines,'',
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    text=[
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    text='Dieser Bereich ist noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
+  const contradictions=witness?.contradictions?.length
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
+  const text=[
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
+  });
+  const text=[
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
+    ...rows,'',
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceState(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const {record,validity}=await currentEvidenceState(symbol);
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
+  const text=[
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
+    });
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showFavorites(chatId, messageId) {
+  const syms=[...favoriteSet(chatId)];
+  let text;
+  if(!syms.length){
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
+    });
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+    return;
+  }
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
+  }
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
+  });
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showMarket(chatId, messageId, symbol, live) {
+  const s = await snapshot(symbol);
+  const text = renderMarket(s,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
+  if (messageId) {
+    await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  } else {
+    const sent = await tg('sendMessage', { chat_id:chatId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId:sent.message_id, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  }
+}
+
+async function showTimeframe(chatId, messageId, symbol, interval) {
+  const t = await timeframeSnapshot(symbol, interval);
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTimeframe(t),
+    reply_markup:timeframeKeyboard(symbol)
+  });
+  const live = sessions.get(String(chatId))?.live === true;
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TIMEFRAME', interval, lastRefresh:Date.now() });
+}
+
+async function showTcx(chatId, messageId, symbol) {
+  const s = await snapshot(symbol);
+  const live = sessions.get(String(chatId))?.live === true;
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTcx(s),
+    reply_markup:tcxKeyboard(symbol,live)
+  });
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
+}
+
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
+  const activeVisible=candles.some(c=>c.closed===false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join("\n").slice(0,1024);
+}
+
+async function researchState(symbol,interval="5m") {
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
+  ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const analysis=analyzeStructure(byTf[interval]);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
+  const text=[
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const context=await sorLearningContext(symbol);
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:vqmMinToxicitySamples
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
+  const auditPayload={
+    ...report,
+    symbol,
+    executionContext:context,
+    venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+    '',
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    '',
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
+
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
+  });
+
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+
+  const makeEnvelope=()=>buildResearchEnvelope({
+    symbol,
+    availableAt:contextAvailableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
+    }
+  });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
+  }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
+  const lines=[
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+const me = await tg('getMe',{});
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++n.toFixed(2);
+  if(a>=0.01) return '
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=activeAlerts(chatId);
+    text=list.length
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
+  } else if(section==='RADAR') {
+    const now=Date.now();
+    const lines=requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+    });
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
+      ...lines,'',
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    text=[
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    text='Dieser Bereich ist noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
+  const contradictions=witness?.contradictions?.length
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
+  const text=[
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
+  });
+  const text=[
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
+    ...rows,'',
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceState(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const {record,validity}=await currentEvidenceState(symbol);
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
+  const text=[
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
+    });
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showFavorites(chatId, messageId) {
+  const syms=[...favoriteSet(chatId)];
+  let text;
+  if(!syms.length){
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
+    });
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+    return;
+  }
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
+  }
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
+  });
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showMarket(chatId, messageId, symbol, live) {
+  const s = await snapshot(symbol);
+  const text = renderMarket(s,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
+  if (messageId) {
+    await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  } else {
+    const sent = await tg('sendMessage', { chat_id:chatId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId:sent.message_id, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  }
+}
+
+async function showTimeframe(chatId, messageId, symbol, interval) {
+  const t = await timeframeSnapshot(symbol, interval);
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTimeframe(t),
+    reply_markup:timeframeKeyboard(symbol)
+  });
+  const live = sessions.get(String(chatId))?.live === true;
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TIMEFRAME', interval, lastRefresh:Date.now() });
+}
+
+async function showTcx(chatId, messageId, symbol) {
+  const s = await snapshot(symbol);
+  const live = sessions.get(String(chatId))?.live === true;
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTcx(s),
+    reply_markup:tcxKeyboard(symbol,live)
+  });
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
+}
+
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
+  const activeVisible=candles.some(c=>c.closed===false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join("\n").slice(0,1024);
+}
+
+async function researchState(symbol,interval="5m") {
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
+  ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const analysis=analyzeStructure(byTf[interval]);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
+  const text=[
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const context=await sorLearningContext(symbol);
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:vqmMinToxicitySamples
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
+  const auditPayload={
+    ...report,
+    symbol,
+    executionContext:context,
+    venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+    '',
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    '',
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
+
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
+  });
+
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+
+  const makeEnvelope=()=>buildResearchEnvelope({
+    symbol,
+    availableAt:contextAvailableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
+    }
+  });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
+  }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
+  const lines=[
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+const me = await tg('getMe',{});
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++n.toFixed(4);
+  return '
+  if(section==='MARKETS') return showMarkets(chatId,messageId);
+  if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+
+  let text='';
+  if(section==='ALERTS') {
+    const list=activeAlerts(chatId);
+    text=list.length
+      ? ['🔔 DEINE ALERTS','',
+         'TCX beobachtet diese Bedingungen für dich:','',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
+         'Neuen Preisalarm setzen: /alert BTC 70000',
+         'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
+      : ['🔔 DEINE ALERTS','',
+         'Aktuell ist kein Alarm aktiv.','',
+         'Schnellster Weg:',
+         '1. Coin öffnen',
+         '2. 🔔 Alert antippen',
+         '3. Bedingung auswählen','',
+         'Preis direkt: /alert BTC 70000'].join('\n');
+  } else if(section==='RADAR') {
+    const now=Date.now();
+    const lines=requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      const witness=Math.round((Number(r.witnessAgreement)||0)*100);
+      const status=String(r.status||'').toUpperCase();
+      const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
+    });
+    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
+      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
+      ...lines,'',
+      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
+      'Öffne einen Coin für die eigentliche Analyse.'
+    ].join('\n');
+  } else if(section==='SYSTEM') {
+    text=[
+      '🖥 TCX SYSTEMSTATUS','',
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
+      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
+      'Sicherheitsmodus:',
+      'TCX darf keine echten Orders ausführen.',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
+    ].join('\n');
+  } else if(section==='PERFORMANCE') {
+    const total=episodes.length;
+    const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
+    const mature1h=episodes.filter(e=>e.outcomes?.['12']).length;
+    const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
+    text=[
+      '🧠 WAS TCX GELERNT HAT','',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
+      'Warum das wichtig ist:',
+      'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
+      'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
+      'Eine Trefferquote wird erst angezeigt, wenn sie methodisch sauber gemessen werden kann.'
+    ].join('\n');
+  } else if(section==='SETTINGS') {
+    text=[
+      '⚙️ TCX EINSTELLUNGEN','',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  } else {
+    text='Dieser Bereich ist noch nicht verfügbar.';
+  }
+
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showWhy(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const witness=await witnessState(symbol,state.market).catch(()=>null);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
+  const bias=String(state.dashboard.bias||'').toUpperCase();
+  const flow=String(state.dashboard.flow||'').toUpperCase();
+  const direction=bias.includes('BULL')||bias.includes('UP')
+    ?'🟢 mehr Signale zeigen nach oben'
+    :bias.includes('BEAR')||bias.includes('DOWN')
+      ?'🔴 mehr Signale zeigen nach unten'
+      :'🟡 keine klare Richtung';
+  const pressure=flow.includes('BID')||flow.includes('BUY')
+    ?'Käufer sind aktuell stärker'
+    :flow.includes('ASK')||flow.includes('SELL')
+      ?'Verkäufer sind aktuell stärker'
+      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
+  const witnessText=witness
+    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
+    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
+  const contradictions=witness?.contradictions?.length
+    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
+    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
+  const text=[
+    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
+    'DIE KURZE ANTWORT',
+    direction+'.',
+    pressure+'.','',
+    'DAS HAT TCX GEPRÜFT',
+    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
+    `• Datenquellen: ${witnessText}`,
+    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
+    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'UNSICHERHEIT',
+    '• '+contradictions,
+    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
+    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
+    'TCX führt keine echten Orders aus.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+async function showRegime(chatId,messageId,symbol) {
+  const state=await researchState(symbol,'5m');
+  const mtf=state.mtf;
+  const humanTrend=value=>{
+    const x=String(value||'').toUpperCase();
+    if(x.includes('BULL')||x==='UP'||x.includes('UPTREND')) return '🟢 steigend';
+    if(x.includes('BEAR')||x==='DOWN'||x.includes('DOWNTREND')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ noch unklar';
+  };
+  const rows=['4h','1h','15m','5m'].map(tf=>{
+    const a=mtf?.analyses?.[tf];
+    return `• ${tf}: ${humanTrend(a?.trend)}`;
+  });
+  const text=[
+    `🧭 MARKTSTRUKTUR · ${symbol.replace('USDT','/USDT')}`,'',
+    'So sieht der Trend auf mehreren Zeitebenen aus:',
+    ...rows,'',
+    `Gesamtbild: ${humanTrend(state.dashboard.bias)}`,
+    `Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
+    'Warum mehrere Zeitebenen?',
+    'Ein Coin kann kurzfristig steigen, obwohl der größere Trend noch fällt – oder umgekehrt.','',
+    'Für technische Details nutze die Profi-Ansicht.',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  await tg('editMessageText',{
+    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
+    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
+  });
+}
+
+function evidenceRelationIcon(relation) {
+  if(relation==='ALIGNED'||relation==='SUPPORTED') return '✓';
+  if(relation==='CONFLICT') return '!';
+  if(relation==='NOVEL') return '?';
+  return '·';
+}
+
+async function currentEvidenceState(symbol) {
+  const context=await researchAlertContext(symbol,{force:true});
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
+}
+
+async function currentEvidenceRecord(symbol) {
+  return (await currentEvidenceState(symbol)).record;
+}
+
+async function showEvidence(chatId,messageId,symbol) {
+  const {record,validity}=await currentEvidenceState(symbol);
+  const relation=x=>x==='ALIGNED'||x==='SUPPORTED'?'🟢 passt':x==='CONFLICT'?'🔴 widerspricht':x==='NOVEL'?'🟡 ungewöhnlich':'⚪ neutral';
+  const lines=record.map.layers.map(x=>'• '+x.layer+': '+relation(x.relation));
+  const index=Number(record.index);
+  const indexText=index>=70?'stark':index>=45?'mittel':'schwach';
+  const text=[
+    '🔎 DATEN & BELEGE · '+symbol.replace('USDT','/USDT'),'',
+    'KURZ GESAGT',
+    `Beleglage: ${Number.isFinite(index)?index+'/100':'—'} · ${indexText}`,
+    `Datenquellen stimmen zu: ${fmt(record.witnessAgreement*100,0)}%`,
+    `Historische Vergleichsfälle: ${record.memorySupport}`,
+    `Ungewöhnlichkeit: ${fmt(record.novelty*100,0)}%`,
+    `Widersprüche: ${record.disagreementCount}`,'',
+    'WAS PASST – UND WAS NICHT?',...lines,'',
+    'IST DIE SICHT NOCH AKTUELL?',
+    `Status: ${validity?.status||'BASELINE'}`+(validity?' · Veränderung '+fmt(validity.driftScore*100,0)+'%':''),
+    '',
+    'Der Wert 0–100 beschreibt nur, wie gut die vorhandenen Belege zusammenpassen.',
+    'Er ist KEINE Wahrscheinlichkeit, dass der Kurs steigt oder fällt.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showEvidenceHistory(chatId,messageId,symbol) {
+  const rows=evidenceHistoryFor(evidenceRecords,symbol,{limit:12});
+  const total=evidenceRecords.filter(r=>r.symbol===symbol).length;
+  let text;
+  if(!rows.length){
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'','Noch keine gespeicherten Vergleichspunkte.','TCX baut den Verlauf automatisch auf, während es den Markt beobachtet.','','Der Belegwert ist keine Kurswahrscheinlichkeit.'].join('\n');
+  }else{
+    const latest=rows.at(-1), previous=rows.length>1?rows.at(-2):null, delta=previous?latest.index-previous.index:null;
+    const entries=rows.slice().reverse().map(r=>{
+      const ts=new Intl.DateTimeFormat('de-DE',{timeZone:'Europe/Berlin',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(new Date(r.capturedAt));
+      return `• ${ts} · Beleglage ${r.index}/100 · ${String(r.regime||'').replaceAll('_',' ')}`;
+    });
+    text=['📜 BELEG-VERLAUF · '+symbol.replace('USDT','/USDT'),'',
+      `Gespeicherte Vergleichspunkte: ${total}`,`Aktuell: ${latest.index}/100`,`Änderung zum letzten Punkt: ${delta==null?'—':(delta>=0?'+':'')+delta}`,'',
+      'LETZTE PUNKTE',...entries,'',
+      'Damit siehst du, ob die Datenlage stabiler oder widersprüchlicher geworden ist.','Der Belegwert ist keine Kurswahrscheinlichkeit.'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showValidity(chatId,messageId,symbol) {
+  const {baseline,record,validity}=await currentEvidenceState(symbol);
+  let text;
+  if(!baseline?.stateFingerprint){
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'','Status: ⚪ Erstes Vergleichsbild','TCX braucht noch mindestens einen älteren Zustand, um Veränderungen sauber zu messen.','','Beim nächsten Analyse-Zyklus entsteht automatisch die Vergleichsbasis.'].join('\n');
+  }else{
+    const status=String(validity.status||'UNKNOWN').toUpperCase();
+    const human=status==='VALID'?'🟢 aktuell':status==='STALE'?'🟡 aktualisieren empfohlen':status==='DRIFTED'||status==='EXPIRED'||status==='INVALIDATED'?'🔴 alte Sicht nicht weiterverwenden':'⚪ '+status;
+    text=['⏱ IST DIE ANALYSE NOCH AKTUELL? · '+symbol.replace('USDT','/USDT'),'',
+      `Status: ${human}`,`Alter: ${Math.round(validity.ageMs/1000)} Sekunden`,`Marktveränderung: ${fmt(validity.driftScore*100,1)}%`,`Preisänderung seit Vergleichspunkt: ${fmt(validity.priceMovePct,3)}%`,`Veränderte Merkmale: ${validity.changedDimensions}`,'',
+      validity.validForResearch?'Die gespeicherte Sicht ist für die Analyse noch verwendbar.':'Die alte Sicht sollte verworfen und neu berechnet werden.','',
+      'TCX vergleicht dafür den aktuellen Markt mit dem Zustand, auf dem die vorherige Analyse basierte.','','Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showFavorites(chatId, messageId) {
+  const syms=[...favoriteSet(chatId)];
+  let text;
+  if(!syms.length){
+    text='⭐ DEINE WATCHLIST\n\nNoch kein Coin gespeichert.\n\nÖffne einen Coin und tippe auf ☆ Beobachten.';
+  } else {
+    const marketRows=await Promise.all(syms.slice(0,20).map(async symbol=>{
+      try{return [symbol,await snapshot(symbol)];}catch{return [symbol,null];}
+    }));
+    const live=new Map(marketRows);
+    const lines=syms.slice(0,20).map(symbol=>{
+      const s=live.get(symbol);
+      const r=radarCache.get(symbol);
+      const price=Number.isFinite(s?.price)?fmt(s.price,s.price<1?6:2):'—';
+      const change=Number.isFinite(s?.changePct)?((s.changePct>=0?'+':'')+fmt(s.changePct,2)+'%'):'—';
+      const raw=String(r?.regime||'').toUpperCase();
+      const phase=raw.includes('TREND')?'Trend':raw.includes('RANGE')?'Seitwärts':raw?'Unklar':'sammelt Daten';
+      const status=String(r?.status||'').toUpperCase();
+      const state=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
+      return `• ${symbolLabel(symbol)} · ${price} · ${change} · ${state} ${phase}`;
+    });
+    text=['⭐ DEINE WATCHLIST','','Preis · 24h · aktuelle Marktphase','',...lines,syms.length>20?'… weitere Coins ausgeblendet':'','','Tippe unten auf einen Coin für die vollständige Analyse.'].filter(Boolean).join('\n');
+  }
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:favoritesKeyboard(chatId)};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
+  else await tg('sendMessage',payload);
+}
+
+async function showCompare(chatId,messageId) {
+  const syms=[...favoriteSet(chatId)].slice(0,4);
+  if(syms.length<2){
+    const payload={chat_id:chatId,text:'⚖️ COINS VERGLEICHEN\n\nSpeichere mindestens zwei Coins in deiner Watchlist.',reply_markup:favoritesKeyboard(chatId)};
+    if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+    return;
+  }
+  const results=[];
+  for(const symbol of syms){
+    let r=radarCache.get(symbol);
+    const stale=!r||Date.now()-Number(r.capturedAt||0)>10*60*1000;
+    if(stale){try{await researchAlertContext(symbol,{force:true});r=radarCache.get(symbol);}catch{}}
+    let market=null;try{market=await snapshot(symbol);}catch{}
+    results.push({symbol,r,market,e:latestEvidenceRecord(symbol)});
+  }
+  const humanBias=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher hoch';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher runter';
+    return '🟡 unklar';
+  };
+  const lines=results.flatMap(({symbol,r,market,e})=>{
+    const p=Number.isFinite(market?.price)?fmt(market.price,market.price<1?6:2):'—';
+    return [`${symbolLabel(symbol)} · ${p}`,`  Richtung: ${humanBias(r?.bias)} · Quellen: ${r?fmt(r.witnessAgreement*100,0)+'%':'—'}`,`  Vergleichsfälle: ${r?.support??'—'} · Beleglage: ${e?.index??'—'}/100`];
+  });
+  const rows=[];
+  for(let i=0;i<syms.length;i+=2) rows.push(syms.slice(i,i+2).map(symbol=>({text:symbolIcon(symbol)+' '+symbolLabel(symbol),callback_data:'market:'+symbol})));
+  rows.push([{text:'⭐ Watchlist',callback_data:'favorites'},{text:'🏠 Start',callback_data:'home'}]);
+  const text=['⚖️ COINS VERGLEICHEN','',...lines,'','Die Werte helfen beim Vergleichen der aktuellen Datenlage.','TCX erklärt hier keinen Coin zum „Gewinner“ und gibt kein Buy-/Sell-Signal.'].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) await tg('editMessageText',{...payload,message_id:messageId}); else await tg('sendMessage',payload);
+}
+
+async function showMarket(chatId, messageId, symbol, live) {
+  const s = await snapshot(symbol);
+  const text = renderMarket(s,live);
+  const reply_markup = marketProductKeyboard(symbol,{live,isFavorite:favoriteSet(chatId).has(symbol)});
+  if (messageId) {
+    await tg('editMessageText', { chat_id:chatId, message_id:messageId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  } else {
+    const sent = await tg('sendMessage', { chat_id:chatId, text, reply_markup });
+    sessions.set(String(chatId), { chatId, messageId:sent.message_id, symbol, live, view:'MARKET', lastRefresh:Date.now() });
+  }
+}
+
+async function showTimeframe(chatId, messageId, symbol, interval) {
+  const t = await timeframeSnapshot(symbol, interval);
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTimeframe(t),
+    reply_markup:timeframeKeyboard(symbol)
+  });
+  const live = sessions.get(String(chatId))?.live === true;
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TIMEFRAME', interval, lastRefresh:Date.now() });
+}
+
+async function showTcx(chatId, messageId, symbol) {
+  const s = await snapshot(symbol);
+  const live = sessions.get(String(chatId))?.live === true;
+  await tg('editMessageText', {
+    chat_id:chatId,
+    message_id:messageId,
+    text:renderTcx(s),
+    reply_markup:tcxKeyboard(symbol,live)
+  });
+  sessions.set(String(chatId), { chatId, messageId, symbol, live, view:'TCX', lastRefresh:Date.now() });
+}
+
+function priceText(v) {
+  if (!Number.isFinite(v)) return "—";
+  return fmt(v,Math.abs(v)<1?6:2);
+}
+
+function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
+  const trend=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
+    return '🟡 unklar';
+  };
+  const activeVisible=candles.some(c=>c.closed===false);
+  return [
+    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
+    `Gesamttrend: ${trend(dashboard.bias)}`,
+    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
+    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
+    `Unterstützung: ${priceText(analysis.support)}`,
+    `Widerstand: ${priceText(analysis.resistance)}`,'',
+    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
+    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
+    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join("\n").slice(0,1024);
+}
+
+async function researchState(symbol,interval="5m") {
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const [market,...fetched]=await Promise.all([
+    snapshot(symbol),
+    ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
+  ]);
+  const availableAt=Math.max(Date.now(),Number(market.availableAt)||0);
+  const byTf={};
+  frames.forEach((tf,i)=>{byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt);});
+  const analysis=analyzeStructure(byTf[interval]);
+  const mtf=analyzeMultiTimeframe({
+    "4h":byTf["4h"],
+    "1h":byTf["1h"],
+    "15m":byTf["15m"],
+    "5m":byTf["5m"]
+  });
+  const dashboard=deriveChartDashboard(byTf[interval],analysis,mtf,market);
+  const memoryAnalysis=interval==="5m"?analysis:analyzeStructure(byTf["5m"]);
+  const memoryDashboard=interval==="5m"?dashboard:deriveChartDashboard(byTf["5m"],memoryAnalysis,mtf,market);
+  return {symbol,interval,availableAt,frames,fetched,market,byTf,analysis,mtf,dashboard,memoryAnalysis,memoryDashboard};
+}
+
+function latestSymbolEpisode(symbol) {
+  for(let i=episodes.length-1;i>=0;i--) if(episodes[i].symbol===symbol) return episodes[i];
+  return null;
+}
+
+async function captureEpisodeFromState(state,{persist=true}={}) {
+  const closed5=closedCandles(state.byTf["5m"]);
+  const anchor=closed5.at(-1)?.closeTime;
+  if(!Number.isFinite(anchor)) return null;
+  const lastEpisode=latestSymbolEpisode(state.symbol);
+  const decision=shouldSampleEpisode({
+    anchorCloseTime:anchor,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    lastEpisode
+  });
+  if(!decision.capture) return null;
+  const id=`${state.symbol}:5m:${anchor}`;
+  const existing=episodes.find(e=>e.id===id);
+  if(existing) return existing;
+  const episode=createEpisode({
+    symbol:state.symbol,
+    interval:"5m",
+    anchorCloseTime:anchor,
+    availableAt:state.availableAt,
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    market:state.market,
+    samplingReason:decision.reason
+  });
+  episodes.push(episode);
+  if(persist) await persistEpisodeMemory("capture");
+  return episode;
+}
+
+function matureSymbolEpisodes(symbol,candles,observedAt=Date.now()) {
+  let changed=false;
+  for(const e of episodes) {
+    if(e.symbol!==symbol) continue;
+    if(matureEpisode(e,candles,{observedAt})) changed=true;
+  }
+  return changed;
+}
+
+function statLine(label,s) {
+  if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
+  const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
+  return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+async function showMemory(chatId,symbol) {
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  const matured=matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt);
+  if(matured) await persistEpisodeMemory("manual-maturity");
+  const vector=episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard});
+  const m3=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:3});
+  const m12=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:12});
+  const m36=findSimilarEpisodes(vector,episodes,{symbol,k:8,requireMatured:true,horizonBars:36});
+  const s3=summarizeSimilar(m3,3),s12=summarizeSimilar(m12,12),s36=summarizeSimilar(m36,36);
+  const stored=episodes.filter(e=>e.symbol===symbol).length;
+  const text=[
+    `🧠 WAS TCX AUS ÄHNLICHEN FÄLLEN GELERNT HAT · ${symbol.replace("USDT","/USDT")}`,'',
+    `Gespeicherte Situationen: ${stored}`,`Aktuelle Marktphase: ${String(state.memoryDashboard.regime||'unklar').replaceAll('_',' ')}`,'',
+    'ÄHNLICHE FRÜHERE SITUATIONEN',statLine('Nach 15 Min.',s3),statLine('Nach 1 Std.',s12),statLine('Nach 3 Std.',s36),'',
+    'TCX sucht frühere Situationen mit ähnlicher Marktstruktur, Liquidität und Kauf-/Verkaufsdruck.',
+    'Die historischen Ergebnisse zeigen, was danach passiert ist – nicht was diesmal passieren muss.','',
+    'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showChart(chatId, symbol, interval="5m") {
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
+  const host=new URL(state.fetched[state.frames.indexOf(interval)].base).host;
+  return tgMultipart("sendPhoto",{
+    chat_id:String(chatId),
+    caption:chartCaption(symbol,interval,state.analysis,state.byTf[interval],state.availableAt,host,state.dashboard),
+    reply_markup:JSON.stringify(chartKeyboard(symbol,interval))
+  },"photo",`${symbol}-${interval}.png`,png,"image/png");
+}
+
+function structureText(symbol, result, availableAt) {
+  const human=v=>{
+    const x=String(v||'').toUpperCase();
+    if(x.includes('BULL')||x.includes('UP')) return '🟢 steigend';
+    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 fallend';
+    if(x.includes('RANGE')||x.includes('SIDE')) return '🟡 seitwärts';
+    return '⚪ unklar';
+  };
+  const lines=[`🧭 MARKTSTRUKTUR · ${symbol.replace("USDT","/USDT")}`,'','Trend auf mehreren Zeitebenen:'];
+  for(const tf of ['4h','1h','15m','5m']) lines.push(`• ${tf}: ${human(result.analyses[tf]?.trend)}`);
+  const five=result.analyses['5m'];
+  lines.push('',`Gesamtbild: ${human(result.bias)}`,`Unterstützung (5m): ${priceText(five?.support)}`,`Widerstand (5m): ${priceText(five?.resistance)}`,'','Warum das wichtig ist:','Kurzfristiger und langfristiger Trend können unterschiedlich sein. Mehrere Zeitebenen verhindern, dass eine einzelne Bewegung zu stark gewichtet wird.','','Systemmodus: ABSTAIN / SHADOW_ONLY');
+  return lines.join('\n');
+}
+
+async function showStructure(chatId, symbol) {
+  const frames=["4h","1h","15m","5m"];
+  const availableAt=Date.now();
+  const fetched=await Promise.all(frames.map(tf => fetchKlines(symbol,tf,220)));
+  const byTf={};
+  frames.forEach((tf,i) => { byTf[tf]=candlesFromKlines(fetched[i].rows,availableAt); });
+  const result=analyzeMultiTimeframe(byTf);
+  return tg("sendMessage",{
+    chat_id:chatId,
+    text:structureText(symbol,result,availableAt),
+    reply_markup:structureKeyboard(symbol)
+  });
+}
+
+function witnessLine(w) {
+  const age=Math.max(0,Date.now()-Number(w.publishedAt||w.availableAt||Date.now()));
+  return `• ${w.source} ${w.quote}: mid ${priceText(w.mid)} · spread ${fmt(w.spreadBps,2)} bps · imbalance ${fmt(w.imbalance*100,1)}% · age ${Math.round(age/1000)}s`;
+}
+
+function witnessSummary(report) {
+  const usable=report.witnesses||[];
+  const errors=report.witnessErrors||[];
+  return [
+    `Venues: ${report.venueCount} · external ${report.externalWitnessCount}`,
+    `Agreement: ${pct01(report.agreementScore)}% · flow ${pct01(report.flowAgreement)}% · liquidity ${pct01(report.liquidityAgreement)}%`,
+    `Same-quote price agreement: ${pct01(report.sameQuotePriceAgreement)}%`,
+    `Independent witness gate: ${report.independentWitnessSatisfied?"SATISFIED":"NOT SATISFIED"}`,
+    `Source independence: ${report.sourceIndependence}`,
+    "",
+    "VENUE SNAPSHOTS",
+    witnessLine(report.primary),
+    ...usable.map(witnessLine),
+    ...(errors.length?["","Unavailable: "+errors.map(e=>`${e.source}(${e.error})`).join(" · ")]:[]),
+    ...(report.contradictions?.length?["","Contradictions/caveats: "+report.contradictions.join(", ")]:[])
+  ].join("\n");
+}
+
+async function showWitness(chatId,symbol) {
+  const primary=await snapshot(symbol);
+  const report=await witnessState(symbol,primary,{maxAgeMs:2000});
+  const agreement=Math.round((Number(report.agreementScore)||0)*100);
+  const text=[
+    `🌐 DATENQUELLEN-CHECK · ${symbol.replace("USDT","/USDT")}`,'',
+    'TCX vergleicht denselben Markt auf mehreren Börsen.',
+    `Geprüfte Börsen: ${report.venueCount}`,`Übereinstimmung: ${agreement}%`,`Unabhängige Vergleichsquellen: ${report.externalWitnessCount}`,'',
+    report.independentWitnessSatisfied?'🟢 Die Datenquellen bestätigen sich ausreichend.':'🟡 Die Quellenlage reicht noch nicht für eine starke Bestätigung.',
+    report.contradictions?.length?'⚠️ Abweichungen: '+report.contradictions.join(', '):'Keine starke Abweichung zwischen den geprüften Quellen erkannt.','',
+    'Ein einzelner Börsenfeed kann fehlerhaft oder ungewöhnlich sein. Mehrere unabhängige Quellen reduzieren dieses Risiko.','',
+    'Profi-Hinweis: USD- und USDT-Märkte sind nicht vollständig identisch.','Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showAudit(chatId) {
+  const verification=verifyLedgerRecords(auditLedger.records);
+  const tail=ledgerTailSummary(auditLedger);
+  const last=auditLedger.records.at(-1);
+  const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
+  const text=[
+    '🛡 TCX Institutional Kernel',
+    '',
+    `Kernel: ${INSTITUTIONAL_KERNEL_VERSION}`,
+    `Ledger health: ${auditLedger.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Records: ${tail.seq}`,
+    `Tail hash: ${tail.tailHash.slice(0,20)}…`,
+    `File: ${tail.filePath}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    replay?`Last envelope replay integrity: ${replay.ok?'PASS':'FAIL'}`:'Last envelope replay integrity: n/a',
+    last?`Last record: #${last.seq} · ${last.kind}`:'Last record: none',
+    last?.payload?.symbol?`Last symbol: ${last.payload.symbol}`:'',
+    last?.payload?.safety?.state?`Last safety state: ${last.payload.safety.state}`:'',
+    '',
+    'INVARIANTS',
+    '• Execution path: DISABLED',
+    '• canExecute: FALSE',
+    '• Mode: SHADOW_ONLY',
+    '• Ledger corruption => SAFE_STOP',
+    '• Invalid/stale primary data => SAFE_STOP'
+  ].filter(Boolean).join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function parseReplayTime(raw) {
+  if(!raw) return Date.now();
+  const n=Number(raw);
+  if(Number.isFinite(n) && n>0) return n;
+  const t=Date.parse(raw);
+  return Number.isFinite(t)?t:null;
+}
+
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function sorLearningContext(symbol){
+  try {
+    const ctx=await researchAlertContext(symbol);
+    const pressure=Number(ctx.state?.pressure);
+    return {
+      regime:String(ctx.state?.regime||'UNKNOWN'),
+      liquidity:String(ctx.state?.liquidity||'UNKNOWN'),
+      pressureBand:Number.isFinite(pressure)?(pressure>=65?'HIGH':pressure>=35?'MEDIUM':'LOW'):'UNKNOWN'
+    };
+  } catch(err) {
+    recordError(observability,{scope:'venue_quality.context',message:err instanceof Error?err.message:String(err)});
+    return {regime:'UNKNOWN',liquidity:'UNKNOWN',pressureBand:'UNKNOWN'};
+  }
+}
+
+function enrichSorBooksWithVenueQuality(books,{symbol,side,notionalQuote,regime,liquidity}){
+  if(!venueQualityHealthy) return books.map(b=>({...b,toxicityBps:0,toxicityEvidenceN:0,vqmEstimate:null}));
+  return books.map(book=>{
+    const estimate=estimateVenueQuality(venueQualityRecords,{
+      venue:book.venue,symbol,side,notionalQuote,regime,liquidity
+    },{
+      minSamples:vqmMinSamples,
+      minToxicitySamples:vqmMinToxicitySamples,
+      halfLifeDays:vqmHalfLifeDays,
+      now:Date.now()
+    });
+    return {...book,toxicityBps:estimate.toxicityBps,toxicityEvidenceN:estimate.toxicityEvidenceN,vqmEstimate:estimate};
+  });
+}
+
+function fmtMaybe(v,d=2,suffix=''){
+  return Number.isFinite(Number(v))?fmt(Number(v),d)+suffix:'n/a';
+}
+
+async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
+  const context=await sorLearningContext(symbol);
+  const summary=venueQualitySummary(venueQualityRecords,{symbol});
+  const venues=[...new Set(['BINANCE','OKX','KRAKEN',...Object.keys(summary.byVenue||{})])];
+  const lines=[
+    `🧠 TCX Venue Quality Memory · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${VENUE_QUALITY_MEMORY_VERSION}`,
+    `Health: ${venueQualityHealthy?'HEALTHY':'UNHEALTHY / LEARNING DISABLED'}`,
+    `Context: ${side} · ${fmt(notionalQuote,2)} USDT · ${context.regime} · ${context.liquidity}`,
+    `Records: ${summary.total}`,
+    '',
+    'VENUE MEMORY'
+  ];
+  for(const venue of venues){
+    const e=estimateVenueQuality(venueQualityRecords,{venue,symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity},{
+      minSamples:vqmMinSamples,minToxicitySamples:vqmMinToxicitySamples,halfLifeDays:vqmHalfLifeDays,now:Date.now()
+    });
+    lines.push(`• ${venue}: scope ${e.scope} · n=${e.sampleN} · fill ${fmtMaybe((e.fillRatioMean??NaN)*100,1,'%')} · slip ${fmtMaybe(e.slippageBpsMean,2,'bps')} · all-in ${fmtMaybe(e.allInBpsMean,2,'bps')} · latency ${fmtMaybe(e.latencyMsMean,0,'ms')}`);
+    lines.push(`  adverse 5m ${fmtMaybe(e.adverseSelection5mBps,2,'bps')} · toxicity ${fmtMaybe(e.toxicityBps,2,'bps')} · ${e.toxicityStatus}`);
+  }
+  lines.push(
+    '',
+    'Memory ist empirische Shadow-Execution-Evidenz, keine kausale Wahrheit.',
+    `canExecuteLive: ${VENUE_QUALITY_MEMORY_CAPABILITIES.canExecuteLive?'YES':'NO'} · SHADOW_ONLY`
+  );
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const context=await sorLearningContext(symbol);
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:vqmMinToxicitySamples
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
+  const auditPayload={
+    ...report,
+    symbol,
+    executionContext:context,
+    venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
+async function showFabric(chatId) {
+  const verification=verifyMarketEventChain(marketFabric.events);
+  const s=marketFabricSummary(marketFabric);
+  const text=[
+    '🧱 TCX Market Data Fabric',
+    '',
+    `Version: ${MARKET_DATA_FABRIC_VERSION}`,
+    `Health: ${marketFabric.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Events: ${s.eventCount} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `File: ${s.filePath}`,
+    '',
+    `PRIMARY_MARKET: ${s.counts.PRIMARY_MARKET||0}`,
+    `WITNESS_CONSENSUS: ${s.counts.WITNESS_CONSENSUS||0}`,
+    `CANDLE_CLOSE: ${s.counts.CANDLE_CLOSE||0}`,
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Backfill rule: availableAt = tatsächliche TCX-Ingestion, nicht historischer Candle-Close.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
+  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  const s=replaySummary(state);
+  const primary=state.primary;
+  const witness=state.witness;
+  const text=[
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+    '',
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    '',
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
+    '',
+    'CANDLES KNOWN AT asOf',
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
+    '',
+    'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Action: ABSTAIN / SHADOW_ONLY'
+  ].join('\n');
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+function pct01(x){ return fmt(Number(x)*100,0); }
+
+function transitionLine(label,lattice){
+  if(!lattice.sufficient){
+    return `${label}: n=${lattice.support} · insufficient evidence · novelty ${pct01(lattice.novelty)}%`;
+  }
+  const top=lattice.states[0];
+  const topText=top?`${top.state.replaceAll("|"," → ")} · ${fmt(top.share*100,0)}%`:"—";
+  return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
+}
+
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
+  const state=await researchState(symbol,"5m");
+  await captureEpisodeFromState(state,{persist:false});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
+
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  const contextAvailableAt=Math.max(
+    Number(state.availableAt)||0,
+    Number(witnessReport?.primary?.availableAt)||0,
+    ...(witnessReport?.witnesses||[]).map(w=>Number(w?.availableAt)||0)
+  );
+  const r15=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
+  });
+  const r60=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:60,witnessReport
+  });
+  const r180=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:180,witnessReport
+  });
+
+  const fabricWrite=await ingestResearchFabric(state,witnessReport);
+  const fabricSummary=marketFabricSummary(marketFabric);
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(r15);
+
+  let safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+
+  const makeEnvelope=()=>buildResearchEnvelope({
+    symbol,
+    availableAt:contextAvailableAt,
+    market:state.market,
+    witness:witnessReport,
+    engine:r15,
+    safety,
+    config:institutionalConfig,
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:r15.version,
+      episodeMemory:'V3',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION
+    },
+    dataFabric:{
+      version:MARKET_DATA_FABRIC_VERSION,
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
+    }
+  });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
+  }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
+  const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
+  const strongest=ch[0]||["NONE",0];
+  const text=[
+    `🧪 TCX Mechanism Transition Lattice · ${symbol.replace("USDT","/USDT")}`,
+    "",
+    `Candidate channel: ${strongest[0]} · ${pct01(strongest[1])}%`,
+    `Gate: ${r15.hypothesis.gate}`,
+    `Evidence strength: ${pct01(r15.hypothesis.evidenceStrength)}%`,
+    `Modality coverage: ${pct01(r15.audit.modalityCoverage)}%`,
+    `Contradiction: ${pct01(r15.audit.contradictionScore)}%`,
+    `Independent witness: ${r15.audit.independentWitnessSatisfied?"YES":"NO"} · venues ${witnessReport.venueCount}`,
+    `Witness agreement: ${pct01(witnessReport.agreementScore)}% · external ${witnessReport.externalWitnessCount}`,
+    "",
+    "PRESSURE CHANNELS",
+    ...ch.map(([k,v])=>`• ${k}: ${pct01(v)}%`),
+    "",
+    "TRANSITION LATTICE",
+    transitionLine("15m",r15.lattice),
+    transitionLine("1h",r60.lattice),
+    transitionLine("3h",r180.lattice),
+    "",
+    `Conflicts: ${r15.audit.conflictFlags.length?r15.audit.conflictFlags.join(", "):"none detected"}`,
+    `Source independence: ${r15.audit.sourceIndependence}`,
+    `Witness caveats: ${witnessReport.caveats?.join(", ")||"none"}`,
+    "",
+    "INSTITUTIONAL CONTROL PLANE",
+    `Safety state: ${safety.state}`,
+    `Primary data: ${marketAudit.ok?"PASS":"FAIL"} · age ${marketAudit.ageMs==null?"n/a":Math.round(marketAudit.ageMs)+"ms"}`,
+    `Witness audit: ${witnessAudit.ok?"PASS":"FAIL"} · external ${witnessAudit.externalWitnessCount}`,
+    `Engine invariants: ${engineAudit.ok?"PASS":"FAIL"}`,
+    `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
+    `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
+    `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
+    `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
+    `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
+    `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
+    ...(safety.hardReasons.length?[`HARD: ${safety.hardReasons.join(", ")}`]:[]),
+    ...(safety.softReasons.length?[`DEGRADED: ${safety.softReasons.join(", ")}`]:[]),
+    "",
+    "STATUS",
+    "• Transition evidence: OBSERVATIONAL",
+    "• Mechanism channel: HYPOTHESIS",
+    "• Causal status: NOT_IDENTIFIED",
+    "• Action: ABSTAIN / SHADOW_ONLY"
+  ].join("\n");
+
+  return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+
+function forecastResearchValidity(evidenceAppend){
+  const validity=evidenceAppend?.validity;
+  if(!validity){
+    return {
+      status:'BASELINE',
+      reasons:['CURRENT_PIT_BASELINE_NO_PRIOR_DRIFT_COMPARISON']
+    };
+  }
+  return {
+    status:String(validity.status||'UNKNOWN'),
+    reasons:formatValidityReason(validity,{limit:5})
+  };
+}
+
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const gate=String(liq?.gate||'INSUFFICIENT').toUpperCase();
+  const lines=[
+    '🧠 MARKTCHECK · '+symbolLabel(symbol),'',
+    'WAS TCX GERADE LIVE PRÜFEN KANN',
+    `💧 Liquidität: ${gate==='PASS'||gate==='VALID'?'🟢 ausreichend':'🟡 eingeschränkt'}`,
+    `• Spread: ${Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'—'}`,
+    `• Orderbuch-Balance: ${Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'—'}`,'',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null){
+  const started=Date.now();
+  if(!forecastRuntime.healthy){
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const extraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:'TCX_TELEGRAM_INSTITUTIONAL_FORECAST',
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+const me = await tg('getMe',{});
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++n.toFixed(8);
+}
+
+function signedPercent(v,d=1){
+  const n=Number(v);
+  return Number.isFinite(n)?(n>=0?'+':'')+n.toFixed(d)+'%':'—';
+}
+
+function memecoinRisk(pair,now=Date.now()){
+  if(!pair) return {label:'⚪ unbekannt',reasons:['keine verwertbaren DEX-Paardaten']};
+  const liq=Number(pair.liquidityUsd);
+  const created=Number(pair.pairCreatedAt);
+  const ageMs=Number.isFinite(created)?Math.max(0,now-created):null;
+  const reasons=[];
+  let level=1;
+  if(!Number.isFinite(liq)||liq<=0){level=3;reasons.push('Liquidität unbekannt');}
+  else if(liq<25000){level=3;reasons.push('sehr geringe Liquidität');}
+  else if(liq<100000){level=Math.max(level,2);reasons.push('geringe Liquidität');}
+  if(ageMs!=null&&ageMs<60*60*1000){level=3;reasons.push('Pair jünger als 1 Stunde');}
+  else if(ageMs!=null&&ageMs<24*60*60*1000){level=Math.max(level,2);reasons.push('Pair jünger als 24 Stunden');}
+  return {
+    label:level>=3?'🔴 sehr hoch':level===2?'🟠 erhöht':'🟡 memecoin-typisch hoch',
+    reasons
+  };
+}
+
+function pairAgeText(createdAt,now=Date.now()){
+  const t=Number(createdAt);
+  if(!Number.isFinite(t)) return 'Alter unbekannt';
+  const ms=Math.max(0,now-t);
+  const h=Math.floor(ms/3600000);
+  if(h<1) return '<1h alt';
+  if(h<48) return h+'h alt';
+  return Math.floor(h/24)+'d alt';
+}
+
+async function showMemecoinRadar(chatId,messageId,{force=false}={}){
+  const started=Date.now();
+  try{
+    const radar=await dexScreenerProvider.fetchMemecoinRadar({limit:6,chainIds:['solana','base','ethereum'],force});
+    const rows=[];
+    radar.rows.forEach((item,i)=>{
+      const p=item.pair;
+      const risk=memecoinRisk(p,radar.capturedAt);
+      const name=p?.baseToken?.symbol||p?.baseToken?.name||item.tokenAddress.slice(0,8)+'…';
+      const chain=String(item.chainId||'').toUpperCase();
+      rows.push(
+        `${i+1}. ${name} · ${chain}`,
+        `   Preis ${compactUsd(p?.priceUsd)} · 1h ${signedPercent(p?.priceChangeH1)} · Vol ${compactUsd(p?.volumeH1)}`,
+        `   Liquidität ${compactUsd(p?.liquidityUsd)} · Käufe/Verkäufe 1h ${p?.buysH1??'—'}/${p?.sellsH1??'—'} · ${pairAgeText(p?.pairCreatedAt,radar.capturedAt)}`,
+        `   Risikoindikator: ${risk.label}`
+      );
+    });
+    const text=[
+      '🐸 MEMECOIN-RADAR · LIVE','',
+      'TCX zeigt aktuell stark beworbene/auffällige Tokens aus öffentlichen DEX-Daten.',
+      'Das ist KEIN Ranking nach Kaufchance.','',
+      ...(rows.length?rows:['Keine verwertbaren Tokens aus der Live-Quelle erhalten.']),'',
+      radar.errors.length?`⚠️ ${radar.errors.length} Token-Abfragen konnten nicht geladen werden.`:'',
+      'WICHTIGE DATENLÜCKEN',
+      '• Holder-Konzentration wird hier noch nicht verifiziert.',
+      '• LP-Lock/Mint-/Freeze-Rechte werden durch DEX-Daten allein nicht bewiesen.',
+      '• „Risikoindikator“ nutzt nur sichtbare Liquidität und Pair-Alter.','',
+      'Quelle: DEX Screener Public API',
+      `Aktualisiert: vor ${Math.max(0,Math.round((Date.now()-radar.capturedAt)/1000))}s`,
+      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+    ].filter(Boolean).join('\n');
+    recordOperation(observability,{name:'memecoin_radar',ok:true,latencyMs:Date.now()-started});
+    return deliverTelegramTextCard(tg,chatId,messageId,{
+      text:text.slice(0,4096),
+      reply_markup:{inline_keyboard:[
+        [{text:'🔄 Aktualisieren',callback_data:'home:memecoins'},{text:'🧭 Stimmung & Trends',callback_data:'home:trends'}],
+        [{text:'🏠 Start',callback_data:'home'}]
+      ]}
+    });
+  }catch(err){
+    recordError(observability,{scope:'memecoin_radar',message:err instanceof Error?err.message:String(err)});
+    recordOperation(observability,{name:'memecoin_radar',ok:false,latencyMs:Date.now()-started,error:err instanceof Error?err.message:String(err)});
+    return deliverTelegramTextCard(tg,chatId,messageId,{
+      text:['🐸 MEMECOIN-RADAR','','Live-Quelle gerade nicht verfügbar.','TCX zeigt deshalb keine erfundenen Token-Daten.','','Quelle: DEX Screener Public API','Systemmodus: ABSTAIN / SHADOW_ONLY'].join('\n'),
+      reply_markup:{inline_keyboard:[
+        [{text:'🔄 Nochmal versuchen',callback_data:'home:memecoins'},{text:'🏠 Start',callback_data:'home'}]
+      ]}
+    });
+  }
+}
+
+function sentimentLabel(value,classification){
+  const n=Number(value);
+  if(!Number.isFinite(n)) return '⚪ unbekannt';
+  if(n<=24) return '🔴 '+(classification||'Extreme Fear');
+  if(n<=44) return '🟠 '+(classification||'Fear');
+  if(n<=55) return '⚪ '+(classification||'Neutral');
+  if(n<=74) return '🟡 '+(classification||'Greed');
+  return '🟠 '+(classification||'Extreme Greed');
+}
+
+async function showTrendContext(chatId,messageId,{force=false}={}){
+  const started=Date.now();
+  const [contextResult,metaResult]=await Promise.allSettled([
+    publicMarketContextProvider.fetchContext({force}),
+    dexScreenerProvider.fetchTrendingMetas({limit:6,force})
+  ]);
+  const context=contextResult.status==='fulfilled'?contextResult.value:null;
+  const metas=metaResult.status==='fulfilled'?metaResult.value:null;
+  const s=context?.sentiment;
+  const g=context?.global;
+  const metaLines=(metas?.rows||[]).flatMap((m,i)=>[
+    `${i+1}. ${m.name||m.slug||'Unbekannter Trend'} · ${m.tokenCount||0} Tokens`,
+    `   1h ${signedPercent(m.marketCapChange?.h1)} · 24h ${signedPercent(m.marketCapChange?.h24)} · Vol ${compactUsd(m.volume)} · Liq ${compactUsd(m.liquidity)}`
+  ]);
+  const errors=[
+    ...(context?.errors||[]),
+    ...(contextResult.status==='rejected'?[{source:'Alternative.me',error:contextResult.reason instanceof Error?contextResult.reason.message:String(contextResult.reason)}]:[]),
+    ...(metaResult.status==='rejected'?[{source:'DEX Screener',error:metaResult.reason instanceof Error?metaResult.reason.message:String(metaResult.reason)}]:[])
+  ];
+  const text=[
+    '🧭 MARKTSTIMMUNG & TRENDS · LIVE','',
+    'GESAMTMARKT',
+    s?`Fear & Greed: ${s.value}/100 · ${sentimentLabel(s.value,s.classification)}${s.delta==null?'':` · Δ ${s.delta>=0?'+':''}${s.delta}`}`:'Fear & Greed: ⚪ nicht verfügbar',
+    g?`Bitcoin-Dominanz: ${Number.isFinite(g.bitcoinDominancePct)?g.bitcoinDominancePct.toFixed(1)+'%':'—'}`:'Bitcoin-Dominanz: —',
+    g?`Gesamtmarkt: ${compactUsd(g.totalMarketCapUsd)} · 24h-Volumen ${compactUsd(g.totalVolume24hUsd)}`:'Gesamtmarkt: —','',
+    'TRENDING DEX-METAS',
+    ...(metaLines.length?metaLines:['Keine Meta-Trends verfügbar.']),'',
+    'SO IST DAS ZU LESEN',
+    '• Fear & Greed beschreibt Marktstimmung, keine Kurswahrscheinlichkeit.',
+    '• DEX-Metas zeigen, wo Aktivität/Kapital gerade gebündelt ist; sie sind kein Social-Sentiment und kein Kaufsignal.',
+    errors.length?`⚠️ Teilweise eingeschränkt: ${errors.length} Quelle(n)/Abruf(e) fehlgeschlagen.`:'',
+    '',
+    'Quellen: Alternative.me (Fear & Greed / Global Market) · DEX Screener Public API',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ].filter(Boolean).join('\n');
+  const ok=Boolean(s||g||metaLines.length);
+  recordOperation(observability,{name:'public_trend_context',ok,latencyMs:Date.now()-started,error:ok?null:'all public context sources unavailable'});
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🔄 Aktualisieren',callback_data:'home:trends'},{text:'🐸 Memecoin-Radar',callback_data:'home:memecoins'}],
+      [{text:'🏠 Start',callback_data:'home'}]
+    ]}
+  });
+}
+
 async function showHomeSection(chatId,messageId,section) {
   if(section==='MARKETS') return showMarkets(chatId,messageId);
   if(section==='WATCHLIST') return showFavorites(chatId,messageId);
+  if(section==='MEMECOINS') return showMemecoinRadar(chatId,messageId);
+  if(section==='TRENDS') return showTrendContext(chatId,messageId);
 
   let text='';
   if(section==='ALERTS') {
