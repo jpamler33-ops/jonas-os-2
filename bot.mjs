@@ -1459,7 +1459,7 @@ async function showHomeSection(chatId,messageId,section) {
     text=list.length
       ? ['🔔 DEINE ALERTS','',
          'TCX beobachtet diese Bedingungen für dich:','',
-         ...list.map((a,i)=>\`\${i+1}. \${describeAlert(a)}\`),'',
+         ...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'',
          'Neuen Preisalarm setzen: /alert BTC 70000',
          'Weitere Alarmtypen findest du über den 🔔-Button bei einem Coin.'].join('\n')
       : ['🔔 DEINE ALERTS','',
@@ -1475,13 +1475,13 @@ async function showHomeSection(chatId,messageId,section) {
       const r=radarCache.get(symbol);
       if(!r){
         const own=episodes.filter(e=>e.symbol===symbol);
-        return \`\${symbolLabel(symbol)} · ⏳ sammelt Daten · \${own.length} Lernfälle\`;
+        return `${symbolLabel(symbol)} · ⏳ sammelt Daten · ${own.length} Lernfälle`;
       }
       const age=Math.max(0,now-r.capturedAt);
       const witness=Math.round((Number(r.witnessAgreement)||0)*100);
       const status=String(r.status||'').toUpperCase();
       const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
-      return \`\${symbolLabel(symbol)} · \${icon} \${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen \${witness}% · Lernfälle \${r.support||0} · \${Math.round(age/1000)}s alt\`;
+      return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
     });
     text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
       'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
@@ -1492,15 +1492,15 @@ async function showHomeSection(chatId,messageId,section) {
   } else if(section==='SYSTEM') {
     text=[
       '🖥 TCX SYSTEMSTATUS','',
-      \`Kernsystem: \${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}\`,
-      \`Marktdaten: \${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}\`,
-      \`Dateispeicher: \${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}\`,
-      \`Persistenz über Deploys: \${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}\`,
-      \`Belege: \${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}\`,
+      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
+      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
+      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
+      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
+      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
       'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
       'Marktstimmung: 🟢 Live-Provider eingebaut',
-      \`Beobachtete Märkte: \${markets.length}\`,
-      \`Aktive Sitzungen: \${sessions.size}\`,'',
+      `Beobachtete Märkte: ${markets.length}`,
+      `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
       'Sicherheitsmodus:',
       'TCX darf keine echten Orders ausführen.',
@@ -1513,11 +1513,11 @@ async function showHomeSection(chatId,messageId,section) {
     const mature3h=episodes.filter(e=>e.outcomes?.['36']).length;
     text=[
       '🧠 WAS TCX GELERNT HAT','',
-      \`Gespeicherte Marktsituationen: \${total}\`,
-      \`Davon nach 15 Min. ausgewertet: \${mature15}\`,
-      \`Davon nach 1 Std. ausgewertet: \${mature1h}\`,
-      \`Davon nach 3 Std. ausgewertet: \${mature3h}\`,
-      \`Gespeicherte Beleg-Snapshots: \${evidenceRecords.length}\`,'',
+      `Gespeicherte Marktsituationen: ${total}`,
+      `Davon nach 15 Min. ausgewertet: ${mature15}`,
+      `Davon nach 1 Std. ausgewertet: ${mature1h}`,
+      `Davon nach 3 Std. ausgewertet: ${mature3h}`,
+      `Gespeicherte Beleg-Snapshots: ${evidenceRecords.length}`,'',
       'Warum das wichtig ist:',
       'TCX vergleicht neue Situationen mit früheren Fällen und kann dadurch erkennen,',
       'wann ein aktuelles Muster bekannt oder ungewöhnlich ist.','',
@@ -1526,10 +1526,10 @@ async function showHomeSection(chatId,messageId,section) {
   } else if(section==='SETTINGS') {
     text=[
       '⚙️ TCX EINSTELLUNGEN','',
-      \`Live-Aktualisierung: alle \${Math.round(refreshMs/1000)} Sekunden\`,
-      \`Alert-Prüfung: alle \${Math.round(alertCheckMs/1000)} Sekunden\`,
-      \`Beobachtete Märkte: \${markets.length}\`,
-      \`Zugriffsschutz: \${allowedChats.size?'aktiv':'nicht eingeschränkt'}\`,'',
+      `Live-Aktualisierung: alle ${Math.round(refreshMs/1000)} Sekunden`,
+      `Alert-Prüfung: alle ${Math.round(alertCheckMs/1000)} Sekunden`,
+      `Beobachtete Märkte: ${markets.length}`,
+      `Zugriffsschutz: ${allowedChats.size?'aktiv':'nicht eingeschränkt'}`,'',
       'Systemmodus: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
   } else {
