@@ -6,7 +6,7 @@ import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independent-witness-network.mjs';
-import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
@@ -208,6 +208,12 @@ const institutionalConfig = Object.freeze({
     version:EXECUTION_RESEARCH_LAB_VERSION,
     canExecuteLive:false,
     objective:'EXECUTION_QUALITY_NOT_PNL'
+  },
+  forecastRuntime:{
+    version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
+    configHash:sha256(forecastRuntime.engine.configSnapshot()),
+    objective:'FORECAST_CALIBRATION_AND_ACCURACY_NOT_PNL',
+    canExecuteLive:false
   }
 });
 
@@ -248,6 +254,7 @@ try {
       forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
       scientificCore:SCIENTIFIC_CORE_VERSION,
       institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
+      forecastConfigHash:sha256(forecastRuntime.engine.configSnapshot()),
       forecastProduct:FORECAST_PRODUCT_VERSION
     }
   });
