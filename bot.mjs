@@ -1217,6 +1217,25 @@ async function ack(id, text) {
   try { await tg('answerCallbackQuery', { callback_query_id:id, text, show_alert:false }); } catch {}
 }
 
+async function deliverTextCard(chatId,messageId,payload){
+  const base={...payload,chat_id:chatId};
+  if(!messageId) return tg('sendMessage',base);
+  try{
+    return await tg('editMessageText',{...base,message_id:messageId});
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    // Telegram cannot edit text on photo/chart messages. Open the requested card as a new message instead.
+    if(
+      msg.includes('there is no text in the message to edit') ||
+      msg.includes('message to edit not found') ||
+      msg.includes('message can\'t be edited')
+    ){
+      return tg('sendMessage',base);
+    }
+    throw err;
+  }
+}
+
 function commandMenuKeyboard(){
   return {inline_keyboard:[
     [{text:'🔮 Kursprognose',callback_data:'cmd:forecast'},{text:'📊 Coin analysieren',callback_data:'cmd:market'}],
@@ -2792,9 +2811,8 @@ async function showForecast(chatId,symbol,messageId=null){
       'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
       'Action: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
-    const failPayload={chat_id:chatId,text:failText,reply_markup:forecastProductKeyboard(symbol)};
-    if(messageId) return tg('editMessageText',{...failPayload,message_id:messageId});
-    return tg('sendMessage',failPayload);
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTextCard(chatId,messageId,failPayload);
   }
 
   const scienceAdapter=buildForecastScienceInputs({
@@ -2893,9 +2911,8 @@ async function showForecast(chatId,symbol,messageId=null){
     error:auditHealthyAfter?null:'forecast audit binding failed'
   });
 
-  const payload={chat_id:chatId,text,reply_markup:forecastProductKeyboard(symbol)};
-  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
-  return tg('sendMessage',payload);
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTextCard(chatId,messageId,payload);
 }
 
 function parseAction(data='') {
