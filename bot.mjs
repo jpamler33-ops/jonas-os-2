@@ -724,8 +724,8 @@ async function showAlertSetup(chatId,symbol) {
   });
 }
 
-function buildResearchAlertContext(state,witnessReport) {
-  const engine=runMechanismTransitionEngine({
+function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safetyOverride=null}={}) {
+  const engine=engineOverride||runMechanismTransitionEngine({
     analysis:state.memoryAnalysis,
     dashboard:state.memoryDashboard,
     episodes,
@@ -739,7 +739,7 @@ function buildResearchAlertContext(state,witnessReport) {
   });
   const witnessAudit=auditWitnessReport(witnessReport);
   const engineAudit=auditEngineResult(engine);
-  const safety=determineSafetyState({
+  const safety=safetyOverride||determineSafetyState({
     marketAudit,
     witnessAudit,
     engineAudit,
