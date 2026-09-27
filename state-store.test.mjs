@@ -21,6 +21,8 @@ test('round-trips favorites and alerts', async () => {
   assert.equal(alert.conditions[0].value,70000);
   assert.equal(alert.once,true);
   assert.equal(loaded.recoveredFromCorrupt,false);
+  assert.equal(loaded.loadedSchemaVersion,2);
+  assert.equal(loaded.migrationNeeded,false);
 });
 
 test('sanitizes invalid persisted data', async () => {
@@ -104,4 +106,6 @@ test('loads schema v1 as backwards-compatible migration', async () => {
   const a=loaded.alerts.get('123')[0];
   assert.equal(a.schemaVersion,2);
   assert.equal(a.conditions[0].op,'LTE');
+  assert.equal(loaded.loadedSchemaVersion,1);
+  assert.equal(loaded.migrationNeeded,true);
 });
