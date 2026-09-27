@@ -43,6 +43,7 @@ test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("home:radar"),{kind:"HOME_SECTION",section:"RADAR"});
   assert.deepEqual(parseProductCallback("why:BTCUSDT"),{kind:"WHY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("regime:BTCUSDT"),{kind:"REGIME",symbol:"BTCUSDT"});
+  assert.deepEqual(parseProductCallback("oms:BTCUSDT"),{kind:"OMS",symbol:"BTCUSDT"});
 });
 
 test("market card keeps epistemic action visible",()=>{
