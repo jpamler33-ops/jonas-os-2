@@ -52,7 +52,7 @@ function cleanProvenance(input={}){
   return JSON.parse(canonicalJson(value));
 }
 function payloadCore(input){
-  return {
+  const core={
     domain:input.domain,
     source:input.source,
     sourceVersion:input.sourceVersion,
@@ -61,6 +61,8 @@ function payloadCore(input){
     features:input.features,
     provenance:input.provenance
   };
+  if(input?.governance!=null) core.governance=input.governance;
+  return core;
 }
 function recordCore({seq,prevHash,input}){
   const payloadHash=sha256(payloadCore(input));
@@ -83,6 +85,7 @@ function recordCore({seq,prevHash,input}){
     quality:input.quality,
     features:input.features,
     provenance:input.provenance,
+    ...(input?.governance!=null?{governance:input.governance}:{}),
     payloadHash
   };
 }
@@ -191,6 +194,14 @@ export function validateResearchDataRecord(record){
   if(!FINALITY.has(String(record?.finality||''))) errors.push('FINALITY');
   const completeness=finite(record?.quality?.completeness);
   if(completeness==null||completeness<0||completeness>1) errors.push('QUALITY_COMPLETENESS');
+
+  if(record?.governance!=null){
+    const decision=String(record.governance?.decision||'');
+    if(!['ACCEPT','DEGRADED','QUARANTINE','REJECT'].includes(decision)) errors.push('GOVERNANCE_DECISION');
+    const sourceKey=String(record.governance?.sourceKey||'');
+    if(sourceKey!==String(record?.domain||'')+':'+String(record?.source||'')) errors.push('GOVERNANCE_SOURCE_KEY');
+    if(record.governance?.canExecute!==false) errors.push('GOVERNANCE_EXECUTION_INVARIANT');
+  }
 
   const features=Array.isArray(record?.features)?record.features:[];
   if(!features.length||features.length>128) errors.push('FEATURES');
@@ -386,7 +397,9 @@ export function researchFeaturesAsOf(plane,{
   streamKey,
   asOf,
   domains=null,
-  minCompleteness=0
+  minCompleteness=0,
+  requireGoverned=false,
+  blockedSourceKeys=[]
 }={}){
   if(!plane?.healthy) return {
     ok:false,
@@ -400,6 +413,7 @@ export function researchFeaturesAsOf(plane,{
   if(!sk||t==null) throw new Error('streamKey and asOf required');
   const allowed=Array.isArray(domains)&&domains.length?new Set(domains.map(x=>String(x).toUpperCase())):null;
   const threshold=Math.max(0,Math.min(1,Number(minCompleteness)||0));
+  const blocked=new Set((Array.isArray(blockedSourceKeys)?blockedSourceKeys:[]).map(String));
   const found=new Map();
   let recordsConsidered=0;
   for(let i=plane.records.length-1;i>=0;i--){
@@ -408,6 +422,11 @@ export function researchFeaturesAsOf(plane,{
     if(allowed&&!allowed.has(record.domain)) continue;
     if(record.availableAt>t||record.validUntil<t) continue;
     if(Number(record.quality?.completeness||0)<threshold) continue;
+    const governance=record.governance||null;
+    if(requireGoverned&&!governance) continue;
+    if(governance&&['QUARANTINE','REJECT'].includes(String(governance.decision||''))) continue;
+    const sourceKey=governance?.sourceKey||String(record.domain)+':'+String(record.source);
+    if(blocked.has(sourceKey)) continue;
     recordsConsidered++;
     for(const row of record.features){
       if(found.has(row.id)) continue;
@@ -421,7 +440,10 @@ export function researchFeaturesAsOf(plane,{
         completeness:Number(record.quality.completeness),
         planeSeq:Number(record.seq),
         planeRecordHash:record.recordHash,
-        sourceEventId:record.sourceEventId
+        sourceEventId:record.sourceEventId,
+        governanceDecision:record.governance?.decision||'LEGACY_UNGOVERNED',
+        governanceVersion:record.governance?.version||null,
+        governanceSourceStatus:record.governance?.sourceStatus||null
       }));
     }
   }
