@@ -130,6 +130,7 @@ const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
 const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
 const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
+const shadowStatsTimeZone = String(process.env.TCX_STATS_TIMEZONE || 'Europe/Berlin');
 const sorMaxBookAgeMs = Math.max(1000, Number(process.env.TCX_SOR_MAX_BOOK_AGE_MS || 15000));
 const sorBinanceFeeBps = Math.max(0, Number(process.env.TCX_SOR_BINANCE_FEE_BPS || shadowTakerFeeBps));
 const sorOkxFeeBps = Math.max(0, Number(process.env.TCX_SOR_OKX_FEE_BPS || shadowTakerFeeBps));
@@ -2635,8 +2636,8 @@ function shadowOrderDetail(order) {
 
 async function showShadowTradeStats(chatId,messageId=null,period='DAY'){
   const p=String(period||'DAY').toUpperCase();
-  const stats=shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:p,asOf:Date.now()});
-  const all=shadowPortfolioStatistics(shadowPortfolioLedger,{asOf:Date.now()});
+  const stats=shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:p,asOf:Date.now(),timeZone:shadowStatsTimeZone});
+  const all=shadowPortfolioStatistics(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
   const pf=stats.profitFactor==null?'—':fmt(stats.profitFactor,2);
@@ -2668,6 +2669,7 @@ async function showShadowTradeStats(chatId,messageId=null,period='DAY'){
     'Heute '+money(all.DAY.realizedPnlQuote)+' · Woche '+money(all.WEEK.realizedPnlQuote),
     'Monat '+money(all.MONTH.realizedPnlQuote)+' · Gesamt '+money(all.ALL.realizedPnlQuote),
     '',
+    'Zeitzone: '+shadowStatsTimeZone,
     'Mode: SHADOW_ONLY'
   ];
   const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
