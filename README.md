@@ -45,6 +45,12 @@ TCX_EPISODE_FILE=/data/tcx-episodes.json
 TCX_AUDIT_LEDGER_FILE=/data/tcx-audit-ledger.jsonl
 TCX_MARKET_FABRIC_FILE=/data/tcx-market-events.jsonl
 TCX_RELEASE_REGISTRY_FILE=/data/tcx-release-registry.jsonl
+TCX_SHADOW_OMS_FILE=/data/tcx-shadow-oms.json
+TCX_SHADOW_WATCH_MS=10000
+TCX_SHADOW_LATENCY_MS=120
+TCX_SHADOW_MAKER_FEE_BPS=10
+TCX_SHADOW_TAKER_FEE_BPS=10
+TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT=0.15
 TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS=15000
 TCX_OKX_REST_BASE=https://www.okx.com
 TCX_KRAKEN_REST_BASE=https://api.kraken.com
@@ -554,3 +560,89 @@ execution -> always SHADOW_ONLY
 Chaos reports can be written to the Institutional Audit Ledger when that ledger is healthy.
 
 Both `observability.mjs` and `chaos-engineering.mjs` are included in the deterministic Runtime Release hash, so changes to monitoring or failure-test logic create a new release identity.
+
+
+## TCX Shadow OMS & Exchange Microstructure Simulator v1
+
+TCX now contains a persistent, execution-disabled Shadow Order Management System.
+
+Commands:
+
+```text
+/oms
+/shadow BTC BUY 100 MARKET
+/shadow BTC BUY 100 LIMIT 65000
+/shadoworders
+/shadoworders BTC
+/shadowcancel ORDER_ID
+```
+
+Hard capabilities:
+
+```text
+execution = SHADOW_ONLY
+canExecuteLive = false
+exchangeOrderAdapter = false
+networkOrderSubmission = false
+```
+
+No authenticated exchange order endpoint exists in this runtime. Exchange access used by the OMS is limited to public market-data GET requests.
+
+### Market / marketable-limit simulation
+
+The simulator captures:
+
+1. decision-time L2 order book,
+2. configured decision-to-arrival latency,
+3. arrival-time L2 order book,
+4. visible-book walk across up to 100 price levels.
+
+It measures:
+
+- partial fills,
+- VWAP / average fill price,
+- slippage versus arrival mid,
+- spread crossing,
+- latency move,
+- configurable taker-fee assumption,
+- visible-depth exhaustion.
+
+If observed L2 depth is insufficient, the remaining intent is **not** fabricated as filled.
+
+### Passive limit simulation
+
+Non-marketable limit orders use a conservative price-time queue proxy:
+
+- visible quantity at the exact price level,
+- configurable hidden-liquidity buffer,
+- explicit queue uncertainty,
+- aggregate public trade prints for queue depletion,
+- only aggressor-side trades capable of reaching the order price may consume queue or generate maker fills.
+
+The simulator does not treat a candle touching a price as proof of a fill.
+
+If no aggregate-trade cursor is available, the order is degraded rather than retroactively inventing fills.
+
+### Adverse-selection markouts
+
+Terminal fills are marked against future observed mid prices at:
+
+- 1 minute,
+- 5 minutes,
+- 15 minutes.
+
+For each horizon TCX stores a signed markout and adverse-selection value in basis points.
+
+### Persistence and audit
+
+Persistent Shadow OMS state:
+
+```text
+/data/tcx-shadow-oms.json
+```
+
+Placement, fill changes, cancellation and markout updates are written to the Institutional Audit Ledger when it is healthy.
+
+`shadow-oms.mjs` is included in the Runtime Release Registry, so any change to queue, fill, slippage or fee logic creates a new release identity.
+
+The Telegram product UI module is also now included in both the Railway image and Runtime Release hash.
