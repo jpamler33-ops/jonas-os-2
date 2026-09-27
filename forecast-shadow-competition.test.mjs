@@ -7,6 +7,7 @@ import { mkdtemp } from 'node:fs/promises';
 import {
   buildShadowCandidateBlueprints,
   createShadowCompetition,
+  refreshShadowCompetitionHypotheses,
   evaluateShadowCompetition,
   shadowCompetitionSummary,
   loadShadowCompetition,
@@ -88,7 +89,7 @@ test('competition waits until seed history is large enough',()=>{
   assert.equal(s.candidates.length,0);
 });
 
-test('competition creates four immutable shadow candidates and waits for OOS',()=>{
+test('competition creates fixed plus controlled hypotheses and waits for OOS',()=>{
   const base=config();
   const history=Array.from({length:50},(_,i)=>row(i));
   const now=history.at(-1).resolvedAt+1000;
@@ -100,7 +101,8 @@ test('competition creates four immutable shadow candidates and waits for OOS',()
     minSeedRows:40
   });
   assert.equal(s.status,'ACTIVE');
-  assert.equal(s.candidates.length,4);
+  assert.ok(s.candidates.length>=4);
+  assert.ok(s.candidates.some(c=>c.blueprintId.startsWith('HYP_')));
   assert.ok(s.candidates.every(c=>c.status==='WAITING_FOR_OOS'));
   assert.ok(s.candidates.every(c=>c.artifact.executionMode==='SHADOW_ONLY'));
   assert.equal(s.productionMutationPerformed,false);
@@ -134,7 +136,7 @@ test('new out-of-sample history is walk-forward evaluated against incumbent',()=
   });
   const summary=shadowCompetitionSummary(evaluated);
   assert.equal(summary.status,'ACTIVE');
-  assert.equal(summary.candidates.length,4);
+  assert.ok(summary.candidates.length>=4);
   assert.ok(summary.candidates.some(c=>c.cases>0));
   assert.equal(evaluated.productionMutationPerformed,false);
 });
@@ -150,5 +152,25 @@ test('competition state survives persistence round trip',async()=>{
   const loaded=await loadShadowCompetition(file);
   assert.equal(loaded.version,state.version);
   assert.equal(loaded.dataCutoffAt,state.dataCutoffAt);
-  assert.equal(loaded.candidates.length,4);
+  assert.equal(loaded.candidates.length,state.candidates.length);
+});
+
+
+test('refresh adds controlled hypotheses to a legacy fixed-only competition without changing cutoff',()=>{
+  const base=config();
+  const history=Array.from({length:50},(_,i)=>row(i));
+  const now=history.at(-1).resolvedAt+1000;
+  const current=createShadowCompetition({historyRows:history,incumbentConfig:base,parentReleaseId:'R1',now,minSeedRows:40});
+  const legacy={...current,candidates:current.candidates.filter(c=>!c.blueprintId.startsWith('HYP_')),hypothesisGenerator:null};
+  const cutoff=legacy.dataCutoffAt;
+  const refreshed=refreshShadowCompetitionHypotheses(legacy,{
+    historyRows:history,
+    incumbentConfig:base,
+    asOf:now+1000,
+    maxGeneratedHypotheses:4
+  });
+  assert.equal(refreshed.dataCutoffAt,cutoff);
+  assert.ok(refreshed.candidates.length>legacy.candidates.length);
+  assert.ok(refreshed.candidates.some(c=>c.blueprintId.startsWith('HYP_')));
+  assert.equal(refreshed.productionMutationPerformed,false);
 });
