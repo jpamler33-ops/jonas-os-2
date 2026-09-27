@@ -31,6 +31,34 @@ function finite(value){
   return Number.isFinite(n)?n:null;
 }
 
+function hasNonFinite(value,seen=new Set()){
+  if(typeof value==='number') return !Number.isFinite(value);
+  if(value==null||typeof value!=='object') return false;
+  if(seen.has(value)) return false;
+  seen.add(value);
+  if(Array.isArray(value)) return value.some(v=>hasNonFinite(v,seen));
+  return Object.values(value).some(v=>hasNonFinite(v,seen));
+}
+
+function canonicalSafe(value,seen=new Set()){
+  if(value===null||typeof value==='string'||typeof value==='boolean') return value;
+  if(typeof value==='number') return Number.isFinite(value)?(Object.is(value,-0)?0:value):null;
+  if(value===undefined||typeof value==='function'||typeof value==='symbol') return undefined;
+  if(Array.isArray(value)) return value.map(v=>canonicalSafe(v,seen));
+  if(typeof value==='object'){
+    if(seen.has(value)) return '[CIRCULAR]';
+    seen.add(value);
+    const out={};
+    for(const key of Object.keys(value).sort()){
+      const v=canonicalSafe(value[key],seen);
+      if(v!==undefined) out[key]=v;
+    }
+    seen.delete(value);
+    return out;
+  }
+  return String(value);
+}
+
 function normalizeGuard(input,asOf){
   const id=cleanText(input?.id);
   const required=input?.required!==false;
@@ -62,6 +90,8 @@ function normalizeGuard(input,asOf){
   const executionMode=cleanText(report?.executionMode,'UNKNOWN').toUpperCase();
   if(executionMode!=='SHADOW_ONLY') reasons.push('EXECUTION_MODE_INVALID');
 
+  if(hasNonFinite(report)) reasons.push('REPORT_NONFINITE');
+
   const sourceGate=normalizeGate(report?.gate);
   if(!SCIENTIFIC_GATES.includes(String(report?.gate??'').toUpperCase())){
     reasons.push('SOURCE_GATE_INVALID');
@@ -89,7 +119,7 @@ function normalizeGuard(input,asOf){
       reportAsOf,
       executionMode,
       reasons,
-      reportFingerprint:sha256(report)
+      reportFingerprint:sha256(canonicalSafe(report))
     })
   };
 }
