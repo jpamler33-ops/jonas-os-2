@@ -2085,6 +2085,82 @@ async function showVenueQuality(chatId,{symbol,side='BUY',notionalQuote=1000}){
   return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
 }
 
+async function showExecutionResearch(chatId,{symbol,side=null,regime=null}){
+  const started=Date.now();
+  const report=executionResearchReport(venueQualityRecords,{symbol,side,regime,now:Date.now()});
+  const ins=report.inSample;
+  const oos=report.oos;
+  const wf=report.walkForward;
+  const cal=report.calibration;
+  const drift=report.drift;
+  const regimeSegments=(report.segments?.REGIME||[]).slice(0,4);
+  const edge=ins?.edgeVsBestSingle||{};
+  const oosEdge=oos?.test?.edgeVsBestSingle||{};
+  const auditPayload={
+    ...report,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy
+    ? await appendInstitutionalAudit('TCX_EXECUTION_RESEARCH_REPORT',auditPayload)
+    : null;
+  recordOperation(observability,{
+    name:'execution_research_lab',
+    ok:true,
+    latencyMs:Date.now()-started
+  });
+
+  const lines=[
+    `🧪 TCX Execution Research Lab · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${EXECUTION_RESEARCH_LAB_VERSION}`,
+    `Filter: ${side||'ALL SIDES'}${regime?' · '+regime:''}`,
+    `Routes: ${report.sampleRoutes} · venue observations: ${report.venueObservations}`,
+    '',
+    'POLICY vs BEST SINGLE-VENUE COUNTERFACTUAL',
+    `• comparable n: ${ins?.comparableN||0}`,
+    `• mean edge: ${fmtMaybe(edge.mean,2,'bps')}`,
+    `• 95% interval: ${fmtMaybe(edge.lo,2,'')} .. ${fmtMaybe(edge.hi,2,'bps')}`,
+    `• positive-edge share: ${fmtMaybe((ins?.positiveEdgeRate??NaN)*100,1,'%')}`,
+    `• policy fill mean: ${fmtMaybe((ins?.policyFillRatio?.mean??NaN)*100,1,'%')}`,
+    '',
+    'TEMPORAL OOS',
+    `• status: ${oos?.status||'UNKNOWN'}`,
+    ...(oos?.status==='OOS_AVAILABLE'?[
+      `• train/test: ${oos.train?.n||0}/${oos.test?.n||0}`,
+      `• test edge: ${fmtMaybe(oosEdge.mean,2,'bps')} · CI ${fmtMaybe(oosEdge.lo,2,'')}..${fmtMaybe(oosEdge.hi,2,'bps')}`,
+      `• generalization gap: ${fmtMaybe(oos.generalizationGapBps,2,'bps')}`,
+      `• OOS status: ${oos.oosPolicyEdgeStatus}`
+    ]:[]),
+    '',
+    'WALK-FORWARD',
+    `• status: ${wf?.status||'UNKNOWN'} · folds ${wf?.folds||0}`,
+    `• fold edge mean: ${fmtMaybe(wf?.foldEdge?.mean,2,'bps')}`,
+    `• positive folds: ${fmtMaybe((wf?.positiveFoldRate??NaN)*100,1,'%')}`,
+    `• worst fold: ${fmtMaybe(wf?.worstFoldEdgeBps,2,'bps')}`,
+    '',
+    'TOXICITY CALIBRATION',
+    `• status: ${cal?.status||'UNKNOWN'} · n=${cal?.n||0}`,
+    `• MAE: ${fmtMaybe(cal?.maeBps,2,'bps')} · bias ${fmtMaybe(cal?.biasBps,2,'bps')}`,
+    `• correlation: ${fmtMaybe(cal?.correlation,3,'')}`,
+    '',
+    'DRIFT',
+    `• status: ${drift?.status||'UNKNOWN'} · recent/reference ${drift?.recentN||0}/${drift?.referenceN||0}`,
+    ...(drift?.signals?.length?drift.signals.map(s=>`• ${s.metric}: deterioration ${fmtMaybe(s.deterioration,3,'')}`):['• no active drift signal']),
+    ...(regimeSegments.length?[
+      '',
+      'REGIME BREAKDOWN',
+      ...regimeSegments.map(s=>`• ${s.segment}: n=${s.n} · edge ${fmtMaybe(s.edgeMeanBps,2,'bps')} · fill ${fmtMaybe((s.fillRatioMean??NaN)*100,1,'%')}`)
+    ]:[]),
+    '',
+    `Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    'Objective: execution quality, not PnL.',
+    'Inference: DESCRIPTIVE OOS EVALUATION · NOT CAUSAL',
+    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+  ];
+  return tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096)});
+}
+
 async function showSorStatus(chatId,symbol='BTCUSDT'){
   const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
   const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
