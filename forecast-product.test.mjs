@@ -103,7 +103,7 @@ test('audit failure suppresses otherwise displayable probabilities',()=>{
     }
   };
   const text=renderInstitutionalForecastCard(issuance,{now:1100,auditHealthy:false});
-  assert.match(text,/Aktion: ABSTAIN/);
+  assert.match(text,/ABSTAIN \\/ SHADOW_ONLY/);
   assert.match(text,/Probability: SUPPRESSED/);
   assert.doesNotMatch(text,/P↑/);
   assert.match(text,/Audit: FEHLER → Forecast gesperrt/);
@@ -130,7 +130,7 @@ test('forecast card explains the signal in plain German',()=>{
   };
   const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
   assert.match(rendered,/KURZ GESAGT/);
-  assert.match(rendered,/eher nach oben/);
+  assert.match(rendered,/eher steigend/);
   assert.match(rendered,/WAS DAS FÜR DICH BEDEUTET/);
   assert.match(rendered,/noch nicht freigegeben/);
   assert.doesNotMatch(rendered,/P↑/);
