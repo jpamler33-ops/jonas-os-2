@@ -5,12 +5,12 @@ COPY package.json ./
 
 COPY bot.mjs state-store.mjs market-structure.mjs chart-renderer.mjs dashboard-state.mjs episode-memory.mjs mechanism-transition-engine.mjs independent-witness-network.mjs institutional-kernel.mjs market-data-fabric.mjs deterministic-replay.mjs runtime-release-registry.mjs observability.mjs operational-readiness.mjs persistence-contracts.mjs persistence-smoke.mjs chaos-engineering.mjs shadow-oms.mjs portfolio-brain.mjs multi-venue-shadow-sor.mjs venue-quality-memory.mjs execution-research-lab.mjs telegram-product-ui.mjs alert-engine.mjs evidence-history.mjs state-validity.mjs research-lifecycle.mjs market-data-provider.mjs telegram-command-router.mjs telegram-read-command-handlers.mjs telegram-mutation-command-handlers.mjs telegram-ui-runtime.mjs ./
 
-COPY research-trace.mjs scientific-validity.mjs scientific-core.mjs institutional-admission.mjs institutional-forecast-issuance.mjs institutional-forecast-runtime.mjs institutional-audit-binding.mjs forecast-input-adapter.mjs forecast-science-adapter.mjs forecast-contract.mjs forecast-product.mjs forecast-candidate-lab.mjs forecast-learning-center.mjs forecast-shadow-competition.mjs model-promotion-ladder.mjs model-candidate-registry.mjs model-release-binding.mjs model-governance-audit.mjs ./
+COPY research-trace.mjs scientific-validity.mjs scientific-core.mjs institutional-admission.mjs institutional-forecast-issuance.mjs institutional-forecast-runtime.mjs institutional-audit-binding.mjs forecast-input-adapter.mjs forecast-science-adapter.mjs forecast-contract.mjs forecast-product.mjs forecast-candidate-lab.mjs forecast-learning-center.mjs forecast-hypothesis-generator.mjs forecast-shadow-competition.mjs model-promotion-ladder.mjs model-candidate-registry.mjs model-release-binding.mjs model-governance-audit.mjs ./
 
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-shadow-competition.test.mjs ./
+COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs ./
 
 RUN npm run check
 RUN npm run test:ui
