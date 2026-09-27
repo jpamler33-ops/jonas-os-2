@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import {
   buildForecastCandidateArtifact,
   verifyForecastCandidateArtifact,
-  evaluateForecastCandidateWalkForward
+  evaluateForecastCandidateWalkForward,
+  evaluateForecastFeatureExtensionWalkForward
 } from './forecast-candidate-lab.mjs';
 
 const baseConfig={
@@ -143,4 +144,29 @@ test('walk-forward artifact is deterministic for same inputs',()=>{
   const b=evaluateForecastCandidateWalkForward(args);
   assert.equal(a.fingerprint,b.fingerprint);
   assert.deepEqual(a.promotionEvaluationInput,b.promotionEvaluationInput);
+});
+
+
+test('feature extension walk-forward compares augmented model on identical PIT rows',()=>{
+  const history=rows(170).map((r,i)=>({
+    ...r,
+    features:{...r.features,z:Math.sin(i/4)}
+  }));
+  const cutoff=history[70].resolvedAt;
+  const result=evaluateForecastFeatureExtensionWalkForward({
+    historyRows:history,
+    incumbentConfig:baseConfig,
+    addedFeatureIds:['z'],
+    dataCutoffAt:cutoff,
+    asOf:history[160].resolvedAt,
+    minimumTrainCases:30
+  });
+  assert.equal(result.kind,'TCX_FORECAST_FEATURE_EXTENSION_WALK_FORWARD');
+  assert.equal(result.diagnostics.temporalOosPassed,true);
+  assert.equal(result.diagnostics.pitViolations,0);
+  assert.ok(result.evaluation.cases>40);
+  assert.ok(result.diagnostics.pairedIndependent.length>0);
+  assert.deepEqual(result.addedFeatureIds,['z']);
+  assert.equal(result.diagnostics.productionMutationAllowed,false);
+  assert.equal(result.canExecute,false);
 });
