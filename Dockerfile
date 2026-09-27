@@ -10,11 +10,12 @@ COPY research-trace.mjs scientific-validity.mjs scientific-core.mjs institutiona
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs ./
+COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs ./
 
 RUN npm run check
 RUN npm run test:ui
 RUN npm run test:intel
+RUN npm run test:forecast-core
 RUN mkdir -p /data && chown -R node:node /data /app
 
 ENV NODE_ENV=production
