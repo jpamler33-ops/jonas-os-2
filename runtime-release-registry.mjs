@@ -43,12 +43,23 @@ export async function buildRuntimeManifest({
     componentHashes[name]=sha256(content);
   }
 
+  let resolvedPackage={...packageInfo};
+  if(!resolvedPackage.name||!resolvedPackage.version){
+    try{
+      const parsed=JSON.parse(await readFile(path.resolve(rootDir,'package.json'),'utf8'));
+      resolvedPackage={
+        name:resolvedPackage.name||parsed.name,
+        version:resolvedPackage.version||parsed.version
+      };
+    }catch{}
+  }
+
   const core={
     schemaVersion:SCHEMA_VERSION,
     kind:'TCX_RUNTIME_RELEASE',
     package:{
-      name:String(packageInfo.name||'tcx-telegram-railway'),
-      version:String(packageInfo.version||'UNKNOWN')
+      name:String(resolvedPackage.name||'tcx-telegram-railway'),
+      version:String(resolvedPackage.version||'UNKNOWN')
     },
     runtime:{
       node:process.version,
