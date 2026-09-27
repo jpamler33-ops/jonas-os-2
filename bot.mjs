@@ -15,7 +15,7 @@ import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './o
 import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from './persistence-contracts.mjs';
 import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistence-smoke.mjs';
 import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from './forecast-learning-center.mjs';
-import { createShadowCompetition, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
+import { createShadowCompetition, refreshShadowCompetitionHypotheses, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -1523,7 +1523,10 @@ function renderLearningCenterText(){
         '• '+label+' · '+candidate.cases+' OOS-Fälle · Brier '+Number(metric.brier).toFixed(3)+' · LogLoss '+Number(metric.logLoss).toFixed(3)
       );
     }else{
-      lines.push('• '+label+' · '+String(candidate.status||'WAITING_FOR_OOS').replaceAll('_',' ').toLowerCase());
+      lines.push(
+        '• '+label+' · '+String(candidate.status||'WAITING_FOR_OOS').replaceAll('_',' ').toLowerCase()+
+        (candidate.blueprintId?.startsWith('HYP_')?' · selbst erzeugte Hypothese':'')
+      );
     }
   }
   if(comp.competition?.bestBrierCandidate){
@@ -3926,7 +3929,26 @@ async function shadowCompetitionWatcher(){
             seedRows:shadowCompetitionState.seedRows||0,
             cutoff:shadowCompetitionState.dataCutoffAt||null
           }));
-        }else if(history.length>shadowCompetitionLastHistorySize){
+        }else{
+          const beforeCount=shadowCompetitionState.candidates?.length||0;
+          const refreshed=refreshShadowCompetitionHypotheses(shadowCompetitionState,{
+            historyRows:history,
+            incumbentConfig:cfg,
+            asOf:Date.now(),
+            maxGeneratedHypotheses:4
+          });
+          const afterCount=refreshed.candidates?.length||0;
+          if(afterCount!==beforeCount||refreshed.hypothesisGenerator?.version!==shadowCompetitionState.hypothesisGenerator?.version){
+            shadowCompetitionState={...refreshed,evaluatedHistoryRows:shadowCompetitionLastHistorySize};
+            await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+            console.log('shadow hypotheses refreshed',JSON.stringify({
+              before:beforeCount,
+              after:afterCount,
+              generated:shadowCompetitionState.hypothesisGenerator?.generatedCandidates||0,
+              added:shadowCompetitionState.hypothesisGenerator?.addedCandidates||0
+            }));
+          }
+          if(history.length>shadowCompetitionLastHistorySize){
           const evaluated=evaluateShadowCompetition(shadowCompetitionState,{
             historyRows:history,
             incumbentConfig:cfg,
@@ -3944,6 +3966,7 @@ async function shadowCompetitionWatcher(){
             bestBrierCandidate:summary.competition?.bestBrierCandidate||null,
             bestLogLossCandidate:summary.competition?.bestLogLossCandidate||null
           }));
+          }
         }
       }
       recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started});
