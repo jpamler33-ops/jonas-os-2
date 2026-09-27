@@ -1033,6 +1033,90 @@ async function showRelease(chatId) {
   return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
 }
 
+function fmtMetric(v,d=0) {
+  return Number.isFinite(Number(v))?fmt(Number(v),d):'n/a';
+}
+
+async function showObservability(chatId) {
+  const s=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(s);
+  const providers=Object.entries(s.providers);
+  const text=[
+    '📡 TCX Institutional Observability',
+    '',
+    `Version: ${OBSERVABILITY_VERSION}`,
+    `Uptime: ${fmtMetric(s.uptimeMs/1000,0)}s`,
+    `Safety: ${s.safety.current}`,
+    `SLO: ${slo.ok?'PASS':'BREACH'}`,
+    ...(slo.breaches.length?[`Breaches: ${slo.breaches.join(', ')}`]:[]),
+    '',
+    'PROVIDERS',
+    ...(providers.length?providers.map(([name,p])=>
+      `• ${name}: ${p.calls} calls · success ${p.successRate==null?'n/a':fmtMetric(p.successRate*100,1)+'%'} · p95 ${fmtMetric(p.latency.p95Ms,0)}ms`
+    ):['• no samples yet']),
+    '',
+    'RESEARCH TELEMETRY',
+    `• evidence mean: ${fmtMetric((s.research.evidence.mean??NaN)*100,1)}%`,
+    `• novelty p95: ${fmtMetric((s.research.novelty.p95??NaN)*100,1)}%`,
+    `• contradiction p95: ${fmtMetric((s.research.contradiction.p95??NaN)*100,1)}%`,
+    `• witness agreement mean: ${fmtMetric((s.research.witnessAgreement.mean??NaN)*100,1)}%`,
+    `• primary age p95: ${fmtMetric(s.research.primaryAgeMs.p95,0)}ms`,
+    '',
+    `Safety transitions: ${s.safety.transitions.length}`,
+    `Recent errors: ${s.recentErrors.length}`,
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showChaos(chatId,scenario=null) {
+  const started=Date.now();
+  let report;
+  if(scenario){
+    const name=String(scenario).toUpperCase();
+    if(!chaosScenarioNames().includes(name)){
+      const names=chaosScenarioNames().join(', ');
+      await tg('sendMessage',{chat_id:chatId,text:`Unbekanntes Chaos-Szenario. Verfügbar: ${names}`.slice(0,4096)});
+      return;
+    }
+    const r=runChaosScenario(name);
+    report={
+      version:CHAOS_ENGINEERING_VERSION,
+      mode:'SYNTHETIC_SIDE_EFFECT_FREE',
+      total:1,
+      passed:r.pass?1:0,
+      failed:r.pass?0:1,
+      passRate:r.pass?1:0,
+      executionInvariant:r.invariantOk,
+      results:[r]
+    };
+  } else {
+    report=runChaosSuite();
+  }
+  recordOperation(observability,{
+    name:'chaos_suite',
+    ok:report.failed===0,
+    latencyMs:Date.now()-started,
+    error:report.failed?String(report.failed)+' failed':null
+  });
+  if(auditLedger.healthy) await appendInstitutionalAudit('TCX_CHAOS_REPORT',report);
+  const text=[
+    '🧨 TCX Chaos Engineering',
+    '',
+    `Version: ${report.version}`,
+    `Mode: ${report.mode}`,
+    `Result: ${report.passed}/${report.total} PASS`,
+    `Execution invariant: ${report.executionInvariant?'PASS':'FAIL'}`,
+    '',
+    ...report.results.map(r=>
+      `${r.pass?'PASS':'FAIL'} · ${r.name}: expected ${r.expectedState} / actual ${r.actualState} · execute=${r.canExecute?'YES':'NO'}`
+    ),
+    '',
+    'Keine echten Provider, Orders, Fabric-Events oder Marktstates werden manipuliert.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
 async function showFabric(chatId) {
   const verification=verifyMarketEventChain(marketFabric.events);
   const s=marketFabricSummary(marketFabric);
