@@ -19,7 +19,7 @@ Completed:
 
 ## P1 · Forecast Specialist staging
 
-Status: CORE DONE / NOT YET MAIN-CANONICAL
+Status: RUNTIME + PRODUCT DONE / FINAL MAIN REVIEW PENDING
 
 Completed:
 - full v2.3.1 forecast runtime staged
@@ -33,12 +33,17 @@ Completed:
 - audit-ledger binding
 - root CI on integration branch + PR
 
-Still required before main promotion:
-- durable forecast runtime service/persistence wiring
+Completed runtime/product path:
+- durable forecast runtime service + atomic persistence
 - actual bot orchestration behind the admission gate
-- Telegram forecast views only after runtime wiring is proven
+- Telegram /forecast + command-center Forecast entry point
 - deployment packaging for staged institutional modules
-- final main-merge migration/rollback review
+- Docker packaging smoke test
+- matured-outcome watcher with audited Research Trace evaluations
+
+Still required before main promotion:
+- final institutional gap audit
+- final main-merge migration review
 
 ## P2 · TCX Research Trace
 
@@ -108,7 +113,7 @@ No downstream layer can weaken an upstream hard block.
 
 ## P5 · Forecast self-correction / promotion ladder
 
-Status: IN PROGRESS
+Status: CORE DONE / GOVERNANCE-STAGED
 
 Completed:
 - immutable issuance → matured outcome audit chain
@@ -121,14 +126,19 @@ Completed:
 - minimum OOS sample / independent episode requirements
 - explicit promotion record
 - no silent production mutation
+- durable append-only candidate-version registry
+- offline candidate builder using matured outcomes only
+- locked forecast target semantics across candidates
+- chronological point-in-time walk-forward evaluation
+- promotion evaluation / promotion / rollback audit binding
+- model release → registered software runtime release binding
+- rollback metadata + rollback drill
+- candidate/governance Docker packaging + CI
 
 Next:
-1. durable candidate-version registry — DONE
-2. offline candidate builder from matured outcomes only
-3. temporal walk-forward evaluation driver
-4. promotion record → audit ledger binding
-5. release-registry linkage for promoted candidate version
-6. rollback metadata + rollback drill
+1. final institutional gap audit
+2. decide explicit operational trigger for offline candidate evaluation after main merge
+3. keep all promotion actions explicit and versioned; no unattended production mutation
 
 Forbidden:
 - same-sample self-feedback
@@ -173,22 +183,28 @@ Next:
 
 ## P6 · Product integration
 
-Status: NEXT AFTER RUNTIME WIRING
+Status: V1 DONE / DRILL-DOWN FOLLOW-UP
 
-Required product views:
-- forecast card
-- calibrated probability only when display gate allows it
-- uncertainty interval + path scenarios
-- revisions / invalidation
+Implemented:
+- /forecast read command
+- Forecast button on market command center
+- institutional forecast card
+- calibrated probability only when forecast + science + admission + audit gates permit display
+- uncertainty intervals + path coherence
 - scientific support state
 - admission state
-- Research Trace / provenance drill-down
+- Research Trace / issuance identifiers
+- runtime learning summary
 
-Do not expose raw internal probabilities when calibration/science/admission suppresses them.
+Follow-up after final merge review:
+- richer revision/invalidation drill-down
+- deeper Research Trace provenance explorer
+
+Do not expose raw internal probabilities when calibration/science/admission/audit suppresses them.
 
 ## P7 · Institutional gap audit
 
-Status: READY AFTER P5 CORE
+Status: NEXT / FINAL PRE-MERGE GATE
 
 Audit:
 - schema/version contracts
