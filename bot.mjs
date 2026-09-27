@@ -1454,7 +1454,7 @@ async function showTrendContext(chatId,messageId,{force=false}={}){
   });
 }
 
-function pct01(v,d=1){
+function learningPct01(v,d=1){
   const n=Number(v);
   return Number.isFinite(n)?(n*100).toFixed(d)+'%':'—';
 }
@@ -1491,7 +1491,7 @@ function renderLearningCenterText(){
     lines.push(
       h.horizonId.toUpperCase()+' · '+h.resolved+' ausgewertet · '+h.pending+' offen',
       h.metricsReady
-        ?'  Richtung '+pct01(h.metrics.directionalAccuracy,1)+' · Brier '+Number(h.metrics.meanBrier).toFixed(3)+' · Intervall '+pct01(h.metrics.intervalCoverage,1)
+        ?'  Richtung '+learningPct01(h.metrics.directionalAccuracy,1)+' · Brier '+Number(h.metrics.meanBrier).toFixed(3)+' · Intervall '+learningPct01(h.metrics.intervalCoverage,1)
         :'  Messwerte werden ab 30 ausgewerteten Fällen angezeigt.'
     );
   }
