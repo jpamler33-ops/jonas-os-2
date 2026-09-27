@@ -21,6 +21,7 @@ import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecy
 import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market-data-provider.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
+import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -174,6 +175,11 @@ const institutionalConfig = Object.freeze({
     minToxicitySamples:vqmMinToxicitySamples,
     halfLifeDays:vqmHalfLifeDays,
     markoutMaxLagMs:vqmMarkoutMaxLagMs
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    canExecuteLive:false,
+    objective:'EXECUTION_QUALITY_NOT_PNL'
   }
 });
 
@@ -204,7 +210,8 @@ try {
       researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
       marketDataProvider:MARKET_DATA_PROVIDER_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
-      venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION
+      venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
+      executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION
     }
   });
   if(releaseRegistry.healthy){
