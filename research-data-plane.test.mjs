@@ -163,3 +163,46 @@ test('corrupt persisted record makes the plane unhealthy instead of silently ski
   const summary=researchDataPlaneSummary(reopened);
   assert.equal(summary.healthy,false);
 });
+
+
+test('governed quarantine decisions are excluded and current source blocks are respected',async()=>{
+  const p=await plane();
+  const acceptedBase=snap({
+    sourceEventId:'gov-accept',
+    features:[{id:'research.x',value:1}]
+  });
+  const quarantinedBase=snap({
+    sourceEventId:'gov-quarantine',
+    eventTime:1_010_000,
+    availableAt:1_011_000,
+    features:[{id:'research.y',value:2}]
+  });
+  const accepted=Object.freeze({...acceptedBase,governance:Object.freeze({
+    version:'TCX_RESEARCH_DATA_GOVERNANCE_V1',
+    decision:'ACCEPT',
+    sourceKey:'ONCHAIN:ETHEREUM_PUBLIC_RPC',
+    sourceStatus:'HEALTHY',
+    canExecute:false
+  })});
+  const quarantined=Object.freeze({...quarantinedBase,governance:Object.freeze({
+    version:'TCX_RESEARCH_DATA_GOVERNANCE_V1',
+    decision:'QUARANTINE',
+    sourceKey:'ONCHAIN:ETHEREUM_PUBLIC_RPC',
+    sourceStatus:'QUARANTINED',
+    canExecute:false
+  })});
+  await appendResearchDataPlane(p,[accepted,quarantined]);
+
+  const normal=researchFeaturesAsOf(p,{streamKey:'ETHUSDT',asOf:1_015_000,requireGoverned:true});
+  assert.equal(normal.features.length,1);
+  assert.equal(normal.features[0].id,'research.x');
+  assert.equal(normal.features[0].governanceDecision,'ACCEPT');
+
+  const blocked=researchFeaturesAsOf(p,{
+    streamKey:'ETHUSDT',
+    asOf:1_015_000,
+    requireGoverned:true,
+    blockedSourceKeys:['ONCHAIN:ETHEREUM_PUBLIC_RPC']
+  });
+  assert.equal(blocked.features.length,0);
+});
