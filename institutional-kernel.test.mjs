@@ -150,3 +150,20 @@ test('control plane SAFE_STOPs when market data fabric integrity is unhealthy',(
   assert.equal(s.canResearch,false);
   assert.equal(s.canExecute,false);
 });
+
+
+test('control plane SAFE_STOPs when release registry integrity is unhealthy',()=>{
+  const now=1_000_000;
+  const s=determineSafetyState({
+    marketAudit:auditMarketSnapshot(market(now),{now}),
+    witnessAudit:auditWitnessReport(witness()),
+    engineAudit:auditEngineResult(engine()),
+    ledgerHealthy:true,
+    fabricHealthy:true,
+    registryHealthy:false
+  });
+  assert.equal(s.state,'SAFE_STOP');
+  assert.ok(s.hardReasons.includes('RELEASE_REGISTRY_UNHEALTHY'));
+  assert.equal(s.canResearch,false);
+  assert.equal(s.canExecute,false);
+});
