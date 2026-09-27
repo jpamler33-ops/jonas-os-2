@@ -4,7 +4,11 @@ const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
 
 const telegramApi = `https://api.telegram.org/bot${token}`;
-const binanceBase = process.env.TCX_BINANCE_REST_BASE || 'https://api.binance.com';
+const configuredBinanceBases = process.env.TCX_BINANCE_REST_BASES || process.env.TCX_BINANCE_REST_BASE || '';
+const binanceBases = (configuredBinanceBases
+  ? configuredBinanceBases.split(',')
+  : ['https://data-api.binance.vision','https://api1.binance.com','https://api.binance.com'])
+  .map(x => x.trim().replace(/\/+$/, '')).filter(Boolean);
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
 const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').split(',').map(x => x.trim()).filter(Boolean));
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT')
@@ -29,10 +33,41 @@ async function fetchJson(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': 'TCX-v2-SHADOW_ONLY' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
-    return await res.json();
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: {
+        'user-agent': 'TCX-v2-SHADOW_ONLY',
+        'accept': 'application/json'
+      }
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      const detail = body.slice(0, 180).replace(/\\s+/g, ' ');
+      throw new Error(`HTTP ${res.status} ${new URL(url).host}: ${detail}`);
+    }
+    try { return JSON.parse(body); }
+    catch { throw new Error(`Invalid JSON from ${new URL(url).host}`); }
   } finally { clearTimeout(timer); }
+}
+
+async function fetchMarketParts(symbol) {
+  const encoded = encodeURIComponent(symbol);
+  const errors = [];
+  for (const base of binanceBases) {
+    try {
+      const [ticker, book, depth] = await Promise.all([
+        fetchJson(`${base}/api/v3/ticker/24hr?symbol=${encoded}`),
+        fetchJson(`${base}/api/v3/ticker/bookTicker?symbol=${encoded}`),
+        fetchJson(`${base}/api/v3/depth?symbol=${encoded}&limit=20`)
+      ]);
+      return { ticker, book, depth, base };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${base}: ${msg}`);
+      console.warn('market-data endpoint failed', base, msg);
+    }
+  }
+  throw new Error(`All Binance market-data endpoints failed: ${errors.join(' | ')}`);
 }
 
 async function tg(method, body) {
@@ -70,11 +105,7 @@ function tcxKeyboard(symbol, live) {
 
 async function snapshot(symbol) {
   const started = Date.now();
-  const [ticker, book, depth] = await Promise.all([
-    fetchJson(`${binanceBase}/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`),
-    fetchJson(`${binanceBase}/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`),
-    fetchJson(`${binanceBase}/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=20`)
-  ]);
+  const { ticker, book, depth, base } = await fetchMarketParts(symbol);
   const bids = (depth.bids || []).slice(0,10).map(([p,q]) => [Number(p),Number(q)]);
   const asks = (depth.asks || []).slice(0,10).map(([p,q]) => [Number(p),Number(q)]);
   const bid = Number(book.bidPrice), ask = Number(book.askPrice), mid = (bid + ask) / 2;
@@ -88,8 +119,8 @@ async function snapshot(symbol) {
     symbol, price:Number(ticker.lastPrice), changePct:Number(ticker.priceChangePercent),
     high:Number(ticker.highPrice), low:Number(ticker.lowPrice), volumeQuote:Number(ticker.quoteVolume),
     bid, ask, spreadBps, imbalance,
-    timestamp: Date.now(), availableAt: Date.now(), source:'BINANCE_REST', version:'v3',
-    provenance:`ticker24hr+bookTicker+depth20; fetched_ms=${Date.now()-started}`
+    timestamp: Date.now(), availableAt: Date.now(), source:'BINANCE_PUBLIC_REST', version:'v3',
+    provenance:`ticker24hr+bookTicker+depth20; host=${new URL(base).host}; fetched_ms=${Date.now()-started}`
   };
 }
 
@@ -242,7 +273,8 @@ process.on('SIGTERM', () => { running=false; server.close(); });
 const me = await tg('getMe', {});
 console.log(JSON.stringify({
   service:'TCX Telegram UI', botUsername:me?.username || 'UNKNOWN', markets:markets.map(x=>x.symbol),
-  refreshMs, execution:'SHADOW_ONLY', allowedChats:allowedChats.size || 'ALL', recommendedReplicas:1
+  refreshMs, execution:'SHADOW_ONLY', allowedChats:allowedChats.size || 'ALL', recommendedReplicas:1,
+  marketDataHosts:binanceBases.map(x => new URL(x).host)
 }, null, 2));
 await tg('deleteWebhook', { drop_pending_updates:false });
 await Promise.all([poll(), refresher()]);
