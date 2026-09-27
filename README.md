@@ -1,37 +1,25 @@
-# BTC Trading Signal Bot v0.3
+# TCX Telegram · Railway
 
-Regelbasierter **Paper-/Signal-Bot** fuer das gemeinsam definierte Trading-System.
+Telegram Live-Market UI for TCX v2. This deployment surface is **SHADOW_ONLY** and contains no order execution path.
 
-## System
-- 4H = Kontext
-- 1H = Marktstruktur
-- 15m = Setup / Support / Resistance
-- 5m = Entry-Ausloeser
-- HH / HL / LH / LL ueber Swing-Pivots
-- Breakout/Breakdown nur nach geschlossener Kerze
-- Retest muss halten bzw. scheitern
-- EMA20 / EMA50 nur als Zusatzfilter
-- Signal nur bei CRV >= 2.0
-- keine echten Orders
+## Railway
 
-## Ausgabe
-Alle ca. 5 Minuten schreibt GitHub Actions eine Summary mit:
-- 4H / 1H / 15m / 5m Trend
-- Bias-Score
-- 15m Support / Resistance
-- EMA20 / EMA50
-- letztes Swing High / Low
-- LONG SETUP / SHORT SETUP / WAIT
-- Entry, Stop, Ziel, CRV
-- Begruendung, welche Regeln erfuellt oder abgelehnt wurden
+1. Deploy this GitHub repository on Railway.
+2. Set `TCX_TELEGRAM_BOT_TOKEN` in Railway Variables.
+3. Keep replicas at **1** when using Telegram long polling.
+4. Deploy and send `/start` to the bot.
 
-## Telegram optional
-Fuer iPhone-Push reicht jetzt ein Repository-Secret:
-- TELEGRAM_BOT_TOKEN
+Optional variables:
 
-Nach dem Erstellen des Telegram-Bots einmal den Bot-Chat oeffnen und **/start** senden. Der Bot erkennt deine Chat-ID dann automatisch.
+- `TCX_TELEGRAM_REFRESH_MS=10000` (minimum 5000)
+- `TCX_TELEGRAM_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT`
+- `TCX_TELEGRAM_ALLOWED_CHATS=123456789` to restrict access
+- `TCX_BINANCE_REST_BASE=https://api.binance.com`
 
-Bei normalen 5-Minuten-Laeufen wird Telegram nur bei einem bestaetigten LONG/SHORT-Setup gesendet. Wenn du den GitHub-Workflow manuell startest, sendet er einmal den aktuellen Status als Testnachricht.
+Health endpoint: `/health`
 
-## Sicherheitsgrenze
-Der Bot erzeugt nur technische Paper-Signale. Er fuehrt keine Trades aus und hat aktuell keinen automatischen News-/Makro-Kalenderfilter.
+## Safety / epistemics
+
+- Market data is OBSERVED from Binance REST.
+- The Telegram TCX card does not promote simple market telemetry to causal mechanism truth.
+- Trading action remains `ABSTAIN / SHADOW_ONLY`.

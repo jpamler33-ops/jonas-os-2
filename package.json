@@ -1,13 +1,11 @@
 {
-  "name": "btc-live-radar-cloudflare",
+  "name": "tcx-telegram-railway",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "start": "node bot.mjs",
+    "check": "node --check bot.mjs"
   },
-  "devDependencies": {
-    "wrangler": "^4.40.0"
-  }
+  "engines": { "node": ">=22" }
 }
