@@ -117,6 +117,12 @@ export function buildCanonicalForecastInput({
       addFeature(features,featureSources,'expansion.traderWallet.sampleSize',trader.sampleSize,'TCX_TRADER_WALLET_INTELLIGENCE');
       addFeature(features,featureSources,'expansion.traderWallet.meanNetReturn',trader.meanNetReturn,'TCX_TRADER_WALLET_INTELLIGENCE');
       addFeature(features,featureSources,'expansion.traderWallet.hitRate',trader.hitRate,'TCX_TRADER_WALLET_INTELLIGENCE');
+      const meme=expansionEvidence?.memecoinEvidence??{};
+      addFeature(features,featureSources,'expansion.memecoin.holders.top10Share',meme?.holders?.top10Share,'TCX_MEMECOIN_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.memecoin.holders.largestHolderShare',meme?.holders?.largestHolderShare,'TCX_MEMECOIN_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.memecoin.liquidity.usd',meme?.liquidity?.liquidityUsd,'TCX_MEMECOIN_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.memecoin.liquidity.change1h',meme?.liquidity?.change1h,'TCX_MEMECOIN_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.memecoin.activity.buySellRatio',meme?.earlyActivity?.buySellRatio,'TCX_MEMECOIN_INTELLIGENCE');
     }
   }
 
