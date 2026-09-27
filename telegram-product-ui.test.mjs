@@ -41,6 +41,7 @@ test("all product keyboards satisfy Telegram callback limit",()=>{
 test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("home"),{kind:"HOME"});
   assert.deepEqual(parseProductCallback("home:radar"),{kind:"HOME_SECTION",section:"RADAR"});
+  assert.deepEqual(parseProductCallback("forecast:BTCUSDT"),{kind:"FORECAST",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("why:BTCUSDT"),{kind:"WHY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("regime:BTCUSDT"),{kind:"REGIME",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("evidence:BTCUSDT"),{kind:"EVIDENCE",symbol:"BTCUSDT"});
