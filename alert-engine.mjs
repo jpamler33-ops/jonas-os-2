@@ -15,6 +15,7 @@ const SYMBOL_RE=/^[A-Z0-9]{2,18}USDT$/;
 const VALID_OPS=new Set(["GTE","LTE","EQ","NEQ","CHANGED","TRUTHY"]);
 
 function finite(v){
+  if(v===null || v===undefined || v==="") return null;
   const n=Number(v);
   return Number.isFinite(n)?n:null;
 }
