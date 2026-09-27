@@ -1242,7 +1242,7 @@ async function showCommandMenu(chatId,messageId){
   return tg('sendMessage',payload);
 }
 async function showCommandMarkets(chatId,messageId,command){
-  const buttons=markets.slice(0,12).map(symbol=>({text:symbolLabel(symbol),callback_data:'cmdrun:'+command+':'+symbol}));
+  const buttons=markets.slice(0,12).map(m=>({text:symbolLabel(m.symbol),callback_data:'cmdrun:'+command+':'+m.symbol}));
   const rows=[];for(let i=0;i<buttons.length;i+=2)rows.push(buttons.slice(i,i+2));
   rows.push([{text:'⬅️ Funktionen',callback_data:'commands'},{text:'🏠 Start',callback_data:'home'}]);
   const names={
