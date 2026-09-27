@@ -124,3 +124,13 @@ test('missing independent witnesses degrades but does not corrupt research engin
   assert.equal(s.canResearch,true);
   assert.equal(s.canExecute,false);
 });
+
+
+test('malformed ledger boots diagnostics in unhealthy SAFE_STOP-compatible state',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-ledger-'));
+  const file=path.join(dir,'audit.jsonl');
+  await writeFile(file,'{bad-json\n');
+  const ledger=await openAuditLedger(file);
+  assert.equal(ledger.healthy,false);
+  assert.equal(ledger.verification.error,'LEDGER_READ_OR_PARSE_FAILURE');
+});
