@@ -12,6 +12,7 @@ import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERS
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
 import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './operational-readiness.mjs';
+import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from './persistence-contracts.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -240,6 +241,7 @@ try {
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
       operationalReadiness:OPERATIONAL_READINESS_VERSION,
+      persistenceContracts:PERSISTENCE_CONTRACTS_VERSION,
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
@@ -3618,6 +3620,44 @@ async function episodeWatcher() {
   }
 }
 
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
 function currentOperationalReadiness(){
   const snapshot=observabilitySnapshot(observability);
   const slo=deriveSloHealth(snapshot);
@@ -3641,6 +3681,7 @@ function currentOperationalReadiness(){
     },
     providerHealth:marketDataProvider.providerHealth(),
     slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
     localFilePersistence:true,
     replicaCount:configuredReplicaCount
   });
@@ -3709,6 +3750,10 @@ const server = http.createServer((req,res) => {
       operationalReadiness:{
         version:OPERATIONAL_READINESS_VERSION,
         ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
       },
       chaosEngineering:{
         version:CHAOS_ENGINEERING_VERSION,
@@ -3879,6 +3924,7 @@ console.log(JSON.stringify({
   deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
   observability:OBSERVABILITY_VERSION,
   operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
   chaosEngineering:CHAOS_ENGINEERING_VERSION,
   alertEngine:ALERT_ENGINE_VERSION,
   stateValidity:{
