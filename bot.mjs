@@ -3836,7 +3836,7 @@ async function autoLearnForecastWatcher() {
           failed++;
           const msg=err instanceof Error?err.message:String(err);
           recordError(observability,{scope:'forecast_runtime.autolearn',message:msg});
-          console.error('autolearn forecast error',symbol,msg);
+          console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
         }
         await sleep(250);
       }
