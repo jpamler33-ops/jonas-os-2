@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   parseOfficialOkxPorCsv,
   fetchOfficialOkxPorRegistry,
+  fetchOfficialOkxPorRegistryStreaming,
   entityRegistrySummary,
   registryToWalletCohorts
 } from './verified-entity-registry.mjs';
@@ -109,4 +110,42 @@ test('registry converts verified EVM entity addresses into a bounded wallet coho
   const summary=entityRegistrySummary(registry);
   assert.equal(summary.byEntity.OKX,3);
   assert.equal(summary.byChain.ETHEREUM,2);
+});
+
+
+test('range-stream importer reads ZIP without materializing expanded CSV',async()=>{
+  const zip=storedZip('okx_por.csv',csv);
+  const fetchImpl=async(_url,opts={})=>{
+    const range=String(opts?.headers?.range||'');
+    let start,end;
+    let m=range.match(/^bytes=-(\d+)$/);
+    if(m){
+      const n=Number(m[1]);
+      start=Math.max(0,zip.length-n);
+      end=zip.length-1;
+    }else{
+      m=range.match(/^bytes=(\d+)-(\d+)$/);
+      if(!m) return new Response('range required',{status:400});
+      start=Number(m[1]); end=Math.min(zip.length-1,Number(m[2]));
+    }
+    const body=zip.subarray(start,end+1);
+    return new Response(body,{
+      status:206,
+      headers:{
+        'content-range':'bytes '+start+'-'+end+'/'+zip.length,
+        'content-length':String(body.length)
+      }
+    });
+  };
+  const registry=await fetchOfficialOkxPorRegistryStreaming({
+    fetchImpl,
+    url:'https://static.okx.com/por.zip',
+    reportId:'R2',
+    reportDate:'2026-09-08',
+    maxEntriesPerChain:10,
+    now:()=>3_000_000
+  });
+  assert.equal(registry.entries.length,3);
+  assert.equal(registry.sources[0].importMode,'HTTP_RANGE_STREAM');
+  assert.equal(registry.sources[0].archiveBytes,zip.length);
 });
