@@ -48,7 +48,7 @@ import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } 
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildResearchDependencyGraph, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
-import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
+import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
 import {
   openInstitutionalForecastRuntime,
@@ -3573,6 +3573,53 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   return deliverTelegramTextCard(tg,chatId,messageId,payload);
 }
 
+async function showResearchLineage(chatId,messageId,symbol){
+  const latest=latestInstitutionalForecast(forecastRuntime,symbol);
+  if(!latest){
+    return deliverTelegramTextCard(tg,chatId,messageId,{
+      text:[
+        '🧬 DATENWEG · '+String(symbol).replace('USDT','/USDT'),
+        '',
+        'Noch keine Prognose vorhanden.',
+        'Erstelle zuerst eine Prognose. Danach kann TCX den kompletten Datenweg bis zum Forecast anzeigen.',
+        '',
+        'Systemmodus: ABSTAIN / SHADOW_ONLY'
+      ].join('\n'),
+      reply_markup:researchDependencyKeyboard(symbol)
+    });
+  }
+
+  const asOf=Number(latest.asOf??latest.trace?.asOf);
+  if(!Number.isFinite(asOf)) throw new Error('latest forecast asOf unavailable');
+  const generatedAt=Number.isFinite(Number(latest.generatedAt))?Number(latest.generatedAt):asOf;
+  const knowledgeTime=Math.max(asOf,generatedAt);
+  const governanceView=researchDataGovernanceSummary(researchDataGovernance,{now:knowledgeTime});
+  const graph=buildResearchDependencyGraph({
+    plane:researchDataPlane,
+    governanceSummary:governanceView,
+    streamKey:symbol,
+    asOf,
+    knowledgeTime,
+    forecastInputFingerprint:latest.trace?.data?.inputFingerprint??null,
+    requireGoverned:true
+  });
+  const text=renderResearchDependencyCard(graph,{
+    symbol,
+    latestForecast:latest,
+    now:Date.now()
+  });
+  recordOperation(observability,{
+    name:'research_dependency_graph_view',
+    ok:graph.gate!=='ABSTAIN',
+    latencyMs:0,
+    error:null
+  });
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text,
+    reply_markup:researchDependencyKeyboard(symbol)
+  });
+}
+
 function parseAction(data='') {
   const product=parseProductCallback(data);
   if(product.kind!=='UNKNOWN') return product;
@@ -3745,6 +3792,12 @@ async function handle(update) {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
       await showEvidence(chatId,messageId,a.symbol);
       await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'LINEAGE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showResearchLineage(chatId,messageId,a.symbol);
+      await ack(q.id,'Datenweg geladen');
       return;
     }
     if (a.kind === 'HISTORY') {
