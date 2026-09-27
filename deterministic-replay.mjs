@@ -53,6 +53,8 @@ export function reconstructInstitutionalState(events,{symbol,asOf,intervals=['4h
     provenance:{
       primarySeq:primary?.seq??null,
       witnessSeq:witness?.seq??null,
+      primaryEventAvailableAt:primary?.availableAt??null,
+      witnessEventAvailableAt:witness?.availableAt??null,
       candleCounts:Object.fromEntries(Object.entries(candles).map(([k,v])=>[k,v.length]))
     }
   };
@@ -61,10 +63,11 @@ export function reconstructInstitutionalState(events,{symbol,asOf,intervals=['4h
 
 export function verifyNoFutureLeakage(state){
   const violations=[];
-  if(state?.primary?.availableAt>state.asOf) violations.push('PRIMARY_FUTURE');
+  if(Number(state?.provenance?.primaryEventAvailableAt)>Number(state.asOf)) violations.push('PRIMARY_EVENT_FUTURE');
+  if(Number(state?.provenance?.witnessEventAvailableAt)>Number(state.asOf)) violations.push('WITNESS_EVENT_FUTURE');
   for(const [interval,candles] of Object.entries(state?.candles||{})){
     for(const c of candles){
-      if(Number(c.availableAt)>Number(state.asOf)) violations.push(`CANDLE_FUTURE_${interval}`);
+      if(Number(c.availableAt)>Number(state.asOf)) violations.push(`CANDLE_EVENT_FUTURE_${interval}`);
     }
   }
   return {ok:violations.length===0,violations};
