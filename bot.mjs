@@ -21,6 +21,7 @@ import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecy
 import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market-data-provider.mjs';
 import { createTelegramCommandRouter, TELEGRAM_COMMAND_ROUTER_VERSION } from './telegram-command-router.mjs';
 import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './telegram-read-command-handlers.mjs';
+import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } from './telegram-mutation-command-handlers.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
@@ -213,6 +214,7 @@ try {
       marketDataProvider:MARKET_DATA_PROVIDER_VERSION,
       telegramCommandRouter:TELEGRAM_COMMAND_ROUTER_VERSION,
       telegramReadCommands:TELEGRAM_READ_COMMANDS_VERSION,
+      telegramMutationCommands:TELEGRAM_MUTATION_COMMANDS_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
       executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION
@@ -2661,209 +2663,51 @@ const readCommandHandlers=createReadCommandHandlers({
   observability
 });
 
-const routePrimaryCommand=createTelegramCommandRouter({
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
   permitted,
-  handlers:readCommandHandlers
+  handlers:telegramCommandHandlers
 });
 
 async function handleCommand(msg){
-  if(await routePrimaryCommand(msg)) return true;
-  return handleCommandLegacy(msg);
-}
-
-async function handleCommandLegacy(msg) {
-  const chatId = msg.chat.id;
-  if (!permitted(chatId)) return true;
-  const parts = msg.text.trim().split(/\s+/);
-  const command = parts[0].split('@')[0].toLowerCase();
-
-  if (command === "/shadoworders") {
-    const symbol=parts[1]?normalizeSymbol(parts[1]):null;
-    if(parts[1] && !symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /shadoworders BTC"});
-      return true;
-    }
-    await showShadowOrders(chatId,symbol);
-    return true;
-  }
-
-  if (command === "/shadowcancel") {
-    const ref=String(parts[1]||"").trim();
-    if(!ref){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /shadowcancel sh_..."});
-      return true;
-    }
-    const matches=shadowOrders.filter(o=>o.id===ref || (ref.length>=8 && o.id.startsWith(ref)));
-    if(matches.length!==1){
-      await tg("sendMessage",{chat_id:chatId,text:matches.length?"Order-ID nicht eindeutig.":"Shadow-Order nicht gefunden."});
-      return true;
-    }
-    const idx=shadowOrders.findIndex(o=>o.id===matches[0].id);
-    const before=shadowOrders[idx];
-    const after=cancelShadowOrder(before,{at:Date.now()});
-    if(after.status===before.status){
-      await tg("sendMessage",{chat_id:chatId,text:`Order ${before.id} ist nicht mehr aktiv (${before.status}).`});
-      return true;
-    }
-    shadowOrders[idx]=after;
-    await persistShadowOms("cancelled");
-    if(auditLedger.healthy) await appendInstitutionalAudit("TCX_SHADOW_ORDER_EVENT",shadowAuditPayload("CANCELLED",after));
-    await showPlacedShadowOrder(chatId,after);
-    return true;
-  }
-
-  if (command === "/shadow") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    const side=String(parts[2]||"").toUpperCase();
-    const notional=Number(String(parts[3]||"").replace(",","."));
-    const type=String(parts[4]||"").toUpperCase();
-    const limitPrice=type==="LIMIT"?Number(String(parts[5]||"").replace(",",".")):null;
-    const latencyRaw=type==="LIMIT"?parts[6]:parts[5];
-    const latencyMs=latencyRaw==null?shadowDefaultLatencyMs:Number(latencyRaw);
-    const valid=symbol && ["BUY","SELL"].includes(side) && ["MARKET","LIMIT"].includes(type) && Number.isFinite(notional) && notional>0 && notional<=1_000_000_000 && Number.isFinite(latencyMs) && latencyMs>=0 && latencyMs<=5000 && (type!=="LIMIT" || (Number.isFinite(limitPrice)&&limitPrice>0));
-    if(!valid){
-      await tg("sendMessage",{chat_id:chatId,text:["Syntax:","/shadow BTC BUY 100 MARKET [latencyMs]","/shadow BTC BUY 100 LIMIT 65000 [latencyMs]","","Das erzeugt ausschließlich eine virtuelle Shadow-Order."].join("\n")});
-      return true;
-    }
-    if(!shadowOmsHealthy){
-      await tg("sendMessage",{chat_id:chatId,text:`Shadow OMS ist fail-closed deaktiviert: ${shadowOmsLastError||"state unhealthy"}`.slice(0,4096)});
-      return true;
-    }
-    try {
-      const order=await placeShadowOrder({symbol,side,type,notionalQuote:notional,limitPrice,latencyMs});
-      await showPlacedShadowOrder(chatId,order);
-    } catch(err){
-      const msg=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'command.shadow',message:msg});
-      recordOperation(observability,{name:"shadow_oms.place",ok:false,latencyMs:0,error:msg});
-      await tg("sendMessage",{chat_id:chatId,text:`Shadow-Order konnte nicht simuliert werden: ${msg}`.slice(0,4096)});
-    }
-    return true;
-  }
-  if (command === "/sor") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    const side=String(parts[2]||"").toUpperCase();
-    const notional=Number(String(parts[3]||"").replace(",","."));
-    const valid=symbol && ["BUY","SELL"].includes(side) && Number.isFinite(notional) && notional>0 && notional<=1_000_000_000;
-    if(!valid){
-      await tg("sendMessage",{chat_id:chatId,text:["Syntax:","/sor BTC BUY 100","/sor BTC SELL 100","","Counterfactual Shadow Route only. Keine echte Order."].join("\n")});
-      return true;
-    }
-    try {
-      await showSorRoute(chatId,{symbol,side,notionalQuote:notional});
-    } catch(err){
-      const msg=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'command.sor',message:msg});
-      recordOperation(observability,{name:"shadow_sor.route",ok:false,latencyMs:0,error:msg});
-      await tg("sendMessage",{chat_id:chatId,text:`Shadow SOR konnte nicht simuliert werden: ${msg}`.slice(0,4096)});
-    }
-    return true;
-  }
-  if (command === '/alert') {
-    const symbol = normalizeSymbol(parts[1] || '');
-    const target = Number(String(parts[2] || '').replace(',','.'));
-    if (!symbol || !Number.isFinite(target) || target <= 0) {
-      await tg('sendMessage',{ chat_id:chatId, text:'Beispiel: /alert BTC 70000' });
-      return true;
-    }
-    try {
-      const s = await snapshot(symbol);
-      const direction = target >= s.price ? 'GTE' : 'LTE';
-      const alert=createAlert({
-        symbol,
-        type:'PRICE',
-        createdAt:Date.now(),
-        once:true,
-        cooldownMs:0,
-        conditions:[{path:'market.price',op:direction,value:target}],
-        label:'Price target'
-      });
-      const added=await addTcXAlert(chatId,alert);
-      const status=!added.added
-        ? (added.reason==='DUPLICATE'?'Dieser Alarm existiert bereits.':'Maximal 50 Alarme pro Chat.')
-        : (added.persisted?'Persistent gespeichert.':'Nur temporär gespeichert – State-Volume prüfen.');
-      await tg('sendMessage',{
-        chat_id:chatId,
-        text:[
-          '🔔 PREISALARM · '+symbolLabel(symbol)+'/USDT',
-          'Ziel: '+fmt(target,target<1?6:2)+' USDT',
-          'Aktuell: '+fmt(s.price,s.price<1?6:2)+' USDT',
-          'Trigger: Preis '+(direction==='GTE'?'≥':'≤')+' Ziel','',
-          status
-        ].join('\n')
-      });
-    } catch {
-      await tg('sendMessage',{ chat_id:chatId, text:'Coin oder Live-Daten nicht verfügbar.' });
-    }
-    return true;
-  }
-
-  if (['/alertregime','/alertstructure','/alertsafety','/alertcombo'].includes(command)) {
-    const symbol=normalizeSymbol(parts[1]||'');
-    if(!symbol){
-      await tg('sendMessage',{chat_id:chatId,text:'Beispiel: '+command+' BTC'});
-      return true;
-    }
-    const preset=command==='/alertregime'?'REGIME':
-      command==='/alertstructure'?'STRUCTURE':
-      command==='/alertsafety'?'SAFETY':'COMPOSITE';
-    const alert=alertPreset(symbol,preset);
-    const added=await addTcXAlert(chatId,alert);
-    await tg('sendMessage',{
-      chat_id:chatId,
-      text:added.added
-        ? '🔔 '+describeAlert(alert)+'\n'+(added.persisted?'Persistent gespeichert.':'Temporär gespeichert.')
-        : (added.reason==='DUPLICATE'?'Dieser Alarm existiert bereits.':'Alarm-Limit erreicht.')
-    });
-    return true;
-  }
-
-  if (command === '/alertwitness') {
-    const symbol=normalizeSymbol(parts[1]||'');
-    const pct=Number(String(parts[2]||'75').replace(',','.'));
-    if(!symbol||!Number.isFinite(pct)||pct<0||pct>100){
-      await tg('sendMessage',{chat_id:chatId,text:'Beispiel: /alertwitness BTC 75'});
-      return true;
-    }
-    const alert=alertPreset(symbol,'WITNESS',{witnessPct:pct});
-    const added=await addTcXAlert(chatId,alert);
-    await tg('sendMessage',{chat_id:chatId,text:added.added?'🔔 '+describeAlert(alert):'Alarm nicht angelegt: '+added.reason});
-    return true;
-  }
-
-  if (command === '/alertmemory') {
-    const symbol=normalizeSymbol(parts[1]||'');
-    const support=Number(parts[2]||8);
-    if(!symbol||!Number.isFinite(support)||support<1||support>1000){
-      await tg('sendMessage',{chat_id:chatId,text:'Beispiel: /alertmemory BTC 8'});
-      return true;
-    }
-    const alert=alertPreset(symbol,'MEMORY',{memorySupport:support});
-    const added=await addTcXAlert(chatId,alert);
-    await tg('sendMessage',{chat_id:chatId,text:added.added?'🔔 '+describeAlert(alert):'Alarm nicht angelegt: '+added.reason});
-    return true;
-  }
-
-  if (command === '/alerts') {
-    const list = activeAlerts(chatId);
-    const text = list.length
-      ? ['🔔 Aktive TCX Alerts','',...list.map((a,i) => (i+1)+'. '+describeAlert(a))].join('\n')
-      : '🔔 Keine aktiven Alarme.';
-    await tg('sendMessage',{ chat_id:chatId, text });
-    return true;
-  }
-
-  if (command === '/clearalerts') {
-    alerts.set(String(chatId),[]);
-    const persisted = await persistState('alerts-cleared');
-    await tg('sendMessage',{
-      chat_id:chatId,
-      text:persisted ? '🔕 Alle Alarme gelöscht.' : '🔕 Alarme gelöscht, aber State-Volume ist nicht schreibbar.'
-    });
-    return true;
-  }
-
-  return false;
+  return routeTelegramCommand(msg);
 }
 
 async function handle(update) {
@@ -3507,12 +3351,16 @@ const server = http.createServer((req,res) => {
       },
       telegramCommandRouter:{
         version:TELEGRAM_COMMAND_ROUTER_VERSION,
-        primaryCommands:Object.keys(readCommandHandlers).length,
-        legacyFallback:true
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
       },
       telegramReadCommands:{
         version:TELEGRAM_READ_COMMANDS_VERSION,
         commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
       },
       episodeMemory:{
         file:episodeFile,
