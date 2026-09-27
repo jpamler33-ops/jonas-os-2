@@ -42,6 +42,8 @@ TCX_TELEGRAM_REFRESH_MS=10000
 TCX_TELEGRAM_ALERT_CHECK_MS=15000
 TCX_EPISODE_SWEEP_MS=300000
 TCX_EPISODE_FILE=/data/tcx-episodes.json
+TCX_AUDIT_LEDGER_FILE=/data/tcx-audit-ledger.jsonl
+TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS=15000
 TCX_OKX_REST_BASE=https://www.okx.com
 TCX_KRAKEN_REST_BASE=https://api.kraken.com
 TCX_TELEGRAM_ALLOWED_CHATS=123456789
@@ -220,3 +222,102 @@ Trading action: ABSTAIN / SHADOW_ONLY
 ```
 
 Cross-venue agreement is evidence against a venue-local artifact; it is not proof of a causal mechanism.
+
+
+## TCX Institutional Kernel v1
+
+TCX now has a fail-closed institutional control plane around the research stack.
+
+### Data Quality Firewall
+
+Every institutional engine run audits:
+
+- positive bid / ask / price
+- crossed-book detection
+- timestamp and `availableAt` validity
+- primary-data freshness
+- spread and imbalance bounds
+- witness-report validity
+- MTL invariant bounds
+
+### Hard invariants
+
+The institutional kernel rejects any engine result that violates:
+
+```text
+execution = SHADOW_ONLY
+action = ABSTAIN
+causalStatus = NOT_IDENTIFIED
+canExecute = false
+```
+
+These are code-level invariants, not UI labels.
+
+### Safety state machine
+
+```text
+NORMAL
+  |
+  +-- soft data/witness/research issue --> DEGRADED
+  |
+  +-- stale/invalid primary data
+  +-- invalid engine invariant
+  +-- audit-ledger failure
+            |
+            v
+         SAFE_STOP
+```
+
+`SAFE_STOP` disables institutional research acceptance. Execution remains disabled in every state.
+
+### Deterministic Research Envelope
+
+Every `/engine SYMBOL` run creates a canonical research envelope containing:
+
+- symbol and `availableAt`
+- primary-market snapshot and provenance
+- independent-witness summary
+- MTL candidate/gate/evidence metrics
+- safety state and reasons
+- engine/kernel versions
+- immutable configuration hash
+- deterministic input hash
+- deterministic envelope hash
+
+### Tamper-evident audit ledger
+
+Research envelopes are persisted to:
+
+```text
+/data/tcx-audit-ledger.jsonl
+```
+
+Every ledger record contains:
+
+- monotonically increasing sequence number
+- previous record hash
+- payload hash
+- record hash
+
+This forms a SHA-256 hash chain. Historical modification, deletion/reordering inside the chain, payload mutation, or sequence corruption is detected by integrity verification.
+
+A corrupted/unreadable ledger does not silently reset. The service can remain available for diagnostics, but the institutional control plane enters `SAFE_STOP`.
+
+Telegram:
+
+```text
+/audit
+/engine BTC
+```
+
+`/audit` reports ledger health, sequence, tail hash and replay-integrity status for the latest research envelope.
+
+### Replay boundary
+
+The stored envelope is designed to answer:
+
+> What information did TCX have at that exact point in time, under which configuration and engine versions?
+
+It does not claim that later code will reproduce identical market outcomes. Reproducibility refers to the recorded research input/state and deterministic envelope integrity.
+
+No order-execution path exists in this repository.
