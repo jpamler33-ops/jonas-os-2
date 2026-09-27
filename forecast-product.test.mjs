@@ -158,5 +158,5 @@ test('forecast card explains governed research dependency coverage',()=>{
     }
   };
   const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
-  assert.match(rendered,/Forschungsdaten: 🟡 10\\/12 Zusatzmerkmale nutzbar · 2 gesperrt/);
+  assert.match(rendered,/Forschungsdaten: 🟡 10\/12 Zusatzmerkmale nutzbar · 2 gesperrt/);
 });
