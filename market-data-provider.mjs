@@ -56,9 +56,11 @@ export function createMarketDataProvider({
     KRAKEN:Math.max(0,Number(sorFees.KRAKEN||0))
   };
 
+  const requestedMaxConcurrent=Number(maxConcurrentRequests);
+  const requestedMaxPending=Number(maxPendingRequests);
   const capacity={
-    maxConcurrent:Math.max(1,Math.floor(Number(maxConcurrentRequests)||12)),
-    maxPending:Math.max(0,Math.floor(Number(maxPendingRequests)||100)),
+    maxConcurrent:Math.max(1,Math.floor(Number.isFinite(requestedMaxConcurrent)?requestedMaxConcurrent:12)),
+    maxPending:Math.max(0,Math.floor(Number.isFinite(requestedMaxPending)?requestedMaxPending:100)),
     inFlight:0,
     pending:[]
   };
