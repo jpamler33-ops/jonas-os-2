@@ -324,21 +324,35 @@ export async function fetchOfficialOkxPorRegistryStreaming({
   const dataStart=entry.localOffset+30+nameLen+extraLen;
   const dataEnd=dataStart+entry.compressedSize-1;
 
-  const dataRes=await fetchImpl(sourceUrl,{
-    signal:AbortSignal.timeout(Math.max(1000,Number(timeoutMs)||20000)),
-    headers:{accept:'application/octet-stream',range:'bytes='+dataStart+'-'+dataEnd,'user-agent':'TCX-SHADOW-RESEARCH'}
-  });
-  if(dataRes.status!==206) throw new Error('CSV_RANGE_UNSUPPORTED_'+dataRes.status);
-  const source=dataRes.body?Readable.fromWeb(dataRes.body):Readable.from(Buffer.from(await dataRes.arrayBuffer()));
-  let readable;
-  if(entry.method===0) readable=source;
-  else if(entry.method===8) readable=source.pipe(createInflateRaw());
-  else throw new Error('ZIP_COMPRESSION_UNSUPPORTED_'+entry.method);
+  const dataCtrl=new AbortController();
+  const dataTimer=setTimeout(()=>dataCtrl.abort(),Math.max(1000,Number(timeoutMs)||20000));
+  let dataRes=null,source=null,readable=null,entries;
+  try{
+    dataRes=await fetchImpl(sourceUrl,{
+      signal:dataCtrl.signal,
+      headers:{accept:'application/octet-stream',range:'bytes='+dataStart+'-'+dataEnd,'user-agent':'TCX-SHADOW-RESEARCH'}
+    });
+    if(dataRes.status!==206) throw new Error('CSV_RANGE_UNSUPPORTED_'+dataRes.status);
+    source=dataRes.body?Readable.fromWeb(dataRes.body):Readable.from(Buffer.from(await dataRes.arrayBuffer()));
+    // Network aborts must never become unhandled process-level stream errors.
+    source.on('error',()=>{});
+    if(entry.method===0) readable=source;
+    else if(entry.method===8){
+      readable=source.pipe(createInflateRaw());
+      readable.on('error',()=>{});
+    }else throw new Error('ZIP_COMPRESSION_UNSUPPORTED_'+entry.method);
+
+    entries=await parseOkxCsvReadable(readable,{
+      reportId,reportDate,sourceUrl,allowedChains,maxEntriesPerChain,maxExpandedBytes
+    });
+  }finally{
+    clearTimeout(dataTimer);
+    try{readable?.destroy?.();}catch{}
+    try{source?.destroy?.();}catch{}
+    try{await dataRes?.body?.cancel?.();}catch{}
+  }
 
   const importedAt=now();
-  const entries=await parseOkxCsvReadable(readable,{
-    reportId,reportDate,sourceUrl,allowedChains,maxEntriesPerChain,maxExpandedBytes
-  });
   const core={
     version:VERIFIED_ENTITY_REGISTRY_VERSION,
     importedAt,
