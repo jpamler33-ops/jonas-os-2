@@ -103,7 +103,7 @@ test('audit failure suppresses otherwise displayable probabilities',()=>{
     }
   };
   const text=renderInstitutionalForecastCard(issuance,{now:1100,auditHealthy:false});
-  assert.match(text,/ABSTAIN \\/ SHADOW_ONLY/);
+  assert.match(text,/ABSTAIN \/ SHADOW_ONLY/);
   assert.match(text,/Probability: SUPPRESSED/);
   assert.doesNotMatch(text,/P↑/);
   assert.match(text,/Audit: FEHLER → Forecast gesperrt/);
