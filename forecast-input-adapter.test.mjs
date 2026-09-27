@@ -82,3 +82,50 @@ test('input tampering is detected',()=>{
   y.features['market.imbalance']=.99;
   assert.equal(verifyCanonicalForecastInput(y).ok,false);
 });
+
+
+test('typed expansion evidence is PIT-safe and cannot enable execution',()=>{
+  const e=envelope();
+  const expansion={
+    asOf:999,
+    fingerprint:'e'.repeat(64),
+    executionMode:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false,
+    restrictions:{mayMutateForecast:false,mayBypassInstitutionalAdmission:false},
+    liquiditySnapshot:{spreadBps:.25,imbalance:.3,depthBid:10,depthAsk:8},
+    eventImpactEstimate:{meanReturn:.01,medianReturn:.005},
+    sourceReliability:{sampleSize:20,reliability:.8}
+  };
+  const x=buildCanonicalForecastInput({envelope:e,dataQuality:.9,expansionEvidence:expansion});
+  assert.equal(x.features['expansion.liquidity.imbalance'],.3);
+  assert.equal(x.features['expansion.source.reliability'],.8);
+  assert.equal(x.audit.expansionFingerprint,expansion.fingerprint);
+  assert.equal(x.audit.blockedFutureExpansion,0);
+  assert.equal(verifyCanonicalForecastInput(x).ok,true);
+});
+
+test('future or unsafe expansion evidence is rejected fail-closed',()=>{
+  const e=envelope();
+  const future=buildCanonicalForecastInput({
+    envelope:e,dataQuality:.9,
+    expansionEvidence:{
+      asOf:1001,fingerprint:'f'.repeat(64),executionMode:'SHADOW_ONLY',action:'ABSTAIN',canExecute:false,
+      restrictions:{mayMutateForecast:false,mayBypassInstitutionalAdmission:false},
+      liquiditySnapshot:{imbalance:.9}
+    }
+  });
+  assert.equal(future.audit.blockedFutureExpansion,1);
+  assert.equal('expansion.liquidity.imbalance' in future.features,false);
+
+  const unsafe=buildCanonicalForecastInput({
+    envelope:e,dataQuality:.9,
+    expansionEvidence:{
+      asOf:999,fingerprint:'f'.repeat(64),executionMode:'LIVE',action:'TRADE',canExecute:true,
+      restrictions:{mayMutateForecast:true,mayBypassInstitutionalAdmission:true},
+      liquiditySnapshot:{imbalance:.9}
+    }
+  });
+  assert.equal(unsafe.audit.rejectedExpansion,1);
+  assert.equal('expansion.liquidity.imbalance' in unsafe.features,false);
+});
