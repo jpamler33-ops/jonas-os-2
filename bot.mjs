@@ -16,6 +16,7 @@ import { evaluatePersistenceCompatibility, PERSISTENCE_CONTRACTS_VERSION } from 
 import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistence-smoke.mjs';
 import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from './forecast-learning-center.mjs';
 import { createShadowCompetition, refreshShadowCompetitionHypotheses, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
+import { createExperimentGovernor, evaluateExperimentGovernor, experimentGovernorSummary, loadExperimentGovernor, saveExperimentGovernor, FORECAST_EXPERIMENT_GOVERNOR_VERSION } from './forecast-experiment-governor.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -170,6 +171,8 @@ const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecast
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
 let shadowCompetitionLastHistorySize = Number(shadowCompetitionState?.evaluatedHistoryRows||0);
+const experimentGovernorFile = process.env.TCX_EXPERIMENT_GOVERNOR_FILE || '/data/tcx-experiment-governor.json';
+let experimentGovernorState = await loadExperimentGovernor(experimentGovernorFile);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
 const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
@@ -1533,6 +1536,30 @@ function renderLearningCenterText(){
     const leader=comp.candidates.find(x=>x.blueprintId===comp.competition.bestBrierCandidate);
     lines.push('Aktuell niedrigster Brier: '+(leader?.label||comp.competition.bestBrierCandidate)+' (nur Shadow-Vergleich)');
   }
+  const gov=experimentGovernorSummary(experimentGovernorState||{});
+  lines.push(
+    '',
+    'EXPERIMENT-GOVERNOR',
+    'Generation: '+(gov.generationNumber||'—')+' · '+(
+      gov.status==='ACTIVE'?'🟢 aktiv':
+      gov.status==='COMPLETE_PROMOTION_REVIEW_REQUIRED'?'🟣 Promotion-Prüfung nötig':
+      gov.status==='COMPLETE_NO_PROMOTION'?'⚪ Runde abgeschlossen':
+      gov.status==='INTEGRITY_HOLD'?'🔴 Integritäts-Hold':
+      '⚪ noch nicht gestartet'
+    ),
+    'Eingefrorene Kandidaten: '+gov.participantCount,
+    'Testing: '+(gov.counts?.SHADOW_TESTING||0)+' · Messung: '+(gov.counts?.MEASURING||0)+' · Abgelehnt: '+(gov.counts?.REJECTED||0),
+    'Promotion-Kandidaten: '+(gov.counts?.PROMOTION_CANDIDATE||0),
+    gov.policy
+      ?'Entscheidungsfenster: '+Number(gov.policy.minCases||0)+' Fälle + '+Number(gov.policy.minIndependentEpisodes||0)+' unabhängige Episoden'
+      :'Entscheidungsfenster: —',
+    'Mehrfachtests: Holm-Bonferroni · α '+(gov.policy?learningPct01(gov.policy.familyAlpha,0):'—'),
+    'Nur ein vorab festgelegter Decision-Look; kein Nachoptimieren auf demselben OOS-Fenster.'
+  );
+  for(const p of gov.promotionCandidates||[]){
+    lines.push('• Review: '+p.label+' · adj. p '+(Number.isFinite(Number(p.holmAdjustedP))?Number(p.holmAdjustedP).toFixed(4):'—'));
+  }
+
   lines.push(
     '',
     'MODELL-PROMOTION',
@@ -1614,6 +1641,7 @@ async function showHomeSection(chatId,messageId,section) {
       'Marktstimmung: 🟢 Live-Provider eingebaut',
       `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
       `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
+      `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -3898,6 +3926,47 @@ async function autoLearnForecastWatcher() {
   }
 }
 
+async function syncExperimentGovernor({evaluate=false}={}){
+  if(!shadowCompetitionState||shadowCompetitionState.status!=='ACTIVE') return null;
+  const cfgHash=String(shadowCompetitionState.incumbentConfigHash||sha256(forecastRuntime.engine.configSnapshot()));
+  if(!experimentGovernorState){
+    experimentGovernorState=createExperimentGovernor({
+      competition:shadowCompetitionState,
+      championConfigHash:cfgHash,
+      championReleaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      generationNumber:1,
+      now:Date.now()
+    });
+    await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
+    console.log('experiment governor initialized',JSON.stringify({
+      generationId:experimentGovernorState.generationId,
+      generationNumber:experimentGovernorState.generationNumber,
+      participants:experimentGovernorState.participants.length,
+      cutoff:experimentGovernorState.dataCutoffAt
+    }));
+    return experimentGovernorState;
+  }
+  if(evaluate&&experimentGovernorState.status==='ACTIVE'){
+    const before=experimentGovernorState.status;
+    experimentGovernorState=evaluateExperimentGovernor(experimentGovernorState,{
+      competition:shadowCompetitionState,
+      now:Date.now()
+    });
+    await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
+    const summary=experimentGovernorSummary(experimentGovernorState);
+    console.log('experiment governor evaluated',JSON.stringify({
+      generationId:summary.generationId,
+      status:summary.status,
+      participants:summary.participantCount,
+      measuring:summary.counts?.MEASURING||0,
+      rejected:summary.counts?.REJECTED||0,
+      promotionCandidates:summary.counts?.PROMOTION_CANDIDATE||0,
+      changed:before!==summary.status
+    }));
+  }
+  return experimentGovernorState;
+}
+
 async function shadowCompetitionWatcher(){
   await sleep(30000);
   while(running){
@@ -3929,6 +3998,7 @@ async function shadowCompetitionWatcher(){
             seedRows:shadowCompetitionState.seedRows||0,
             cutoff:shadowCompetitionState.dataCutoffAt||null
           }));
+          await syncExperimentGovernor({evaluate:false});
         }else{
           const beforeCount=shadowCompetitionState.candidates?.length||0;
           const refreshed=refreshShadowCompetitionHypotheses(shadowCompetitionState,{
@@ -3947,6 +4017,7 @@ async function shadowCompetitionWatcher(){
               generated:shadowCompetitionState.hypothesisGenerator?.generatedCandidates||0,
               added:shadowCompetitionState.hypothesisGenerator?.addedCandidates||0
             }));
+            await syncExperimentGovernor({evaluate:false});
           }
           if(history.length>shadowCompetitionLastHistorySize){
           const evaluated=evaluateShadowCompetition(shadowCompetitionState,{
@@ -3966,7 +4037,11 @@ async function shadowCompetitionWatcher(){
             bestBrierCandidate:summary.competition?.bestBrierCandidate||null,
             bestLogLossCandidate:summary.competition?.bestLogLossCandidate||null
           }));
+          await syncExperimentGovernor({evaluate:true});
           }
+        }
+        if(!experimentGovernorState&&shadowCompetitionState?.status==='ACTIVE'){
+          await syncExperimentGovernor({evaluate:false});
         }
       }
       recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started});
@@ -4355,6 +4430,7 @@ console.log(JSON.stringify({
   forecastOutcomeCheckMs,
   autoLearn:{enabled:autoLearnEnabled,symbols:autoLearnSymbols,forecastIntervalMs:autoLearnForecastMs,sweepMs:autoLearnSweepMs,version:FORECAST_LEARNING_CENTER_VERSION},
   shadowCompetition:{enabled:shadowCompetitionEnabled,evaluationMs:shadowCompetitionEvalMs,minSeedRows:shadowCompetitionMinSeedRows,minTrainCases:shadowCompetitionMinTrainCases,version:FORECAST_SHADOW_COMPETITION_VERSION,status:shadowCompetitionState?.status||'UNINITIALIZED'},
+  experimentGovernor:{version:FORECAST_EXPERIMENT_GOVERNOR_VERSION,file:experimentGovernorFile,status:experimentGovernorState?.status||'UNINITIALIZED',generationNumber:experimentGovernorState?.generationNumber||0},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
