@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 
-const SCHEMA_VERSION = 1;
+export const EPISODE_MEMORY_SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = EPISODE_MEMORY_SCHEMA_VERSION;
 const HORIZONS = [1,3,12,36,48];
 const NUMERIC_KEYS = [
   'biasScore','pressureScore','spreadBps','imbalance','atrPct','realizedVolPct','volumeRatio',
