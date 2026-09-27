@@ -56,16 +56,30 @@ Model Promotion Ladder
 - issuance + outcome audit-ledger binding
 - staged institutional runtime release file identity
 - fail-closed model promotion ladder
+- append-only model candidate/version registry
+- V3 Expansion Pack selective institutional adaptations:
+  - Source Intelligence
+  - Event Impact Memory
+  - Liquidity Intelligence
+  - read-only expansion evidence bundle
+  - cryptographic expansion-pack provenance
 
 ## Latest verified gate
 
 ```text
-commit: ee245b99ebf87abd8e59187c29fc62847534a0f3
-push CI: SUCCESS
+commit: bfde125ac248ed0ec016d4b235f6e715a9d34658
+GitHub Actions: SUCCESS
 PR CI: SUCCESS
 syntax: PASS
-root tests + science-runtime tests: PASS
+root + science-runtime + expansion-runtime tests: PASS
+expansion source pack verification: 9/9 PASS
+expansion package: 36 files / 30 modules / SHADOW_ONLY / liveExecution=false
 ```
+
+Expansion source package SHA-256:
+`e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
+
+The latest uploaded `(2)` archive is byte-identical to the previously inspected `(1)` archive.
 
 ## Hard invariants
 
@@ -84,13 +98,12 @@ uncalibrated/suppressed probability = not user-displayable
 Nothing on this branch is canonical on `main` until the runtime/deployment migration is complete and the final integration PR is reviewed.
 
 Current missing production path:
-1. durable candidate/version registry
-2. offline candidate builder from matured outcomes
-3. temporal walk-forward evaluation driver
-4. actual bot orchestration through the new adapter/science/admission/trace path
-5. persistence/deployment packaging for staged modules
-6. Telegram forecast views
-7. rollback drill + final institutional gap audit
+1. offline candidate builder from matured outcomes
+2. temporal walk-forward evaluation driver
+3. actual bot orchestration through the new adapter/science/admission/trace path
+4. persistence/deployment packaging for staged modules
+5. Telegram forecast views
+6. rollback drill + final institutional gap audit
 
 ## Next highest-leverage work
 
