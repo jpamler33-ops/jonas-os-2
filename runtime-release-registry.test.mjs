@@ -1,0 +1,77 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry } from './runtime-release-registry.mjs';
+
+async function fixture(){
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-release-'));
+  await writeFile(path.join(dir,'a.mjs'),'export const a=1;\n');
+  await writeFile(path.join(dir,'b.mjs'),'export const b=2;\n');
+  return dir;
+}
+
+test('runtime manifest is deterministic for same source and config',async()=>{
+  const dir=await fixture();
+  const args={
+    rootDir:dir,files:['a.mjs','b.mjs'],
+    config:{mode:'SHADOW_ONLY',threshold:0.5},
+    packageInfo:{name:'tcx',version:'1.0.0'},
+    deployment:{gitCommit:'abcdef1234567',gitBranch:'main'},
+    versions:{kernel:'IK_V1'}
+  };
+  const a=await buildRuntimeManifest(args);
+  const b=await buildRuntimeManifest(args);
+  assert.equal(a.releaseId,b.releaseId);
+  assert.deepEqual(a.componentHashes,b.componentHashes);
+});
+
+test('source or config mutation changes release id',async()=>{
+  const dir=await fixture();
+  const base={rootDir:dir,files:['a.mjs','b.mjs'],config:{x:1},packageInfo:{name:'tcx',version:'1'}};
+  const a=await buildRuntimeManifest(base);
+  await writeFile(path.join(dir,'a.mjs'),'export const a=2;\n');
+  const b=await buildRuntimeManifest(base);
+  const c=await buildRuntimeManifest({...base,config:{x:2}});
+  assert.notEqual(a.releaseId,b.releaseId);
+  assert.notEqual(b.releaseId,c.releaseId);
+});
+
+test('deployment metadata is sanitized and never reads arbitrary environment secrets',async()=>{
+  const dir=await fixture();
+  const m=await buildRuntimeManifest({
+    rootDir:dir,files:['a.mjs'],
+    deployment:{gitCommit:'not-a-sha',gitBranch:'main',service:'tcx',secret:'DO_NOT_STORE'},
+    config:{safe:true}
+  });
+  assert.equal(m.deployment.gitCommit,null);
+  assert.equal('secret' in m.deployment,false);
+});
+
+test('release registry registers once and deduplicates identical runtime',async()=>{
+  const dir=await fixture();
+  const file=path.join(dir,'registry.jsonl');
+  const registry=await openReleaseRegistry(file);
+  const manifest=await buildRuntimeManifest({rootDir:dir,files:['a.mjs','b.mjs'],config:{x:1}});
+  const a=await registerRuntimeRelease(registry,manifest,{registeredAt:1});
+  const b=await registerRuntimeRelease(registry,manifest,{registeredAt:2});
+  assert.equal(a.duplicate,false);
+  assert.equal(b.duplicate,true);
+  assert.equal(registry.seq,1);
+  assert.equal(verifyReleaseRegistry(registry.records).ok,true);
+});
+
+test('release registry detects historical manifest tampering',async()=>{
+  const dir=await fixture();
+  const file=path.join(dir,'registry.jsonl');
+  const registry=await openReleaseRegistry(file);
+  const manifest=await buildRuntimeManifest({rootDir:dir,files:['a.mjs'],config:{x:1}});
+  await registerRuntimeRelease(registry,manifest,{registeredAt:1});
+  const rows=(await readFile(file,'utf8')).trim().split('\n').map(JSON.parse);
+  rows[0].manifest.configHash='0'.repeat(64);
+  await writeFile(file,rows.map(JSON.stringify).join('\n')+'\n');
+  const reopened=await openReleaseRegistry(file);
+  assert.equal(reopened.healthy,false);
+  assert.equal(reopened.verification.error,'MANIFEST_HASH_MISMATCH');
+});
