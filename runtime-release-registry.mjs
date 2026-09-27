@@ -96,7 +96,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'expansion-runtime/source-intelligence.mjs',
   'expansion-runtime/event-impact-memory.mjs',
   'expansion-runtime/liquidity-intelligence.mjs',
-  'expansion-runtime/derivatives-public-provider.mjs'
+  'expansion-runtime/derivatives-public-provider.mjs',
+  'expansion-runtime/liquidation-public-stream.mjs'
 ];
 
 export function institutionalRuntimeFiles(){
