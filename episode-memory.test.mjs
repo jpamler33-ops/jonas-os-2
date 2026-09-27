@@ -66,7 +66,7 @@ test('summary reports robust historical distribution, not win probability',()=>{
   const a=baseEpisode();a.id='a';a.outcomes['12']={returnPct:1,maxRisePct:2,maxFallPct:-1,realizedRangePct:3};
   const b=baseEpisode();b.id='b';b.outcomes['12']={returnPct:3,maxRisePct:4,maxFallPct:-2,realizedRangePct:6};
   const s=summarizeSimilar([{episode:a,similarity:0.9},{episode:b,similarity:0.8}],12);
-  assert.equal(s.n,2);assert.equal(s.returnPct.median,2);assert.equal(s.medianSimilarity,85);
+  assert.equal(s.n,2);assert.equal(s.returnPct.median,2);assert.ok(Math.abs(s.medianSimilarity-85)<1e-9);
   assert.equal('probability' in s,false);
 });
 
