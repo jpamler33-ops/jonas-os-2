@@ -18,6 +18,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'market-data-fabric.mjs',
   'deterministic-replay.mjs',
   'observability.mjs',
+  'operational-readiness.mjs',
   'chaos-engineering.mjs',
   'shadow-oms.mjs',
   'multi-venue-shadow-sor.mjs',
