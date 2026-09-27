@@ -1165,6 +1165,7 @@ function helpText() {
     '/audit – Institutional Kernel / Ledger-Integrität',
     '/fabric – Event-Sourced Market Data Fabric',
     '/replay BTC [ISO-Zeit] – Point-in-Time Replay',
+    'Replay auch per 🎬-Button direkt am Markt',
     '/release – Runtime Release & Configuration Registry',
     '/obs – Institutional Observability / SLOs',
     '/chaos [SCENARIO] – synthetischer Fail-Closed-Test',
@@ -2217,29 +2218,104 @@ async function showFabric(chatId) {
   return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
 }
 
-async function showReplay(chatId,symbol,asOf) {
+function recentReplayPoints(symbol,{limit=8}={}) {
+  const rows=(marketFabric.events||[])
+    .filter(e=>
+      e?.kind==='PRIMARY_MARKET' &&
+      String(e?.payload?.symbol||'').toUpperCase()===String(symbol).toUpperCase() &&
+      Number.isFinite(Number(e?.availableAt))
+    )
+    .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
+  const out=[];
+  const seen=new Set();
+  for(const e of rows){
+    const at=Number(e.availableAt);
+    const bucket=Math.floor(at/60000);
+    if(seen.has(bucket)) continue;
+    seen.add(bucket);
+    out.push(at);
+    if(out.length>=limit) break;
+  }
+  return out;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=[];
+  for(let i=0;i<points.length;i+=2){
+    rows.push(points.slice(i,i+2).map(at=>{
+      const label=new Intl.DateTimeFormat('de-DE',{
+        timeZone:'Europe/Berlin',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit'
+      }).format(new Date(at));
+      return {
+        text:'⏪ '+label,
+        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
+      };
+    }));
+  }
+  rows.push([
+    {text:'📊 Markt',callback_data:'refresh:'+symbol},
+    {text:'🏠 Home',callback_data:'home'}
+  ]);
+  return {inline_keyboard:rows};
+}
+
+async function showReplayMenu(chatId,messageId,symbol) {
+  const points=recentReplayPoints(symbol,{limit:8});
+  const text=points.length
+    ? [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Wähle einen gespeicherten Point-in-Time-Zustand.',
+        'Der Replay rekonstruiert nur Informationen, die zu diesem Zeitpunkt bereits verfügbar waren.','',
+        'Verfügbare Punkte: '+points.length,
+        'Future leakage guard: aktiv',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Noch keine PRIMARY_MARKET-Punkte im Market Data Fabric.',
+        'Research-Läufe erzeugen die Replay-Basis automatisch.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text,reply_markup:replayMenuKeyboard(symbol,points)};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showReplay(chatId,symbol,asOf,messageId=null) {
   const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
   const s=replaySummary(state);
   const primary=state.primary;
   const witness=state.witness;
   const text=[
-    `⏪ TCX Deterministic Replay · ${symbol.replace('USDT','/USDT')}`,
+    '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
     '',
-    `Replay: ${DETERMINISTIC_REPLAY_VERSION}`,
-    `asOf: ${new Date(asOf).toISOString()}`,
-    `Hash: ${s.replayHash.slice(0,20)}…`,
-    `Future leakage: ${s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')}`,
+    'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'asOf: '+new Date(asOf).toISOString(),
+    'Hash: '+s.replayHash.slice(0,20)+'…',
+    'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
     '',
-    `Primary: ${primary?`${priceText(primary.price)} · ${primary.source||'UNKNOWN'}`:'not available'}`,
-    `Witness: ${witness?`${fmt(Number(witness.agreementScore||0)*100,0)}% agreement · external ${witness.externalWitnessCount||0}`:'not available'}`,
+    'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
+    'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
     '',
     'CANDLES KNOWN AT asOf',
-    ...Object.entries(s.candleCounts).map(([tf,n])=>`• ${tf}: ${n}`),
+    ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
     '',
     'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
     'Action: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
-  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+  const payload={
+    chat_id:chatId,
+    text:text.slice(0,4096),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+      [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+    ]}
+  };
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
 }
 
 function pct01(x){ return fmt(Number(x)*100,0); }
@@ -2448,6 +2524,7 @@ function parseAction(data='') {
   if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
   if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
   return { kind:'UNKNOWN' };
 }
 
@@ -2913,6 +2990,18 @@ async function handle(update) {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
       await showEvidenceHistory(chatId,messageId,a.symbol);
       await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
       return;
     }
     if (a.kind === 'OMS') {
