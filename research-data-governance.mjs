@@ -111,7 +111,9 @@ export function createResearchDataGovernanceState({
   sources={},
   featureHistory={},
   maxFeatureHistory=96,
-  maxSourceHistory=96
+  maxSourceHistory=96,
+  recoveredFromCorrupt=false,
+  lastLoadError=null
 }={}){
   return {
     version:RESEARCH_DATA_GOVERNANCE_VERSION,
@@ -119,6 +121,8 @@ export function createResearchDataGovernanceState({
     updatedAt:Number(createdAt),
     maxFeatureHistory:Math.max(20,Math.floor(Number(maxFeatureHistory)||96)),
     maxSourceHistory:Math.max(20,Math.floor(Number(maxSourceHistory)||96)),
+    recoveredFromCorrupt:Boolean(recoveredFromCorrupt),
+    lastLoadError:lastLoadError==null?null:String(lastLoadError),
     sources:structuredClone(sources||{}),
     featureHistory:structuredClone(featureHistory||{})
   };
@@ -386,14 +390,18 @@ export async function loadResearchDataGovernance(filePath){
     if(err?.code==='ENOENT') return createResearchDataGovernanceState();
     const backup=filePath+'.corrupt-'+Date.now();
     try{await rename(filePath,backup);}catch{}
-    return createResearchDataGovernanceState();
+    return createResearchDataGovernanceState({
+      recoveredFromCorrupt:true,
+      lastLoadError:err instanceof Error?err.message:String(err)
+    });
   }
 }
 
 export async function saveResearchDataGovernance(filePath,state){
   await mkdir(path.dirname(filePath),{recursive:true});
   const tmp=filePath+'.tmp-'+process.pid;
-  await writeFile(tmp,JSON.stringify(state,null,2)+'\n',{encoding:'utf8',mode:0o600});
+  const persisted={...state,recoveredFromCorrupt:false,lastLoadError:null};
+  await writeFile(tmp,JSON.stringify(persisted,null,2)+'\n',{encoding:'utf8',mode:0o600});
   await rename(tmp,filePath);
   return state;
 }
