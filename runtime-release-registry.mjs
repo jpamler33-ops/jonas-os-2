@@ -48,6 +48,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'model-candidate-registry.mjs',
   'institutional-audit-binding.mjs',
   'forecast-input-adapter.mjs',
+  'forecast-science-adapter.mjs',
 
   'forecast-runtime/utils/math.js',
   'forecast-runtime/forecast/types.js',
