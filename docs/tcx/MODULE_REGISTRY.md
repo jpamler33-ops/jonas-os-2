@@ -42,85 +42,76 @@ These are authoritative only inside the integration branch until promoted to mai
 
 | Capability | Module(s) | Integration status |
 |---|---|---|
-| Immutable Research Trace | `research-trace.mjs` | STAGED / TESTED |
-| Forecast Intelligence runtime | `forecast-runtime/forecast/*` | STAGED / TESTED / NOT PRODUCT-CANONICAL |
-| Canonical forecast contract | `forecast-contract.mjs` | STAGED / TESTED / CI GREEN |
-| Forecast regression guards | `forecast-intelligence.integration.test.mjs` | STAGED / CI GREEN |
+| Forecast Intelligence runtime | `forecast-runtime/forecast/*` | STAGED / TESTED |
+| Master → Forecast input adapter | `forecast-input-adapter.mjs` | STAGED / TESTED / CI GREEN |
+| Canonical forecast output contract | `forecast-contract.mjs` | STAGED / TESTED / CI GREEN |
+| Forecast issuance bundle | `institutional-forecast-issuance.mjs` | STAGED / TESTED / CI GREEN |
+| Unified admission gate | `institutional-admission.mjs` | STAGED / TESTED / CI GREEN |
+| Immutable Research Trace | `research-trace.mjs` | STAGED / TESTED / CI GREEN |
+| Trace/issuance audit binding | `institutional-audit-binding.mjs` | STAGED / TESTED / CI GREEN |
 | Scientific validity aggregation | `scientific-validity.mjs` | STAGED / TESTED / CI GREEN |
-| Alpha.30 empirical support | `science-runtime/empirical-support.mjs` | STAGED / TESTED / CI GREEN |
-| Alpha.30 research integrity | `science-runtime/research-integrity.mjs` | STAGED / TESTED / CI GREEN |
-| Alpha.30 remaining science guards | future `science-runtime/*` | CANDIDATE / PARTIAL EXTRACTION |
+| Scientific core orchestrator | `scientific-core.mjs` | STAGED / TESTED / CI GREEN |
+| Empirical support | `science-runtime/empirical-support.mjs` | STAGED / TESTED / CI GREEN |
+| Research integrity | `science-runtime/research-integrity.mjs` | STAGED / TESTED / CI GREEN |
+| Linear concept stability | `science-runtime/concept-stability.mjs` | STAGED / TESTED / CI GREEN |
+| Nonlinear concept stability | `science-runtime/nonlinear-concept-stability.mjs` | STAGED / TESTED / CI GREEN |
+| Temporal recency | `science-runtime/temporal-recency.mjs` | STAGED / TESTED / CI GREEN |
+| Sequential evidence | `science-runtime/sequential-evidence.mjs` | STAGED / TESTED / CI GREEN |
+| Specification multiverse | `science-runtime/specification-multiverse.mjs` | STAGED / TESTED / CI GREEN |
+| Transportability | `science-runtime/transportability.mjs` | STAGED / TESTED / CI GREEN |
+| Evidence lineage independence | `science-runtime/evidence-lineage-independence.mjs` | STAGED / TESTED / CI GREEN |
+| Model promotion ladder | `model-promotion-ladder.mjs` | STAGED / TESTED / CI GREEN |
+| Institutional release file set | `runtime-release-registry.mjs` | STAGED / TESTED / CI GREEN |
 
-## Forecast Specialist Engine
+## Ownership decisions
+
+### Forecasting
 
 Owner: TCX Forecast Intelligence
-Source branch: `integration/forecast-v2.3.1`
-Integration status: STAGED on `integration/tcx-institutional-v3`
-Canonical on main: NO
+Source candidate: Forecast Specialist v2.3.1
+Status: one candidate forecast layer; no second forecast bot.
 
-Important correction:
-the historical Cloudflare Market Grammar / Market World Model files are no longer active runtime modules on current `main`. They were removed during the transition to the current Node/Railway architecture and therefore are not a second current forecast source of truth.
+Historical Cloudflare Market Grammar / Market World Model files are not active current-main runtime truth.
 
-Forecast Specialist may become the one canonical forecast layer only after:
-- canonical input/output contract
-- master point-in-time adapter
-- institutional admission gate
-- calibration/OOD/validity review
-- Alpha.30 scientific validity integration
-- full CI
-- release/replay binding
-- product integration through normalized views
+### Scientific validation
 
-## Alpha.30 Scientific Core
+Owner: TCX Scientific Core
+Source candidate: selected Alpha.30 scientific guards
+Status: core extraction complete.
 
-Owner candidate: TCX Scientific Validity Core
-Source: Alpha.30 master merge bundle
-Status: VALIDATED SOURCE CANDIDATE / NOT WHOLE-REPO MERGE
-Canonical on main: NO
-
-Keep/adapt:
-- empirical support
-- concept stability
-- nonlinear concept stability
-- temporal recency
-- sequential evidence/change
-- specification multiverse
-- transportability
-- evidence-lineage independence
-- dependency discovery/hypergraph
-- latent-factor discovery
-- interventional invariance
-- research integrity / reality-gap guards
-
-Do not import as competing runtime truth:
-- market providers
-- Telegram/dashboard UI
+Do not import Alpha.30 as a competing:
+- market provider
+- persistence layer
+- dashboard/Telegram product
 - execution stack
 - portfolio stack
 - deployment shell
-- duplicate persistence/audit infrastructure
 
-## Forecast Self-Correction
+### Product / Telegram
 
-Status: NOT YET APPROVED FOR AUTONOMOUS PRODUCTION MUTATION
+Owner remains current TCX Telegram product modules.
+Forecast Specialist Telegram adapters are not canonical product ownership.
 
-Allowed architecture:
+### Self-correction
+
+Owner: TCX Model Promotion Ladder + future candidate registry.
+
+Allowed:
 ```text
-issued immutable forecast
+immutable issued forecast
 → matured outcome
 → scoring/calibration/error decomposition
-→ drift/scientific guards
-→ candidate model or parameter version
-→ PIT + temporal OOS validation
-→ promotion gate
-→ new version
+→ versioned candidate
+→ PIT + temporal OOS + science + replay gates
+→ explicit promotion record
+→ new release identity
 ```
 
 Forbidden:
 - same-sample self-feedback
-- hidden threshold mutation
-- silent replacement of canonical production model
-- feedback that bypasses Release Registry / Research Trace
+- hidden mutable calibration
+- unversioned online learning
+- silent production replacement
 
 ## Rule for new parallel work
 
