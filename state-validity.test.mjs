@@ -43,7 +43,7 @@ test("fingerprints are stable under sub-bucket noise",()=>{
   const b=createStateFingerprint("BTCUSDT",ctx({
     capturedAt:2000,
     market:{price:100.01},
-    state:{pressure:43},
+    state:{pressure:41.8},
     witness:{agreement:0.821},
     memory:{novelty:0.249},
     engine:{evidenceStrength:0.721}
