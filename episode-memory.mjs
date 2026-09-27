@@ -167,14 +167,19 @@ export function computeOutcome(episode,candles,horizonBars) {
   };
 }
 
-export function matureEpisode(episode,candles) {
+export function matureEpisode(episode,candles,{observedAt=Date.now()}={}) {
+  const observationTime=Number(observedAt);
+  if(!Number.isFinite(observationTime)) throw new Error('Invalid episode outcome observedAt');
   let changed=false;
   episode.outcomes=episode.outcomes||{};
   for(const h of HORIZONS){
     const key=String(h);
     if(episode.outcomes[key]) continue;
     const outcome=computeOutcome(episode,candles,h);
-    if(outcome){ episode.outcomes[key]=outcome; changed=true; }
+    if(!outcome) continue;
+    if(observationTime<Number(outcome.maturedAt)) throw new Error('PIT violation: outcome observed before maturity');
+    episode.outcomes[key]={...outcome,observedAt:observationTime};
+    changed=true;
   }
   if(changed) episode.epistemic.outcome='OBSERVED_POST_EPISODE';
   return changed;
