@@ -196,7 +196,15 @@ export function evaluateAlert(alert,context,{now=Date.now()}={}){
   const fingerprint=hashText(stable({
     symbol:a.symbol,
     type:a.type,
-    values:checks.map(function(x){return {path:x.condition.path,current:x.current,match:x.match};})
+    values:checks.map(function(x){
+      const op=x.condition.op;
+      return {
+        path:x.condition.path,
+        op,
+        match:x.match,
+        current:["CHANGED","EQ","NEQ"].includes(op)?x.current:undefined
+      };
+    })
   }));
 
   if(!matched){
@@ -205,7 +213,7 @@ export function evaluateAlert(alert,context,{now=Date.now()}={}){
       reason:"NO_MATCH",
       fingerprint,
       checks,
-      alert:{...a,previous:nextPrevious}
+      alert:{...a,previous:nextPrevious,lastFingerprint:null}
     };
   }
 
