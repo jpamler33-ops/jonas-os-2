@@ -14,6 +14,7 @@ import { createObservability, recordProviderCall, recordOperation, recordSafety,
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
+import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -29,6 +30,7 @@ const krakenBase = (process.env.TCX_KRAKEN_REST_BASE || 'https://api.kraken.com'
 
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
+const researchAlertCheckMs = Math.max(30000, Number(process.env.TCX_RESEARCH_ALERT_CHECK_MS || 60000));
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
 const shadowWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_WATCH_MS || 10000));
@@ -55,6 +57,8 @@ const markets = requestedSymbols.map(symbol => ({
 
 const sessions = new Map();
 const witnessCache = new Map();
+const radarCache = new Map();
+const researchAlertContextCache = new Map();
 const observability = createObservability({sampleLimit:500});
 const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
 const loadedState = await loadPersistentState(stateFile);
@@ -115,7 +119,8 @@ try {
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
-      shadowOms:SHADOW_OMS_VERSION
+      shadowOms:SHADOW_OMS_VERSION,
+      alertEngine:ALERT_ENGINE_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -351,6 +356,234 @@ function alertList(chatId) {
   const key = String(chatId);
   if (!alerts.has(key)) alerts.set(key, []);
   return alerts.get(key);
+}
+
+function activeAlerts(chatId) {
+  return alertList(chatId).filter(a=>a?.enabled!==false);
+}
+
+function describeAlert(alert) {
+  const a=alert||{};
+  const c=Array.isArray(a.conditions)?a.conditions:[];
+  const first=c[0]||{};
+  if(a.type==='PRICE') {
+    const op=first.op==='GTE'?'≥':'≤';
+    return 'PRICE · '+symbolLabel(a.symbol)+' '+op+' '+fmt(Number(first.value),Number(first.value)<1?6:2)+' USDT';
+  }
+  if(a.type==='REGIME_CHANGE') return 'REGIME · '+symbolLabel(a.symbol)+' · change';
+  if(a.type==='STRUCTURE_CHANGE') return 'STRUCTURE · '+symbolLabel(a.symbol)+' · change';
+  if(a.type==='WITNESS_AGREEMENT') return 'WITNESS · '+symbolLabel(a.symbol)+' ≥ '+fmt(Number(first.value)*100,0)+'%';
+  if(a.type==='WITNESS_CONTRADICTION') return 'WITNESS · '+symbolLabel(a.symbol)+' · contradiction';
+  if(a.type==='MEMORY_SUPPORT') return 'MEMORY · '+symbolLabel(a.symbol)+' support ≥ '+fmt(Number(first.value),0);
+  if(a.type==='SAFETY_STATE_CHANGE') return 'SAFETY · '+symbolLabel(a.symbol)+' · state change';
+  if(a.type==='COMPOSITE') return 'COMPOSITE · '+symbolLabel(a.symbol)+' · research evidence gate';
+  return formatAlert(a);
+}
+
+async function addTcXAlert(chatId,alert) {
+  const list=alertList(chatId);
+  if(list.length>=50) return {added:false,reason:'LIMIT'};
+  const key=JSON.stringify({
+    symbol:alert.symbol,
+    type:alert.type,
+    mode:alert.mode,
+    conditions:alert.conditions
+  });
+  const duplicate=list.some(x=>x?.enabled!==false && JSON.stringify({
+    symbol:x.symbol,
+    type:x.type,
+    mode:x.mode,
+    conditions:x.conditions
+  })===key);
+  if(duplicate) return {added:false,reason:'DUPLICATE'};
+  list.push(alert);
+  const persisted=await persistState('alert-v2-added');
+  return {added:true,persisted};
+}
+
+function alertPreset(symbol,preset,{witnessPct=75,memorySupport=8}={}) {
+  const p=String(preset||'').toUpperCase();
+  const now=Date.now();
+  if(p==='REGIME') return createAlert({
+    symbol,type:'REGIME_CHANGE',createdAt:now,cooldownMs:5*60*1000,
+    conditions:[{path:'state.regime',op:'CHANGED'}],
+    label:'Regime changed'
+  });
+  if(p==='STRUCTURE') return createAlert({
+    symbol,type:'STRUCTURE_CHANGE',createdAt:now,cooldownMs:5*60*1000,
+    conditions:[{path:'state.structureKey',op:'CHANGED'}],
+    label:'Structure changed'
+  });
+  if(p==='WITNESS75'||p==='WITNESS') return createAlert({
+    symbol,type:'WITNESS_AGREEMENT',createdAt:now,cooldownMs:15*60*1000,
+    conditions:[{path:'witness.agreement',op:'GTE',value:Math.max(0,Math.min(100,Number(witnessPct)))/100}],
+    label:'Witness agreement threshold'
+  });
+  if(p==='MEMORY8'||p==='MEMORY') return createAlert({
+    symbol,type:'MEMORY_SUPPORT',createdAt:now,cooldownMs:30*60*1000,
+    conditions:[{path:'memory.support',op:'GTE',value:Math.max(1,Math.round(Number(memorySupport)||8))}],
+    label:'Historical support threshold'
+  });
+  if(p==='SAFETY') return createAlert({
+    symbol,type:'SAFETY_STATE_CHANGE',createdAt:now,cooldownMs:0,
+    conditions:[{path:'safety.state',op:'CHANGED'}],
+    label:'Safety state changed'
+  });
+  if(p==='COMPOSITE') return createAlert({
+    symbol,type:'COMPOSITE',createdAt:now,cooldownMs:30*60*1000,
+    conditions:[
+      {path:'witness.agreement',op:'GTE',value:0.75},
+      {path:'memory.support',op:'GTE',value:8},
+      {path:'engine.evidenceStrength',op:'GTE',value:0.65},
+      {path:'engine.contradiction',op:'LTE',value:0.25},
+      {path:'safety.canResearch',op:'TRUTHY'}
+    ],
+    label:'Research evidence gate'
+  });
+  return null;
+}
+
+function alertSetupKeyboard(symbol) {
+  return {inline_keyboard:[
+    [
+      {text:'🧬 Regime-Wechsel',callback_data:'alertpreset:'+symbol+':REGIME'},
+      {text:'🧭 Struktur-Wechsel',callback_data:'alertpreset:'+symbol+':STRUCTURE'}
+    ],
+    [
+      {text:'🛰 Witness ≥75%',callback_data:'alertpreset:'+symbol+':WITNESS75'},
+      {text:'🧠 Memory ≥8',callback_data:'alertpreset:'+symbol+':MEMORY8'}
+    ],
+    [
+      {text:'🛡 Safety-Wechsel',callback_data:'alertpreset:'+symbol+':SAFETY'},
+      {text:'🧩 Composite',callback_data:'alertpreset:'+symbol+':COMPOSITE'}
+    ],
+    [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+  ]};
+}
+
+async function showAlertSetup(chatId,symbol) {
+  return tg('sendMessage',{
+    chat_id:chatId,
+    text:[
+      '🔔 TCX ALERTS · '+symbol.replace('USDT','/USDT'),'',
+      'Wähle einen Research-Alert oder setze einen Preisalarm mit:',
+      '/alert '+symbolLabel(symbol)+' PREIS','',
+      'Research-Alerts informieren über Zustandsänderungen und Evidenz.',
+      'Sie sind keine Buy/Sell-Signale.'
+    ].join('\n'),
+    reply_markup:alertSetupKeyboard(symbol)
+  });
+}
+
+function buildResearchAlertContext(state,witnessReport) {
+  const engine=runMechanismTransitionEngine({
+    analysis:state.memoryAnalysis,
+    dashboard:state.memoryDashboard,
+    episodes,
+    symbol:state.symbol,
+    horizonMinutes:15,
+    witnessReport
+  });
+  const marketAudit=auditMarketSnapshot(state.market,{
+    now:Date.now(),
+    maxAgeMs:institutionalMarketMaxAgeMs
+  });
+  const witnessAudit=auditWitnessReport(witnessReport);
+  const engineAudit=auditEngineResult(engine);
+  const safety=determineSafetyState({
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    ledgerHealthy:auditLedger.healthy,
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+  });
+  const pattern=state.analysis?.pattern
+    ? [state.analysis.pattern.stage,state.analysis.pattern.side,Number(state.analysis.pattern.level||0).toFixed(8)].join(':')
+    : 'NONE';
+  return {
+    capturedAt:Date.now(),
+    market:{
+      price:Number(state.market.price),
+      spreadBps:Number(state.market.spreadBps),
+      change24hPct:Number(state.market.changePct),
+      availableAt:Number(state.market.availableAt)
+    },
+    state:{
+      regime:String(state.dashboard.regime),
+      mtfBias:String(state.dashboard.bias),
+      structure:String(state.analysis?.trend||'INSUFFICIENT'),
+      structureKey:String(state.analysis?.trend||'INSUFFICIENT')+'|'+pattern,
+      liquidity:String(state.dashboard.liquidity),
+      flow:String(state.dashboard.flow),
+      pressure:Number(state.dashboard.pressureScore)
+    },
+    witness:{
+      agreement:Number(witnessReport?.agreementScore||0),
+      contradiction:Boolean(witnessReport?.contradictions?.length),
+      externalCount:Number(witnessReport?.externalWitnessCount||0),
+      satisfied:witnessReport?.independentWitnessSatisfied===true
+    },
+    memory:{
+      support:Number(engine.lattice.support||0),
+      sufficient:engine.lattice.sufficient===true,
+      novelty:Number(engine.lattice.novelty||0)
+    },
+    engine:{
+      evidenceStrength:Number(engine.hypothesis.evidenceStrength||0),
+      contradiction:Number(engine.audit.contradictionScore||0),
+      coherence:Number(engine.lattice.transitionCoherence||0),
+      gate:String(engine.hypothesis.gate||'INSUFFICIENT_EVIDENCE')
+    },
+    safety:{
+      state:String(safety.state||'UNKNOWN'),
+      canResearch:safety.canResearch===true,
+      canExecute:false
+    }
+  };
+}
+
+function updateRadarCache(symbol,ctx) {
+  radarCache.set(symbol,{
+    capturedAt:Number(ctx.capturedAt||Date.now()),
+    status:String(ctx.safety?.state||'UNKNOWN'),
+    regime:String(ctx.state?.regime||'UNKNOWN'),
+    bias:String(ctx.state?.mtfBias||'UNKNOWN'),
+    witnessAgreement:Number(ctx.witness?.agreement||0),
+    witnessSatisfied:ctx.witness?.satisfied===true,
+    support:Number(ctx.memory?.support||0),
+    sufficient:ctx.memory?.sufficient===true,
+    novelty:Number(ctx.memory?.novelty||0),
+    contradiction:Number(ctx.engine?.contradiction||0),
+    evidenceStrength:Number(ctx.engine?.evidenceStrength||0),
+    gate:String(ctx.engine?.gate||'UNKNOWN')
+  });
+}
+
+async function researchAlertContext(symbol,{force=false}={}) {
+  const now=Date.now();
+  const cached=researchAlertContextCache.get(symbol);
+  if(!force && cached && now-cached.at<researchAlertCheckMs) return cached.context;
+  const state=await researchState(symbol,'5m');
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:Math.min(researchAlertCheckMs,60000)});
+  const context=buildResearchAlertContext(state,witnessReport);
+  researchAlertContextCache.set(symbol,{at:now,context});
+  updateRadarCache(symbol,context);
+  return context;
+}
+
+function alertCurrentStateLines(ctx) {
+  if(!ctx) return [];
+  return [
+    'Preis: '+(Number.isFinite(ctx.market?.price)?fmt(ctx.market.price,ctx.market.price<1?6:2)+' USDT':'—'),
+    'Regime: '+String(ctx.state?.regime||'—'),
+    'Structure: '+String(ctx.state?.structure||'—'),
+    'Witness: '+fmt(Number(ctx.witness?.agreement||0)*100,0)+'%',
+    'Memory support: '+fmt(Number(ctx.memory?.support||0),0),
+    'Evidence: '+fmt(Number(ctx.engine?.evidenceStrength||0)*100,0)+'%',
+    'Contradiction: '+fmt(Number(ctx.engine?.contradiction||0)*100,0)+'%',
+    'Safety: '+String(ctx.safety?.state||'—')
+  ];
 }
 
 function providerNameFromUrl(url) {
@@ -796,7 +1029,13 @@ function helpText() {
     '/shadowcancel ORDER_ID – virtuelle Order abbrechen',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
-    '/alerts – aktive Preisalarme',
+    '/alertregime BTC – Regime-Wechsel',
+    '/alertstructure BTC – Struktur-Wechsel',
+    '/alertwitness BTC 75 – Witness-Schwelle in %',
+    '/alertmemory BTC 8 – Mindestzahl historischer Transitionen',
+    '/alertsafety BTC – Safety-State-Wechsel',
+    '/alertcombo BTC – Composite Research Gate',
+    '/alerts – aktive Alarme',
     '/clearalerts – alle Alarme löschen','',
     'Favoriten und Alarme werden persistent gespeichert, wenn Railway ein Volume auf /data gemountet hat.',
     'Execution bleibt SHADOW_ONLY.'
@@ -900,20 +1139,25 @@ async function showHomeSection(chatId,messageId,section) {
 
   let text='';
   if(section==='ALERTS') {
-    const list=alertList(chatId);
+    const list=activeAlerts(chatId);
     text=list.length
-      ? ['🔔 TCX Alerts','',...list.map((a,i)=>`${i+1}. ${symbolLabel(a.symbol)} ${a.direction==='ABOVE'?'≥':'≤'} ${fmt(a.target,a.target<1?6:2)} USDT`),'','Neue Preisalarme: /alert BTC 70000','TCX-native Alerts folgen auf dieser Basis.'].join('\n')
-      : ['🔔 TCX Alerts','','Keine aktiven Preisalarme.','Neue Preisalarme: /alert BTC 70000','','Nächste Ausbaustufe: Struktur-, Regime-, Witness- und Composite-Alerts.'].join('\n');
+      ? ['🔔 TCX ALERTS v2','',...list.map((a,i)=>`${i+1}. ${describeAlert(a)}`),'','Preis: /alert BTC 70000','Weitere Alerts direkt über den 🔔-Button eines Marktes.'].join('\n')
+      : ['🔔 TCX ALERTS v2','','Keine aktiven Alarme.','Preis: /alert BTC 70000','Research-Alerts direkt über den 🔔-Button eines Marktes.'].join('\n');
   } else if(section==='RADAR') {
+    const now=Date.now();
     const lines=requestedSymbols.map(symbol=>{
-      const own=episodes.filter(e=>e.symbol===symbol);
-      const mature=own.filter(e=>e.outcomes?.['12']).length;
-      return `${symbolLabel(symbol)} · Memory ${own.length} · mature 1h ${mature}`;
+      const r=radarCache.get(symbol);
+      if(!r){
+        const own=episodes.filter(e=>e.symbol===symbol);
+        return `${symbolLabel(symbol)} · warming · Memory ${own.length}`;
+      }
+      const age=Math.max(0,now-r.capturedAt);
+      return `${symbolLabel(symbol)} · ${r.status} · ${r.regime} · W${fmt(r.witnessAgreement*100,0)}% · M${r.support} · N${fmt(r.novelty*100,0)}% · C${fmt(r.contradiction*100,0)}% · ${Math.round(age/1000)}s`;
     });
-    text=['🧠 TCX RADAR · Research Coverage','',
-      'Kein Trade-Ranking. Der Radar zeigt aktuell reale Forschungsabdeckung aus Episode Memory.','',
+    text=['🧠 TCX RADAR v2','',
+      'Kein Trade-Ranking. W=Witness · M=Memory support · N=Novelty · C=Contradiction.','',
       ...lines,'',
-      'Nächster Layer: Data Quality + Witness + Novelty + Regime Change in einer gemeinsamen Radaransicht.'
+      'Action bleibt ABSTAIN / SHADOW_ONLY.'
     ].join('\n');
   } else if(section==='SYSTEM') {
     text=[
@@ -1764,6 +2008,7 @@ function parseAction(data='') {
   if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
   if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
   if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
   if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
   if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
@@ -2021,22 +2266,28 @@ async function handleCommand(msg) {
     }
     try {
       const s = await snapshot(symbol);
-      const direction = target >= s.price ? 'ABOVE' : 'BELOW';
-      const list = alertList(chatId);
-      if (list.length >= 20) {
-        await tg('sendMessage',{ chat_id:chatId, text:'Maximal 20 aktive Alarme pro Chat.' });
-        return true;
-      }
-      list.push({ symbol, target, direction, createdAt:Date.now() });
-      const persisted = await persistState('alert-added');
+      const direction = target >= s.price ? 'GTE' : 'LTE';
+      const alert=createAlert({
+        symbol,
+        type:'PRICE',
+        createdAt:Date.now(),
+        once:true,
+        cooldownMs:0,
+        conditions:[{path:'market.price',op:direction,value:target}],
+        label:'Price target'
+      });
+      const added=await addTcXAlert(chatId,alert);
+      const status=!added.added
+        ? (added.reason==='DUPLICATE'?'Dieser Alarm existiert bereits.':'Maximal 50 Alarme pro Chat.')
+        : (added.persisted?'Persistent gespeichert.':'Nur temporär gespeichert – State-Volume prüfen.');
       await tg('sendMessage',{
         chat_id:chatId,
         text:[
-          `🔔 Alarm gesetzt: ${symbolLabel(symbol)}/USDT`,
-          `Ziel: ${fmt(target,target<1?6:2)} USDT`,
-          `Aktuell: ${fmt(s.price,s.price<1?6:2)} USDT`,
-          `Richtung: ${direction === 'ABOVE' ? 'erreicht/übersteigt Ziel' : 'erreicht/unterschreitet Ziel'}`,'',
-          persisted ? '💾 Persistent gespeichert.' : '⚠️ Nur temporär gespeichert – State-Volume prüfen.'
+          '🔔 PREISALARM · '+symbolLabel(symbol)+'/USDT',
+          'Ziel: '+fmt(target,target<1?6:2)+' USDT',
+          'Aktuell: '+fmt(s.price,s.price<1?6:2)+' USDT',
+          'Trigger: Preis '+(direction==='GTE'?'≥':'≤')+' Ziel','',
+          status
         ].join('\n')
       });
     } catch {
@@ -2045,10 +2296,56 @@ async function handleCommand(msg) {
     return true;
   }
 
+  if (['/alertregime','/alertstructure','/alertsafety','/alertcombo'].includes(command)) {
+    const symbol=normalizeSymbol(parts[1]||'');
+    if(!symbol){
+      await tg('sendMessage',{chat_id:chatId,text:'Beispiel: '+command+' BTC'});
+      return true;
+    }
+    const preset=command==='/alertregime'?'REGIME':
+      command==='/alertstructure'?'STRUCTURE':
+      command==='/alertsafety'?'SAFETY':'COMPOSITE';
+    const alert=alertPreset(symbol,preset);
+    const added=await addTcXAlert(chatId,alert);
+    await tg('sendMessage',{
+      chat_id:chatId,
+      text:added.added
+        ? '🔔 '+describeAlert(alert)+'\n'+(added.persisted?'Persistent gespeichert.':'Temporär gespeichert.')
+        : (added.reason==='DUPLICATE'?'Dieser Alarm existiert bereits.':'Alarm-Limit erreicht.')
+    });
+    return true;
+  }
+
+  if (command === '/alertwitness') {
+    const symbol=normalizeSymbol(parts[1]||'');
+    const pct=Number(String(parts[2]||'75').replace(',','.'));
+    if(!symbol||!Number.isFinite(pct)||pct<0||pct>100){
+      await tg('sendMessage',{chat_id:chatId,text:'Beispiel: /alertwitness BTC 75'});
+      return true;
+    }
+    const alert=alertPreset(symbol,'WITNESS',{witnessPct:pct});
+    const added=await addTcXAlert(chatId,alert);
+    await tg('sendMessage',{chat_id:chatId,text:added.added?'🔔 '+describeAlert(alert):'Alarm nicht angelegt: '+added.reason});
+    return true;
+  }
+
+  if (command === '/alertmemory') {
+    const symbol=normalizeSymbol(parts[1]||'');
+    const support=Number(parts[2]||8);
+    if(!symbol||!Number.isFinite(support)||support<1||support>1000){
+      await tg('sendMessage',{chat_id:chatId,text:'Beispiel: /alertmemory BTC 8'});
+      return true;
+    }
+    const alert=alertPreset(symbol,'MEMORY',{memorySupport:support});
+    const added=await addTcXAlert(chatId,alert);
+    await tg('sendMessage',{chat_id:chatId,text:added.added?'🔔 '+describeAlert(alert):'Alarm nicht angelegt: '+added.reason});
+    return true;
+  }
+
   if (command === '/alerts') {
-    const list = alertList(chatId);
+    const list = activeAlerts(chatId);
     const text = list.length
-      ? ['🔔 Aktive Alarme','',...list.map((a,i) => `${i+1}. ${symbolLabel(a.symbol)} ${a.direction === 'ABOVE' ? '≥' : '≤'} ${fmt(a.target,a.target<1?6:2)} USDT`)].join('\n')
+      ? ['🔔 Aktive TCX Alerts','',...list.map((a,i) => (i+1)+'. '+describeAlert(a))].join('\n')
       : '🔔 Keine aktiven Alarme.';
     await tg('sendMessage',{ chat_id:chatId, text });
     return true;
@@ -2059,7 +2356,7 @@ async function handleCommand(msg) {
     const persisted = await persistState('alerts-cleared');
     await tg('sendMessage',{
       chat_id:chatId,
-      text:persisted ? '🔕 Alle Preisalarme gelöscht.' : '🔕 Alarme gelöscht, aber State-Volume ist nicht schreibbar.'
+      text:persisted ? '🔕 Alle Alarme gelöscht.' : '🔕 Alarme gelöscht, aber State-Volume ist nicht schreibbar.'
     });
     return true;
   }
@@ -2195,7 +2492,21 @@ async function handle(update) {
       return;
     }
     if (a.kind === 'ALERT_HELP') {
-      await ack(q.id,`Nutze /alert ${symbolLabel(a.symbol)} PREIS`);
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
       return;
     }
   } catch (err) {
@@ -2248,46 +2559,81 @@ async function alertWatcher() {
     const grouped = new Map();
     for (const [chatKey,list] of alerts) {
       for (const alert of list) {
+        if(alert?.enabled===false) continue;
         if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
         grouped.get(alert.symbol).push({ chatKey, alert });
       }
     }
 
+    let persistenceChanged=false;
     for (const [symbol,items] of grouped) {
-      let s;
-      try { s = await snapshot(symbol); }
-      catch (err) {
-        console.error('alert snapshot error',symbol,err instanceof Error ? err.message : String(err));
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
         continue;
       }
 
       for (const { chatKey, alert } of items) {
-        const hit = alert.direction === 'ABOVE' ? s.price >= alert.target : s.price <= alert.target;
-        if (!hit) continue;
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
 
-        let delivered = false;
-        try {
-          await tg('sendMessage',{
-            chat_id:chatKey,
-            text:[
-              `🔔 PREISALARM · ${symbolLabel(symbol)}/USDT`,
-              `Ziel: ${fmt(alert.target,alert.target<1?6:2)} USDT`,
-              `Aktuell: ${fmt(s.price,s.price<1?6:2)} USDT`,'',
-              'TCX Execution: SHADOW_ONLY'
-            ].join('\n')
-          });
-          delivered = true;
-        } catch (err) {
-          console.error('alert send error',err instanceof Error ? err.message : String(err));
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
         }
 
-        if (delivered) {
-          const current = alertList(chatKey);
-          alerts.set(chatKey,current.filter(x => x !== alert));
-          await persistState('alert-delivered');
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
         }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
       }
     }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
   }
 }
 
@@ -2395,6 +2741,14 @@ async function episodeWatcher() {
         await captureEpisodeFromState(state,{persist:false});
         if(episodes.length!==before) changed=true;
         if(matureSymbolEpisodes(symbol,state.byTf["5m"])) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
       } catch(err) {
         console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
       }
@@ -2418,6 +2772,7 @@ const server = http.createServer((req,res) => {
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
       alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
       institutionalKernel:{
         version:INSTITUTIONAL_KERNEL_VERSION,
         ledgerHealthy:auditLedger.healthy,
@@ -2515,6 +2870,7 @@ console.log(JSON.stringify({
   markets:markets.map(x=>x.symbol),
   refreshMs,
   alertCheckMs,
+  researchAlertCheckMs,
   episodeSweepMs,
   institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
   auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
@@ -2537,6 +2893,7 @@ console.log(JSON.stringify({
   deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
   observability:OBSERVABILITY_VERSION,
   chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
   shadowOms:{
     version:SHADOW_OMS_VERSION,
     file:shadowOmsFile,
