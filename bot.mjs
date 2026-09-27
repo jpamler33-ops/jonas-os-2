@@ -4879,6 +4879,7 @@ console.log(JSON.stringify({
   entityRegistry:{version:VERIFIED_ENTITY_REGISTRY_VERSION,file:entityRegistryFile,summary:entityRegistrySummary(entityRegistry||{}),refreshError:entityRegistryRefreshError,source:okxPorSource},
   entityFlowResearch:{version:ENTITY_FLOW_ENGINE_VERSION,file:entityFlowMemoryFile,addressCount:entityFlowAddressIndex.addressCount,entityCount:entityFlowAddressIndex.entityCount,memory:entityFlowMemorySummary(entityFlowMemory),finality:'FINALIZED',assetScope:'NATIVE_ETH',coverage:'BOUNDED_VERIFIED_ADDRESS_SAMPLE'},
   researchDataPlane:{version:RESEARCH_DATA_PLANE_VERSION,adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,...researchDataPlaneSummary(researchDataPlane)},
+  researchDataGovernance:{version:RESEARCH_DATA_GOVERNANCE_VERSION,file:researchGovernanceFile,healthy:researchGovernanceHealthy,lastError:researchGovernanceLastError,...researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()})},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
