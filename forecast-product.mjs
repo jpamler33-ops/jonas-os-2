@@ -179,22 +179,3 @@ export function forecastKeyboard(symbol){
     [{text:'🏠 Start',callback_data:'home'}]
   ]};
 }
-
-export function forecastKeyboard(symbol){
-  const s=String(symbol||'').toUpperCase();
-  return {inline_keyboard:[
-    [
-      {text:'🔄 Neu berechnen',callback_data:'forecast:'+s},
-      {text:'📊 Markt',callback_data:'refresh:'+s}
-    ],
-    [
-      {text:'🧩 Evidence',callback_data:'evidence:'+s},
-      {text:'⏱ Validity',callback_data:'validity:'+s}
-    ],
-    [
-      {text:'🧬 Memory',callback_data:'memory:'+s},
-      {text:'🧪 MTL',callback_data:'engine:'+s}
-    ],
-    [{text:'🏠 Home',callback_data:'home'}]
-  ]};
-}
