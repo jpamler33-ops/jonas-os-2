@@ -60,6 +60,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-shadow-competition.mjs',
   'forecast-experiment-governor.mjs',
   'forecast-feature-research.mjs',
+  'research-data-plane.mjs',
+  'research-data-plane-adapters.mjs',
 
   'forecast-runtime/utils/math.js',
   'forecast-runtime/forecast/types.js',
