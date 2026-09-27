@@ -61,9 +61,18 @@ export function advanceEvidenceLifecycle(
     });
   }
 
-  if(
+  const sameResearchState=Boolean(
     previous &&
-    previous.fingerprint===record.fingerprint &&
+    previous.stateFingerprint?.hash &&
+    record.stateFingerprint?.hash &&
+    previous.stateFingerprint.hash===record.stateFingerprint.hash &&
+    Number(previous.index)===Number(record.index) &&
+    Number(previous.disagreementCount)===Number(record.disagreementCount) &&
+    String(previous.gate)===String(record.gate)
+  );
+
+  if(
+    sameResearchState &&
     record.capturedAt-previous.capturedAt<dedupeWindowMs
   ){
     return {
