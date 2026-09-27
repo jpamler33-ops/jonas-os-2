@@ -3289,12 +3289,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       researchPlaneWrite={ok:false,appended:0,duplicates:0,reason:msg};
     }
   }
-  const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{
-    streamKey:symbol,
-    asOf:Number(state.availableAt),
-    minCompleteness:.5
-  });
-  const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
+  const researchGovernanceView=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});\n  const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{\n    streamKey:symbol,\n    asOf:Number(state.availableAt),\n    minCompleteness:.5,\n    requireGoverned:true\n  });\n  const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
   const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
   const liquidationExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='LIQUIDATION');
   const onchainExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ONCHAIN');
