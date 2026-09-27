@@ -67,19 +67,22 @@ Model Promotion Ladder
 ## Latest verified gate
 
 ```text
-commit: bfde125ac248ed0ec016d4b235f6e715a9d34658
+commit: 73ff2f6797a9bdced0254dd052e9bfc81a0d965d
 GitHub Actions: SUCCESS
 PR CI: SUCCESS
 syntax: PASS
-root + science-runtime + expansion-runtime tests: PASS
-expansion source pack verification: 9/9 PASS
-expansion package: 36 files / 30 modules / SHADOW_ONLY / liveExecution=false
+root + science-runtime + expansion-runtime + forecast candidate/governance tests: PASS
+Docker institutional packaging smoke test: PASS
 ```
+
+The verified branch now includes the durable forecast runtime, Telegram forecast product,
+matured-outcome feedback, candidate builder, chronological walk-forward evaluation,
+promotion/audit binding, model-to-runtime release binding, and rollback drill.
 
 Expansion source package SHA-256:
 `e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
 
-The latest uploaded `(2)` archive is byte-identical to the previously inspected `(1)` archive.
+The uploaded `(2)` expansion archive is byte-identical to the previously inspected `(1)` archive.
 
 ## Hard invariants
 
@@ -95,16 +98,24 @@ uncalibrated/suppressed probability = not user-displayable
 
 ## Not yet production-canonical
 
-Nothing on this branch is canonical on `main` until the runtime/deployment migration is complete and the final integration PR is reviewed.
+Nothing on this branch is canonical on `main` until PR #2 passes the final institutional gap audit and is merged.
 
-Current missing production path:
-1. offline candidate builder from matured outcomes
-2. temporal walk-forward evaluation driver
-3. actual bot orchestration through the new adapter/science/admission/trace path
-4. persistence/deployment packaging for staged modules
-5. Telegram forecast views
-6. rollback drill + final institutional gap audit
+Completed production-path staging:
+1. durable forecast runtime persistence
+2. canonical bot orchestration through adapter → science → admission → Research Trace
+3. Telegram forecast command + market-card entry point
+4. calibrated-probability suppression and audit fail-closed display
+5. matured-outcome feedback into calibration/reliability/drift memories
+6. offline candidate builder from matured outcomes only
+7. chronological PIT-safe walk-forward evaluation
+8. append-only candidate/version registry
+9. promotion/evaluation audit binding
+10. model release → registered software release binding
+11. rollback metadata + deterministic rollback drill
+12. Docker packaging + smoke test
 
 ## Next highest-leverage work
 
-Finish the versioned learning/promotion pipeline before UI expansion. Then wire the gated institutional forecast service into the bot and expose only normalized, admissible views.
+Run the final institutional gap audit on persistence migrations, operational failure modes,
+release/rollback procedure, observability, and main-branch migration. Do not start another
+prediction engine before this review is closed.
