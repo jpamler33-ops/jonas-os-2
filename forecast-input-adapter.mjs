@@ -123,6 +123,11 @@ export function buildCanonicalForecastInput({
       addFeature(features,featureSources,'expansion.memecoin.liquidity.usd',meme?.liquidity?.liquidityUsd,'TCX_MEMECOIN_INTELLIGENCE');
       addFeature(features,featureSources,'expansion.memecoin.liquidity.change1h',meme?.liquidity?.change1h,'TCX_MEMECOIN_INTELLIGENCE');
       addFeature(features,featureSources,'expansion.memecoin.activity.buySellRatio',meme?.earlyActivity?.buySellRatio,'TCX_MEMECOIN_INTELLIGENCE');
+      const narrative=expansionEvidence?.narrativeEvidence??{};
+      addFeature(features,featureSources,'expansion.narrative.sentiment',narrative?.narrative?.weightedSentiment,'TCX_NARRATIVE_REFLEXIVITY');
+      addFeature(features,featureSources,'expansion.narrative.sourceDiversity',narrative?.narrative?.sourceDiversity,'TCX_NARRATIVE_REFLEXIVITY');
+      addFeature(features,featureSources,'expansion.narrative.disagreement',narrative?.narrative?.disagreement,'TCX_NARRATIVE_REFLEXIVITY');
+      addFeature(features,featureSources,'expansion.narrative.attentionChange',narrative?.reflexivity?.attentionChange,'TCX_NARRATIVE_REFLEXIVITY');
     }
   }
 
