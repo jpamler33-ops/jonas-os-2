@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateResearchIntegrity } from './science-runtime/research-integrity.mjs';
+import { evaluateResearchIntegrity } from './research-integrity.mjs';
 
 function rec({
   id,role,purpose,partitionId,systemVersion='v1',
