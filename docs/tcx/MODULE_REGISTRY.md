@@ -94,6 +94,7 @@ Source package SHA-256:
 | Source Intelligence | `expansion-runtime/source-intelligence.mjs` | MAIN CANONICAL |
 | Event Impact Memory | `expansion-runtime/event-impact-memory.mjs` | MAIN CANONICAL |
 | Liquidity Intelligence | `expansion-runtime/liquidity-intelligence.mjs` | MAIN CANONICAL |
+| Trader / Wallet Intelligence evidence | `expansion-runtime/trader-wallet-intelligence.mjs` | MAIN CANONICAL V1 |
 
 The original expansion orchestrator, Ghost Portfolio, forecast ledger, duplicate science gates and self-improvement controller are not canonical because TCX already has stronger owners.
 
