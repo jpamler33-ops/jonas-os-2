@@ -224,7 +224,8 @@ export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
     ],
     [
       {text:"🧬 Memory",callback_data:"memory:"+s},
-      {text:"🛰 Witness",callback_data:"witness:"+s}
+      {text:"🛰 Witness",callback_data:"witness:"+s},
+      {text:"🧾 Shadow OMS",callback_data:"oms:"+s}
     ],
     [
       {text:"🔔 Alert",callback_data:"alerthelp:"+s},
@@ -245,6 +246,7 @@ export function parseProductCallback(data="") {
   const p=raw.split(":");
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
+  if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
   return {kind:"UNKNOWN"};
 }
 
