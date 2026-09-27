@@ -1177,6 +1177,7 @@ function transitionLine(label,lattice){
 }
 
 async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
   if(matureSymbolEpisodes(symbol,state.byTf["5m"])) await persistEpisodeMemory("engine-maturity");
@@ -1281,6 +1282,23 @@ async function showEngine(chatId,symbol){
     });
   }
 
+  recordSafety(observability,safety.state,{
+    hardReasons:safety.hardReasons,
+    softReasons:safety.softReasons
+  });
+  recordResearchTelemetry(observability,{
+    evidenceStrength:r15.hypothesis.evidenceStrength,
+    novelty:r15.lattice.novelty,
+    contradiction:r15.audit.contradictionScore,
+    witnessAgreement:witnessReport.agreementScore,
+    primaryAgeMs:marketAudit.ageMs
+  });
+  recordOperation(observability,{
+    name:'engine',
+    ok:safety.state!=='SAFE_STOP',
+    latencyMs:Date.now()-engineStarted,
+    error:safety.state==='SAFE_STOP'?safety.hardReasons.join(','):null
+  });
   const ch=Object.entries(r15.channels).sort((a,b)=>b[1]-a[1]);
   const strongest=ch[0]||["NONE",0];
   const text=[
