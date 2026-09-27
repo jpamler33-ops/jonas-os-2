@@ -51,6 +51,10 @@ TCX_SHADOW_LATENCY_MS=120
 TCX_SHADOW_MAKER_FEE_BPS=10
 TCX_SHADOW_TAKER_FEE_BPS=10
 TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT=0.15
+TCX_SOR_MAX_BOOK_AGE_MS=15000
+TCX_SOR_BINANCE_FEE_BPS=10
+TCX_SOR_OKX_FEE_BPS=10
+TCX_SOR_KRAKEN_FEE_BPS=10
 TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS=15000
 TCX_OKX_REST_BASE=https://www.okx.com
 TCX_KRAKEN_REST_BASE=https://api.kraken.com
@@ -768,3 +772,100 @@ SHADOW_ONLY = TRUE
 ```
 
 The Railway image, CI syntax checks and runtime release manifest include the Shadow SOR module so deployed runtime identity matches the source being tested.
+
+
+## TCX Multi-Venue Shadow Smart Order Router v1
+
+TCX now contains a counterfactual multi-venue execution router.
+
+Telegram:
+
+```text
+/sor BTC BUY 100
+/sor BTC SELL 100
+/sorstatus BTC
+```
+
+The router is hard-locked to:
+
+```text
+execution = SHADOW_ONLY
+canExecuteLive = false
+exchangeOrderAdapter = false
+networkOrderSubmission = false
+```
+
+### Venue set
+
+Current public order-book adapters:
+
+- Binance Spot · USDT · routable
+- OKX Spot · USDT · routable
+- Kraken Spot · USD · observed, but excluded from USDT routing until a point-in-time quote-basis normalization exists
+
+TCX never silently treats USD and USDT as identical.
+
+### Routing objective
+
+SOR works at the marginal L2 price-level level instead of selecting one venue by top-of-book alone.
+
+For each eligible visible level it considers:
+
+- observed public L2 price
+- visible quantity
+- configured fee assumption
+- observed book-fetch latency as a deterministic tie-break
+- venue toxicity only when a minimum amount of markout evidence exists
+
+For BUY simulations, lower fee-adjusted marginal cost is consumed first.
+For SELL simulations, higher fee-adjusted marginal proceeds are consumed first.
+
+The output reports:
+
+- route split by venue
+- aggregate fill ratio
+- average fill price
+- visible-depth exhaustion
+- fee assumptions
+- slippage versus the consolidated same-quote reference mid
+- all-in basis-point cost
+- fragmentation HHI
+- effective venue count
+- comparison with the best full-fill single-venue counterfactual
+- excluded/unavailable venues and exact reasons
+- deterministic route hash
+- Institutional Audit Ledger record
+
+### Quote integrity
+
+A venue with a different quote currency receives an explicit exclusion such as:
+
+```text
+QUOTE_MISMATCH_USD_VS_USDT
+```
+
+A stale or invalid book is also excluded rather than repaired or invented.
+
+### Venue toxicity
+
+The SOR contains an evidence-gated toxicity hook. A toxicity penalty is not applied merely because a venue has a name or reputation.
+
+It requires sufficient empirical future-markout evidence. Until that threshold is met:
+
+```text
+NOT_APPLIED_INSUFFICIENT_EVIDENCE
+```
+
+This prevents unmeasured venues from receiving invented execution penalties.
+
+### Epistemic status
+
+```text
+Venue books: OBSERVED_PUBLIC_L2
+Fees: ASSUMED_CONFIG
+Toxicity: MODELLED_FROM_MARKOUT_EVIDENCE only when supported
+Route: COUNTERFACTUAL_SHADOW_SIMULATION
+Real exchange order submission: NONE
+```
+
+Every SOR report can be written to the Institutional Audit Ledger and `multi-venue-shadow-sor.mjs` is included in the Runtime Release hash.
