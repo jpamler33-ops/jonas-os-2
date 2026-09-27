@@ -198,8 +198,7 @@ export function evaluateShadowCapitalAcademy(ledger,{asOf=Date.now(),timeZone='E
   }
   const activeIndex=Math.min(achievedLevel+1,stages.length-1);
   const activeStage=stages[activeIndex];
-  const effectiveStage=STAGES[Math.max(0,achievedLevel)];
-  const currentPolicy=effectiveStage.risk;
+  const currentPolicy=activeStage.risk;
 
   const initial=Math.max(1,Number(ledger?.initialEquityQuote)||10_000);
   const equity=Math.max(1,Number(summary.equityQuote)||initial);
