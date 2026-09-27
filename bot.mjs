@@ -4315,6 +4315,8 @@ async function autoLearnForecastWatcher() {
               researchDataPlaneSeq:result.researchDataPlaneSeq||0,
               researchDataPlaneFeatures:result.researchDataPlaneFeatures||0,
               researchDataPlaneAppendOk:result.researchDataPlaneAppendOk===true,
+              researchGovernanceIssueCount:result.researchGovernanceIssueCount||0,
+              researchGovernanceFingerprint:result.researchGovernanceFingerprint||null,
               duplicate:result.duplicate===true
             }));
           }else{
