@@ -109,6 +109,10 @@ export function renderInstitutionalForecastCard(issuance,{
     );
   }
 
+  if(Array.isArray(scienceGuardLines)&&scienceGuardLines.length){
+    lines.push('SCIENCE GUARDS',...scienceGuardLines.slice(0,8).map(x=>'• '+String(x)),'');
+  }
+
   if(f.path){
     lines.push(
       'PATH',
@@ -131,6 +135,7 @@ export function renderInstitutionalForecastCard(issuance,{
     ]:[]),
     '',
     'Probabilities werden nur angezeigt, wenn Forecast- und Science-Gates sowie Kalibrierung dies erlauben.',
+    ...(auditHealthy?[]:['Audit binding: FAILED → display fail-closed']),
     'Action: ABSTAIN · Execution: SHADOW_ONLY'
   );
 
