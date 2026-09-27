@@ -5,6 +5,7 @@ import { EVIDENCE_HISTORY_SCHEMA_VERSION } from './evidence-history.mjs';
 import { SHADOW_OMS_SCHEMA_VERSION } from './shadow-oms.mjs';
 import { VENUE_QUALITY_MEMORY_SCHEMA_VERSION } from './venue-quality-memory.mjs';
 import { INSTITUTIONAL_FORECAST_RUNTIME_VERSION } from './institutional-forecast-runtime.mjs';
+import { RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 
 export const PERSISTENCE_CONTRACTS_VERSION='TCX_PERSISTENCE_CONTRACTS_V1';
 
@@ -98,6 +99,16 @@ const CONTRACTS=Object.freeze([
     legacySchemas:[],
     criticality:'BLOCK',
     corruptionPolicy:'FAIL_CLOSED'
+  }),
+  Object.freeze({
+    id:'RESEARCH_DATA_PLANE',
+    format:'HASH_CHAIN_JSONL_FSYNC_BOUNDED_RAM',
+    env:'TCX_RESEARCH_DATA_PLANE_FILE',
+    defaultPath:'/data/tcx-research-data-plane.jsonl',
+    schema:RESEARCH_DATA_PLANE_VERSION,
+    legacySchemas:[],
+    criticality:'DEGRADE',
+    corruptionPolicy:'FAIL_CLOSED_RESEARCH_FEATURES'
   })
 ]);
 
