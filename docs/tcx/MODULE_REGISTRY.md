@@ -1,9 +1,9 @@
 # TCX Module Registry
 
 Status: CANONICAL OWNERSHIP / OVERLAP CONTROL
-Branch context: integration/tcx-institutional-v3
+Canonical branch: `main`
 
-Purpose: prevent parallel chats from implementing the same capability twice and distinguish MAIN-canonical from integration-staged components.
+Purpose: prevent duplicate subsystem ownership and make the current source of truth explicit.
 
 ## Main-canonical runtime modules
 
@@ -20,7 +20,9 @@ Purpose: prevent parallel chats from implementing the same capability twice and 
 | Market event chain | `market-data-fabric.mjs` | MAIN CANONICAL |
 | Point-in-time replay | `deterministic-replay.mjs` | MAIN CANONICAL |
 | Runtime release identity | `runtime-release-registry.mjs` | MAIN CANONICAL |
-| Observability | `observability.mjs` | MAIN CANONICAL |
+| Observability / SLOs | `observability.mjs` | MAIN CANONICAL |
+| Operational readiness | `operational-readiness.mjs` | MAIN CANONICAL |
+| Persistence contracts | `persistence-contracts.mjs` | MAIN CANONICAL |
 | Chaos harness | `chaos-engineering.mjs` | MAIN CANONICAL |
 | Shadow OMS | `shadow-oms.mjs` | MAIN CANONICAL |
 | Shadow SOR | `multi-venue-shadow-sor.mjs` | MAIN CANONICAL |
@@ -36,117 +38,119 @@ Purpose: prevent parallel chats from implementing the same capability twice and 
 | Telegram read commands | `telegram-read-command-handlers.mjs` | MAIN CANONICAL |
 | Telegram mutation commands | `telegram-mutation-command-handlers.mjs` | MAIN CANONICAL |
 
-## Institutional-v3 staged modules
+## Forecast / institutional research
 
-These are authoritative only inside the integration branch until promoted to main.
-
-| Capability | Module(s) | Integration status |
+| Capability | Canonical module(s) | Status |
 |---|---|---|
-| Forecast Intelligence runtime | `forecast-runtime/forecast/*` | STAGED / TESTED |
-| Master → Forecast input adapter | `forecast-input-adapter.mjs` | STAGED / TESTED / CI GREEN |
-| Canonical forecast output contract | `forecast-contract.mjs` | STAGED / TESTED / CI GREEN |
-| Forecast issuance bundle | `institutional-forecast-issuance.mjs` | STAGED / TESTED / CI GREEN |
-| Unified admission gate | `institutional-admission.mjs` | STAGED / TESTED / CI GREEN |
-| Immutable Research Trace | `research-trace.mjs` | STAGED / TESTED / CI GREEN |
-| Trace/issuance audit binding | `institutional-audit-binding.mjs` | STAGED / TESTED / CI GREEN |
-| Scientific validity aggregation | `scientific-validity.mjs` | STAGED / TESTED / CI GREEN |
-| Scientific core orchestrator | `scientific-core.mjs` | STAGED / TESTED / CI GREEN |
-| Empirical support | `science-runtime/empirical-support.mjs` | STAGED / TESTED / CI GREEN |
-| Research integrity | `science-runtime/research-integrity.mjs` | STAGED / TESTED / CI GREEN |
-| Linear concept stability | `science-runtime/concept-stability.mjs` | STAGED / TESTED / CI GREEN |
-| Nonlinear concept stability | `science-runtime/nonlinear-concept-stability.mjs` | STAGED / TESTED / CI GREEN |
-| Temporal recency | `science-runtime/temporal-recency.mjs` | STAGED / TESTED / CI GREEN |
-| Sequential evidence | `science-runtime/sequential-evidence.mjs` | STAGED / TESTED / CI GREEN |
-| Specification multiverse | `science-runtime/specification-multiverse.mjs` | STAGED / TESTED / CI GREEN |
-| Transportability | `science-runtime/transportability.mjs` | STAGED / TESTED / CI GREEN |
-| Evidence lineage independence | `science-runtime/evidence-lineage-independence.mjs` | STAGED / TESTED / CI GREEN |
-| Model promotion ladder | `model-promotion-ladder.mjs` | STAGED / TESTED / CI GREEN |
-| Model candidate registry | `model-candidate-registry.mjs` | STAGED / TESTED / CI GREEN |
-| Institutional release file set | `runtime-release-registry.mjs` | STAGED / TESTED / CI GREEN |
-| Expansion pack provenance | `expansion-runtime/provenance.mjs` | STAGED / TESTED / CI GREEN |
-| Expansion evidence bundle | `expansion-runtime/institutional-expansion.mjs` | STAGED / TESTED / CI GREEN |
-| Source Intelligence | `expansion-runtime/source-intelligence.mjs` | STAGED / TESTED / CI GREEN |
-| Event Impact Memory | `expansion-runtime/event-impact-memory.mjs` | STAGED / TESTED / CI GREEN |
-| Liquidity Intelligence | `expansion-runtime/liquidity-intelligence.mjs` | STAGED / TESTED / CI GREEN |
+| Forecast engine/runtime | `forecast-runtime/forecast/*` | MAIN CANONICAL |
+| Master → Forecast input | `forecast-input-adapter.mjs` | MAIN CANONICAL |
+| Forecast → science adapter | `forecast-science-adapter.mjs` | MAIN CANONICAL |
+| Forecast contract | `forecast-contract.mjs` | MAIN CANONICAL |
+| Forecast product view | `forecast-product.mjs` | MAIN CANONICAL |
+| Durable forecast runtime | `institutional-forecast-runtime.mjs` | MAIN CANONICAL |
+| Forecast issuance | `institutional-forecast-issuance.mjs` | MAIN CANONICAL |
+| Institutional Admission | `institutional-admission.mjs` | MAIN CANONICAL |
+| Research Trace | `research-trace.mjs` | MAIN CANONICAL |
+| Trace / issuance audit binding | `institutional-audit-binding.mjs` | MAIN CANONICAL |
+| Scientific validity | `scientific-validity.mjs` | MAIN CANONICAL |
+| Scientific Core | `scientific-core.mjs` | MAIN CANONICAL |
+
+## Scientific guards
+
+| Capability | Canonical module | Status |
+|---|---|---|
+| Empirical support | `science-runtime/empirical-support.mjs` | MAIN CANONICAL |
+| Research integrity | `science-runtime/research-integrity.mjs` | MAIN CANONICAL |
+| Linear concept stability | `science-runtime/concept-stability.mjs` | MAIN CANONICAL |
+| Nonlinear concept stability | `science-runtime/nonlinear-concept-stability.mjs` | MAIN CANONICAL |
+| Temporal recency | `science-runtime/temporal-recency.mjs` | MAIN CANONICAL |
+| Sequential evidence | `science-runtime/sequential-evidence.mjs` | MAIN CANONICAL |
+| Specification multiverse | `science-runtime/specification-multiverse.mjs` | MAIN CANONICAL |
+| Transportability | `science-runtime/transportability.mjs` | MAIN CANONICAL |
+| Evidence-lineage independence | `science-runtime/evidence-lineage-independence.mjs` | MAIN CANONICAL |
+
+## Self-correction / governance
+
+| Capability | Canonical module | Status |
+|---|---|---|
+| Candidate builder + walk-forward | `forecast-candidate-lab.mjs` | MAIN CANONICAL |
+| Promotion ladder | `model-promotion-ladder.mjs` | MAIN CANONICAL |
+| Candidate/version registry | `model-candidate-registry.mjs` | MAIN CANONICAL |
+| Model/software release binding | `model-release-binding.mjs` | MAIN CANONICAL |
+| Promotion / rollback audit | `model-governance-audit.mjs` | MAIN CANONICAL |
+
+## V3 Expansion Pack adaptations
+
+Verified source package:
+`TCX_V3_EXPANSION_PACK_INSERTABLE_2026-09-27`
+
+Source package SHA-256:
+`e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
+
+| Capability | Canonical module | Status |
+|---|---|---|
+| Expansion source provenance | `expansion-runtime/provenance.mjs` | MAIN CANONICAL |
+| Read-only expansion evidence | `expansion-runtime/institutional-expansion.mjs` | MAIN CANONICAL |
+| Source Intelligence | `expansion-runtime/source-intelligence.mjs` | MAIN CANONICAL |
+| Event Impact Memory | `expansion-runtime/event-impact-memory.mjs` | MAIN CANONICAL |
+| Liquidity Intelligence | `expansion-runtime/liquidity-intelligence.mjs` | MAIN CANONICAL |
+
+The original expansion orchestrator, Ghost Portfolio, forecast ledger, duplicate science gates and self-improvement controller are not canonical because TCX already has stronger owners.
 
 ## Ownership decisions
 
 ### Forecasting
 
-Owner: TCX Forecast Intelligence
-Source candidate: Forecast Specialist v2.3.1
-Status: one candidate forecast layer; no second forecast bot.
+Owner: TCX Forecast Intelligence.
 
-Historical Cloudflare Market Grammar / Market World Model files are not active current-main runtime truth.
+There is one canonical forecast contract and one canonical forecast-runtime path.
+
+Do not create a second user-facing probability truth.
 
 ### Scientific validation
 
-Owner: TCX Scientific Core
-Source candidate: selected Alpha.30 scientific guards
-Status: core extraction complete.
+Owner: TCX Scientific Core.
 
-Do not import Alpha.30 as a competing:
-- market provider
-- persistence layer
-- dashboard/Telegram product
-- execution stack
-- portfolio stack
-- deployment shell
-
-### V3 Expansion Pack
-
-Source package:
-`TCX_V3_EXPANSION_PACK_INSERTABLE_2026-09-27`
-
-Verified package SHA-256:
-`e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
-
-The second uploaded copy is byte-identical to the first. It does not create a new version.
-
-Institutional adaptations currently staged:
-- resolved-event Source Intelligence
-- PIT/matured Event Impact Memory
-- evidence-typed Liquidity Intelligence
-- read-only expansion evidence bundle
-- package/source provenance binding
-
-The original expansion orchestrator, Ghost Portfolio, forecast ledger, science gates and self-improvement controller are not imported as competing owners because stronger canonical TCX equivalents already exist.
+Selected Alpha.30 concepts were adapted behind TCX contracts. Alpha.30 is not a competing provider, persistence layer, product shell, execution stack or deployment system.
 
 ### Product / Telegram
 
-Owner remains current TCX Telegram product modules.
-Forecast Specialist Telegram adapters are not canonical product ownership.
+Owner: TCX Telegram product modules.
+
+Forecast views consume canonical research artifacts; the UI may never manufacture probability or bypass Admission.
 
 ### Self-correction
 
-Owner: TCX Model Promotion Ladder + future candidate registry.
+Owner: TCX Candidate Lab + Model Promotion Ladder + Candidate Registry.
 
 Allowed:
+
 ```text
-immutable issued forecast
+immutable forecast
 → matured outcome
-→ scoring/calibration/error decomposition
+→ scoring / calibration / drift
 → versioned candidate
 → PIT + temporal OOS + science + replay gates
-→ explicit promotion record
-→ new release identity
+→ explicit promotion
+→ model/software release identity
+→ rollback path
 ```
 
 Forbidden:
 - same-sample self-feedback
-- hidden mutable calibration
+- hidden mutable thresholds
 - unversioned online learning
 - silent production replacement
 
-## Rule for new parallel work
+## Rule for new work
 
 Before creating a new engine/module:
 
-1. Inspect current `main`.
-2. Inspect `integration/tcx-institutional-v3`.
-3. Check this registry.
-4. Identify the canonical owner.
-5. Define a missing capability, not a new name for an existing one.
-6. Extend/adapt before duplicating.
-7. Preserve point-in-time and epistemic boundaries.
-8. Update this registry whenever ownership or promotion state changes.
+1. inspect current `main`
+2. check this registry
+3. identify the canonical owner
+4. define an actual missing capability
+5. extend/adapt before duplicating
+6. preserve PIT and epistemic boundaries
+7. preserve `SHADOW_ONLY / ABSTAIN / canExecute=false`
+8. update this registry whenever ownership changes
