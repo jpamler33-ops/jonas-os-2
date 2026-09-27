@@ -44,7 +44,8 @@ import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnaps
 import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
 import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
-import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';\nimport { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
+import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
+import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -3290,7 +3291,14 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       researchPlaneWrite={ok:false,appended:0,duplicates:0,reason:msg};
     }
   }
-  const researchGovernanceView=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});\n  const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{\n    streamKey:symbol,\n    asOf:Number(state.availableAt),\n    minCompleteness:.5,\n    requireGoverned:true\n  });\n  const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
+  const researchGovernanceView=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});
+  const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{
+    streamKey:symbol,
+    asOf:Number(state.availableAt),
+    minCompleteness:.5,
+    requireGoverned:true
+  });
+  const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
   const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
   const liquidationExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='LIQUIDATION');
   const onchainExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ONCHAIN');
@@ -3520,7 +3528,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       walletCohorts:walletCohortResearchProvider.configuredCohorts,
       researchDataPlaneSeq:researchPlaneView.planeSeq||0,
       researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
-      researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,\n      researchGovernanceIssueCount:Number(researchGovernanceView.statuses?.QUARANTINED||0),\n      researchGovernanceFingerprint:researchGovernanceView.fingerprint
+      researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,
+      researchGovernanceIssueCount:Number(researchGovernanceView.statuses?.QUARANTINED||0),
+      researchGovernanceFingerprint:researchGovernanceView.fingerprint
     };
   }
 
