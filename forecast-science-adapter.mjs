@@ -100,6 +100,7 @@ export function buildForecastScienceInputs({
         empirical.push({
           ...common,
           id:id+':'+feature,
+          sampleId:id,
           feature,
           value:Number(value)
         });
@@ -139,6 +140,17 @@ export function buildForecastScienceInputs({
     symbol:sym,
     historyRows:rows.length,
     horizonCount:byHorizon.size,
+    diagnostics:{
+      coldStart:rows.length===0,
+      requiredHistory:{
+        empiricalReference:30,
+        empiricalTarget:20,
+        conceptReference:30,
+        conceptTarget:20,
+        temporal:60
+      },
+      witnessLineageRows:lineage.length
+    },
     inputs:{
       EMPIRICAL_SUPPORT:empirical,
       CONCEPT_STABILITY:conditional,
