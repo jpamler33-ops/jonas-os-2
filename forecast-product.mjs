@@ -169,6 +169,137 @@ export function renderInstitutionalForecastCard(issuance,{
   return lines.join('\n').slice(0,4096);
 }
 
+function dependencyDomainLabel(domain){
+  const d=String(domain||'UNKNOWN').toUpperCase();
+  const labels={
+    DERIVATIVES:'Futures & Funding',
+    LIQUIDATION:'Liquidationen',
+    ONCHAIN:'Blockchain',
+    ENTITY_FLOW:'Große Akteure',
+    WALLET_COHORT:'Wallet-Gruppen'
+  };
+  return labels[d]||d.replaceAll('_',' ');
+}
+
+function dependencyStateLabel(state){
+  const x=String(state||'UNKNOWN').toUpperCase();
+  if(x==='HEALTHY') return '🟢 sauber';
+  if(x==='DEGRADED') return '🟡 eingeschränkt';
+  if(x==='BLOCKED') return '🔴 gesperrt';
+  if(x==='INSUFFICIENT') return '⚪ zu wenig Daten';
+  return '⚪ unbekannt';
+}
+
+function dependencyGateLabel(gate){
+  const x=String(gate||'UNKNOWN').toUpperCase();
+  if(x==='PASS') return '🟢 Datenweg sauber';
+  if(x==='CAUTION') return '🟡 Datenweg eingeschränkt';
+  if(x==='ABSTAIN') return '🔴 Datenweg blockiert';
+  if(x==='INSUFFICIENT') return '⚪ Noch zu wenig Daten';
+  return '⚪ Status unbekannt';
+}
+
+export function renderResearchDependencyCard(graph,{
+  symbol=null,
+  latestForecast=null,
+  now=Date.now()
+}={}){
+  if(!graph?.impact||!Array.isArray(graph?.nodes)) throw new Error('research dependency graph required');
+  const s=String(symbol||graph.streamKey||'').toUpperCase();
+  const impact=graph.impact;
+  const sourceNodes=graph.nodes.filter(x=>x?.type==='SOURCE');
+  const factorNodes=graph.nodes.filter(x=>x?.type==='FACTOR').sort((a,b)=>String(a.domain).localeCompare(String(b.domain)));
+  const sourceCounts={HEALTHY:0,DEGRADED:0,BLOCKED:0,UNKNOWN:0};
+  for(const row of sourceNodes){
+    const state=String(row?.state||'UNKNOWN').toUpperCase();
+    sourceCounts[state]=(sourceCounts[state]||0)+1;
+  }
+  const latestAt=finite(latestForecast?.generatedAt);
+  const ageSec=latestAt==null?null:Math.max(0,Math.round((Number(now)-latestAt)/1000));
+  const coverage=finite(impact.coverage);
+  const lines=[
+    '🧬 DATENWEG · '+s.replace('USDT','/USDT'),
+    '',
+    'KURZ GESAGT',
+    'Status: '+dependencyGateLabel(graph.gate),
+    'Nutzbare Zusatzmerkmale: '+Number(impact.usableFeatures||0)+'/'+Number(impact.totalFeatures||0),
+    'Gesperrt: '+Number(impact.blockedFeatures||0)+' · Eingeschränkt: '+Number(impact.degradedFeatures||0),
+    coverage==null?'Abdeckung: —':'Abdeckung: '+Math.round(coverage*100)+' %',
+    '',
+    'SO KOMMT EIN SIGNAL ZUSTANDE',
+    'Datenquelle → Messpunkt → Merkmal → Faktor → Prognose',
+    'TCX kann dadurch rückwärts prüfen, wo jedes Forschungssignal herkommt.',
+    '',
+    'DATENBEREICHE'
+  ];
+
+  if(factorNodes.length){
+    for(const factor of factorNodes.slice(0,8)){
+      lines.push(
+        '• '+dependencyDomainLabel(factor.domain)+': '+dependencyStateLabel(factor.state)+
+        ' · '+Number(factor.featureCount||0)+' Merkmale'
+      );
+    }
+  }else{
+    lines.push('• Noch keine aktiven Forschungsdaten für diesen Forecast.');
+  }
+
+  lines.push(
+    '',
+    'QUELLENSTATUS',
+    '🟢 '+Number(sourceCounts.HEALTHY||0)+' sauber · 🟡 '+Number(sourceCounts.DEGRADED||0)+' eingeschränkt · 🔴 '+Number(sourceCounts.BLOCKED||0)+' gesperrt'
+  );
+
+  const impacted=Array.isArray(impact.impactedSourceKeys)?impact.impactedSourceKeys:[];
+  if(impacted.length){
+    lines.push('','BETROFFENE QUELLEN');
+    for(const key of impacted.slice(0,5)){
+      const parts=String(key).split(':');
+      lines.push('• '+dependencyDomainLabel(parts[0])+' · '+String(parts.slice(1).join(':')||'Quelle').replaceAll('_',' '));
+    }
+  }
+
+  const blocked=Array.isArray(impact.blockedFeatureIds)?impact.blockedFeatureIds:[];
+  if(blocked.length){
+    lines.push('','GESPERRTE MERKMALE');
+    for(const id of blocked.slice(0,5)){
+      lines.push('• '+String(id).split('.').at(-1));
+    }
+    if(blocked.length>5) lines.push('• +'+(blocked.length-5)+' weitere');
+  }
+
+  lines.push(
+    '',
+    'WAS DAS BEDEUTET',
+    graph.gate==='PASS'
+      ?'Die verwendeten Forschungsdaten sind entlang ihrer Herkunft nachvollziehbar und aktuell nicht blockiert.'
+      :graph.gate==='CAUTION'
+        ?'Mindestens ein Teil der Forschungsdaten ist eingeschränkt. TCX kennzeichnet den Einfluss sichtbar.'
+        :'Mindestens eine relevante Datenabhängigkeit ist nicht ausreichend nutzbar. TCX arbeitet deshalb fail-closed.',
+    '',
+    'Integrität: '+String(graph.fingerprint||'').slice(0,12)+'…',
+    ...(ageSec==null?[]:['Forecast-Alter: '+ageSec+'s']),
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  );
+
+  return lines.join('\n').slice(0,4096);
+}
+
+export function researchDependencyKeyboard(symbol){
+  const s=String(symbol||'').toUpperCase();
+  return {inline_keyboard:[
+    [
+      {text:'🔮 Zur Prognose',callback_data:'forecast:'+s},
+      {text:'🔄 Neu laden',callback_data:'lineage:'+s}
+    ],
+    [
+      {text:'🧠 Belege',callback_data:'evidence:'+s},
+      {text:'⏱ Gültigkeit',callback_data:'validity:'+s}
+    ],
+    [{text:'🏠 Start',callback_data:'home'}]
+  ]};
+}
+
 export function forecastKeyboard(symbol){
   const s=String(symbol||'').toUpperCase();
   return {inline_keyboard:[
@@ -181,9 +312,12 @@ export function forecastKeyboard(symbol){
       {text:'📈 Chart',callback_data:'chart:'+s+':5m'}
     ],
     [
-      {text:'🧠 Daten & Belege',callback_data:'evidence:'+s},
-      {text:'⏱ Gültigkeit',callback_data:'validity:'+s}
+      {text:'🧬 Datenweg',callback_data:'lineage:'+s},
+      {text:'🧠 Belege',callback_data:'evidence:'+s}
     ],
-    [{text:'🏠 Start',callback_data:'home'}]
+    [
+      {text:'⏱ Gültigkeit',callback_data:'validity:'+s},
+      {text:'🏠 Start',callback_data:'home'}
+    ]
   ]};
 }

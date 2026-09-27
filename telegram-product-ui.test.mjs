@@ -45,6 +45,7 @@ test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("why:BTCUSDT"),{kind:"WHY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("regime:BTCUSDT"),{kind:"REGIME",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("evidence:BTCUSDT"),{kind:"EVIDENCE",symbol:"BTCUSDT"});
+  assert.deepEqual(parseProductCallback("lineage:BTCUSDT"),{kind:"LINEAGE",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("history:BTCUSDT"),{kind:"HISTORY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("validity:BTCUSDT"),{kind:"VALIDITY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("replaymenu:BTCUSDT"),{kind:"REPLAY_MENU",symbol:"BTCUSDT"});

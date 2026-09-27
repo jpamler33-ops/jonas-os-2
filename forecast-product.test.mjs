@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard } from './forecast-product.mjs';
+import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, forecastKeyboard, researchDependencyKeyboard } from './forecast-product.mjs';
 
 test('quality diagnostic is bounded and explicitly non-probabilistic',()=>{
   const q=deriveForecastRuntimeQuality({
@@ -159,4 +159,42 @@ test('forecast card explains governed research dependency coverage',()=>{
   };
   const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
   assert.match(rendered,/Forschungsdaten: 🟡 10\/12 Zusatzmerkmale nutzbar · 2 gesperrt/);
+});
+
+
+test('research dependency card explains lineage in beginner-first language',()=>{
+  const graph={
+    streamKey:'BTCUSDT',
+    gate:'CAUTION',
+    fingerprint:'f'.repeat(64),
+    impact:{
+      usableFeatures:4,totalFeatures:5,blockedFeatures:0,degradedFeatures:1,coverage:.8,
+      impactedSourceKeys:['ONCHAIN:ETHEREUM_PUBLIC_RPC'],
+      blockedFeatureIds:[]
+    },
+    nodes:[
+      {type:'SOURCE',state:'HEALTHY',domain:'DERIVATIVES'},
+      {type:'SOURCE',state:'DEGRADED',domain:'ONCHAIN'},
+      {type:'FACTOR',domain:'DERIVATIVES',state:'HEALTHY',featureCount:2},
+      {type:'FACTOR',domain:'ONCHAIN',state:'DEGRADED',featureCount:3}
+    ]
+  };
+  const rendered=renderResearchDependencyCard(graph,{symbol:'BTCUSDT',latestForecast:{generatedAt:1000},now:2000});
+  assert.match(rendered,/DATENWEG · BTC\/USDT/);
+  assert.match(rendered,/Nutzbare Zusatzmerkmale: 4\/5/);
+  assert.match(rendered,/Datenquelle → Messpunkt → Merkmal → Faktor → Prognose/);
+  assert.match(rendered,/Blockchain: 🟡 eingeschränkt/);
+  assert.match(rendered,/ABSTAIN \/ SHADOW_ONLY/);
+});
+
+test('research dependency and forecast keyboards expose compact lineage navigation',()=>{
+  const forecast=forecastKeyboard('BTCUSDT');
+  const lineage=researchDependencyKeyboard('BTCUSDT');
+  assert.ok(forecast.inline_keyboard.flat().some(x=>x.callback_data==='lineage:BTCUSDT'));
+  assert.ok(lineage.inline_keyboard.flat().some(x=>x.callback_data==='forecast:BTCUSDT'));
+  for(const kb of [forecast,lineage]){
+    for(const row of kb.inline_keyboard) for(const button of row){
+      assert.ok(Buffer.byteLength(button.callback_data,'utf8')<=64);
+    }
+  }
 });
