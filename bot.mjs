@@ -15,8 +15,9 @@ import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
-import { loadEvidenceHistory, saveEvidenceHistory, createEvidenceRecord, appendEvidenceRecord, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
-import { assessResearchValidity, formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
+import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
+import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
+import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecycle, compactValidity, RESEARCH_LIFECYCLE_VERSION } from './research-lifecycle.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 
@@ -173,6 +174,7 @@ try {
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
+      researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION
     }
@@ -286,62 +288,28 @@ async function persistEvidenceHistory(reason='mutation') {
 }
 
 function latestEvidenceRecord(symbol) {
-  return evidenceHistoryFor(evidenceRecords,symbol,{limit:1}).at(-1) || null;
-}
-
-function validityForRecordPair(previous,currentRecord,{now=currentRecord?.capturedAt||Date.now()}={}) {
-  if(!previous?.stateFingerprint || !currentRecord?.stateFingerprint) return null;
-  try{
-    return assessResearchValidity({
-      baseline:previous.stateFingerprint,
-      current:currentRecord.stateFingerprint,
-      now,
-      config:researchValidityConfig
-    });
-  }catch(err){
-    recordError(observability,{scope:'state_validity.assess',message:err instanceof Error?err.message:String(err)});
-    return null;
-  }
+  return latestEvidenceSnapshot(evidenceRecords,symbol);
 }
 
 function updateRadarValidity(symbol,validity) {
   const r=radarCache.get(symbol);
   if(!r) return;
-  r.validity=validity?.status||'BASELINE';
-  r.driftScore=Number(validity?.driftScore||0);
-  r.validityAgeMs=Number(validity?.ageMs||0);
-  r.validityReasons=validity?formatValidityReason(validity,{limit:3}):[];
+  const compact=compactValidity(validity,{limit:3});
+  r.validity=compact.status;
+  r.driftScore=compact.driftScore;
+  r.validityAgeMs=compact.ageMs;
+  r.validityReasons=compact.reasons;
 }
 
 function appendEvidenceFromContext(symbol,context) {
-  const previous=latestEvidenceRecord(symbol);
-  const record=createEvidenceRecord(symbol,context,previous);
-  const validity=validityForRecordPair(previous,record,{now:record.capturedAt});
-  let lifecycleChanged=false;
-
-  if(previous && validity){
-    const before=JSON.stringify({
-      validityLast:previous.validityLast||null,
-      closedAt:previous.closedAt||null
-    });
-    previous.validityLast=validity;
-    if(['DRIFTED','EXPIRED','INVALIDATED'].includes(validity.status) && !previous.closedAt){
-      previous.closedAt=record.capturedAt;
-    }
-    lifecycleChanged=before!==JSON.stringify({
-      validityLast:previous.validityLast||null,
-      closedAt:previous.closedAt||null
-    });
-  }
-
-  updateRadarValidity(symbol,validity);
-
-  if(previous && previous.fingerprint===record.fingerprint && record.capturedAt-previous.capturedAt<15*60*1000){
-    return {record:previous,validity,changed:lifecycleChanged};
-  }
-  record.transitionFromPrevious=validity;
-  evidenceRecords=appendEvidenceRecord(evidenceRecords,record,{maxPerSymbol:2000});
-  return {record,validity,changed:true};
+  const result=advanceEvidenceLifecycle(evidenceRecords,symbol,context,{
+    config:researchValidityConfig,
+    dedupeWindowMs:15*60*1000,
+    maxPerSymbol:2000
+  });
+  evidenceRecords=result.records;
+  updateRadarValidity(symbol,result.validity);
+  return result;
 }
 
 async function appendInstitutionalAudit(kind,payload) {
@@ -1532,12 +1500,10 @@ function evidenceRelationIcon(relation) {
 }
 
 async function currentEvidenceState(symbol) {
-  const baseline=latestEvidenceRecord(symbol);
   const context=await researchAlertContext(symbol,{force:true});
-  const record=createEvidenceRecord(symbol,context,baseline);
-  const validity=validityForRecordPair(baseline,record,{now:record.capturedAt});
-  updateRadarValidity(symbol,validity);
-  return {baseline,context,record,validity};
+  const state=currentEvidenceLifecycle(evidenceRecords,symbol,context,{config:researchValidityConfig});
+  updateRadarValidity(symbol,state.validity);
+  return {...state,context};
 }
 
 async function currentEvidenceRecord(symbol) {
@@ -3867,6 +3833,10 @@ const server = http.createServer((req,res) => {
         driftThreshold:researchValidityDriftThreshold,
         canExecute:false
       },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -3936,6 +3906,7 @@ console.log(JSON.stringify({
     expireAfterMs:researchValidityExpireMs,
     driftThreshold:researchValidityDriftThreshold
   },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
   shadowOms:{
     version:SHADOW_OMS_VERSION,
     file:shadowOmsFile,
