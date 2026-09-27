@@ -40,7 +40,8 @@ import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSI
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
-import { createWalletCohortPublicProvider, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
+import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
+import { fetchOfficialOkxPorRegistry, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, registryToWalletCohorts, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -161,9 +162,38 @@ const onchainResearchProvider=createOnchainResearchProvider({
   ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
   solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
 });
+const entityRegistryFile=process.env.TCX_ENTITY_REGISTRY_FILE||'/data/tcx-entity-registry.json';
+const okxPorSource=Object.freeze({
+  url:process.env.TCX_OKX_POR_URL||'https://static.okx.com/cdn/okx/por/chain/por_csv_2026090800_V1.zip',
+  reportId:process.env.TCX_OKX_POR_REPORT_ID||'502299735',
+  reportDate:process.env.TCX_OKX_POR_REPORT_DATE||'2026-09-08'
+});
+let entityRegistry=await loadEntityRegistry(entityRegistryFile);
+let entityRegistryRefreshError=null;
+try{
+  const fresh=await fetchOfficialOkxPorRegistry({
+    fetchImpl:globalThis.fetch,
+    url:okxPorSource.url,
+    reportId:okxPorSource.reportId,
+    reportDate:okxPorSource.reportDate,
+    timeoutMs:15000
+  });
+  entityRegistry=fresh;
+  await saveEntityRegistry(entityRegistryFile,entityRegistry);
+}catch(err){
+  entityRegistryRefreshError=err instanceof Error?err.message:String(err);
+  recordError(observability,{scope:'entity_registry.refresh',message:entityRegistryRefreshError});
+}
+const registryWalletCohorts=registryToWalletCohorts(entityRegistry||{entries:[]},{
+  entityIds:['OKX'],
+  chains:['ETHEREUM'],
+  maxAddressesPerCohort:20000
+});
+const manuallyConfiguredWalletCohorts=parseWalletCohorts(process.env.TCX_WALLET_RESEARCH_COHORTS_JSON||'');
+const walletCohorts=[...registryWalletCohorts,...manuallyConfiguredWalletCohorts];
 const walletCohortResearchProvider=createWalletCohortPublicProvider({
   fetchImpl:globalThis.fetch,
-  cohorts:process.env.TCX_WALLET_RESEARCH_COHORTS_JSON||'',
+  cohorts:walletCohorts,
   ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
   solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
 });
@@ -1696,6 +1726,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Liquidation-Stream: ${liquidationResearchStream.health().connected?'🟢 verbunden':'🟡 verbindet'} · ${LIQUIDATION_PUBLIC_STREAM_VERSION}`,
       `On-Chain-Research: 🟢 BTC/ETH/SOL · ${ONCHAIN_RESEARCH_PROVIDER_VERSION}`,
       `Wallet-Cohorts: ${walletCohortResearchProvider.configuredCohorts>0?'🟢 '+walletCohortResearchProvider.configuredCohorts+' konfiguriert':'⚪ keine konfiguriert'}`,
+      `Entity-Registry: ${entityRegistrySummary(entityRegistry||{}).entries} Adressen · ${entityRegistryRefreshError?'🟡 Cache':'🟢 offizieller PoR'}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -3077,11 +3108,16 @@ async function showIntelligence(chatId,symbol){
     ]:[]),
     'Nur öffentlich beobachtbare Chain-Daten; kein Identitäts-Matching.','',
     'WALLET-COHORT-RESEARCH',
-    `👛 Konfigurierte öffentliche Kohorten: ${walletCohortResearchProvider.configuredCohorts}`,
+    `👛 Öffentliche Kohorten: ${walletCohortResearchProvider.configuredCohorts}`,
+    `• Verifizierte Entity-Adressen: ${entityRegistrySummary(entityRegistry||{}).entries}`,
+    `• Quelle: ${entityRegistry?.sources?.[0]?.publisher||'—'} PoR · Report ${entityRegistry?.sources?.[0]?.reportId||'—'}`,
     walletCohortResearchProvider.configuredCohorts===0
-      ?'• Keine Wallet-Adressen automatisch hinzugefügt. Erst explizit konfigurierte öffentliche Adressen werden untersucht.'
+      ?'• Keine verwertbare Kohorte aktiv.'
       :`• Aktivität 5m: ${walletCohort?.ok?walletCohort.metrics.activity5m:'—'} · 15m: ${walletCohort?.ok?walletCohort.metrics.activity15m:'—'}`,
-    'TCX versucht nicht, Wallets natürlichen Personen zuzuordnen.','',
+    walletCohort?.ok
+      ?`• Native Netto-Flow: ${Number.isFinite(walletCohort.metrics.nativeNetFlow)?walletCohort.metrics.nativeNetFlow.toFixed(4):'—'} ETH`
+      :'• Native Netto-Flow: —',
+    'Nur öffentlich belegte Entity-Adressen; keine Zuordnung zu natürlichen Personen.','',
     'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
     '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
@@ -4670,6 +4706,7 @@ console.log(JSON.stringify({
   liquidationResearch:{version:LIQUIDATION_PUBLIC_STREAM_VERSION,health:liquidationResearchStream.health()},
   onchainResearch:{version:ONCHAIN_RESEARCH_PROVIDER_VERSION,assets:['BTCUSDT','ETHUSDT','SOLUSDT']},
   walletCohortResearch:{version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:walletCohortResearchProvider.configuredCohorts},
+  entityRegistry:{version:VERIFIED_ENTITY_REGISTRY_VERSION,file:entityRegistryFile,summary:entityRegistrySummary(entityRegistry||{}),refreshError:entityRegistryRefreshError,source:okxPorSource},
   institutionalForecastRuntime:{
     ...institutionalForecastRuntimeSummary(forecastRuntime),
     file:forecastRuntimeFile
