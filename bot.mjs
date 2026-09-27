@@ -4798,6 +4798,8 @@ async function gracefulShutdown(signal) {
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
   await persistForecastRuntime(`shutdown:${signal}`);
+  await researchDataPlaneAppendQueue.catch(()=>{});
+  await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
   await persistShadowOms(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   server.close(() => process.exit(0));
