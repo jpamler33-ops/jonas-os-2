@@ -1042,6 +1042,7 @@ function helpText() {
     '/sor BTC BUY 100 – Multi-Venue Shadow Smart Order Route',
     '/sorstatus [BTC] – Venue-Qualität / Routing-Fähigkeit',
     '/venuequality BTC [BUY|SELL] [1000] – gelernte Venue-Execution-Qualität',
+    '/executionlab BTC [BUY|SELL] – OOS / Walk-Forward / Calibration / Drift',
     '/favorites – Favoriten',
     '/compare – bis zu vier Favoriten vergleichen',
     '/alert BTC 70000 – einmaliger Preisalarm',
@@ -2782,6 +2783,23 @@ async function handleCommand(msg) {
     }
     return true;
   }
+  if (command === "/executionlab" || command === "/erl") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    const side=parts[2]?String(parts[2]).toUpperCase():null;
+    if(!symbol || (side && !["BUY","SELL"].includes(side))){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /executionlab BTC BUY"});
+      return true;
+    }
+    try { await showExecutionResearch(chatId,{symbol,side}); }
+    catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'command.executionlab',message:msg});
+      recordOperation(observability,{name:'execution_research_lab',ok:false,latencyMs:0,error:msg});
+      await tg("sendMessage",{chat_id:chatId,text:`Execution Research Lab gerade nicht verfügbar: ${msg}`.slice(0,4096)});
+    }
+    return true;
+  }
+
   if (command === "/venuequality" || command === "/vqm") {
     const symbol=normalizeSymbol(parts[1]||"");
     const side=String(parts[2]||"BUY").toUpperCase();
@@ -3151,6 +3169,12 @@ async function handle(update) {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
       await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
       await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
       return;
     }
     if (a.kind === 'BACK') {
