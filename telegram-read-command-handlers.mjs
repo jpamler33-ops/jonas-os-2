@@ -81,8 +81,11 @@ export function createReadCommandHandlers(deps={}){
     catch(err){
       const msg=message(err);
       if(scope) recordError(observability,{scope,message:msg});
-      else console.error(command+" command error",msg);
-      await tg("sendMessage",{chat_id:chatId,text:errorText});
+      console.error(command+" command error",msg);
+      const diagnostic=scope==='command.forecast'
+        ? errorText+"\nDiagnose: "+msg
+        : errorText;
+      await tg("sendMessage",{chat_id:chatId,text:diagnostic.slice(0,4096)});
     }
   };
 
