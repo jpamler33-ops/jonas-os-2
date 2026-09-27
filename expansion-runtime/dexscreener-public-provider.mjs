@@ -18,11 +18,11 @@ function bestPair(rows=[]){
   const xs=(Array.isArray(rows)?rows:[]).filter(Boolean);
   if(!xs.length) return null;
   return xs.slice().sort((a,b)=>{
-    const la=finite(a?.liquidity?.usd)??-1;
-    const lb=finite(b?.liquidity?.usd)??-1;
+    const la=finite(a?.liquidityUsd ?? a?.liquidity?.usd)??-1;
+    const lb=finite(b?.liquidityUsd ?? b?.liquidity?.usd)??-1;
     if(lb!==la) return lb-la;
-    const va=finite(a?.volume?.h24)??-1;
-    const vb=finite(b?.volume?.h24)??-1;
+    const va=finite(a?.volumeH24 ?? a?.volume?.h24)??-1;
+    const vb=finite(b?.volumeH24 ?? b?.volume?.h24)??-1;
     return vb-va;
   })[0]||null;
 }
