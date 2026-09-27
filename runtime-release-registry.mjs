@@ -19,6 +19,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'deterministic-replay.mjs',
   'observability.mjs',
   'chaos-engineering.mjs',
+  'shadow-oms.mjs',
+  'telegram-product-ui.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
