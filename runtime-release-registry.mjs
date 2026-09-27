@@ -26,6 +26,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'alert-engine.mjs',
   'evidence-history.mjs',
   'state-validity.mjs',
+  'research-lifecycle.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
