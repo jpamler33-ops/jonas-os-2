@@ -1,8 +1,14 @@
-name: TCX Telegram Check
+name: TCX Institutional Check
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'integration/**'
+  pull_request:
+    branches:
+      - main
+      - 'integration/**'
   workflow_dispatch:
 
 jobs:
@@ -15,5 +21,5 @@ jobs:
           node-version: '22'
       - name: Syntax check
         run: npm run check
-      - name: Unit tests
+      - name: Unit and integration tests
         run: npm test
