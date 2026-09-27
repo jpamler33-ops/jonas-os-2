@@ -29,6 +29,11 @@ export function evaluateOperationalReadiness({
   if(!bool(episodePersistence?.healthy)) hard.push('EPISODE_PERSISTENCE_UNHEALTHY');
   if(!bool(evidenceHistory?.healthy)) hard.push('EVIDENCE_HISTORY_UNHEALTHY');
 
+  if(bool(forecastRuntime?.recoveredFromCorrupt)) hard.push('FORECAST_RUNTIME_RECOVERED_FROM_CORRUPT');
+  if(bool(episodePersistence?.recoveredFromCorrupt)) hard.push('EPISODE_MEMORY_RECOVERED_FROM_CORRUPT');
+  if(bool(evidenceHistory?.recoveredFromCorrupt)) hard.push('EVIDENCE_HISTORY_RECOVERED_FROM_CORRUPT');
+  if(bool(persistence?.recoveredFromCorrupt)) warnings.push('USER_STATE_RECOVERED_FROM_CORRUPT');
+
   const replicas=Math.max(1,Math.floor(Number(replicaCount)||1));
   if(localFilePersistence&&replicas>1) hard.push('LOCAL_FILE_STATE_REQUIRES_SINGLE_REPLICA');
 
@@ -36,9 +41,11 @@ export function evaluateOperationalReadiness({
   const openCircuits=circuits.filter(x=>x?.open===true).length;
   if(openCircuits) warnings.push('PROVIDER_CIRCUIT_OPEN_'+openCircuits);
 
-  const maxPending=Number(providerHealth?.maxPending||0);
-  const pending=Number(providerHealth?.pending||0);
-  if(maxPending>0&&pending/maxPending>=.8) warnings.push('PROVIDER_BACKPRESSURE_HIGH');
+  const maxPending=Number(providerHealth?.maxPending??0);
+  const pending=Number(providerHealth?.pending??0);
+  if(maxPending===0&&pending>0) hard.push('PROVIDER_BACKPRESSURE_POLICY_BREACH');
+  else if(maxPending>0&&pending>=maxPending) hard.push('PROVIDER_BACKPRESSURE_SATURATED');
+  else if(maxPending>0&&pending/maxPending>=.8) warnings.push('PROVIDER_BACKPRESSURE_HIGH');
 
   for(const breach of slo?.breaches||[]) warnings.push('SLO_'+String(breach));
 
@@ -58,6 +65,15 @@ export function evaluateOperationalReadiness({
       persistenceMode:localFilePersistence?'LOCAL_FILE_SINGLE_REPLICA':'EXTERNAL_SHARED',
       replicas,
       horizontalScalingAllowed:!localFilePersistence
+    },
+    slo:{
+      ok:slo?.ok!==false,
+      breaches:clean(slo?.breaches||[])
+    },
+    provider:{
+      openCircuits,
+      pending,
+      maxPending
     },
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
