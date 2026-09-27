@@ -62,5 +62,5 @@ test("market card keeps epistemic action visible",()=>{
   });
   const output=marketCardText(vm,{live:true,detailMode:"SIMPLE"});
   assert.match(output,/ABSTAIN \/ SHADOW_ONLY/);
-  assert.match(output,/LIVE/);
+  assert.match(output,/Live-Aktualisierung aktiv/);
 });
