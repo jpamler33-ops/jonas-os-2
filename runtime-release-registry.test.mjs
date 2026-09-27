@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
-import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry } from './runtime-release-registry.mjs';
+import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, institutionalRuntimeFiles, INSTITUTIONAL_STAGED_RUNTIME_FILES } from './runtime-release-registry.mjs';
 
 async function fixture(){
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-release-'));
@@ -74,4 +74,26 @@ test('release registry detects historical manifest tampering',async()=>{
   const reopened=await openReleaseRegistry(file);
   assert.equal(reopened.healthy,false);
   assert.equal(reopened.verification.error,'MANIFEST_HASH_MISMATCH');
+});
+
+
+test('institutional staged release set hashes forecast, science, admission and trace code',()=>{
+  const files=institutionalRuntimeFiles();
+  for(const required of [
+    'forecast-contract.mjs',
+    'scientific-validity.mjs',
+    'institutional-admission.mjs',
+    'research-trace.mjs',
+    'institutional-forecast-issuance.mjs',
+    'forecast-runtime/forecast/engine.js',
+    'forecast-runtime/forecast/calibration.js',
+    'science-runtime/empirical-support.mjs',
+    'science-runtime/specification-multiverse.mjs',
+    'science-runtime/evidence-lineage-independence.mjs'
+  ]){
+    assert.ok(files.includes(required),required+' missing from institutional release identity');
+  }
+  assert.equal(files.some(x=>x.endsWith('.test.mjs')),false);
+  assert.equal(new Set(files).size,files.length);
+  assert.ok(INSTITUTIONAL_STAGED_RUNTIME_FILES.length>=20);
 });
