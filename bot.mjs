@@ -11,6 +11,7 @@ import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verif
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
+import { evaluateOperationalReadiness, OPERATIONAL_READINESS_VERSION } from './operational-readiness.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -72,6 +73,7 @@ const researchValidityConfig = Object.freeze({
 });
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_OUTCOME_CHECK_MS || 60000));
+const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
 const shadowWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_WATCH_MS || 10000));
 const shadowDefaultLatencyMs = Math.max(0, Math.min(5000, Number(process.env.TCX_SHADOW_LATENCY_MS || 120)));
@@ -237,6 +239,7 @@ try {
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
+      operationalReadiness:OPERATIONAL_READINESS_VERSION,
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
@@ -3615,8 +3618,49 @@ async function episodeWatcher() {
   }
 }
 
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
   if (req.url === '/health' || req.url === '/') {
     const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
     res.writeHead(200,{'content-type':'application/json'});
@@ -3661,6 +3705,10 @@ const server = http.createServer((req,res) => {
         version:OBSERVABILITY_VERSION,
         snapshot:observabilitySnapshot(observability),
         slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
       },
       chaosEngineering:{
         version:CHAOS_ENGINEERING_VERSION,
@@ -3830,6 +3878,7 @@ console.log(JSON.stringify({
   },
   deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
   observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
   chaosEngineering:CHAOS_ENGINEERING_VERSION,
   alertEngine:ALERT_ENGINE_VERSION,
   stateValidity:{
@@ -3879,6 +3928,7 @@ console.log(JSON.stringify({
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
+  configuredReplicaCount,
   marketDataHosts:binanceBases.map(x => new URL(x).host),
   witnessProviders:{
     okx:new URL(okxBase).host,
