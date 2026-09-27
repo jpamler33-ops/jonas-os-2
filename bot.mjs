@@ -1142,6 +1142,7 @@ function helpText() {
     '/history BTC – persistenter Evidence-Verlauf',
     '/engine BTC – Mechanism Transition Lattice',
     '/forecast BTC – institutioneller Multi-Horizon Forecast',
+    '/intelligence BTC – aktive Intelligence-Schichten + Evidence-Status',
     '/witness BTC – Binance vs OKX vs Kraken Witness Audit',
     '/audit – Institutional Kernel / Ledger-Integrität',
     '/fabric – Event-Sourced Market Data Fabric',
@@ -2729,6 +2730,33 @@ function forecastResearchValidity(evidenceAppend){
   };
 }
 
+async function showIntelligence(chatId,symbol){
+  const s=await snapshot(symbol);
+  const expansion=buildInstitutionalExpansionEvidence({
+    asOf:Number(s.availableAt),
+    orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
+    liquidityContext:{aggressiveFlow:Number(s.imbalance||0),priceResponse:0,visibleBarrierStrength:Math.min(1,Math.abs(Number(s.imbalance||0))),approachVelocity:0}
+  });
+  const liq=expansion.liquiditySnapshot;
+  const lines=[
+    '🧠 TCX INTELLIGENCE · '+symbolLabel(symbol),'',
+    'LIVE AKTIV',
+    '💧 Liquidity Intelligence: '+String(liq?.gate||'INSUFFICIENT'),
+    '   Spread: '+(Number.isFinite(liq?.spreadBps)?liq.spreadBps.toFixed(2)+' bps':'–'),
+    '   Orderbook-Balance: '+(Number.isFinite(liq?.imbalance)?(liq.imbalance*100).toFixed(1)+'%':'–'),'',
+    'NOCH OHNE LIVE-QUELLE',
+    '👛 Trader / Wallet: bereit, aber keine Wallet-Evidence eingespeist',
+    '🪙 Memecoin: bereit, aber keine Token-On-Chain-Evidence eingespeist',
+    '🗣 Narrative / Reflexivity: bereit, aber keine öffentliche Narrative-Quelle eingespeist',
+    '🔭 Future Intelligence: bereit, aber keine Slow-Horizon-Datenquelle eingespeist','',
+    'EXPANSION GATE: '+String(expansion.evidenceGate),
+    'Fingerprint: '+String(expansion.fingerprint||'').slice(0,16)+'…',
+    'Modus: SHADOW_ONLY · Aktion: ABSTAIN','',
+    'Nur Intelligence mit realer Evidence wird als aktiv angezeigt.'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n')});
+}
+
 async function showForecast(chatId,symbol,messageId=null){
   const started=Date.now();
   if(!forecastRuntime.healthy){
@@ -2991,6 +3019,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showWitness,
   showEngine,
   showForecast,
+  showIntelligence,
   showMemory,
   showEvidence,
   showEvidenceHistory,
