@@ -1,11 +1,11 @@
 # TCX Institutional Integration Status
 
-Branch: `integration/tcx-institutional-v3`
-PR: #2 — TCX Institutional v3 — Forecast + Scientific Validity Integration
+Status: MAIN-CANONICAL CODE / DEPLOYMENT ACCEPTANCE PENDING
+Canonical branch: `main`
+Merge PR: #2 — merged 2026-09-27
+Canonical merge commit: `331f9f4c93a5a8cff52b9057cdc888b8fdef8c13`
 
-## Current staged core
-
-The integration branch now contains one joined institutional path:
+## Canonical institutional path
 
 ```text
 MASTER MARKET / TEMPORAL TRUTH
@@ -14,7 +14,7 @@ TCX Research Envelope
         ↓
 Canonical ForecastInput Adapter
         ↓
-Forecast Specialist v2.3.1 Core
+Forecast Intelligence Runtime
         ↓
 Canonical Forecast Contract
         ↘
@@ -32,59 +32,59 @@ Append-only Audit Ledger
         ↓
 Matured Outcome
         ↓
-Model Promotion Ladder
+Calibration / Reliability / Drift
+        ↓
+Candidate Lab + Temporal Walk-Forward
+        ↓
+Versioned Promotion Governance
 ```
 
-## Staged and tested
+## Canonical capabilities
 
-- Forecast Specialist v2.3.1 runtime
+- durable institutional forecast runtime
+- Forecast Specialist v2.3.1 adapted behind canonical TCX contracts
 - canonical Master → Forecast input adapter
 - canonical forecast output contract
-- immutable Research Trace
-- Scientific Validity aggregator
-- canonical Scientific Core orchestrator
+- immutable Research Trace and outcome evaluation
+- Scientific Validity + Scientific Core
 - empirical support
-- adaptive research-integrity / holdout guard
+- research integrity / adaptive holdout
 - linear + nonlinear concept stability
 - temporal recency
 - sequential evidence / optional-stopping guard
 - specification multiverse
 - transportability
 - evidence-lineage independence
-- strictest-wins Institutional admission gate
-- atomic forecast/science/admission/trace issuance identity
-- issuance + outcome audit-ledger binding
-- staged institutional runtime release file identity
-- fail-closed model promotion ladder
-- append-only model candidate/version registry
-- V3 Expansion Pack selective institutional adaptations:
-  - Source Intelligence
-  - Event Impact Memory
-  - Liquidity Intelligence
-  - read-only expansion evidence bundle
-  - cryptographic expansion-pack provenance
+- strictest-wins Institutional Admission
+- issuance / outcome → Audit Ledger binding
+- calibrated probability display suppression
+- Telegram `/forecast` + command-center Forecast entry
+- matured-outcome feedback loop
+- PIT-safe offline candidate builder
+- chronological walk-forward evaluation
+- append-only candidate/version registry
+- model promotion / rollback governance
+- model config → Runtime Release identity binding
+- explicit persistence contracts
+- fail-closed `/ready`
+- bounded provider backpressure + circuit breakers
+- provider / operation SLOs
+- deterministic chaos tests
+- incident recovery runbook
+- deployment / rollback plan
+- selected V3 Expansion Pack institutional adaptations
 
-## Latest verified gate
+## Latest verified code gate
 
 ```text
-commit: 98984c91ac1f005ea3d3f49e9153e2d358400310
-GitHub Actions: SUCCESS
-PR CI: SUCCESS
-syntax: PASS
-root + science-runtime + expansion-runtime + forecast candidate/governance + pre-merge tests: PASS
+merge commit: 331f9f4c93a5a8cff52b9057cdc888b8fdef8c13
+main GitHub Actions: SUCCESS
+integration / PR CI: SUCCESS
+syntax gate: PASS
+root + science-runtime + expansion-runtime + institutional tests: PASS
+institutional pre-merge gate: PASS
 Docker institutional packaging smoke test: PASS
 ```
-
-The verified branch now includes the durable forecast runtime, Telegram forecast product,
-matured-outcome feedback, candidate builder, chronological walk-forward evaluation,
-promotion/audit binding, model-to-runtime release binding, rollback drill, bounded provider
-backpressure/circuit breakers, explicit persistence contracts, fail-closed /ready checks,
-SLO enforcement, deterministic chaos tests and the institutional pre-merge gate.
-
-Expansion source package SHA-256:
-`e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
-
-The uploaded `(2)` expansion archive is byte-identical to the previously inspected `(1)` archive.
 
 ## Hard invariants
 
@@ -95,29 +95,21 @@ canExecute = false
 same-sample self-feedback = forbidden
 silent production mutation = forbidden
 future knowledge = blocked
-uncalibrated/suppressed probability = not user-displayable
+uncalibrated / inadmissible probability = suppressed from product display
+local-file horizontal scaling = forbidden
 ```
 
-## Not yet production-canonical
+## Deployment status
 
-The engineering pre-merge audit is closed. Nothing on this branch is canonical on `main` until PR #2 is merged and the post-deploy acceptance gate passes.
+The code is canonical on `main`.
 
-Completed production-path staging:
-1. durable forecast runtime persistence
-2. canonical bot orchestration through adapter → science → admission → Research Trace
-3. Telegram forecast command + market-card entry point
-4. calibrated-probability suppression and audit fail-closed display
-5. matured-outcome feedback into calibration/reliability/drift memories
-6. offline candidate builder from matured outcomes only
-7. chronological PIT-safe walk-forward evaluation
-8. append-only candidate/version registry
-9. promotion/evaluation audit binding
-10. model release → registered software release binding
-11. rollback metadata + deterministic rollback drill
-12. Docker packaging + smoke test
+A live Railway deployment has not been independently verified from repository state alone. Production acceptance still requires:
 
-## Next highest-leverage work
+1. deploy the merged main release with `TCX_REPLICA_COUNT=1`
+2. require `GET /ready = 200`
+3. verify Runtime Release registration
+4. verify Telegram `/start`, market view, `/forecast BTC`, `/system`, evidence/validity
+5. allow a forecast to mature and verify an audited outcome evaluation
+6. use `docs/tcx/INCIDENT_RECOVERY_RUNBOOK.md` on any readiness failure
 
-Merge/deploy only the tested PR head, require `/ready = 200`, then complete Telegram and
-matured-outcome smoke acceptance. Do not start another prediction engine before deployment
-acceptance is closed.
+Do not treat process liveness alone as deployment acceptance.
