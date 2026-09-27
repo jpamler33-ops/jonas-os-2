@@ -646,3 +646,54 @@ Placement, fill changes, cancellation and markout updates are written to the Ins
 `shadow-oms.mjs` is included in the Runtime Release Registry, so any change to queue, fill, slippage or fee logic creates a new release identity.
 
 The Telegram product UI module is also now included in both the Railway image and Runtime Release hash.
+
+
+## TCX Alerts v2
+
+Telegram now supports persistent edge-triggered research alerts in addition to one-shot price alerts.
+
+Commands:
+
+```text
+/alert BTC 70000
+/alertregime BTC
+/alertstructure BTC
+/alertwitness BTC 75
+/alertmemory BTC 8
+/alertsafety BTC
+/alertcombo BTC
+/alerts
+/clearalerts
+```
+
+The market card alert button also exposes preset buttons for regime changes, structure changes, witness agreement, memory support, safety-state changes and the composite research-evidence gate.
+
+Alert semantics:
+
+- threshold alerts are edge-triggered and re-arm after the condition becomes false
+- cooldown suppresses rapid repeat notifications
+- fingerprints deduplicate unchanged states
+- state-change alerts establish a baseline before firing
+- alert state persists in `TCX_STATE_FILE`
+- legacy schema-v1 price alerts migrate automatically to Alerts v2
+- alert notifications never imply order execution
+
+### TCX Radar v2
+
+Radar v2 reuses the same research context used by Alerts v2 and shows, per market:
+
+- institutional safety state
+- regime
+- independent-witness agreement
+- historical transition support
+- novelty
+- contradiction
+
+Radar is explicitly not a "best trade" ranking. It is an evidence-coverage and system-state view.
+
+Execution remains:
+
+```text
+ABSTAIN / SHADOW_ONLY
+canExecute = false
+```
