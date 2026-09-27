@@ -1,11 +1,12 @@
 {
   "name": "tcx-telegram-railway",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node bot.mjs",
-    "check": "node --check bot.mjs"
+    "check": "node --check bot.mjs && node --check state-store.mjs",
+    "test": "node --test state-store.test.mjs"
   },
   "engines": { "node": ">=22" }
 }

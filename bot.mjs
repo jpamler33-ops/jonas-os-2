@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { loadPersistentState, savePersistentState } from './state-store.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -30,8 +31,30 @@ const markets = requestedSymbols.map(symbol => ({
 }));
 
 const sessions = new Map();
-const favorites = new Map();
-const alerts = new Map();
+const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
+const loadedState = await loadPersistentState(stateFile);
+const favorites = loadedState.favorites;
+const alerts = loadedState.alerts;
+let persistenceHealthy = true;
+let persistenceLastError = null;
+let persistenceQueue = Promise.resolve();
+
+async function persistState(reason='mutation') {
+  persistenceQueue = persistenceQueue.then(async () => {
+    try {
+      await savePersistentState(stateFile, { favorites, alerts });
+      persistenceHealthy = true;
+      persistenceLastError = null;
+    } catch (err) {
+      persistenceHealthy = false;
+      persistenceLastError = err instanceof Error ? err.message : String(err);
+      console.error('state persistence error', reason, persistenceLastError);
+    }
+  });
+  await persistenceQueue;
+  return persistenceHealthy;
+}
+
 let offset = 0;
 let running = true;
 
@@ -285,7 +308,7 @@ function helpText() {
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
     '/clearalerts – alle Alarme löschen','',
-    'Hinweis: Favoriten und Alarme liegen aktuell im Arbeitsspeicher und werden bei einem Railway-Neustart zurückgesetzt.',
+    'Favoriten und Alarme werden persistent gespeichert, wenn Railway ein Volume auf /data gemountet hat.',
     'Execution bleibt SHADOW_ONLY.'
   ].join('\n');
 }
@@ -469,6 +492,7 @@ async function handleCommand(msg) {
         return true;
       }
       list.push({ symbol, target, direction, createdAt:Date.now() });
+      const persisted = await persistState('alert-added');
       await tg('sendMessage',{
         chat_id:chatId,
         text:[
@@ -476,7 +500,7 @@ async function handleCommand(msg) {
           `Ziel: ${fmt(target,target<1?6:2)} USDT`,
           `Aktuell: ${fmt(s.price,s.price<1?6:2)} USDT`,
           `Richtung: ${direction === 'ABOVE' ? 'erreicht/übersteigt Ziel' : 'erreicht/unterschreitet Ziel'}`,'',
-          'Hinweis: Alarm ist aktuell nicht persistent über Railway-Neustarts.'
+          persisted ? '💾 Persistent gespeichert.' : '⚠️ Nur temporär gespeichert – State-Volume prüfen.'
         ].join('\n')
       });
     } catch {
@@ -496,7 +520,11 @@ async function handleCommand(msg) {
 
   if (command === '/clearalerts') {
     alerts.set(String(chatId),[]);
-    await tg('sendMessage',{ chat_id:chatId, text:'🔕 Alle Preisalarme gelöscht.' });
+    const persisted = await persistState('alerts-cleared');
+    await tg('sendMessage',{
+      chat_id:chatId,
+      text:persisted ? '🔕 Alle Preisalarme gelöscht.' : '🔕 Alarme gelöscht, aber State-Volume ist nicht schreibbar.'
+    });
     return true;
   }
 
@@ -562,8 +590,14 @@ async function handle(update) {
     if (a.kind === 'FAV') {
       const set = favoriteSet(chatId);
       if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
       await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
-      await ack(q.id,set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt');
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
       return;
     }
     if (a.kind === 'ALERT_HELP') {
@@ -637,6 +671,7 @@ async function alertWatcher() {
         const hit = alert.direction === 'ABOVE' ? s.price >= alert.target : s.price <= alert.target;
         if (!hit) continue;
 
+        let delivered = false;
         try {
           await tg('sendMessage',{
             chat_id:chatKey,
@@ -647,12 +682,16 @@ async function alertWatcher() {
               'TCX Execution: SHADOW_ONLY'
             ].join('\n')
           });
+          delivered = true;
         } catch (err) {
           console.error('alert send error',err instanceof Error ? err.message : String(err));
         }
 
-        const current = alertList(chatKey);
-        alerts.set(chatKey,current.filter(x => x !== alert));
+        if (delivered) {
+          const current = alertList(chatKey);
+          alerts.set(chatKey,current.filter(x => x !== alert));
+          await persistState('alert-delivered');
+        }
       }
     }
   }
@@ -670,7 +709,13 @@ const server = http.createServer((req,res) => {
       markets:markets.map(x => x.symbol),
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
-      alerts:activeAlerts
+      alerts:activeAlerts,
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
     }));
     return;
   }
@@ -680,8 +725,18 @@ const server = http.createServer((req,res) => {
 
 server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
 
-process.on('SIGINT',() => { running=false; server.close(); });
-process.on('SIGTERM',() => { running=false; server.close(); });
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 
 const me = await tg('getMe',{});
 console.log(JSON.stringify({
@@ -693,7 +748,14 @@ console.log(JSON.stringify({
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
-  marketDataHosts:binanceBases.map(x => new URL(x).host)
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  }
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });

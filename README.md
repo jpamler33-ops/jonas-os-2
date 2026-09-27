@@ -1,25 +1,59 @@
 # TCX Telegram · Railway
 
-Telegram Live-Market UI for TCX v2. This deployment surface is **SHADOW_ONLY** and contains no order execution path.
+Telegram Live-Market UI for TCX v2. Execution remains **SHADOW_ONLY** and there is no order-execution path.
+
+## Features
+
+- Coin buttons and `/coin SYMBOL`
+- Binance public live market data with endpoint fallback
+- 1m / 5m / 15m / 1h views
+- Favorites
+- One-shot price alerts
+- Persistent favorites + alerts through `/data/tcx-state.json`
+- Atomic state writes and corrupt-state recovery
+- Health endpoint at `/health`
 
 ## Railway
 
-1. Deploy this GitHub repository on Railway.
-2. Set `TCX_TELEGRAM_BOT_TOKEN` in Railway Variables.
-3. Keep replicas at **1** when using Telegram long polling.
-4. Deploy and send `/start` to the bot.
+Required variable:
+
+```text
+TCX_TELEGRAM_BOT_TOKEN=<BotFather token>
+```
+
+For durable favorites and alerts, attach a Railway **Volume** to this service and mount it at:
+
+```text
+/data
+```
+
+The container already defaults to:
+
+```text
+TCX_STATE_FILE=/data/tcx-state.json
+```
+
+Keep the service at **1 replica** while using the file-backed state store and Telegram long polling.
 
 Optional variables:
 
-- `TCX_TELEGRAM_REFRESH_MS=10000` (minimum 5000)
-- `TCX_TELEGRAM_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT`
-- `TCX_TELEGRAM_ALLOWED_CHATS=123456789` to restrict access
-- `TCX_BINANCE_REST_BASE=https://api.binance.com`
+```text
+TCX_TELEGRAM_REFRESH_MS=10000
+TCX_TELEGRAM_ALERT_CHECK_MS=15000
+TCX_TELEGRAM_ALLOWED_CHATS=123456789
+TCX_TELEGRAM_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,...
+```
 
-Health endpoint: `/health`
+## Commands
+
+- `/start`
+- `/coin BTC`
+- `/favorites`
+- `/alert BTC 70000`
+- `/alerts`
+- `/clearalerts`
+- `/help`
 
 ## Safety / epistemics
 
-- Market data is OBSERVED from Binance REST.
-- The Telegram TCX card does not promote simple market telemetry to causal mechanism truth.
-- Trading action remains `ABSTAIN / SHADOW_ONLY`.
+Market data is OBSERVED. The compact Telegram TCX view does not promote telemetry to causal mechanism truth. Trading action remains **ABSTAIN / SHADOW_ONLY**.
