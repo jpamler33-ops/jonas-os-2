@@ -51,3 +51,31 @@ test('provider circuit and slo breach degrade but do not fabricate hard failure'
   assert.ok(r.warningReasons.some(x=>x.startsWith('PROVIDER_CIRCUIT_OPEN_')));
   assert.ok(r.warningReasons.includes('PROVIDER_BACKPRESSURE_HIGH'));
 });
+
+
+test('critical research-state corruption blocks readiness',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    forecastRuntime:{healthy:true,recoveredFromCorrupt:true},
+    episodePersistence:{healthy:true,recoveredFromCorrupt:false},
+    evidenceHistory:{healthy:true,recoveredFromCorrupt:false}
+  }));
+  assert.equal(r.ready,false);
+  assert.ok(r.hardReasons.includes('FORECAST_RUNTIME_RECOVERED_FROM_CORRUPT'));
+});
+
+test('user-state corruption is degraded but does not impersonate research corruption',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    persistence:{healthy:true,recoveredFromCorrupt:true}
+  }));
+  assert.equal(r.ready,true);
+  assert.equal(r.state,'DEGRADED');
+  assert.ok(r.warningReasons.includes('USER_STATE_RECOVERED_FROM_CORRUPT'));
+});
+
+test('provider queue saturation is not ready',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    providerHealth:{circuits:{},pending:100,maxPending:100}
+  }));
+  assert.equal(r.ready,false);
+  assert.ok(r.hardReasons.includes('PROVIDER_BACKPRESSURE_SATURATED'));
+});
