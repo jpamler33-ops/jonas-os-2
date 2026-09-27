@@ -59,3 +59,47 @@ test('solana cohort produces public activity features without identity claims',a
   assert.ok(rows.some(x=>x.id==='research.wallet.activity5m'));
   assert.ok(rows.every(x=>Number.isFinite(x.value)));
 });
+
+
+test('ethereum cohort uses batch block scan for verified address sets',async()=>{
+  const now=2_000_000;
+  const address='0x1111111111111111111111111111111111111111';
+  let batchCalls=0;
+  const p=createWalletCohortPublicProvider({
+    cohorts:[{id:'okx-eth',chain:'ETHEREUM',symbol:'ETHUSDT',addresses:[address]}],
+    ethereumRpcUrl:'https://ethereum-rpc.publicnode.com',
+    now:()=>now,
+    fetchImpl:async(_url,opts)=>{
+      const req=JSON.parse(opts.body);
+      if(!Array.isArray(req)){
+        assert.equal(req.method,'eth_blockNumber');
+        return response('0x64');
+      }
+      batchCalls++;
+      const result=req.map((x,i)=>({
+        jsonrpc:'2.0',
+        id:x.id,
+        result:{
+          timestamp:'0x'+Math.floor((now-60_000)/1000).toString(16),
+          transactions:i===0?[{
+            from:'0x2222222222222222222222222222222222222222',
+            to:address,
+            value:'0xde0b6b3a7640000'
+          }]:[]
+        }
+      }));
+      return {
+        ok:true,
+        status:200,
+        async text(){return JSON.stringify(result);}
+      };
+    }
+  });
+  const s=await p.fetchSnapshot('ETHUSDT',{asOf:now});
+  assert.equal(s.ok,true);
+  assert.equal(batchCalls,1);
+  assert.equal(s.metrics.activity5m,1);
+  assert.equal(s.metrics.activity15m,1);
+  assert.equal(s.metrics.nativeNetFlow,1);
+  assert.equal(s.metrics.nativeGrossFlow,1);
+});
