@@ -1,81 +1,133 @@
 # TCX Module Registry
 
 Status: CANONICAL OWNERSHIP / OVERLAP CONTROL
+Branch context: integration/tcx-institutional-v3
 
-Purpose: prevent parallel chats from implementing the same capability twice.
+Purpose: prevent parallel chats from implementing the same capability twice and distinguish MAIN-canonical from integration-staged components.
 
-## Canonical runtime modules
+## Main-canonical runtime modules
 
 | Capability | Canonical module(s) | Status |
 |---|---|---|
-| Persistent user state | `state-store.mjs` | CANONICAL |
-| Structure / MTF | `market-structure.mjs` | CANONICAL |
-| Chart rendering | `chart-renderer.mjs` | CANONICAL |
-| Dashboard state | `dashboard-state.mjs` | CANONICAL |
-| Episode Memory | `episode-memory.mjs` | CANONICAL |
-| Mechanism Transition Lattice | `mechanism-transition-engine.mjs` | CANONICAL |
-| Independent witnesses | `independent-witness-network.mjs` | CANONICAL |
-| Institutional control plane | `institutional-kernel.mjs` | CANONICAL |
-| Market event chain | `market-data-fabric.mjs` | CANONICAL |
-| Point-in-time replay | `deterministic-replay.mjs` | CANONICAL |
-| Runtime release identity | `runtime-release-registry.mjs` | CANONICAL |
-| Observability | `observability.mjs` | CANONICAL |
-| Chaos harness | `chaos-engineering.mjs` | CANONICAL |
-| Shadow OMS | `shadow-oms.mjs` | CANONICAL |
-| Shadow SOR | `multi-venue-shadow-sor.mjs` | CANONICAL |
-| Venue Quality Memory | `venue-quality-memory.mjs` | CANONICAL |
-| Execution Research Lab | `execution-research-lab.mjs` | CANONICAL |
-| Telegram product UI | `telegram-product-ui.mjs` | CANONICAL |
-| Alerts v2 | `alert-engine.mjs` | CANONICAL |
-| Evidence history | `evidence-history.mjs` | CANONICAL |
-| Research validity | `state-validity.mjs` | CANONICAL |
-| Research lifecycle | `research-lifecycle.mjs` | CANONICAL |
-| Exchange/public market I/O | `market-data-provider.mjs` | CANONICAL |
-| Telegram routing | `telegram-command-router.mjs` | CANONICAL |
-| Telegram read commands | `telegram-read-command-handlers.mjs` | CANONICAL |
-| Telegram mutation commands | `telegram-mutation-command-handlers.mjs` | CANONICAL |
+| Persistent user state | `state-store.mjs` | MAIN CANONICAL |
+| Structure / MTF | `market-structure.mjs` | MAIN CANONICAL |
+| Chart rendering | `chart-renderer.mjs` | MAIN CANONICAL |
+| Dashboard state | `dashboard-state.mjs` | MAIN CANONICAL |
+| Episode Memory | `episode-memory.mjs` | MAIN CANONICAL |
+| Mechanism Transition Lattice | `mechanism-transition-engine.mjs` | MAIN CANONICAL |
+| Independent venue witnesses | `independent-witness-network.mjs` | MAIN CANONICAL |
+| Institutional control plane | `institutional-kernel.mjs` | MAIN CANONICAL |
+| Market event chain | `market-data-fabric.mjs` | MAIN CANONICAL |
+| Point-in-time replay | `deterministic-replay.mjs` | MAIN CANONICAL |
+| Runtime release identity | `runtime-release-registry.mjs` | MAIN CANONICAL |
+| Observability | `observability.mjs` | MAIN CANONICAL |
+| Chaos harness | `chaos-engineering.mjs` | MAIN CANONICAL |
+| Shadow OMS | `shadow-oms.mjs` | MAIN CANONICAL |
+| Shadow SOR | `multi-venue-shadow-sor.mjs` | MAIN CANONICAL |
+| Venue Quality Memory | `venue-quality-memory.mjs` | MAIN CANONICAL |
+| Execution Research Lab | `execution-research-lab.mjs` | MAIN CANONICAL |
+| Telegram product UI | `telegram-product-ui.mjs` | MAIN CANONICAL |
+| Alerts v2 | `alert-engine.mjs` | MAIN CANONICAL |
+| Evidence history | `evidence-history.mjs` | MAIN CANONICAL |
+| Research validity | `state-validity.mjs` | MAIN CANONICAL |
+| Research lifecycle | `research-lifecycle.mjs` | MAIN CANONICAL |
+| Exchange/public market I/O | `market-data-provider.mjs` | MAIN CANONICAL |
+| Telegram routing | `telegram-command-router.mjs` | MAIN CANONICAL |
+| Telegram read commands | `telegram-read-command-handlers.mjs` | MAIN CANONICAL |
+| Telegram mutation commands | `telegram-mutation-command-handlers.mjs` | MAIN CANONICAL |
 
-## Integration candidates
+## Institutional-v3 staged modules
 
-### Forecast Specialist Engine
+These are authoritative only inside the integration branch until promoted to main.
 
-Owner: Forecast Specialist
-Status: CANDIDATE FOR INTEGRATION
-Canonical: NO
+| Capability | Module(s) | Integration status |
+|---|---|---|
+| Immutable Research Trace | `research-trace.mjs` | STAGED / TESTED |
+| Forecast Intelligence runtime | `forecast-runtime/forecast/*` | STAGED / TESTED / NOT PRODUCT-CANONICAL |
+| Forecast regression guards | `forecast-intelligence.integration.test.mjs` | STAGED / CI GREEN |
+| Scientific validity aggregation | `scientific-validity.mjs` | STAGED / TEST REQUIRED |
+| Alpha.30 guard adapters | isolated future `science-runtime/*` | CANDIDATE / NOT YET IMPORTED |
 
-Before any merge, compare the candidate against existing main-branch capabilities, especially:
+## Forecast Specialist Engine
 
-- Market Grammar prediction / surprise / drift
-- Market World Model and horizon calibration
-- empirical calibration / Brier tracking
-- `state-validity.mjs`
-- `research-lifecycle.mjs`
-- `evidence-history.mjs`
-- `execution-research-lab.mjs`
-- Telegram product forecast contract
+Owner: TCX Forecast Intelligence
+Source branch: `integration/forecast-v2.3.1`
+Integration status: STAGED on `integration/tcx-institutional-v3`
+Canonical on main: NO
 
-Per component choose exactly one:
+Important correction:
+the historical Cloudflare Market Grammar / Market World Model files are no longer active runtime modules on current `main`. They were removed during the transition to the current Node/Railway architecture and therefore are not a second current forecast source of truth.
 
+Forecast Specialist may become the one canonical forecast layer only after:
+- canonical input/output contract
+- master point-in-time adapter
+- institutional admission gate
+- calibration/OOD/validity review
+- Alpha.30 scientific validity integration
+- full CI
+- release/replay binding
+- product integration through normalized views
+
+## Alpha.30 Scientific Core
+
+Owner candidate: TCX Scientific Validity Core
+Source: Alpha.30 master merge bundle
+Status: VALIDATED SOURCE CANDIDATE / NOT WHOLE-REPO MERGE
+Canonical on main: NO
+
+Keep/adapt:
+- empirical support
+- concept stability
+- nonlinear concept stability
+- temporal recency
+- sequential evidence/change
+- specification multiverse
+- transportability
+- evidence-lineage independence
+- dependency discovery/hypergraph
+- latent-factor discovery
+- interventional invariance
+- research integrity / reality-gap guards
+
+Do not import as competing runtime truth:
+- market providers
+- Telegram/dashboard UI
+- execution stack
+- portfolio stack
+- deployment shell
+- duplicate persistence/audit infrastructure
+
+## Forecast Self-Correction
+
+Status: NOT YET APPROVED FOR AUTONOMOUS PRODUCTION MUTATION
+
+Allowed architecture:
 ```text
-KEEP MASTER
-KEEP SPECIALIST
-MERGE
-REWRITE
-DEPRECATE
+issued immutable forecast
+→ matured outcome
+→ scoring/calibration/error decomposition
+→ drift/scientific guards
+→ candidate model or parameter version
+→ PIT + temporal OOS validation
+→ promotion gate
+→ new version
 ```
 
-### Forecast Self-Correction
-
-Status: NOT YET APPROVED
-Reason: overlap and leakage/calibration review required before it becomes canonical.
+Forbidden:
+- same-sample self-feedback
+- hidden threshold mutation
+- silent replacement of canonical production model
+- feedback that bypasses Release Registry / Research Trace
 
 ## Rule for new parallel work
 
 Before creating a new engine/module:
 
-1. Search current `main`.
-2. Check this registry.
-3. Identify the canonical owner.
-4. Define the missing capability, not just a new name.
-5. If overlap exists, integrate or extend instead of duplicating.
-6. Update this registry when ownership/status changes.
+1. Inspect current `main`.
+2. Inspect `integration/tcx-institutional-v3`.
+3. Check this registry.
+4. Identify the canonical owner.
+5. Define a missing capability, not a new name for an existing one.
+6. Extend/adapt before duplicating.
+7. Preserve point-in-time and epistemic boundaries.
+8. Update this registry whenever ownership or promotion state changes.
