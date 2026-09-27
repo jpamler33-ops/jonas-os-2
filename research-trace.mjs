@@ -81,6 +81,7 @@ function traceCore(input){
     },
     evidence:cleanList(input?.evidence),
     contradictions:cleanList(input?.contradictions),
+    expansion:input?.expansion==null?null:structuredClone(input.expansion),
     forecast:input?.forecast==null?null:structuredClone(input.forecast),
     science:input?.science==null?null:structuredClone(input.science),
     safety:{
@@ -183,6 +184,7 @@ export function researchTraceSummary(trace){
     validity:trace?.validity?.state??'UNKNOWN',
     forecastPresent:Boolean(trace?.forecast),
     sciencePresent:Boolean(trace?.science),
+    expansionPresent:Boolean(trace?.expansion),
     evidenceCount:Array.isArray(trace?.evidence)?trace.evidence.length:0,
     contradictionCount:Array.isArray(trace?.contradictions)?trace.contradictions.length:0,
     integrity:verification.ok?'VALID':'INVALID',
