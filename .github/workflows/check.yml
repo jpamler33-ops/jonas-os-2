@@ -23,3 +23,5 @@ jobs:
         run: npm run check
       - name: Unit and integration tests
         run: npm test
+      - name: Docker packaging smoke test
+        run: docker build --tag tcx-institutional-ci .
