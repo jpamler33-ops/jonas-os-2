@@ -3518,7 +3518,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       walletCohorts:walletCohortResearchProvider.configuredCohorts,
       researchDataPlaneSeq:researchPlaneView.planeSeq||0,
       researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
-      researchDataPlaneAppendOk:researchPlaneWrite?.ok===true
+      researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,\n      researchGovernanceIssueCount:Number(researchGovernanceView.statuses?.QUARANTINED||0),\n      researchGovernanceFingerprint:researchGovernanceView.fingerprint
     };
   }
 
