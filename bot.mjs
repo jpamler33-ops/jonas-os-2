@@ -419,6 +419,48 @@ async function appendInstitutionalAudit(kind,payload) {
   return auditAppendQueue;
 }
 
+async function appendForecastIssuanceAuditQueued(issuance) {
+  auditAppendQueue = auditAppendQueue.then(async()=>{
+    if(!auditLedger.healthy) return null;
+    try {
+      return await appendInstitutionalForecastIssuanceAudit(auditLedger,issuance,{
+        occurredAt:issuance.generatedAt
+      });
+    } catch(err) {
+      auditLedger.healthy=false;
+      auditLedger.verification={
+        ok:false,
+        error:'FORECAST_AUDIT_APPEND_FAILURE',
+        detail:err instanceof Error?err.message:String(err)
+      };
+      recordError(observability,{scope:'forecast.audit.issue',message:auditLedger.verification.detail});
+      return null;
+    }
+  });
+  return auditAppendQueue;
+}
+
+async function appendForecastEvaluationAuditQueued(trace,evaluation) {
+  auditAppendQueue = auditAppendQueue.then(async()=>{
+    if(!auditLedger.healthy) return null;
+    try {
+      return await appendResearchTraceEvaluationAudit(auditLedger,trace,evaluation,{
+        occurredAt:evaluation.observedAt
+      });
+    } catch(err) {
+      auditLedger.healthy=false;
+      auditLedger.verification={
+        ok:false,
+        error:'FORECAST_EVALUATION_AUDIT_APPEND_FAILURE',
+        detail:err instanceof Error?err.message:String(err)
+      };
+      recordError(observability,{scope:'forecast.audit.evaluation',message:auditLedger.verification.detail});
+      return null;
+    }
+  });
+  return auditAppendQueue;
+}
+
 async function appendFabricEvents(inputs) {
   marketFabricAppendQueue = marketFabricAppendQueue.then(async()=>{
     if(!marketFabric.healthy) return {appended:[],duplicates:0,skipped:true};
