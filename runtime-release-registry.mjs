@@ -44,6 +44,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'research-trace.mjs',
   'institutional-forecast-issuance.mjs',
   'model-promotion-ladder.mjs',
+  'model-candidate-registry.mjs',
   'institutional-audit-binding.mjs',
   'forecast-input-adapter.mjs',
 
