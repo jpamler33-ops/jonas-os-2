@@ -279,6 +279,7 @@ export function governResearchSnapshot(state,snapshot,{
     evaluatedAt:Number(evaluatedAt),
     decision,
     sourceStatus:src.status,
+    usableForResearch:!structuralViolation&&!operationalViolation&&!['QUARANTINE','REJECT'].includes(decision),
     qualityScore,
     qualityScoreMeaning:'NON_PROBABILISTIC_DATA_QUALITY_DIAGNOSTIC',
     reasons:Object.freeze(reasons.map(cleanReason)),
