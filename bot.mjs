@@ -27,6 +27,7 @@ import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObser
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
 import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
+import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
 import {
   openInstitutionalForecastRuntime,
@@ -245,7 +246,8 @@ try {
       forecastInputAdapter:FORECAST_INPUT_ADAPTER_VERSION,
       forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
       scientificCore:SCIENTIFIC_CORE_VERSION,
-      institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+      institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
+      forecastProduct:FORECAST_PRODUCT_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -2699,30 +2701,6 @@ async function showEngine(chatId,symbol){
 }
 
 
-function clamp01(x){
-  const n=Number(x);
-  return Number.isFinite(n)?Math.max(0,Math.min(1,n)):0;
-}
-
-function forecastOperationalDataQuality({safety,marketAudit,witnessReport}){
-  if(safety?.state==='SAFE_STOP'||marketAudit?.ok!==true) return 0;
-  const safetyFactor=safety?.state==='NORMAL'?1:.80;
-  const external=Number(witnessReport?.externalWitnessCount||0);
-  const witnessFactor=external>=2?1:external===1?.85:.70;
-  return clamp01(safetyFactor*witnessFactor);
-}
-
-function forecastRegimeConfidence(state){
-  const d=state?.memoryDashboard||{};
-  const regime=String(d.regime||'MIXED');
-  const mtfStrength=clamp01(Math.abs(Number(state?.mtf?.biasScore||0))/6);
-  if(regime==='STRESS') return clamp01(Math.max(.45,Number(d.pressureScore||0)/100));
-  if(regime==='TREND_EXPANSION') return clamp01(Math.max(.45,.65*mtfStrength+.35*Math.min(1,Number(d.volumeRatio||0)/2)));
-  if(regime==='TREND_ORDERLY') return clamp01(Math.max(.40,mtfStrength));
-  if(regime==='RANGE') return clamp01(d.localTrend==='NEUTRAL'?Math.max(.50,1-Math.min(1,Number(d.atrPct||0)/1.2)):.35);
-  return .40;
-}
-
 function forecastResearchValidity(evidenceAppend){
   const validity=evidenceAppend?.validity;
   if(!validity){
@@ -2735,32 +2713,6 @@ function forecastResearchValidity(evidenceAppend){
     status:String(validity.status||'UNKNOWN'),
     reasons:formatValidityReason(validity,{limit:5})
   };
-}
-
-function forecastKeyboard(symbol){
-  return {inline_keyboard:[
-    [{text:'🔄 Forecast aktualisieren',callback_data:`forecast:${symbol}`}],
-    [
-      {text:'🧪 MTL',callback_data:`engine:${symbol}`},
-      {text:'🧬 Memory',callback_data:`memory:${symbol}`},
-      {text:'📊 Markt',callback_data:`refresh:${symbol}`}
-    ]
-  ]};
-}
-
-function forecastHorizonLine(h,{allowProbabilities=false}={}){
-  const expected=Number(h.expectedReturn)*100;
-  const lo=Number(h.interval?.q10)*100;
-  const hi=Number(h.interval?.q90)*100;
-  const p=h.display?.probabilities;
-  const probabilityLine=allowProbabilities&&p
-    ? `P ↑${fmt(Number(p.up)*100,0)}% · ↓${fmt(Number(p.down)*100,0)}% · →${fmt(Number(p.flat)*100,0)}%`
-    : `P ausgeblendet · ${(h.display?.suppressionReasons||['INSTITUTIONAL_GATE']).join(', ')}`;
-  return [
-    `${h.horizonId} · ${h.direction} · Gate ${h.gate}`,
-    `  E[r] ${expected>=0?'+':''}${fmt(expected,2)}% · q10..q90 ${fmt(lo,2)}%..${fmt(hi,2)}%`,
-    `  ${probabilityLine}`
-  ];
 }
 
 async function showForecast(chatId,symbol,messageId=null){
@@ -2781,7 +2733,7 @@ async function showForecast(chatId,symbol,messageId=null){
   const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
   const {
     state,witnessReport,r15,
-    marketAudit,safety,envelope
+    marketAudit,witnessAudit,engineAudit,safety,envelope
   }=ctx;
 
   const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
@@ -2798,11 +2750,21 @@ async function showForecast(chatId,symbol,messageId=null){
     episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
     state.availableAt
   );
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:extraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
   const input=buildCanonicalForecastInput({
     envelope,
-    dataQuality:forecastOperationalDataQuality({safety,marketAudit,witnessReport}),
+    dataQuality:runtimeQuality.dataQuality,
     regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
-    regimeConfidence:forecastRegimeConfidence(state),
+    regimeConfidence:runtimeQuality.regimeConfidence,
     extraFeatures
   });
 
@@ -2875,55 +2837,22 @@ async function showForecast(chatId,symbol,messageId=null){
 
   const issuance=issued.issuance;
   const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
-  const effectiveGate=auditHealthyAfter?issuance.gate:'ABSTAIN';
-  const allowProbabilities=auditHealthyAfter&&issuance.probabilityDisplayAllowed===true;
-  const forecast=issuance.forecast;
-  const scienceRequired=Object.entries(scienceAdapter.profile)
-    .filter(([,v])=>v.required===true)
-    .map(([id])=>{
-      const report=scienceCore.reports[id];
-      return `${id.replaceAll('_',' ')}: ${report?.gate||'INSUFFICIENT'}`;
-    });
-
   const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
-  const text=[
-    `🔮 TCX Forecast Intelligence · ${symbol.replace('USDT','/USDT')}`,
-    '',
-    `Institutional Gate: ${effectiveGate}`,
-    `Forecast Gate: ${forecast.overallGate} · Science: ${scienceCore.validity.gate}`,
-    `Safety: ${safety.state} · Research: ${forecastResearchValidity(evidenceAppend).status}`,
-    `Regime: ${input.regimeId} · regime confidence ${fmt(input.regimeConfidence*100,0)}%`,
-    `Data quality: ${fmt(input.dataQuality*100,0)}% · Witness venues ${witnessReport.venueCount}`,
-    '',
-    'HORIZONS',
-    ...forecast.horizons.flatMap(h=>forecastHorizonLine(h,{allowProbabilities})),
-    '',
-    'SCIENTIFIC SUPPORT',
-    ...scienceRequired.map(x=>'• '+x),
-    `• history ${scienceAdapter.historyRows} matured rows · ${scienceAdapter.horizonCount} horizons`,
-    '',
-    'AUDIT / LEARNING',
-    `Trace: ${issuance.traceId.slice(0,16)}…`,
-    `Issuance: ${issuance.issuanceId.slice(0,16)}…`,
-    `Audit: ${auditHealthyAfter?'BOUND':'FAILED → ABSTAIN'}`,
-    `Forecast history: ${runtimeSummary.historyCases} · pending outcomes ${runtimeSummary.pendingOutcomes}`,
-    issued.duplicate?'Idempotent duplicate: YES':'Idempotent duplicate: NO',
-    '',
-    allowProbabilities
-      ?'Probabilities shown only because calibration + science + admission gates permit it.'
-      :'Probabilities intentionally suppressed until calibration/science/admission permit display.',
-    'Causal status: NOT_IDENTIFIED',
-    'Action: ABSTAIN / SHADOW_ONLY'
-  ].join('\n').slice(0,4096);
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditBound:auditHealthyAfter,
+    now:Date.now()
+  });
+
 
   recordOperation(observability,{
     name:'institutional_forecast',
-    ok:auditHealthyAfter&&effectiveGate!=='ABSTAIN',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
     latencyMs:Date.now()-started,
     error:auditHealthyAfter?null:'forecast audit binding failed'
   });
 
-  const payload={chat_id:chatId,text,reply_markup:forecastKeyboard(symbol)};
+  const payload={chat_id:chatId,text,reply_markup:forecastProductKeyboard(symbol)};
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
   return tg('sendMessage',payload);
 }
