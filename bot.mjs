@@ -3492,6 +3492,92 @@ async function shadowOmsWatcher() {
   }
 }
 
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
 async function episodeWatcher() {
   while(running) {
     let changed=false;
