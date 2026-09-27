@@ -5,12 +5,12 @@ COPY package.json ./
 
 COPY bot.mjs state-store.mjs market-structure.mjs chart-renderer.mjs dashboard-state.mjs episode-memory.mjs mechanism-transition-engine.mjs independent-witness-network.mjs institutional-kernel.mjs market-data-fabric.mjs deterministic-replay.mjs runtime-release-registry.mjs observability.mjs operational-readiness.mjs persistence-contracts.mjs persistence-smoke.mjs chaos-engineering.mjs shadow-oms.mjs portfolio-brain.mjs multi-venue-shadow-sor.mjs venue-quality-memory.mjs execution-research-lab.mjs telegram-product-ui.mjs alert-engine.mjs evidence-history.mjs state-validity.mjs research-lifecycle.mjs market-data-provider.mjs telegram-command-router.mjs telegram-read-command-handlers.mjs telegram-mutation-command-handlers.mjs telegram-ui-runtime.mjs ./
 
-COPY research-trace.mjs scientific-validity.mjs scientific-core.mjs institutional-admission.mjs institutional-forecast-issuance.mjs institutional-forecast-runtime.mjs institutional-audit-binding.mjs forecast-input-adapter.mjs forecast-science-adapter.mjs forecast-contract.mjs forecast-product.mjs forecast-candidate-lab.mjs forecast-learning-center.mjs forecast-hypothesis-generator.mjs forecast-shadow-competition.mjs forecast-experiment-governor.mjs forecast-feature-research.mjs model-promotion-ladder.mjs model-candidate-registry.mjs model-release-binding.mjs model-governance-audit.mjs ./
+COPY research-data-plane.mjs research-data-plane-adapters.mjs research-trace.mjs scientific-validity.mjs scientific-core.mjs institutional-admission.mjs institutional-forecast-issuance.mjs institutional-forecast-runtime.mjs institutional-audit-binding.mjs forecast-input-adapter.mjs forecast-science-adapter.mjs forecast-contract.mjs forecast-product.mjs forecast-candidate-lab.mjs forecast-learning-center.mjs forecast-hypothesis-generator.mjs forecast-shadow-competition.mjs forecast-experiment-governor.mjs forecast-feature-research.mjs model-promotion-ladder.mjs model-candidate-registry.mjs model-release-binding.mjs model-governance-audit.mjs ./
 
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs expansion-runtime/entity-flow-engine.test.mjs ./
+COPY research-data-plane.test.mjs research-data-plane-adapters.test.mjs telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs expansion-runtime/entity-flow-engine.test.mjs ./
 
 RUN npm run check
 RUN npm run test:ui
@@ -19,6 +19,7 @@ RUN npm run test:forecast-core
 RUN npm run test:autolearn
 RUN npm run test:competition
 RUN npm run test:feature-research
+RUN npm run test:data-plane
 RUN mkdir -p /data && chown -R node:node /data /app
 
 ENV NODE_ENV=production
@@ -36,6 +37,10 @@ ENV TCX_EXPERIMENT_GOVERNOR_FILE=/data/tcx-experiment-governor.json
 ENV TCX_FEATURE_RESEARCH_FILE=/data/tcx-feature-research.json
 ENV TCX_ENTITY_REGISTRY_FILE=/data/tcx-entity-registry.json
 ENV TCX_ENTITY_FLOW_MEMORY_FILE=/data/tcx-entity-flow-memory.json
+ENV TCX_RESEARCH_DATA_PLANE_FILE=/data/tcx-research-data-plane.jsonl
+ENV TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS=50000
+ENV TCX_RESEARCH_DATA_PLANE_WARN_BYTES=125829120
+ENV TCX_RESEARCH_DATA_PLANE_HARD_BYTES=167772160
 ENV TCX_REPLICA_COUNT=1
 
 USER node
