@@ -25,6 +25,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'telegram-product-ui.mjs',
   'alert-engine.mjs',
   'evidence-history.mjs',
+  'state-validity.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
