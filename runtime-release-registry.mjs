@@ -25,6 +25,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'autonomous-shadow-trader.mjs',
   'shadow-portfolio-ledger.mjs',
   'shadow-capital-academy.mjs',
+  'shadow-training-supervisor.mjs',
   'multi-venue-shadow-sor.mjs',
   'venue-quality-memory.mjs',
   'execution-research-lab.mjs',

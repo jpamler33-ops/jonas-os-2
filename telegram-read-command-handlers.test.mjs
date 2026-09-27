@@ -21,6 +21,7 @@ function deps(overrides={}){
     showShadowPortfolio:async(...x)=>calls.push(["portfolio",...x]),
     showShadowTradeStats:async(...x)=>calls.push(["stats",...x]),
     showShadowCapitalAcademy:async(...x)=>calls.push(["academy",...x]),
+    showShadowTrainingCoach:async(...x)=>calls.push(["coach",...x]),
     showExecutionResearch:async(...x)=>calls.push(["erl",...x]),
     showVenueQuality:async(...x)=>calls.push(["vqm",...x]),
     showSorStatus:async(...x)=>calls.push(["sorstatus",...x]),
@@ -113,4 +114,13 @@ test("academy and challenge aliases open the capital academy",async()=>{
   await h["/academy"]({chatId:11,args:[]});
   await h["/challenge"]({chatId:11,args:[]});
   assert.equal(calls.filter(x=>x[0]==="academy").length,2);
+});
+
+
+test("coach and training aliases open the adaptive training supervisor",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/coach"]({chatId:11,args:[]});
+  await h["/training"]({chatId:11,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="coach").length,2);
 });

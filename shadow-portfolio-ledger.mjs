@@ -101,6 +101,12 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null}={}){
     forecastFingerprint:String(order.strategyMeta?.forecastFingerprint||''),
     horizonId:String(order.strategyMeta?.horizonId||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
+    trainingSupervisorVersion:String(order.strategyMeta?.trainingSupervisorVersion||''),
+    trainingMissionId:String(order.strategyMeta?.trainingMissionId||''),
+    trainingMissionType:String(order.strategyMeta?.trainingMissionType||''),
+    trainingRiskMultiplier:finite(order.strategyMeta?.trainingRiskMultiplier),
+    academyStage:String(order.strategyMeta?.academyStage||''),
+    academyAchievedLevel:finite(order.strategyMeta?.academyAchievedLevel),
     strategyLane:String(order.strategyMeta?.strategyLane||[
       String(order.symbol).toUpperCase(),
       String(order.strategyMeta?.horizonId||''),

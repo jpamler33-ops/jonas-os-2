@@ -32,6 +32,10 @@ import {
   evaluateShadowCapitalAcademy, academyTradeBudget,
   SHADOW_CAPITAL_ACADEMY_VERSION
 } from './shadow-capital-academy.mjs';
+import {
+  evaluateShadowTrainingSupervisor, supervisedShadowBudget, renderSupervisorCompact,
+  SHADOW_TRAINING_SUPERVISOR_VERSION
+} from './shadow-training-supervisor.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -1121,9 +1125,19 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     baseNotionalQuote:autoShadowNotionalQuote,
     equityQuote:portfolioNow.equityQuote
   });
+  const training=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,academy,{asOf:now});
+  if(training.risk.hold){
+    return {
+      placed:false,eligible:false,reason:'TRAINING_SUPERVISOR_HOLD',
+      trainingMission:training.mission.type,
+      holdUntil:training.risk.holdUntil,
+      execution:'SHADOW_ONLY'
+    };
+  }
+  const supervisedBudget=supervisedShadowBudget(training,{academyNotionalQuote:academyBudget.notionalQuote});
   const decision=deriveAutonomousShadowTrade(issuance,{
     now,
-    notionalQuote:academyBudget.notionalQuote,
+    notionalQuote:supervisedBudget.notionalQuote,
     minExpectedReturn:isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn,
     minDirectionalProbability:isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability,
     minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
@@ -1179,6 +1193,13 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
       academyAchievedLevel:academy.achievedLevel,
       academyRiskMultiplier:academy.riskPolicy.notionalMultiplier,
       academySizedNotionalQuote:academyBudget.notionalQuote,
+      trainingSupervisorVersion:SHADOW_TRAINING_SUPERVISOR_VERSION,
+      trainingMissionId:training.mission.missionId,
+      trainingMissionType:training.mission.type,
+      trainingRiskMultiplier:training.risk.multiplier,
+      trainingRollingProfitFactor:training.rolling.profitFactor,
+      trainingRollingExpectancyQuote:training.rolling.expectancyQuote,
+      trainingRollingDrawdownPct:training.rolling.maxDrawdownPct,
       decisionKey:decision.decisionKey,
       issuanceId:decision.issuanceId,
       forecastFingerprint:decision.forecastFingerprint,
@@ -1205,6 +1226,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     academyAchievedLevel:academy.achievedLevel,
     academyProgress:academy.stageProgress,
     academyNotionalQuote:academyBudget.notionalQuote,
+    trainingMission:training.mission.type,
+    trainingRiskMultiplier:training.risk.multiplier,
+    supervisedNotionalQuote:supervisedBudget.notionalQuote,
     academyGlobalCap,
     academySymbolCap,
     openForSymbolBefore:openForSymbol.length,
@@ -1474,7 +1498,7 @@ function helpText() {
     'PROFI-FUNKTIONEN',
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
-    '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy',
+    '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy · /coach',
     '/oms · /sorstatus · /venuequality · /executionlab','',
     'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
   ].join('\n');
@@ -1914,6 +1938,7 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='PERFORMANCE') return showLearningCenter(chatId,messageId);
   if(section==='PORTFOLIO') return showShadowPortfolio(chatId,messageId);
   if(section==='ACADEMY') return showShadowCapitalAcademy(chatId,messageId);
+  if(section==='COACH') return showShadowTrainingCoach(chatId,messageId);
   if(section==='STATS_DAY') return showShadowTradeStats(chatId,messageId,'DAY');
   if(section==='STATS_WEEK') return showShadowTradeStats(chatId,messageId,'WEEK');
   if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
@@ -1971,6 +1996,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Memecoin-AutoLearn: ${[...MEMECOIN_CEX_SYMBOLS].filter(x=>autoLearnSymbols.includes(x)).length} liquide CEX-Memecoins · strengere Entry-Gates`,
       `Shadow-Portfolio: ${shadowPortfolioHealthy?'🟢':'🟡'} · Equity ${fmt(shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).equityQuote,2)} USDT`,
       `Capital Academy: ${evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).activeStage} · ${fmt(evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).stageProgress*100,1)}%`,
+      `Training Coach: ${renderSupervisorCompact(evaluateShadowTrainingSupervisor(shadowPortfolioLedger,evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}),{asOf:Date.now()})).mission} · Risiko ${fmt(renderSupervisorCompact(evaluateShadowTrainingSupervisor(shadowPortfolioLedger,evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}),{asOf:Date.now()})).riskMultiplier,2)}×`,
       `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
       `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
       `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
@@ -2723,6 +2749,45 @@ async function showShadowCapitalAcademy(chatId,messageId=null){
   const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
     [{text:'🔄 Prüfen',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
     [{text:'🏆 Academy',callback_data:'home:academy'},{text:'💼 Portfolio',callback_data:'home:portfolio'}],
+    [{text:'🏠 Start',callback_data:'home'}]
+  ]}};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showShadowTrainingCoach(chatId,messageId=null){
+  const academy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
+  const t=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,academy,{asOf:Date.now()});
+  const x=renderSupervisorCompact(t);
+  const pf=x.profitFactor==null?'—':Number.isFinite(x.profitFactor)?fmt(x.profitFactor,2):'∞';
+  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
+  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
+  const topSymbol=t.diversity.symbols?.[0];
+  const lines=[
+    '🧠 TCX TRAINING COACH','',
+    'AKTUELLE MISSION',
+    x.mission,
+    t.mission.objective,
+    'Fortschritt: '+fmt(t.mission.progress*100,1)+'%','',
+    'ROLLING-LEISTUNG',
+    'Trades im Fenster: '+x.recentTrades,
+    'Profit Factor: '+pf,
+    'Expectancy: '+money(x.expectancyQuote),
+    'Drawdown: '+pct(x.drawdownPct),
+    'Verlustserie: '+t.rolling.lossStreak,
+    'Dominanter Coin: '+(topSymbol?topSymbol.key+' · '+fmt((topSymbol.trades/Math.max(1,t.samples.recent))*100,1)+'%':'—'),'',
+    'AUTOMATISCHE RISIKOANPASSUNG',
+    'Academy-Budget wird aktuell mit '+fmt(x.riskMultiplier,2)+'× skaliert.',
+    'Status: '+(x.hold?'⛔ Trainingspause':'🟢 neue qualifizierte Shadow-Entries erlaubt'),
+    ...(x.hold&&t.risk.holdUntil?['Pause bis: '+new Date(t.risk.holdUntil).toLocaleString('de-DE',{timeZone:shadowStatsTimeZone})]:[]),
+    '',
+    'Der Coach darf Entry-Gates niemals lockern, nur Risiko reduzieren oder pausieren.',
+    'Ziel: Robustheit statt einzelne Glückstreffer.',
+    'Mode: SHADOW_ONLY · canExecuteLive: NO'
+  ];
+  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
+    [{text:'🔄 Aktualisieren',callback_data:'home:coach'},{text:'🏆 Academy',callback_data:'home:academy'}],
+    [{text:'📈 Statistik',callback_data:'home:stats_day'},{text:'💼 Portfolio',callback_data:'home:portfolio'}],
     [{text:'🏠 Start',callback_data:'home'}]
   ]}};
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
@@ -4058,6 +4123,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showShadowPortfolio,
   showShadowTradeStats,
   showShadowCapitalAcademy,
+  showShadowTrainingCoach,
   showExecutionResearch,
   showVenueQuality,
   showSorStatus,
