@@ -306,6 +306,7 @@ export function parseProductCallback(data="") {
   if(p[0]==="vqm"&&p[1]) return {kind:"VQM",symbol:p[1]};
   if(p[0]==="erl"&&p[1]) return {kind:"ERL",symbol:p[1]};
   if(p[0]==="evidence"&&p[1]) return {kind:"EVIDENCE",symbol:p[1]};
+  if(p[0]==="lineage"&&p[1]) return {kind:"LINEAGE",symbol:p[1]};
   if(p[0]==="history"&&p[1]) return {kind:"HISTORY",symbol:p[1]};
   if(p[0]==="validity"&&p[1]) return {kind:"VALIDITY",symbol:p[1]};
   if(p[0]==="replaymenu"&&p[1]) return {kind:"REPLAY_MENU",symbol:p[1]};
