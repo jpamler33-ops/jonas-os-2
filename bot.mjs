@@ -9,7 +9,7 @@ import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independ
 import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
-import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
+import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
@@ -25,6 +25,23 @@ import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } fro
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
+import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
+import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
+import {
+  openInstitutionalForecastRuntime,
+  saveInstitutionalForecastRuntime,
+  seedInstitutionalForecastRuntimeFromEpisodes,
+  issueInstitutionalForecast,
+  observeInstitutionalForecastOutcomePoint,
+  latestInstitutionalForecast,
+  institutionalForecastRuntimeSummary,
+  episodeVectorExtraFeatures,
+  INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+} from './institutional-forecast-runtime.mjs';
+import {
+  appendInstitutionalForecastIssuanceAudit,
+  appendResearchTraceEvaluationAudit
+} from './institutional-audit-binding.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -121,6 +138,9 @@ const alerts = loadedState.alerts;
 const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
 const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
+const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
+const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile);
+const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
 const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
@@ -144,6 +164,7 @@ let shadowOmsLastError = loadedShadowOms.error || null;
 let shadowOmsPersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
+let forecastRuntimePersistenceQueue = Promise.resolve();
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
   marketMaxAgeMs:institutionalMarketMaxAgeMs,
@@ -191,6 +212,7 @@ let runtimeReleaseRecord=null;
 try {
   runtimeManifest=await buildRuntimeManifest({
     rootDir:'.',
+    files:institutionalRuntimeFiles(),
     config:institutionalConfig,
     deployment:{
       gitCommit:process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || '',
@@ -217,7 +239,10 @@ try {
       telegramMutationCommands:TELEGRAM_MUTATION_COMMANDS_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
-      executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION
+      executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION,
+      forecastInputAdapter:FORECAST_INPUT_ADAPTER_VERSION,
+      scientificCore:SCIENTIFIC_CORE_VERSION,
+      institutionalForecastRuntime:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
     }
   });
   if(releaseRegistry.healthy){
