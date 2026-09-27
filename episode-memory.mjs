@@ -82,9 +82,27 @@ export function shouldSampleEpisode({anchorCloseTime,analysis,dashboard,lastEpis
   if(lastEpisode?.anchorCloseTime===anchorCloseTime) return {capture:false,reason:'DUPLICATE'};
   const cadence=new Date(anchorCloseTime).getUTCMinutes()%15===4 || new Date(anchorCloseTime+1).getUTCMinutes()%15===0;
   const event=Boolean(analysis?.pattern) || Number(dashboard?.pressureScore)>=65 || ['STRESS','TREND_EXPANSION'].includes(String(dashboard?.regime));
-  if(event) return {capture:true,reason:'EVENT'};
-  if(cadence) return {capture:true,reason:'CADENCE'};
-  return {capture:false,reason:'SKIP'};
+  const currentSignature=[
+    dashboard?.regime||'UNKNOWN',
+    dashboard?.flow||'UNKNOWN',
+    dashboard?.liquidity||'UNKNOWN',
+    dashboard?.pressureBand||'UNKNOWN',
+    analysis?.pattern?.stage||'NONE',
+    analysis?.pattern?.side||'NONE'
+  ].join('|');
+  const lastSignature=lastEpisode ? [
+    lastEpisode.vector?.regime||'UNKNOWN',
+    lastEpisode.vector?.flow||'UNKNOWN',
+    lastEpisode.vector?.liquidity||'UNKNOWN',
+    Number(lastEpisode.vector?.pressureScore)>=65?'HIGH':Number(lastEpisode.vector?.pressureScore)>=35?'MEDIUM':'LOW',
+    lastEpisode.vector?.patternStage||'NONE',
+    lastEpisode.vector?.patternSide||'NONE'
+  ].join('|') : null;
+  const gapMs=lastEpisode ? Number(anchorCloseTime)-Number(lastEpisode.anchorCloseTime) : Infinity;
+  const stateChanged=lastSignature!==currentSignature;
+  if(event && (stateChanged || gapMs>=15*60*1000)) return {capture:true,reason:'EVENT'};
+  if(cadence && gapMs>=10*60*1000) return {capture:true,reason:'CADENCE'};
+  return {capture:false,reason:event?'SERIAL_DEDUP':'SKIP'};
 }
 
 const SCALES = {
