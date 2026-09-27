@@ -2478,13 +2478,14 @@ function transitionLine(label,lattice){
   return `${label}: n=${lattice.support} · coherence ${pct01(lattice.transitionCoherence)}% · entropy ${pct01(lattice.transitionEntropy)}% · top ${topText}`;
 }
 
-async function showEngine(chatId,symbol){
-  const engineStarted=Date.now();
+async function buildInstitutionalResearchContext(symbol,{auditEnvelope=true}={}){
   const state=await researchState(symbol,"5m");
   await captureEpisodeFromState(state,{persist:false});
-  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) await persistEpisodeMemory("engine-maturity");
-  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
+  if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) {
+    await persistEpisodeMemory("institutional-context-maturity");
+  }
 
+  const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:3000});
   const r15=runMechanismTransitionEngine({
     analysis:state.memoryAnalysis,dashboard:state.memoryDashboard,episodes,symbol,horizonMinutes:15,witnessReport
   });
@@ -2497,13 +2498,13 @@ async function showEngine(chatId,symbol){
 
   const fabricWrite=await ingestResearchFabric(state,witnessReport);
   const fabricSummary=marketFabricSummary(marketFabric);
-
   const marketAudit=auditMarketSnapshot(state.market,{
     now:Date.now(),
     maxAgeMs:institutionalMarketMaxAgeMs
   });
   const witnessAudit=auditWitnessReport(witnessReport);
   const engineAudit=auditEngineResult(r15);
+
   let safety=determineSafetyState({
     marketAudit,
     witnessAudit,
@@ -2512,7 +2513,8 @@ async function showEngine(chatId,symbol){
     fabricHealthy:marketFabric.healthy,
     registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
   });
-  let envelope=buildResearchEnvelope({
+
+  const makeEnvelope=()=>buildResearchEnvelope({
     symbol,
     availableAt:state.availableAt,
     market:state.market,
@@ -2530,9 +2532,9 @@ async function showEngine(chatId,symbol){
     },
     dataFabric:{
       version:MARKET_DATA_FABRIC_VERSION,
-      seq:fabricSummary.seq,
-      tailHash:fabricSummary.tailHash,
-      healthy:fabricSummary.healthy
+      seq:marketFabric.seq,
+      tailHash:marketFabric.tailHash,
+      healthy:marketFabric.healthy
     },
     runtimeRelease:{
       registryVersion:RELEASE_REGISTRY_VERSION,
@@ -2542,47 +2544,39 @@ async function showEngine(chatId,symbol){
       registryHealthy:releaseRegistry.healthy
     }
   });
-  const auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
-  if(!auditLedger.healthy){
-    safety=determineSafetyState({
-      marketAudit,
-      witnessAudit,
-      engineAudit,
-      ledgerHealthy:false,
-      fabricHealthy:marketFabric.healthy,
-      registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
-    });
-    envelope=buildResearchEnvelope({
-      symbol,
-      availableAt:state.availableAt,
-      market:state.market,
-      witness:witnessReport,
-      engine:r15,
-      safety,
-      config:institutionalConfig,
-      versions:{
-        institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
-        mechanismEngine:r15.version,
-        episodeMemory:'V3',
-        witnessNetwork:'IWN_V1',
-        marketDataFabric:MARKET_DATA_FABRIC_VERSION,
-        deterministicReplay:DETERMINISTIC_REPLAY_VERSION
-      },
-      dataFabric:{
-        version:MARKET_DATA_FABRIC_VERSION,
-        seq:marketFabric.seq,
-        tailHash:marketFabric.tailHash,
-        healthy:marketFabric.healthy
-      },
-      runtimeRelease:{
-        registryVersion:RELEASE_REGISTRY_VERSION,
-        releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
-        registrySeq:runtimeReleaseRecord?.seq??null,
-        registryTailHash:releaseRegistry.tailHash,
-        registryHealthy:releaseRegistry.healthy
-      }
-    });
+
+  let envelope=makeEnvelope();
+  let auditRecord=null;
+  if(auditEnvelope){
+    auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
+    if(!auditLedger.healthy){
+      safety=determineSafetyState({
+        marketAudit,
+        witnessAudit,
+        engineAudit,
+        ledgerHealthy:false,
+        fabricHealthy:marketFabric.healthy,
+        registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
+      });
+      envelope=makeEnvelope();
+    }
   }
+
+  return {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,fabricSummary,
+    marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  };
+}
+
+async function showEngine(chatId,symbol){
+  const engineStarted=Date.now();
+  const {
+    state,witnessReport,r15,r60,r180,
+    fabricWrite,marketAudit,witnessAudit,engineAudit,
+    safety,envelope,auditRecord
+  }=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
 
   recordSafety(observability,safety.state,{
     hardReasons:safety.hardReasons,
