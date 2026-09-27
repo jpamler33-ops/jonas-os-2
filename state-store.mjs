@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { sanitizeAlert } from './alert-engine.mjs';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const LEGACY_SCHEMA_VERSION = 1;
 const SYMBOL_RE = /^[A-Z0-9]{2,18}USDT$/;
 
 function validChatKey(key) {
@@ -29,16 +31,10 @@ function sanitizeAlerts(raw) {
     if (!validChatKey(chatKey) || !Array.isArray(values)) continue;
     const clean = [];
     for (const item of values) {
-      const symbol = String(item?.symbol || '').toUpperCase();
-      const target = Number(item?.target);
-      const direction = item?.direction;
-      const createdAt = Number(item?.createdAt);
-      if (!SYMBOL_RE.test(symbol)) continue;
-      if (!Number.isFinite(target) || target <= 0) continue;
-      if (direction !== 'ABOVE' && direction !== 'BELOW') continue;
-      if (!Number.isFinite(createdAt) || createdAt <= 0) continue;
-      clean.push({ symbol, target, direction, createdAt });
-      if (clean.length >= 20) break;
+      const alert=sanitizeAlert(item);
+      if(!alert) continue;
+      clean.push(alert);
+      if (clean.length >= 50) break;
     }
     if (clean.length) out.set(chatKey,clean);
   }
@@ -59,17 +55,11 @@ function serializeAlerts(map) {
   const out = {};
   for (const [chatKey,list] of map) {
     if (!validChatKey(chatKey) || !Array.isArray(list)) continue;
-    const clean = list.slice(0,20).map(item => ({
-      symbol:String(item.symbol || '').toUpperCase(),
-      target:Number(item.target),
-      direction:item.direction,
-      createdAt:Number(item.createdAt)
-    })).filter(item =>
-      SYMBOL_RE.test(item.symbol) &&
-      Number.isFinite(item.target) && item.target > 0 &&
-      (item.direction === 'ABOVE' || item.direction === 'BELOW') &&
-      Number.isFinite(item.createdAt) && item.createdAt > 0
-    );
+    const clean=[];
+    for(const item of list.slice(0,50)){
+      const alert=sanitizeAlert(item);
+      if(alert) clean.push(alert);
+    }
     if (clean.length) out[chatKey] = clean;
   }
   return out;
@@ -90,7 +80,7 @@ export async function loadPersistentState(filePath) {
   try {
     const raw = await readFile(filePath,'utf8');
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.schemaVersion !== SCHEMA_VERSION) {
+    if (!parsed || ![LEGACY_SCHEMA_VERSION,SCHEMA_VERSION].includes(Number(parsed.schemaVersion))) {
       throw new Error(`unsupported state schema: ${parsed?.schemaVersion}`);
     }
     return {
