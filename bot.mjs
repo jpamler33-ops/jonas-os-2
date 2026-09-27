@@ -1435,6 +1435,90 @@ async function showChaos(chatId,scenario=null) {
   ].join('\n');
   return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
 }
+function shadowOrderLine(order) {
+  const s=shadowOrderSummary(order);
+  const fill=`${fmt(Number(s.fillRatio||0)*100,1)}%`;
+  const px=s.avgFillPrice?priceText(s.avgFillPrice):'—';
+  return `${s.id} · ${s.symbol.replace('USDT','/USDT')} · ${s.side} ${s.type} · ${s.status} · fill ${fill} · avg ${px}`;
+}
+
+function shadowOrderDetail(order) {
+  const s=shadowOrderSummary(order);
+  const lines=[
+    `🧾 TCX Shadow Order · ${s.symbol.replace('USDT','/USDT')}`,
+    '',
+    `ID: ${s.id}`,
+    `Intent: ${s.side} ${s.type} · ${fmt(s.notionalQuote,2)} USDT`,
+    ...(s.limitPrice?[`Limit: ${priceText(s.limitPrice)}`]:[]),
+    `Status: ${s.status}`,
+    `Fill: ${fmt(s.fillRatio*100,1)}% · avg ${s.avgFillPrice?priceText(s.avgFillPrice):'—'}`,
+    `Slippage vs arrival mid: ${Number.isFinite(s.slippageBps)?fmt(s.slippageBps,2)+' bps':'—'}`,
+    `Latency move: ${Number.isFinite(s.latencyMoveBps)?fmt(s.latencyMoveBps,2)+' bps':'—'}`,
+    `Fees (assumption): ${fmt(s.feesQuote,4)} USDT`,
+    ...(s.queueAheadBase!=null?[`Queue ahead proxy: ${fmt(s.queueAheadBase,8)} base · uncertainty ${order.queue?.uncertainty||'UNKNOWN'}`]:[]),
+    ...(order.depthExhausted?[`Visible L2 depth exhausted: YES · remaining intent was NOT fabricated as filled.`]:[]),
+    `Data quality: ${s.dataQuality}`,
+    '',
+    'MARKOUT / ADVERSE SELECTION',
+    ...['60000','300000','900000'].map(k=>{
+      const m=s.markouts?.[k];
+      const label=k==='60000'?'1m':k==='300000'?'5m':'15m';
+      return m?`• ${label}: signed ${fmt(m.signedMarkoutBps,2)} bps · adverse ${fmt(m.adverseSelectionBps,2)} bps`:`• ${label}: pending`;
+    }),
+    '',
+    'Execution adapter: NONE',
+    'Exchange order ID: NONE',
+    'Mode: SHADOW_ONLY'
+  ];
+  return lines.join('\n').slice(0,4096);
+}
+
+async function showOms(chatId) {
+  const counts={};
+  for(const o of shadowOrders) counts[o.status]=(counts[o.status]||0)+1;
+  const active=shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length;
+  const text=[
+    '🧾 TCX Shadow OMS + Microstructure Simulator',
+    '',
+    `Version: ${SHADOW_OMS_VERSION}`,
+    `Health: ${shadowOmsHealthy?'HEALTHY':'UNHEALTHY / OMS DISABLED'}`,
+    `Orders: ${shadowOrders.length} · active ${active}`,
+    `Filled: ${counts.FILLED||0} · partial ${counts.PARTIALLY_FILLED||0} · cancelled ${counts.CANCELLED||0}`,
+    '',
+    'ASSUMPTIONS',
+    `• default latency: ${shadowDefaultLatencyMs}ms`,
+    `• maker fee: ${shadowMakerFeeBps} bps`,
+    `• taker fee: ${shadowTakerFeeBps} bps`,
+    `• hidden queue buffer: ${fmt(shadowHiddenQueueBufferPct*100,1)}%`,
+    `• watcher: ${Math.round(shadowWatchMs/1000)}s`,
+    '',
+    'CAPABILITIES',
+    `• canExecuteLive: ${SHADOW_OMS_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `• exchangeOrderAdapter: ${SHADOW_OMS_CAPABILITIES.exchangeOrderAdapter?'YES':'NO'}`,
+    `• networkOrderSubmission: ${SHADOW_OMS_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    '',
+    'Market/marketable limit: observed L2 walk.',
+    'Passive limit: price-time queue proxy + observed aggTrades.',
+    'No real order submission exists in this runtime.'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showShadowOrders(chatId,symbol=null) {
+  const xs=shadowOrders
+    .filter(o=>!symbol||o.symbol===symbol)
+    .slice(-12)
+    .reverse();
+  const text=xs.length
+    ? ['🧾 TCX Shadow Orders','',...xs.map(shadowOrderLine),'','Nutze /shadowcancel ORDER_ID für aktive virtuelle Orders.','Mode: SHADOW_ONLY'].join('\n')
+    : '🧾 Keine passenden Shadow-Orders vorhanden.';
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showPlacedShadowOrder(chatId,order) {
+  return tg('sendMessage',{chat_id:chatId,text:shadowOrderDetail(order)});
+}
+
 async function showFabric(chatId) {
   const verification=verifyMarketEventChain(marketFabric.events);
   const s=marketFabricSummary(marketFabric);
