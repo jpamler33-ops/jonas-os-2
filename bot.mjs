@@ -2285,6 +2285,99 @@ async function alertWatcher() {
   }
 }
 
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
 async function episodeWatcher() {
   while(running) {
     let changed=false;
