@@ -2509,6 +2509,40 @@ async function handleCommand(msg) {
     }
     return true;
   }
+  if (command === "/sorstatus") {
+    const symbol=parts[1]?normalizeSymbol(parts[1]):"BTCUSDT";
+    if(parts[1] && !symbol){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /sorstatus BTC"});
+      return true;
+    }
+    try { await showSorStatus(chatId,symbol); }
+    catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'command.sorstatus',message:msg});
+      await tg("sendMessage",{chat_id:chatId,text:`SOR-Status gerade nicht verfügbar: ${msg}`.slice(0,4096)});
+    }
+    return true;
+  }
+
+  if (command === "/sor") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    const side=String(parts[2]||"").toUpperCase();
+    const notional=Number(String(parts[3]||"").replace(",","."));
+    const valid=symbol && ["BUY","SELL"].includes(side) && Number.isFinite(notional) && notional>0 && notional<=1_000_000_000;
+    if(!valid){
+      await tg("sendMessage",{chat_id:chatId,text:["Syntax:","/sor BTC BUY 100","/sor BTC SELL 100","","Counterfactual Shadow Route only. Keine echte Order."].join("\n")});
+      return true;
+    }
+    try {
+      await showSorRoute(chatId,{symbol,side,notionalQuote:notional});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'command.sor',message:msg});
+      recordOperation(observability,{name:"shadow_sor.route",ok:false,latencyMs:0,error:msg});
+      await tg("sendMessage",{chat_id:chatId,text:`Shadow SOR konnte nicht simuliert werden: ${msg}`.slice(0,4096)});
+    }
+    return true;
+  }
   if (command === "/release") {
     try { await showRelease(chatId); }
     catch(err){
