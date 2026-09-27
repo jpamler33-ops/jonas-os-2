@@ -89,7 +89,10 @@ test('institutional staged release set hashes forecast, science, admission and t
     'forecast-runtime/forecast/calibration.js',
     'science-runtime/empirical-support.mjs',
     'science-runtime/specification-multiverse.mjs',
-    'science-runtime/evidence-lineage-independence.mjs'
+    'science-runtime/evidence-lineage-independence.mjs',
+    'expansion-runtime/source-intelligence.mjs',
+    'expansion-runtime/event-impact-memory.mjs',
+    'expansion-runtime/liquidity-intelligence.mjs'
   ]){
     assert.ok(files.includes(required),required+' missing from institutional release identity');
   }
