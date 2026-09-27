@@ -697,3 +697,74 @@ Execution remains:
 ABSTAIN / SHADOW_ONLY
 canExecute = false
 ```
+
+
+## TCX Evidence Diagnostics v1
+
+TCX now keeps a persistent research-evidence history per market and exposes it directly in the Telegram market card:
+
+- `🧩 Evidence` — current disagreement map and evidence diagnostics
+- `📜 History` — recent persistent evidence snapshots
+- `/evidence BTC`
+- `/history BTC`
+
+The Disagreement Map keeps research layers separate instead of averaging incompatible quantities into a fake probability:
+
+- structure
+- multi-timeframe bias
+- order-book flow
+- independent witness network
+- episode/transition memory
+- MTL research engine
+- institutional safety state
+
+The Evidence Index is a bounded diagnostic score built from measured witness agreement, historical support, novelty, engine evidence strength, contradiction and research safety. It is explicitly:
+
+```text
+DERIVED_RESEARCH_DIAGNOSTIC_NOT_PROBABILITY
+```
+
+It is **not** a price probability, win probability or trading instruction.
+
+Evidence trend states:
+
+```text
+BASELINE
+RISING
+STABLE
+DECAYING
+CONFLICTED
+```
+
+Persistent storage defaults to:
+
+```text
+/data/tcx-evidence-history.json
+```
+
+The history writer serial-deduplicates unchanged states at short intervals and retains bounded per-symbol history.
+
+Execution remains:
+
+```text
+Action: ABSTAIN
+Execution: SHADOW_ONLY
+canExecute: false
+```
+
+## Multi-Venue Shadow Smart Order Router
+
+TCX also contains a separate **simulation-only** multi-venue Smart Order Router research layer.
+
+The router can inspect read-only market books from supported venues and simulate route allocation, venue quality, liquidity fragmentation and execution diagnostics. It does not expose live-exchange trading credentials or a live order path.
+
+Telegram commands and market-card entry points expose Shadow SOR route/status research where available.
+
+Hard boundary:
+
+```text
+LIVE_EXECUTION = DISABLED
+SHADOW_ONLY = TRUE
+```
+
+The Railway image, CI syntax checks and runtime release manifest include the Shadow SOR module so deployed runtime identity matches the source being tested.
