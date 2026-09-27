@@ -12,7 +12,11 @@ export const SHADOW_PORTFOLIO_CAPABILITIES=Object.freeze({
 });
 
 const EPS=1e-12;
-function finite(v,fallback=null){const n=Number(v);return Number.isFinite(n)?n:fallback;}
+function finite(v,fallback=null){
+  if(v===null||v===undefined||v==='') return fallback;
+  const n=Number(v);
+  return Number.isFinite(n)?n:fallback;
+}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 function round12(v){return Math.round(Number(v)*1e12)/1e12;}
 function deepFreeze(v){
