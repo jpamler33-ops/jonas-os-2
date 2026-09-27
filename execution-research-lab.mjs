@@ -177,6 +177,83 @@ export function temporalOosEvaluation(samples,{
   };
 }
 
+export function walkForwardExecutionEvaluation(samples,{
+  minTrain=30,
+  testWindow=10,
+  step=10,
+  purgeMs=0,
+  minTest=5
+}={}){
+  const xs=[...(samples||[])].sort((a,b)=>a.capturedAt-b.capturedAt);
+  const folds=[];
+  for(let start=minTrain;start<xs.length;start+=Math.max(1,step)){
+    const cutoff=xs[start]?.capturedAt;
+    if(!Number.isFinite(cutoff)) break;
+    const train=xs.slice(0,start).filter(x=>cutoff-x.capturedAt>purgeMs);
+    const rawTest=xs.slice(start,Math.min(xs.length,start+testWindow));
+    const test=rawTest.filter(x=>x.capturedAt-cutoff>=purgeMs);
+    if(train.length<minTrain||test.length<minTest) continue;
+    const stats=policyStats(test);
+    folds.push({
+      fold:folds.length+1,
+      cutoff,
+      trainN:train.length,
+      testN:test.length,
+      edgeMeanBps:stats.edgeVsBestSingle.mean,
+      edgeCi95:stats.edgeVsBestSingle,
+      positiveEdgeRate:stats.positiveEdgeRate,
+      fillRatioMean:stats.policyFillRatio.mean,
+      allInBpsMean:stats.policyAllInBps.mean
+    });
+  }
+  const edges=folds.map(x=>x.edgeMeanBps).filter(Number.isFinite);
+  return {
+    status:folds.length>=2?'WALK_FORWARD_AVAILABLE':'INSUFFICIENT_WALK_FORWARD_FOLDS',
+    folds:folds.length,
+    foldEdge:ci95(edges),
+    positiveFoldRate:edges.length?edges.filter(x=>x>0).length/edges.length:null,
+    worstFoldEdgeBps:edges.length?Math.min(...edges):null,
+    bestFoldEdgeBps:edges.length?Math.max(...edges):null,
+    details:folds
+  };
+}
+
+export function segmentExecutionBreakdown(samples,{minN=5}={}){
+  const specs=[
+    ['REGIME',x=>x.regime],
+    ['SIZE',x=>x.sizeBucket],
+    ['SIDE',x=>x.side],
+    ['MEMORY',x=>x.policy.memoryActive?'MEMORY_ACTIVE':'MEMORY_INACTIVE']
+  ];
+  const out={};
+  for(const [name,keyFn] of specs){
+    const groups=new Map();
+    for(const s of samples||[]){
+      const key=String(keyFn(s)||'UNKNOWN');
+      if(!groups.has(key)) groups.set(key,[]);
+      groups.get(key).push(s);
+    }
+    out[name]=[...groups.entries()]
+      .filter(([,rows])=>rows.length>=minN)
+      .map(([segment,rows])=>{
+        const stats=policyStats(rows);
+        return {
+          segment,
+          n:rows.length,
+          comparableN:stats.comparableN,
+          edgeMeanBps:stats.edgeVsBestSingle.mean,
+          edgeLoBps:stats.edgeVsBestSingle.lo,
+          edgeHiBps:stats.edgeVsBestSingle.hi,
+          allInBpsMean:stats.policyAllInBps.mean,
+          fillRatioMean:stats.policyFillRatio.mean,
+          positiveEdgeRate:stats.positiveEdgeRate
+        };
+      })
+      .sort((a,b)=>b.n-a.n||a.segment.localeCompare(b.segment));
+  }
+  return out;
+}
+
 function correlation(xs,ys){
   const pairs=xs.map((x,i)=>[x,ys[i]]).filter(([x,y])=>Number.isFinite(x)&&Number.isFinite(y));
   if(pairs.length<3) return null;
@@ -301,8 +378,10 @@ export function executionResearchReport(records,{
   const samples=buildExecutionResearchSamples(rows);
   const inSample=policyStats(samples);
   const oos=temporalOosEvaluation(samples);
+  const walkForward=walkForwardExecutionEvaluation(samples);
   const calibration=toxicityCalibration(rows);
   const drift=executionDrift(samples);
+  const segments=segmentExecutionBreakdown(samples);
 
   return {
     version:EXECUTION_RESEARCH_LAB_VERSION,
@@ -312,8 +391,10 @@ export function executionResearchReport(records,{
     venueObservations:rows.length,
     inSample,
     oos,
+    walkForward,
     calibration,
     drift,
+    segments,
     epistemic:{
       objective:'EXECUTION_QUALITY_NOT_PNL',
       routeOutcomes:'COUNTERFACTUAL_SHADOW_SIMULATION',
