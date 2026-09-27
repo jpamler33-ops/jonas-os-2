@@ -636,6 +636,8 @@ function helpText() {
     '/fabric – Event-Sourced Market Data Fabric',
     '/replay BTC [ISO-Zeit] – Point-in-Time Replay',
     '/release – Runtime Release & Configuration Registry',
+    '/obs – Institutional Observability / SLOs',
+    '/chaos [SCENARIO] – synthetischer Fail-Closed-Test',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
