@@ -88,3 +88,30 @@ test('outcome remains unknown when immediate future bars are missing',()=>{
   ];
   assert.equal(computeOutcome(e,candles,3),null);
 });
+
+
+test('matured outcome records actual observation time',()=>{
+  const e=baseEpisode();
+  const candles=[
+    {closeTime:1_300_000,closed:true,h:102,l:99,c:101},
+    {closeTime:1_600_000,closed:true,h:104,l:98,c:103},
+    {closeTime:1_900_000,closed:true,h:105,l:97,c:104}
+  ];
+  const observedAt=2_000_000;
+  assert.equal(matureEpisode(e,candles,{observedAt}),true);
+  assert.equal(e.outcomes['3'].maturedAt,1_900_000);
+  assert.equal(e.outcomes['3'].observedAt,observedAt);
+});
+
+test('episode outcome cannot be observed before it matures',()=>{
+  const e=baseEpisode();
+  const candles=[
+    {closeTime:1_300_000,closed:true,h:102,l:99,c:101},
+    {closeTime:1_600_000,closed:true,h:104,l:98,c:103},
+    {closeTime:1_900_000,closed:true,h:105,l:97,c:104}
+  ];
+  assert.throws(
+    ()=>matureEpisode(e,candles,{observedAt:1_800_000}),
+    /PIT violation/
+  );
+});
