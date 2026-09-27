@@ -46,7 +46,7 @@ import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFl
 import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
-import { buildResearchDependencyGraph, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
+import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -3293,11 +3293,13 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   }
   const researchGovernanceView=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});
+  const blockedResearchSourceKeys=quarantinedResearchSourceKeys(researchDataGovernance);
   const researchPlaneView=researchFeaturesAsOf(researchDataPlane,{
     streamKey:symbol,
     asOf:Number(state.availableAt),
     minCompleteness:.5,
-    requireGoverned:true
+    requireGoverned:true,
+    blockedSourceKeys:blockedResearchSourceKeys
   });
   const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
   const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
@@ -3458,6 +3460,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         tailHash:researchPlaneView.tailHash,
         featureCount:researchPlaneExtraFeatures.length,
         recordsConsidered:researchPlaneView.recordsConsidered,
+        blockedSourceCount:blockedResearchSourceKeys.length,
         epistemic:'POINT_IN_TIME_RESEARCH_FEATURES'
       }]:[]),
       {type:'RESEARCH_DATA_GOVERNANCE',version:RESEARCH_DATA_GOVERNANCE_VERSION,fingerprint:researchGovernanceView.fingerprint,epistemic:'POINT_IN_TIME_DATA_POLICY'},
@@ -3504,11 +3507,15 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   };
 
+  const researchAdmissionValidity=bindResearchDependencyGateToValidity(
+    forecastResearchValidity(evidenceAppend),
+    researchDependencyGraph
+  );
   const issued=issueInstitutionalForecast(forecastRuntime,{
     input,
     scientificValidity:scienceCore.validity,
     dataSafety:safety,
-    researchValidity:forecastResearchValidity(evidenceAppend),
+    researchValidity:researchAdmissionValidity,
     traceContext,
     generatedAt:Math.max(Date.now(),input.asOf)
   });
@@ -3561,6 +3568,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
       researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,
       researchGovernanceIssueCount:Number(researchGovernanceView.statuses?.QUARANTINED||0),
+      researchGovernanceBlockedSources:blockedResearchSourceKeys.length,
       researchGovernanceFingerprint:researchGovernanceView.fingerprint,
       researchDependencyGate:researchDependencyGraph?.gate||'UNAVAILABLE',
       researchDependencyCoverage:Number(researchDependencyGraph?.impact?.coverage||0),
@@ -4414,6 +4422,7 @@ async function autoLearnForecastWatcher() {
               researchDataPlaneFeatures:result.researchDataPlaneFeatures||0,
               researchDataPlaneAppendOk:result.researchDataPlaneAppendOk===true,
               researchGovernanceIssueCount:result.researchGovernanceIssueCount||0,
+              researchGovernanceBlockedSources:result.researchGovernanceBlockedSources||0,
               researchGovernanceFingerprint:result.researchGovernanceFingerprint||null,
               researchDependencyGate:result.researchDependencyGate||'UNAVAILABLE',
               researchDependencyCoverage:result.researchDependencyCoverage||0,
