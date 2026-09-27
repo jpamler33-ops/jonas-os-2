@@ -426,6 +426,12 @@ export function researchFeaturesAsOf(plane,{
     }
   }
   const features=[...found.values()].sort((a,b)=>a.id.localeCompare(b.id));
+  let earliestRetainedAvailableAt=null;
+  for(const record of plane.records){
+    const at=finite(record?.availableAt);
+    if(at==null) continue;
+    earliestRetainedAvailableAt=earliestRetainedAvailableAt==null?at:Math.min(earliestRetainedAvailableAt,at);
+  }
   return Object.freeze({
     ok:true,
     streamKey:sk,
@@ -436,7 +442,7 @@ export function researchFeaturesAsOf(plane,{
     tailHash:String(plane.tailHash),
     inMemoryRecords:plane.records.length,
     totalRecords:Number(plane.totalRecords),
-    earliestRetainedAvailableAt:plane.records.length?Math.min(...plane.records.map(x=>Number(x.availableAt)||Infinity)):null
+    earliestRetainedAvailableAt
   });
 }
 
