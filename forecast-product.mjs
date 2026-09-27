@@ -85,63 +85,96 @@ export function renderInstitutionalForecastCard(issuance,{
     ?auditBound
     :(typeof auditHealthy==='boolean'?auditHealthy:true);
   const f=issuance.forecast;
+  const horizons=Array.isArray(f.horizons)?f.horizons:[];
+  const directionWord=d=>{
+    const x=String(d||'UNKNOWN').toUpperCase();
+    if(x==='UP') return 'eher nach oben';
+    if(x==='DOWN') return 'eher nach unten';
+    if(x==='FLAT'||x==='SIDEWAYS') return 'eher seitwärts';
+    return 'noch keine klare Richtung';
+  };
+  const gateWord=g=>{
+    const x=String(g||'UNKNOWN').toUpperCase();
+    if(x==='PASS'||x==='VALID') return 'ausreichend geprüft';
+    if(x==='CAUTION') return 'mit Vorsicht';
+    if(x==='INSUFFICIENT') return 'noch zu wenig Belege';
+    if(x==='ABSTAIN'||x==='SAFE_STOP') return 'keine belastbare Aussage';
+    return x.toLowerCase();
+  };
+  const admitted=auditOk&&String(issuance.admission.gate||'').toUpperCase()==='PASS';
+  const lead=horizons[0]||null;
   const lines=[
-    '🔮 TCX FORECAST INTELLIGENCE · '+String(issuance.symbol).replace('USDT','/USDT'),
+    '🔮 TCX FORECAST · '+String(issuance.symbol).replace('USDT','/USDT'),
     '',
-    'Admission: '+(auditOk?issuance.admission.gate:'ABSTAIN')+' · '+(auditOk?issuance.admission.researchDisposition:'ABSTAIN'),
-    'Audit: '+(auditOk?'BOUND':'FAILED → ABSTAIN'),
-    'Science: '+f.scienceGate+' · Forecast: '+f.overallGate,
-    'Research validity: '+String(issuance.trace?.validity?.state||'UNKNOWN'),
-    'Data safety: '+String(issuance.trace?.safety?.state||'UNKNOWN'),
+    'KURZ GESAGT',
+    lead
+      ?'Für '+lead.horizonId+' sieht TCX den Markt '+directionWord(lead.direction)+'.'
+      :'TCX hat aktuell noch keine belastbare Richtung.',
+    admitted
+      ?'Der Forecast hat die institutionellen Prüfungen bestanden.'
+      :'TCX hält sich aktuell zurück: '+gateWord(issuance.admission.gate)+'.',
     ''
   ];
 
-  for(const h of f.horizons){
-    const display=auditOk&&issuance.probabilityDisplayAllowed===true&&h.display?.probabilityDisplayAllowed===true;
+  if(horizons.length){
+    lines.push('ZEITHORIZONTE');
+    for(const h of horizons){
+      const display=auditOk&&issuance.probabilityDisplayAllowed===true&&h.display?.probabilityDisplayAllowed===true;
+      lines.push(
+        '• '+h.horizonId+': '+directionWord(h.direction),
+        '  Erwartete Bewegung: '+signedPct(h.expectedReturn)+
+          ' · realistischer Bereich: '+signedPct(h.interval?.q10)+' bis '+signedPct(h.interval?.q90),
+        display
+          ?'  Chancenmodell: hoch '+pct(h.display.probabilities.up,0)+
+            ' · seitwärts '+pct(h.display.probabilities.flat,0)+
+            ' · runter '+pct(h.display.probabilities.down,0)
+          :'  Wahrscheinlichkeit: noch nicht freigegeben',
+        '  Grundlage: '+Number(h.support?.analogCount||0)+' ähnliche Fälle'+
+          ' · Kalibrierung: '+String(h.calibration?.status||'UNKNOWN'),
+        ''
+      );
+    }
+  }
+
+  lines.push(
+    'WARUM TCX SO URTEILT',
+    '• Daten: '+gateWord(issuance.trace?.safety?.state==='NORMAL'?'PASS':issuance.trace?.safety?.state),
+    '• Wissenschaftliche Prüfung: '+gateWord(f.scienceGate),
+    '• Forecast-Prüfung: '+gateWord(f.overallGate),
+    '• Forschungsstand: '+String(issuance.trace?.validity?.state||'UNKNOWN'),
+    '• Audit: '+(auditOk?'vollständig gebunden':'FEHLER → Forecast gesperrt')
+  );
+
+  if(f.path){
     lines.push(
-      h.horizonId+' · '+h.direction+' · gate '+h.gate,
-      'μ '+signedPct(h.expectedReturn)+' · q10..q90 '+signedPct(h.interval?.q10)+' .. '+signedPct(h.interval?.q90),
-      display
-        ?'P↑ '+pct(h.display.probabilities.up,0)+' · P→ '+pct(h.display.probabilities.flat,0)+' · P↓ '+pct(h.display.probabilities.down,0)
-        :'Probability: SUPPRESSED · '+(
-          !auditOk
-            ?'AUDIT_BINDING_FAILED'
-            :reasons(h.display?.suppressionReasons,2).join(', ')||'INSTITUTIONAL_ADMISSION_GATE'
-        ),
-      'Support n='+Number(h.support?.analogCount||0)+' · ESS '+(finite(h.support?.effectiveSamples)?.toFixed(1)??'—')+
-        ' · calibration '+String(h.calibration?.status||'UNKNOWN'),
-      ''
+      '• Preisweg: '+String(f.path.coherence||'UNKNOWN')+
+      (f.path.dominantArchetype?' · Muster '+String(f.path.dominantArchetype):'')
     );
   }
 
   if(Array.isArray(scienceGuardLines)&&scienceGuardLines.length){
-    lines.push('SCIENCE GUARDS',...scienceGuardLines.slice(0,8).map(x=>'• '+String(x)),'');
+    lines.push('','DETAILCHECKS',...scienceGuardLines.slice(0,6).map(x=>'• '+String(x)));
   }
 
-  if(f.path){
-    lines.push(
-      'PATH',
-      'Coherence: '+String(f.path.coherence||'UNKNOWN')+
-        ' · archetype '+String(f.path.dominantArchetype||'UNKNOWN'),
-      ''
-    );
+  lines.push('','WAS DAS FÜR DICH BEDEUTET');
+  if(!auditOk){
+    lines.push('Der Audit ist nicht sauber. TCX verwirft die Aussage deshalb vollständig.');
+  }else if(!admitted){
+    lines.push('Die Richtung ist nur ein Forschungssignal. Die Belege reichen noch nicht für eine belastbare Wahrscheinlichkeit.');
+  }else{
+    lines.push('Das Signal ist für Forschung zugelassen. Es bleibt eine Prognose mit Unsicherheit, keine sichere Kursvorhersage.');
   }
 
   lines.push(
-    'TRACE',
-    'Trace '+String(issuance.traceId||'').slice(0,16)+'…',
-    'Issuance '+String(issuance.issuanceId||'').slice(0,16)+'…',
-    'asOf '+new Date(Number(issuance.asOf)).toISOString(),
-    'age '+Math.max(0,Math.round((Number(now)-Number(issuance.generatedAt))/1000))+'s',
+    '',
+    'SYSTEM',
+    'Trace '+String(issuance.traceId||'').slice(0,12)+'… · '+Math.max(0,Math.round((Number(now)-Number(issuance.generatedAt))/1000))+'s alt',
     ...(runtimeSummary?[
-      'Runtime history '+Number(runtimeSummary.historyCases||0)+
-      ' · pending '+Number(runtimeSummary.pendingOutcomes||0)+
-      ' · tracked '+Number(runtimeSummary.trackedForecasts||0)
+      'Lernbasis: '+Number(runtimeSummary.historyCases||0)+' ausgewertete Fälle'+
+      ' · '+Number(runtimeSummary.pendingOutcomes||0)+' offen'
     ]:[]),
     '',
-    'Probabilities werden nur angezeigt, wenn Forecast- und Science-Gates sowie Kalibrierung dies erlauben.',
-    ...(auditOk?[]:['Audit binding: FAILED → display fail-closed']),
-    'Action: ABSTAIN · Execution: SHADOW_ONLY'
+    'Modus: SHADOW_ONLY · Aktion: ABSTAIN'
   );
 
   return lines.join('\n').slice(0,4096);
