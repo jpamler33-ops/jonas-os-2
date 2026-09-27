@@ -94,6 +94,13 @@ test('repeated operational SLO breaches degrade then auto-quarantine a source',(
     decisions.push(governed.governance.decision);
   }
   assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
+  const probe=governResearchSnapshot(createResearchDataGovernanceState({createdAt:2_000_000}),derivativeSnapshot({
+    eventTime:1_000_000,
+    availableAt:2_000_000,
+    ingestedAt:2_000_100,
+    sourceEventId:'late-usability'
+  }),{evaluatedAt:2_100_000});
+  assert.equal(probe.governance.usableForResearch,false);
   assert.deepEqual(quarantinedResearchSourceKeys(state),['DERIVATIVES:BINANCE_OKX_PUBLIC_DERIVATIVES']);
 });
 
@@ -146,6 +153,7 @@ test('semantic value shift is flagged for review but does not auto-quarantine th
   assert.equal(shifted.governance.decision,'DEGRADED');
   assert.equal(shifted.governance.sourceStatus,'HEALTHY');
   assert.equal(shifted.governance.semanticDrift,'REVIEW');
+  assert.equal(shifted.governance.usableForResearch,true);
   assert.ok(shifted.governance.reasons.some(x=>x.code==='SEMANTIC_DISTRIBUTION_SHIFT_REVIEW'));
 });
 
