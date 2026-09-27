@@ -290,7 +290,7 @@ export function governResearchSnapshot(state,snapshot,{
   return Object.freeze({...snapshot,governance});
 }
 
-export function refreshResearchSourceFreshness(state,{now=Date.now()}={}){
+export function refreshResearchSourceFreshness(state,{now=Date.now(),monitorStartedAt=null}={}){
   if(!state||state.version!==RESEARCH_DATA_GOVERNANCE_VERSION) throw new Error('research governance state invalid');
   const t=Number(now);
   const changes=[];
@@ -298,7 +298,7 @@ export function refreshResearchSourceFreshness(state,{now=Date.now()}={}){
     const key=sourceContractKey(contract.domain,contract.source);
     const src=state.sources[key];
     if(!src||!Number.isFinite(Number(src.lastSeenAt))) continue;
-    const silenceMs=Math.max(0,t-Number(src.lastSeenAt));
+    const effectiveLastSeen=Number.isFinite(Number(monitorStartedAt))?Math.max(Number(src.lastSeenAt),Number(monitorStartedAt)):Number(src.lastSeenAt);\n    const silenceMs=Math.max(0,t-effectiveLastSeen);
     let next=src.status;
     let reason=null;
     if(silenceMs>2*contract.maxSilenceMs){
