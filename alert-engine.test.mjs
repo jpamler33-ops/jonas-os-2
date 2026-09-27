@@ -80,3 +80,23 @@ test("format and context requirements are deterministic",()=>{
   assert.deepEqual([...requiredContext(a)].sort(),["market","memory"]);
   assert.ok(sanitizeAlert(a));
 });
+
+
+test("threshold alert rearms only after leaving matched state",()=>{
+  let a=createAlert({
+    symbol:"BTCUSDT",type:"WITNESS_AGREEMENT",createdAt:1000,cooldownMs:0,
+    conditions:[{path:"witness.agreement",op:"GTE",value:0.75}]
+  });
+  let r=evaluateAlert(a,{witness:{agreement:0.80}},{now:2000});
+  assert.equal(r.triggered,true);
+  a=r.alert;
+  r=evaluateAlert(a,{witness:{agreement:0.82}},{now:3000});
+  assert.equal(r.triggered,false);
+  assert.equal(r.reason,"DEDUPED");
+  a=r.alert;
+  r=evaluateAlert(a,{witness:{agreement:0.60}},{now:4000});
+  assert.equal(r.triggered,false);
+  a=r.alert;
+  r=evaluateAlert(a,{witness:{agreement:0.78}},{now:5000});
+  assert.equal(r.triggered,true);
+});
