@@ -25,6 +25,7 @@ import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
   markShadowPosition, closeShadowPosition, shadowPortfolioSummary,
+  shadowPortfolioPeriodStats, shadowPortfolioStatistics,
   SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
 } from './shadow-portfolio-ledger.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -117,8 +118,13 @@ const shadowTakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_TAKER_FEE_BP
 const shadowHiddenQueueBufferPct = Math.max(0, Math.min(2, Number(process.env.TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT || 0.15)));
 const autoShadowTradingEnabled = String(process.env.TCX_AUTO_SHADOW_TRADING_ENABLED || '1') !== '0';
 const autoShadowNotionalQuote = Math.max(1, Number(process.env.TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 100));
-const autoShadowCooldownMs = Math.max(5*60_000, Number(process.env.TCX_AUTO_SHADOW_COOLDOWN_MS || 30*60_000));
-const autoShadowMaxPerSymbolPerDay = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_PER_SYMBOL_DAY || 8) || 8));
+const autoShadowCooldownMs = Math.max(60_000, Number(process.env.TCX_AUTO_SHADOW_COOLDOWN_MS || 5*60_000));
+const autoShadowMaxPerSymbolPerDay = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_PER_SYMBOL_DAY || 12) || 12));
+const autoShadowMaxOpenPerSymbol = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_OPEN_PER_SYMBOL || 3) || 3));
+const autoShadowMaxOpenTotal = Math.max(autoShadowMaxOpenPerSymbol, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_OPEN_TOTAL || 20) || 20));
+const autoShadowMemecoinMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MEME_MIN_EXPECTED_RETURN || 0.0035));
+const autoShadowMemecoinMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MEME_MIN_DIRECTIONAL_PROB || 0.60)));
+const autoShadowMemecoinMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MEME_MIN_PROB_EDGE || 0.12)));
 const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MIN_EXPECTED_RETURN || 0.002));
 const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
@@ -135,15 +141,21 @@ const vqmMinToxicitySamples = Math.max(10, Number(process.env.TCX_VQM_MIN_TOXICI
 const vqmHalfLifeDays = Math.max(1, Number(process.env.TCX_VQM_HALF_LIFE_DAYS || 30));
 const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').split(',').map(x => x.trim()).filter(Boolean));
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
-  'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT')
+  'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
-const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT')
+const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
   .split(',').map(x=>x.trim().toUpperCase()).filter(x=>requestedSymbols.includes(x));
+const MEMECOIN_CEX_SYMBOLS=new Set(
+  (process.env.TCX_MEMECOIN_CEX_SYMBOLS||'DOGEUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
+    .split(',').map(x=>x.trim().toUpperCase()).filter(Boolean)
+);
 
 const MARKET_META = {
   BTCUSDT:['₿','BTC'], ETHUSDT:['Ξ','ETH'], SOLUSDT:['◎','SOL'], BNBUSDT:['🟡','BNB'],
   XRPUSDT:['✕','XRP'], DOGEUSDT:['Ð','DOGE'], ADAUSDT:['₳','ADA'], LINKUSDT:['⬡','LINK'],
-  AVAXUSDT:['🔺','AVAX'], DOTUSDT:['●','DOT'], LTCUSDT:['Ł','LTC'], TRXUSDT:['◆','TRX']
+  AVAXUSDT:['🔺','AVAX'], DOTUSDT:['●','DOT'], LTCUSDT:['Ł','LTC'], TRXUSDT:['◆','TRX'],
+  PEPEUSDT:['🐸','PEPE'], SHIBUSDT:['🐕','SHIB'], BONKUSDT:['🦴','BONK'],
+  WIFUSDT:['🎩','WIF'], FLOKIUSDT:['🐕','FLOKI']
 };
 
 const markets = requestedSymbols.map(symbol => ({
@@ -769,6 +781,10 @@ function symbolIcon(symbol) {
   return MARKET_META[symbol]?.[0] || '•';
 }
 
+function assetClassForSymbol(symbol){
+  return MEMECOIN_CEX_SYMBOLS.has(String(symbol).toUpperCase())?'MEME':'CORE';
+}
+
 async function witnessState(symbol,primarySnapshot,{maxAgeMs=5000}={}) {
   const cached=witnessCache.get(symbol);
   const now=Date.now();
@@ -1080,12 +1096,14 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   if(!autoShadowTradingEnabled){
     return {placed:false,eligible:false,reason:'AUTO_SHADOW_DISABLED',execution:'SHADOW_ONLY'};
   }
+  const assetClass=assetClassForSymbol(issuance?.symbol);
+  const isMeme=assetClass==='MEME';
   const decision=deriveAutonomousShadowTrade(issuance,{
     now,
     notionalQuote:autoShadowNotionalQuote,
-    minExpectedReturn:autoShadowMinExpectedReturn,
-    minDirectionalProbability:autoShadowMinDirectionalProbability,
-    minProbabilityEdge:autoShadowMinProbabilityEdge
+    minExpectedReturn:isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn,
+    minDirectionalProbability:isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability,
+    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
   });
   if(!decision.eligible) return {...decision,placed:false};
   if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy){
@@ -1094,15 +1112,24 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   if(shadowOrders.some(o=>o?.strategyMeta?.decisionKey===decision.decisionKey)){
     return {...decision,placed:false,reason:'DECISION_ALREADY_TRADED'};
   }
-  if((shadowPortfolioLedger?.positions||[]).some(p=>p.status==='OPEN'&&p.symbol===decision.symbol)){
-    return {...decision,placed:false,reason:'OPEN_POSITION_EXISTS'};
+  const openAll=(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN');
+  const openForSymbol=openAll.filter(p=>p.symbol===decision.symbol);
+  if(openAll.length>=autoShadowMaxOpenTotal){
+    return {...decision,placed:false,reason:'GLOBAL_OPEN_POSITION_CAP'};
+  }
+  if(openForSymbol.length>=autoShadowMaxOpenPerSymbol){
+    return {...decision,placed:false,reason:'SYMBOL_OPEN_POSITION_CAP'};
   }
 
   const prior=shadowOrders
     .filter(o=>o?.strategyMeta?.strategy===AUTONOMOUS_SHADOW_TRADER_VERSION&&String(o?.strategyMeta?.role||'ENTRY').toUpperCase()==='ENTRY'&&o.symbol===decision.symbol)
     .sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
-  if(prior.length&&now-Number(prior[0].createdAt||0)<autoShadowCooldownMs){
-    return {...decision,placed:false,reason:'SYMBOL_COOLDOWN'};
+  const sameLanePrior=prior.filter(o=>
+    String(o?.strategyMeta?.horizonId||'')===String(decision.horizonId||'')&&
+    String(o?.side||'').toUpperCase()===String(decision.side||'').toUpperCase()
+  );
+  if(sameLanePrior.length&&now-Number(sameLanePrior[0].createdAt||0)<autoShadowCooldownMs){
+    return {...decision,placed:false,reason:'STRATEGY_LANE_COOLDOWN'};
   }
 
   const dayStart=new Date(now);
@@ -1120,6 +1147,8 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
       role:'ENTRY',
+      assetClass,
+      strategyLane:[decision.symbol,decision.horizonId,decision.side].join(':'),
       decisionKey:decision.decisionKey,
       issuanceId:decision.issuanceId,
       forecastFingerprint:decision.forecastFingerprint,
@@ -1141,6 +1170,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     expectedReturn:decision.expectedReturn,
     directionalProbability:decision.directionalProbability,
     admissionGate:decision.admissionGate,
+    assetClass,
+    openForSymbolBefore:openForSymbol.length,
+    openTotalBefore:openAll.length,
     orderId:order.id,
     execution:'SHADOW_ONLY'
   }));
@@ -1406,7 +1438,8 @@ function helpText() {
     'PROFI-FUNKTIONEN',
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
-    '/portfolio · /oms · /sorstatus · /venuequality · /executionlab','',
+    '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats',
+    '/oms · /sorstatus · /venuequality · /executionlab','',
     'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
   ].join('\n');
 }
@@ -1844,6 +1877,10 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='TRENDS') return showTrendContext(chatId,messageId);
   if(section==='PERFORMANCE') return showLearningCenter(chatId,messageId);
   if(section==='PORTFOLIO') return showShadowPortfolio(chatId,messageId);
+  if(section==='STATS_DAY') return showShadowTradeStats(chatId,messageId,'DAY');
+  if(section==='STATS_WEEK') return showShadowTradeStats(chatId,messageId,'WEEK');
+  if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
+  if(section==='STATS_ALL') return showShadowTradeStats(chatId,messageId,'ALL');
 
   let text='';
   if(section==='ALERTS') {
@@ -1893,6 +1930,8 @@ async function showHomeSection(chatId,messageId,section) {
       'Marktstimmung: 🟢 Live-Provider eingebaut',
       `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
       `Auto-Shadow-Trading: ${autoShadowTradingEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).openPositions} offene Positionen`,
+      `Parallel-Limit: ${autoShadowMaxOpenTotal} gesamt · ${autoShadowMaxOpenPerSymbol} je Coin · Cooldown ${Math.round(autoShadowCooldownMs/60000)} Min./Lane`,
+      `Memecoin-AutoLearn: ${[...MEMECOIN_CEX_SYMBOLS].filter(x=>autoLearnSymbols.includes(x)).length} liquide CEX-Memecoins · strengere Entry-Gates`,
       `Shadow-Portfolio: ${shadowPortfolioHealthy?'🟢':'🟡'} · Equity ${fmt(shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).equityQuote,2)} USDT`,
       `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
       `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
@@ -2594,6 +2633,52 @@ function shadowOrderDetail(order) {
   return lines.join('\n').slice(0,4096);
 }
 
+async function showShadowTradeStats(chatId,messageId=null,period='DAY'){
+  const p=String(period||'DAY').toUpperCase();
+  const stats=shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:p,asOf:Date.now()});
+  const all=shadowPortfolioStatistics(shadowPortfolioLedger,{asOf:Date.now()});
+  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
+  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
+  const pf=stats.profitFactor==null?'—':fmt(stats.profitFactor,2);
+  const meme=stats.byAssetClass?.MEME||null;
+  const core=stats.byAssetClass?.CORE||null;
+  const topSymbols=Object.entries(stats.bySymbol||{})
+    .sort((a,b)=>Number(b[1].realizedPnlQuote||0)-Number(a[1].realizedPnlQuote||0))
+    .slice(0,5);
+  const lines=[
+    '📈 TCX TRADE-STATISTIK · '+stats.label,'',
+    'ERGEBNIS',
+    'Trades: '+stats.trades+' · Entries: '+stats.entries,
+    'Gewonnen / verloren / flat: '+stats.wins+' / '+stats.losses+' / '+stats.breakeven,
+    'Winrate: '+pct(stats.winRate),
+    'PnL: '+money(stats.realizedPnlQuote),
+    'Profit Factor: '+pf,
+    'Ø PnL pro Trade: '+money(stats.expectancyQuote),
+    'Ø Gewinn: '+money(stats.avgWinQuote)+' · Ø Verlust: '+(stats.avgLossQuote==null?'—':'-'+fmt(stats.avgLossQuote,2)+' USDT'),'',
+    'ASSET-KLASSEN',
+    'Core: '+(core?core.trades+' Trades · '+money(core.realizedPnlQuote):'keine abgeschlossenen Trades'),
+    'Memecoins: '+(meme?meme.trades+' Trades · '+money(meme.realizedPnlQuote):'keine abgeschlossenen Trades'),'',
+    'TOP COINS',
+    ...(topSymbols.length?topSymbols.map(([symbol,x])=>'• '+symbolLabel(symbol)+' · '+x.trades+' Trades · '+money(x.realizedPnlQuote)):['• noch keine abgeschlossenen Trades']),
+    '',
+    ...(stats.bestTrade?['Bester Trade: '+symbolLabel(stats.bestTrade.symbol)+' · '+money(stats.bestTrade.pnlQuote)]:[]),
+    ...(stats.worstTrade?['Schlechtester Trade: '+symbolLabel(stats.worstTrade.symbol)+' · '+money(stats.worstTrade.pnlQuote)]:[]),
+    '',
+    'SCHNELLÜBERSICHT',
+    'Heute '+money(all.DAY.realizedPnlQuote)+' · Woche '+money(all.WEEK.realizedPnlQuote),
+    'Monat '+money(all.MONTH.realizedPnlQuote)+' · Gesamt '+money(all.ALL.realizedPnlQuote),
+    '',
+    'Mode: SHADOW_ONLY'
+  ];
+  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
+    [{text:'Heute',callback_data:'home:stats_day'},{text:'Woche',callback_data:'home:stats_week'}],
+    [{text:'Monat',callback_data:'home:stats_month'},{text:'Gesamt',callback_data:'home:stats_all'}],
+    [{text:'💼 Portfolio',callback_data:'home:portfolio'},{text:'🏠 Start',callback_data:'home'}]
+  ]}};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
 async function showShadowPortfolio(chatId,messageId=null){
   const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});
   if(reconciled.changed){
@@ -2641,8 +2726,8 @@ async function showShadowPortfolio(chatId,messageId=null){
     'Mode: SHADOW_ONLY · canExecuteLive: NO'
   );
   const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
-    [{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],
-    [{text:'🏠 Start',callback_data:'home'}]
+    [{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
+    [{text:'🧪 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Start',callback_data:'home'}]
   ]}};
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
   return tg('sendMessage',payload);
@@ -3873,6 +3958,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showChaos,
   showOms,
   showShadowPortfolio,
+  showShadowTradeStats,
   showExecutionResearch,
   showVenueQuality,
   showSorStatus,
