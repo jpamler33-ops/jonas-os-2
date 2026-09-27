@@ -15,8 +15,8 @@ const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS || 'BTCUSDT,ETHUSDT,S
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
 
 const MARKET_META = {
-  BTCUSDT: ['₿','BTC'], ETHUSDT: ['Ξ','ETH'], SOLUSDT: ['◎','SOL'], BNBUSDT: ['BNB','BNB'],
-  XRPUSDT: ['XRP','XRP'], DOGEUSDT: ['DOGE','DOGE'], ADAUSDT: ['ADA','ADA'], LINKUSDT: ['LINK','LINK']
+  BTCUSDT: ['₿','BTC'], ETHUSDT: ['Ξ','ETH'], SOLUSDT: ['◎','SOL'], BNBUSDT: ['🟡','BNB'],
+  XRPUSDT: ['✕','XRP'], DOGEUSDT: ['Ð','DOGE'], ADAUSDT: ['₳','ADA'], LINKUSDT: ['⬡','LINK']
 };
 const markets = requestedSymbols.map(symbol => ({ symbol, icon: MARKET_META[symbol]?.[0] || '•', label: MARKET_META[symbol]?.[1] || symbol.replace('USDT','') }));
 const bySymbol = new Map(markets.map(m => [m.symbol, m]));
