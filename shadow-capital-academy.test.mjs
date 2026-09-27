@@ -50,7 +50,7 @@ test('new academy starts unranked with bootcamp risk limits',()=>{
   const a=evaluateShadowCapitalAcademy(l,{asOf:Date.UTC(2026,8,27,12),timeZone:'Europe/Berlin'});
   assert.equal(a.achievedLevel,-1);
   assert.equal(a.activeStage,'BOOTCAMP');
-  assert.equal(a.riskPolicy.maxOpenTotal,4);
+  assert.equal(a.riskPolicy.maxOpenTotal,6);
   assert.equal(a.guard.coreAllowed,true);
   assert.equal(verifyShadowCapitalAcademy(a).ok,true);
 });
