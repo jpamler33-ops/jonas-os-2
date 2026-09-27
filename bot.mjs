@@ -10,6 +10,8 @@ import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessRe
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
+import { createObservability, recordProviderCall, recordOperation, recordSafety, recordResearchTelemetry, recordError, observabilitySnapshot, deriveSloHealth, OBSERVABILITY_VERSION } from './observability.mjs';
+import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -46,6 +48,7 @@ const markets = requestedSymbols.map(symbol => ({
 
 const sessions = new Map();
 const witnessCache = new Map();
+const observability = createObservability({sampleLimit:500});
 const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
 const loadedState = await loadPersistentState(stateFile);
 const favorites = loadedState.favorites;
@@ -88,7 +91,9 @@ try {
       witnessNetwork:'IWN_V1',
       marketDataFabric:MARKET_DATA_FABRIC_VERSION,
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
-      releaseRegistry:RELEASE_REGISTRY_VERSION
+      releaseRegistry:RELEASE_REGISTRY_VERSION,
+      observability:OBSERVABILITY_VERSION,
+      chaosEngineering:CHAOS_ENGINEERING_VERSION
     }
   });
   if(releaseRegistry.healthy){
