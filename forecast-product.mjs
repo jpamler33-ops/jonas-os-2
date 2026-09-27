@@ -76,13 +76,13 @@ export function deriveForecastRuntimeQuality({
 export function renderInstitutionalForecastCard(issuance,{
   runtimeSummary=null,
   scienceGuardLines=[],
-  auditOk=null,
+  auditBound=null,
   auditHealthy=null,
   now=Date.now()
 }={}){
   if(!issuance?.forecast||!issuance?.admission) throw new Error('institutional issuance required');
-  const auditOk=typeof auditOk==='boolean'
-    ?auditOk
+  const auditOk=typeof auditBound==='boolean'
+    ?auditBound
     :(typeof auditHealthy==='boolean'?auditHealthy:true);
   const f=issuance.forecast;
   const lines=[
