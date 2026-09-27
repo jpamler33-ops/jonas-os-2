@@ -2,7 +2,7 @@ import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 
 const SCHEMA_VERSION = 1;
-const HORIZONS = [3,12,36];
+const HORIZONS = [1,3,12,36,48];
 const NUMERIC_KEYS = [
   'biasScore','pressureScore','spreadBps','imbalance','atrPct','realizedVolPct','volumeRatio',
   'emaGapPct','supportDistancePct','resistanceDistancePct'
