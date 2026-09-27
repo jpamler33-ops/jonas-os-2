@@ -30,6 +30,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'research-lifecycle.mjs',
   'market-data-provider.mjs',
   'telegram-command-router.mjs',
+  'telegram-read-command-handlers.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
