@@ -19,22 +19,26 @@ Completed:
 
 ## P1 · Forecast Specialist staging
 
-Status: DONE / NOT YET MAIN-CANONICAL
+Status: CORE DONE / NOT YET MAIN-CANONICAL
 
 Completed:
 - full v2.3.1 forecast runtime staged
 - PIT hardening staged
-- integration regression suite added
-- root CI enabled on integration branches
-- CI green after staging
+- forecast integration regression suite
+- canonical ForecastOutput contract
+- canonical Master Research Envelope → ForecastInput adapter
+- unified Institutional admission gate
+- staged Runtime Release file identity
+- Research Trace binding
+- audit-ledger binding
+- root CI on integration branch + PR
 
 Still required before main promotion:
-- canonical ForecastInput / ForecastOutput contracts — CONTRACT V1 STAGED
-- normalized master adapter
-- Institutional Kernel admission
-- Runtime Release hash inclusion
-- Research Trace binding
-- Telegram view integration only after gates
+- durable forecast runtime service/persistence wiring
+- actual bot orchestration behind the admission gate
+- Telegram forecast views only after runtime wiring is proven
+- deployment packaging for staged institutional modules
+- final main-merge migration/rollback review
 
 ## P2 · TCX Research Trace
 
@@ -46,84 +50,114 @@ Completed:
 - evidence / contradiction / forecast / science references
 - SHADOW_ONLY / ABSTAIN hard locks
 - separate immutable outcome evaluation
-- tamper tests
-- CI green
-
-Next:
-- bind actual forecast issuance to Research Trace
-- bind trace/evaluations into audit ledger
-- bind trace module into runtime release manifest
+- forecast issuance → Research Trace binding
+- issuance/evaluation → append-only audit ledger binding
+- idempotent audit events
+- staged release-manifest inclusion
+- tamper tests + CI green
 
 ## P3 · Alpha.30 Scientific Validity extraction
 
-Status: IN PROGRESS
+Status: CORE DONE
 
-Do NOT merge Alpha.30 wholesale.
+Completed:
+1. strict Scientific Validity aggregation
+2. empirical support
+3. research integrity / adaptive holdout reuse
+4. linear concept stability
+5. nonlinear concept stability
+6. temporal recency
+7. sequential evidence / optional-stopping risk
+8. specification multiverse
+9. transportability
+10. evidence-lineage independence
+11. one canonical Scientific Core orchestrator
 
-Order:
-1. define strict scientific-validity aggregation contract — DONE
-2. adapt empirical-support guard — DONE
-3. adapt research-integrity guard — DONE
-4. adapt concept-stability / nonlinear-stability guards — NEXT
-5. adapt temporal recency + sequential evidence/change
-6. adapt specification multiverse
-7. adapt transportability
-8. adapt evidence-lineage independence
-9. defer dependency/hypergraph/interventional layers until the core admission path is stable
+Every adapted guard:
+- filters point-in-time
+- blocks/counts future rows
+- rejects invalid rows
+- emits PASS / CAUTION / ABSTAIN / INSUFFICIENT
+- does not fabricate forecast probability
+- remains SHADOW_ONLY
+- has deterministic tests
 
-Requirements for every adapted guard:
-- point-in-time filtering
-- future rows counted and blocked
-- invalid rows rejected
-- explicit PASS / CAUTION / ABSTAIN / INSUFFICIENT
-- no probability fabrication
-- SHADOW_ONLY
-- deterministic tests
-- no duplicate market-data truth
+Deferred research-only extensions:
+- dependency discovery / hypergraph
+- latent-factor discovery
+- interventional invariance
+
+These remain deferred until the canonical runtime path is stable; they must not become a competing market-data or forecast truth.
 
 ## P4 · Unified admission gate
 
-Status: BLOCKED BY P3 CORE
+Status: DONE / INTEGRATION-STAGED
 
-Target:
-combine without averaging:
-- data safety
-- research-state validity
-- forecast gate
-- scientific validity
+Implemented:
+- data safety gate
+- research-state validity gate
+- canonical forecast gate
+- scientific-validity gate
+- strictest-wins semantics
+- future-knowledge rejection
+- integrity verification of forecast/science artifacts
+- probability-display suppression
+- SHADOW_ONLY / canExecute=false invariants
 
-Strictest applicable hard state wins.
-No downstream layer may weaken an upstream block.
+No downstream layer can weaken an upstream hard block.
 
 ## P5 · Forecast self-correction / promotion ladder
 
-Status: BLOCKED BY P4
+Status: IN PROGRESS
 
-Implement only as:
-immutable forecast → outcome → score → diagnostics → candidate version → temporal OOS/PIT/science validation → promotion.
+Completed:
+- immutable issuance → matured outcome audit chain
+- fail-closed model promotion ladder
+- PIT leakage gate
+- temporal OOS gate
+- deterministic replay gate
+- scientific-validity PASS requirement
+- non-inferiority checks against incumbent
+- minimum OOS sample / independent episode requirements
+- explicit promotion record
+- no silent production mutation
 
-No silent production mutation.
+Next:
+1. durable candidate-version registry
+2. offline candidate builder from matured outcomes only
+3. temporal walk-forward evaluation driver
+4. promotion record → audit ledger binding
+5. release-registry linkage for promoted candidate version
+6. rollback metadata + rollback drill
+
+Forbidden:
+- same-sample self-feedback
+- hidden threshold mutation
+- silent production replacement
+- unversioned online learning
 
 ## P6 · Product integration
 
-Status: BLOCKED BY P4
+Status: NEXT AFTER RUNTIME WIRING
 
-Only after contracts/gates are stable:
-- Forecast card
-- uncertainty/calibration
-- paths
-- revisions
-- invalidation
-- scientific-support state
+Required product views:
+- forecast card
+- calibrated probability only when display gate allows it
+- uncertainty interval + path scenarios
+- revisions / invalidation
+- scientific support state
+- admission state
 - Research Trace / provenance drill-down
+
+Do not expose raw internal probabilities when calibration/science/admission suppresses them.
 
 ## P7 · Institutional gap audit
 
-Status: AFTER CORE MERGE
+Status: READY AFTER P5 CORE
 
 Audit:
 - schema/version contracts
-- migrations
+- persistence migrations
 - idempotency
 - backpressure
 - circuit breakers
@@ -132,7 +166,9 @@ Audit:
 - release hashing
 - observability/SLOs
 - incident recovery
+- deployment packaging
+- main-branch migration
 
 ## Stop condition
 
-Do not start speculative new engines while P3/P4 are incomplete.
+Do not start speculative new prediction engines. Finish the canonical runtime, persistence, promotion, product and deployment path first.
