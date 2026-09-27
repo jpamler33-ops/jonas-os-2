@@ -10,7 +10,7 @@ COPY research-trace.mjs scientific-validity.mjs scientific-core.mjs institutiona
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs ./
+COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs ./
 
 RUN npm run check
 RUN npm run test:ui
@@ -34,6 +34,7 @@ ENV TCX_FORECAST_RUNTIME_FILE=/data/tcx-forecast-runtime.json
 ENV TCX_SHADOW_COMPETITION_FILE=/data/tcx-shadow-competition.json
 ENV TCX_EXPERIMENT_GOVERNOR_FILE=/data/tcx-experiment-governor.json
 ENV TCX_FEATURE_RESEARCH_FILE=/data/tcx-feature-research.json
+ENV TCX_ENTITY_REGISTRY_FILE=/data/tcx-entity-registry.json
 ENV TCX_REPLICA_COUNT=1
 
 USER node
