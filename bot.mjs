@@ -2227,21 +2227,51 @@ async function showSorStatus(chatId,symbol='BTCUSDT'){
 
 async function showSorRoute(chatId,{symbol,side,notionalQuote}){
   const started=Date.now();
+  const context=await sorLearningContext(symbol);
   const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
   if(!books.length) throw new Error('No SOR venue books available');
-  const report=buildShadowSmartRoute({side,notionalQuote},books,{
+  const learnedBooks=enrichSorBooksWithVenueQuality(books,{
+    symbol,side,notionalQuote,regime:context.regime,liquidity:context.liquidity
+  });
+  const report=buildShadowSmartRoute({side,notionalQuote},learnedBooks,{
     routeQuote:'USDT',
     asOf:capturedAt,
     maxAgeMs:sorMaxBookAgeMs,
-    minToxicityEvidenceN:30
+    minToxicityEvidenceN:vqmMinToxicitySamples
   });
   const r=report.route;
   const excluded=[...r.excluded];
   for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+
+  let vqmAdded=0;
+  let vqmObservationIds=[];
+  if(venueQualityHealthy){
+    const observations=createVenueQualityObservations({
+      report,
+      symbol,
+      regime:context.regime,
+      liquidity:context.liquidity,
+      pressureBand:context.pressureBand,
+      capturedAt
+    });
+    const appended=appendVenueQualityObservations(venueQualityRecords,observations,{maxRecords:50000});
+    venueQualityRecords=appended.records;
+    vqmAdded=appended.added;
+    vqmObservationIds=observations.map(x=>x.id);
+    if(vqmAdded>0) await persistVenueQualityMemory('sor-observations');
+  }
+
   const auditPayload={
     ...report,
     symbol,
+    executionContext:context,
     venueErrors:errors,
+    venueQualityMemory:{
+      version:VENUE_QUALITY_MEMORY_VERSION,
+      healthy:venueQualityHealthy,
+      observationsAdded:vqmAdded,
+      observationIds:vqmObservationIds
+    },
     runtimeReleaseId:runtimeManifest?.releaseId||null,
     capabilities:SHADOW_SOR_CAPABILITIES
   };
@@ -2261,6 +2291,8 @@ async function showSorRoute(chatId,{symbol,side,notionalQuote}){
     `Fees: ${fmt(r.feesQuote,4)} USDT`,
     `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
     `vs best single-venue counterfactual: ${improvement}`,
+    `Context: ${context.regime} · ${context.liquidity} · pressure ${context.pressureBand}`,
+    `VQM: ${venueQualityHealthy?'ACTIVE':'DISABLED'} · +${vqmAdded} observations`,
     '',
     'ROUTE',
     ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
