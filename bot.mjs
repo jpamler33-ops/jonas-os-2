@@ -1215,6 +1215,7 @@ function helpText() {
     '/shadowcancel ORDER_ID – virtuelle Order abbrechen',
     '/sor BTC BUY 100 – Multi-Venue Shadow Smart Order Route',
     '/sorstatus [BTC] – Venue-Qualität / Routing-Fähigkeit',
+    '/venuequality BTC [BUY|SELL] [1000] – gelernte Venue-Execution-Qualität',
     '/favorites – Favoriten',
     '/compare – bis zu vier Favoriten vergleichen',
     '/alert BTC 70000 – einmaliger Preisalarm',
@@ -2818,6 +2819,22 @@ async function handleCommand(msg) {
       recordError(observability,{scope:'command.shadow',message:msg});
       recordOperation(observability,{name:"shadow_oms.place",ok:false,latencyMs:0,error:msg});
       await tg("sendMessage",{chat_id:chatId,text:`Shadow-Order konnte nicht simuliert werden: ${msg}`.slice(0,4096)});
+    }
+    return true;
+  }
+  if (command === "/venuequality" || command === "/vqm") {
+    const symbol=normalizeSymbol(parts[1]||"");
+    const side=String(parts[2]||"BUY").toUpperCase();
+    const notional=parts[3]==null?1000:Number(String(parts[3]).replace(",","."));
+    if(!symbol || !["BUY","SELL"].includes(side) || !Number.isFinite(notional) || notional<=0){
+      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /venuequality BTC BUY 1000"});
+      return true;
+    }
+    try { await showVenueQuality(chatId,{symbol,side,notionalQuote:notional}); }
+    catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'command.venuequality',message:msg});
+      await tg("sendMessage",{chat_id:chatId,text:`Venue Quality Memory gerade nicht verfügbar: ${msg}`.slice(0,4096)});
     }
     return true;
   }
