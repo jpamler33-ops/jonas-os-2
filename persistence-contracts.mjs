@@ -6,6 +6,7 @@ import { SHADOW_OMS_SCHEMA_VERSION } from './shadow-oms.mjs';
 import { VENUE_QUALITY_MEMORY_SCHEMA_VERSION } from './venue-quality-memory.mjs';
 import { INSTITUTIONAL_FORECAST_RUNTIME_VERSION } from './institutional-forecast-runtime.mjs';
 import { RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
+import { RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 
 export const PERSISTENCE_CONTRACTS_VERSION='TCX_PERSISTENCE_CONTRACTS_V1';
 
@@ -109,6 +110,16 @@ const CONTRACTS=Object.freeze([
     legacySchemas:[],
     criticality:'DEGRADE',
     corruptionPolicy:'FAIL_CLOSED_RESEARCH_FEATURES'
+  }),
+  Object.freeze({
+    id:'RESEARCH_DATA_GOVERNANCE',
+    format:'JSON_ATOMIC_RENAME',
+    env:'TCX_RESEARCH_GOVERNANCE_FILE',
+    defaultPath:'/data/tcx-research-governance.json',
+    schema:RESEARCH_DATA_GOVERNANCE_VERSION,
+    legacySchemas:[],
+    criticality:'DEGRADE',
+    corruptionPolicy:'BACKUP_AND_START_CLEAN_WITH_WARNING'
   })
 ]);
 
