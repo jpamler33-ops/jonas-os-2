@@ -127,6 +127,14 @@ export function renderInstitutionalForecastCard(issuance,{
   lines.push('• Wissenschaftlicher Check: '+String(f.scienceGate||'UNKNOWN'));
   lines.push('• Forecast-Check: '+String(f.overallGate||'UNKNOWN'));
   lines.push('• Aktueller Forschungsstand: '+String(issuance.trace?.validity?.state||'UNKNOWN'));
+  const dependency=(issuance.trace?.evidence||[]).find(x=>x?.type==='RESEARCH_DEPENDENCY_GRAPH');
+  if(dependency){
+    const usable=Number(dependency.usableFeatures||0);
+    const total=Number(dependency.totalFeatures||0);
+    const blocked=Number(dependency.blockedFeatures||0);
+    const icon=blocked>0?'🟡':'🟢';
+    lines.push('• Forschungsdaten: '+icon+' '+usable+'/'+total+' Zusatzmerkmale nutzbar'+(blocked>0?' · '+blocked+' gesperrt':''));
+  }
   lines.push('• Audit: '+(auditOk?'🟢 vollständig':'FEHLER → Forecast gesperrt'));
 
   if(!auditOk){
