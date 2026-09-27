@@ -33,7 +33,7 @@ function researchGate(validity){
   if(!validity) return {gate:'ABSTAIN',reasons:['RESEARCH_VALIDITY_MISSING']};
   const raw=String(validity.status??validity.state??'UNKNOWN').toUpperCase();
   if(['INVALIDATED','EXPIRED','ABSTAIN'].includes(raw)) return {gate:'ABSTAIN',reasons:['RESEARCH_'+raw]};
-  if(['STALE','DRIFTED','CAUTION'].includes(raw)) return {gate:'CAUTION',reasons:['RESEARCH_'+raw]};
+  if(['STALE','DRIFTED','CAUTION','BASELINE'].includes(raw)) return {gate:'CAUTION',reasons:['RESEARCH_'+raw]};
   if(['VALID','PASS'].includes(raw)) return {gate:'PASS',reasons:[]};
   if(['INSUFFICIENT','UNKNOWN'].includes(raw)) return {gate:'INSUFFICIENT',reasons:['RESEARCH_'+raw]};
   return {gate:'INSUFFICIENT',reasons:['RESEARCH_STATE_UNRECOGNIZED']};
