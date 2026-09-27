@@ -1994,6 +1994,94 @@ async function showOms(chatId) {
   return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
 }
 
+function sorLegLine(leg,totalBase){
+  const share=totalBase>0?leg.baseQty/totalBase:0;
+  const tox=leg.toxicityPenaltyBps>0?` · tox ${fmt(leg.toxicityPenaltyBps,2)}bps`:' · tox n/a';
+  return `• ${leg.venue}: ${fmt(share*100,1)}% · avg ${priceText(leg.avgPrice)} · fee ${fmt(leg.feeQuote,4)} · latency ${Number.isFinite(leg.latencyMs)?Math.round(leg.latencyMs)+'ms':'n/a'}${tox}`;
+}
+
+async function showSorStatus(chatId,symbol='BTCUSDT'){
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  const quality=summarizeVenueQuality(books,{routeQuote:'USDT',asOf:capturedAt,maxAgeMs:sorMaxBookAgeMs});
+  const text=[
+    `🧭 TCX Shadow SOR Status · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Version: ${SHADOW_SOR_VERSION}`,
+    `Captured: ${new Date(capturedAt).toISOString()}`,
+    '',
+    'VENUES',
+    ...quality.map(v=>
+      `• ${v.venue} ${v.quote}: ${v.eligible?'ROUTABLE':'EXCLUDED'} · spread ${fmt(v.spreadBps,2)}bps · fee ${fmt(v.feeBps,2)}bps · latency ${Number.isFinite(v.fetchLatencyMs)?Math.round(v.fetchLatencyMs)+'ms':'n/a'} · askDepth ${fmt(v.askDepthQuote,0)} ${v.quote}${v.exclusionReasons.length?' · '+v.exclusionReasons.join(', '):''}`
+    ),
+    ...(errors.length?['','UNAVAILABLE',...errors.map(e=>`• ${e.venue}: ${e.error}`)]:[]),
+    '',
+    'TOXICITY',
+    ...quality.map(v=>`• ${v.venue}: ${v.toxicityStatus} · n=${v.toxicityEvidenceN}`),
+    '',
+    `canExecuteLive: ${SHADOW_SOR_CAPABILITIES.canExecuteLive?'YES':'NO'}`,
+    `networkOrderSubmission: ${SHADOW_SOR_CAPABILITIES.networkOrderSubmission?'YES':'NO'}`,
+    'Mode: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
+async function showSorRoute(chatId,{symbol,side,notionalQuote}){
+  const started=Date.now();
+  const {books,errors,capturedAt}=await fetchSorVenueBooks(symbol);
+  if(!books.length) throw new Error('No SOR venue books available');
+  const report=buildShadowSmartRoute({side,notionalQuote},books,{
+    routeQuote:'USDT',
+    asOf:capturedAt,
+    maxAgeMs:sorMaxBookAgeMs,
+    minToxicityEvidenceN:30
+  });
+  const r=report.route;
+  const excluded=[...r.excluded];
+  for(const e of errors) excluded.push({venue:e.venue,quote:'UNKNOWN',reasons:['UNAVAILABLE'],error:e.error});
+  const auditPayload={
+    ...report,
+    symbol,
+    venueErrors:errors,
+    runtimeReleaseId:runtimeManifest?.releaseId||null,
+    capabilities:SHADOW_SOR_CAPABILITIES
+  };
+  const auditRecord=auditLedger.healthy?await appendInstitutionalAudit('TCX_SHADOW_SOR_REPORT',auditPayload):null;
+  recordOperation(observability,{name:'shadow_sor.route',ok:r.fillRatio>0,latencyMs:Date.now()-started,error:r.fillRatio>0?null:'NO_FILL'});
+  const improvement=Number.isFinite(report.improvementBps)
+    ? `${fmt(report.improvementBps,2)} bps (${fmt(report.improvementQuote,4)} USDT)`
+    : 'n/a';
+  const text=[
+    `🧭 TCX Multi-Venue Shadow SOR · ${symbol.replace('USDT','/USDT')}`,
+    '',
+    `Intent: ${side} · ${fmt(notionalQuote,2)} USDT`,
+    `Fill: ${fmt(r.fillRatio*100,1)}%${r.depthExhausted?' · DEPTH EXHAUSTED':''}`,
+    `Reference mid: ${priceText(r.referenceMid)}`,
+    `Avg fill: ${priceText(r.avgFillPrice)}`,
+    `Slippage: ${Number.isFinite(r.slippageBps)?fmt(r.slippageBps,2)+' bps':'n/a'}`,
+    `Fees: ${fmt(r.feesQuote,4)} USDT`,
+    `All-in: ${Number.isFinite(r.allInBps)?fmt(r.allInBps,2)+' bps':'n/a'}`,
+    `vs best single-venue counterfactual: ${improvement}`,
+    '',
+    'ROUTE',
+    ...(r.legs.length?r.legs.map(x=>sorLegLine(x,r.filledBase)):['• no fill']),
+    '',
+    `Fragmentation: ${r.fragmentation.venueCountUsed} venues · HHI ${Number.isFinite(r.fragmentation.hhi)?fmt(r.fragmentation.hhi,3):'n/a'} · effective ${Number.isFinite(r.fragmentation.effectiveVenues)?fmt(r.fragmentation.effectiveVenues,2):'n/a'}`,
+    ...(excluded.length?['','EXCLUDED / UNAVAILABLE',...excluded.map(x=>`• ${x.venue} ${x.quote||''}: ${(x.reasons||[]).join(', ')}${x.error?' · '+x.error:''}`)]:[]),
+    '',
+    'EPISTEMIC STATUS',
+    `• Books: ${report.epistemic.books}`,
+    `• Fees: ${report.epistemic.fees}`,
+    `• Toxicity: ${report.epistemic.toxicity}`,
+    `• Route: ${report.epistemic.route}`,
+    `• Route hash: ${report.routeHash.slice(0,20)}…`,
+    `• Audit: ${auditRecord?'#'+auditRecord.seq:'NOT WRITTEN'}`,
+    '',
+    'No authenticated exchange order endpoint exists.',
+    'Execution: SHADOW_ONLY · canExecuteLive: NO'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
 async function showShadowOrders(chatId,symbol=null) {
   const xs=shadowOrders
     .filter(o=>!symbol||o.symbol===symbol)
