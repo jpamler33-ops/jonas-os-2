@@ -231,3 +231,21 @@ export function verifyModelPromotionEvaluation(value){
     return {ok:false,reasons:['PROMOTION_EVALUATION_INVALID',err instanceof Error?err.message:String(err)]};
   }
 }
+
+
+export function verifyModelPromotionRecord(value){
+  try{
+    if(value?.version!=='TCX_MODEL_PROMOTION_RECORD_V1') return {ok:false,reasons:['VERSION_INVALID']};
+    if(value?.executionMode!=='SHADOW_ONLY') return {ok:false,reasons:['EXECUTION_MODE_INVALID']};
+    if(value?.canExecute!==false) return {ok:false,reasons:['CAN_EXECUTE_INVALID']};
+    if(value?.productionMutationPerformed!==false) return {ok:false,reasons:['PRODUCTION_MUTATION_INVALID']};
+    if(value?.action!=='REGISTER_PROMOTION_ONLY') return {ok:false,reasons:['ACTION_INVALID']};
+    const {promotionId,...core}=value;
+    const expected=sha256(core);
+    return promotionId===expected
+      ? {ok:true,reasons:[],expectedPromotionId:expected}
+      : {ok:false,reasons:['PROMOTION_ID_MISMATCH'],expectedPromotionId:expected};
+  }catch(err){
+    return {ok:false,reasons:['PROMOTION_RECORD_INVALID',err instanceof Error?err.message:String(err)]};
+  }
+}
