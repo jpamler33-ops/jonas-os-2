@@ -2449,6 +2449,17 @@ const server = http.createServer((req,res) => {
         version:CHAOS_ENGINEERING_VERSION,
         mode:'SYNTHETIC_SIDE_EFFECT_FREE'
       },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
       witnessNetwork:{
         cacheEntries:witnessCache.size,
         providers:["BINANCE","OKX","KRAKEN"]
@@ -2484,6 +2495,7 @@ async function gracefulShutdown(signal) {
   console.log('shutdown', signal);
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0),5000).unref();
 }
@@ -2519,6 +2531,15 @@ console.log(JSON.stringify({
   deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
   observability:OBSERVABILITY_VERSION,
   chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
   execution:'SHADOW_ONLY',
   allowedChats:allowedChats.size || 'ALL',
   recommendedReplicas:1,
@@ -2542,4 +2563,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),shadowOmsWatcher()]);
