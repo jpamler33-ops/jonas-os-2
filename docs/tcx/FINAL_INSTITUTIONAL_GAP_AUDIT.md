@@ -1,6 +1,6 @@
 # TCX Institutional v3 — Final Gap Audit
 
-Status: IN PROGRESS / PRE-MERGE
+Status: CLOSED / PRE-MERGE ENGINEERING GATE PASSED
 Date: 2026-09-27
 
 This audit evaluates the staged institutional branch against `docs/tcx/INSTITUTIONAL_STANDARD.md`.
@@ -77,16 +77,24 @@ Therefore:
 - no horizontal scaling
 - shared transactional persistence is required before multi-replica deployment
 
-## Remaining pre-merge checks
+## Verified pre-merge state
 
-These are release-process checks rather than missing product engines:
+Verified against branch head `98984c91ac1f005ea3d3f49e9153e2d358400310`:
 
-1. latest branch CI + PR CI green
-2. Docker packaging smoke test green on latest tested head
-3. integration branch still `behind_by = 0` versus main
-4. final review of PR #2 file diff
-5. merge only the tested head
-6. perform post-deploy `/ready` + Telegram + matured-outcome smoke test
+- branch CI: SUCCESS
+- PR CI: SUCCESS
+- institutional pre-merge gate: SUCCESS
+- Docker packaging smoke test: SUCCESS
+- integration branch versus main: `ahead_by = 207`, `behind_by = 0`
+- PR #2: mergeable / clean
+- no-live invariants remain enforced
+
+The remaining actions are release-process actions rather than missing engineering:
+
+1. merge only a head that still has green checks and `behind_by = 0`
+2. deploy with `TCX_REPLICA_COUNT=1`
+3. perform post-deploy `/ready` + Telegram + matured-outcome smoke test
+4. rollback according to the runbook if readiness fails
 
 ## Deferred by design
 
