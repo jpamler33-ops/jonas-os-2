@@ -20,6 +20,7 @@ import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CO
 import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecycle, compactValidity, RESEARCH_LIFECYCLE_VERSION } from './research-lifecycle.mjs';
 import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market-data-provider.mjs';
 import { createTelegramCommandRouter, TELEGRAM_COMMAND_ROUTER_VERSION } from './telegram-command-router.mjs';
+import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './telegram-read-command-handlers.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
@@ -211,6 +212,7 @@ try {
       researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
       marketDataProvider:MARKET_DATA_PROVIDER_VERSION,
       telegramCommandRouter:TELEGRAM_COMMAND_ROUTER_VERSION,
+      telegramReadCommands:TELEGRAM_READ_COMMANDS_VERSION,
       shadowSor:SHADOW_SOR_VERSION,
       venueQualityMemory:VENUE_QUALITY_MEMORY_VERSION,
       executionResearchLab:EXECUTION_RESEARCH_LAB_VERSION
@@ -2627,61 +2629,41 @@ function parseAction(data='') {
 }
 
 
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
 const routePrimaryCommand=createTelegramCommandRouter({
   permitted,
-  handlers:{
-    "/start":async ({chatId})=>{
-      await showStart(chatId);
-    },
-    "/help":async ({chatId})=>{
-      await tg("sendMessage",{chat_id:chatId,text:helpText()});
-    },
-    "/favorites":async ({chatId})=>{
-      await showFavorites(chatId);
-    },
-    "/compare":async ({chatId})=>{
-      await showCompare(chatId,null);
-    },
-    "/coin":async ({chatId,args})=>{
-      const symbol=normalizeSymbol(args[0]||"");
-      if(!symbol){
-        await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /coin BTC"});
-        return;
-      }
-      try{
-        await showMarket(chatId,null,symbol,false);
-      }catch{
-        await tg("sendMessage",{chat_id:chatId,text:"Kein Binance-USDT-Markt für "+(args[0]||symbol)+" gefunden."});
-      }
-    },
-    "/chart":async ({chatId,args})=>{
-      const symbol=normalizeSymbol(args[0]||"");
-      const interval=["1m","5m","15m","1h","4h"].includes(args[1])?args[1]:"5m";
-      if(!symbol){
-        await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /chart BTC 5m"});
-        return;
-      }
-      try{
-        await showChart(chatId,symbol,interval);
-      }catch(err){
-        console.error("chart command error",err instanceof Error?err.message:String(err));
-        await tg("sendMessage",{chat_id:chatId,text:"Chart-Daten gerade nicht verfügbar."});
-      }
-    },
-    "/structure":async ({chatId,args})=>{
-      const symbol=normalizeSymbol(args[0]||"");
-      if(!symbol){
-        await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /structure BTC"});
-        return;
-      }
-      try{
-        await showStructure(chatId,symbol);
-      }catch(err){
-        console.error("structure command error",err instanceof Error?err.message:String(err));
-        await tg("sendMessage",{chat_id:chatId,text:"Struktur-Daten gerade nicht verfügbar."});
-      }
-    }
-  }
+  handlers:readCommandHandlers
 });
 
 async function handleCommand(msg){
@@ -2694,32 +2676,6 @@ async function handleCommandLegacy(msg) {
   if (!permitted(chatId)) return true;
   const parts = msg.text.trim().split(/\s+/);
   const command = parts[0].split('@')[0].toLowerCase();
-
-  if (command === "/obs") {
-    try { await showObservability(chatId); }
-    catch(err){
-      recordError(observability,{scope:'command.obs',message:err instanceof Error?err.message:String(err)});
-      await tg("sendMessage",{chat_id:chatId,text:"Observability gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/chaos") {
-    try { await showChaos(chatId,parts[1]||null); }
-    catch(err){
-      recordError(observability,{scope:'command.chaos',message:err instanceof Error?err.message:String(err)});
-      await tg("sendMessage",{chat_id:chatId,text:"Chaos Harness gerade nicht verfügbar."});
-    }
-    return true;
-  }
-  if (command === "/oms") {
-    try { await showOms(chatId); }
-    catch(err){
-      recordError(observability,{scope:'command.oms',message:err instanceof Error?err.message:String(err)});
-      await tg("sendMessage",{chat_id:chatId,text:"Shadow OMS gerade nicht verfügbar."});
-    }
-    return true;
-  }
 
   if (command === "/shadoworders") {
     const symbol=parts[1]?normalizeSymbol(parts[1]):null;
@@ -2784,54 +2740,6 @@ async function handleCommandLegacy(msg) {
     }
     return true;
   }
-  if (command === "/executionlab" || command === "/erl") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    const side=parts[2]?String(parts[2]).toUpperCase():null;
-    if(!symbol || (side && !["BUY","SELL"].includes(side))){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /executionlab BTC BUY"});
-      return true;
-    }
-    try { await showExecutionResearch(chatId,{symbol,side}); }
-    catch(err){
-      const msg=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'command.executionlab',message:msg});
-      recordOperation(observability,{name:'execution_research_lab',ok:false,latencyMs:0,error:msg});
-      await tg("sendMessage",{chat_id:chatId,text:`Execution Research Lab gerade nicht verfügbar: ${msg}`.slice(0,4096)});
-    }
-    return true;
-  }
-
-  if (command === "/venuequality" || command === "/vqm") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    const side=String(parts[2]||"BUY").toUpperCase();
-    const notional=parts[3]==null?1000:Number(String(parts[3]).replace(",","."));
-    if(!symbol || !["BUY","SELL"].includes(side) || !Number.isFinite(notional) || notional<=0){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /venuequality BTC BUY 1000"});
-      return true;
-    }
-    try { await showVenueQuality(chatId,{symbol,side,notionalQuote:notional}); }
-    catch(err){
-      const msg=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'command.venuequality',message:msg});
-      await tg("sendMessage",{chat_id:chatId,text:`Venue Quality Memory gerade nicht verfügbar: ${msg}`.slice(0,4096)});
-    }
-    return true;
-  }
-  if (command === "/sorstatus") {
-    const symbol=parts[1]?normalizeSymbol(parts[1]):"BTCUSDT";
-    if(parts[1] && !symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /sorstatus BTC"});
-      return true;
-    }
-    try { await showSorStatus(chatId,symbol); }
-    catch(err){
-      const msg=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'command.sorstatus',message:msg});
-      await tg("sendMessage",{chat_id:chatId,text:`SOR-Status gerade nicht verfügbar: ${msg}`.slice(0,4096)});
-    }
-    return true;
-  }
-
   if (command === "/sor") {
     const symbol=normalizeSymbol(parts[1]||"");
     const side=String(parts[2]||"").toUpperCase();
@@ -2848,132 +2756,6 @@ async function handleCommandLegacy(msg) {
       recordError(observability,{scope:'command.sor',message:msg});
       recordOperation(observability,{name:"shadow_sor.route",ok:false,latencyMs:0,error:msg});
       await tg("sendMessage",{chat_id:chatId,text:`Shadow SOR konnte nicht simuliert werden: ${msg}`.slice(0,4096)});
-    }
-    return true;
-  }
-  if (command === "/release") {
-    try { await showRelease(chatId); }
-    catch(err){
-      console.error("release command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Release Registry gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/fabric") {
-    try { await showFabric(chatId); }
-    catch(err){
-      console.error("fabric command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Market Data Fabric gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/replay") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    const asOf=parseReplayTime(parts.slice(2).join(" "));
-    if(!symbol || asOf==null){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /replay BTC 2026-09-27T14:30:00Z"});
-      return true;
-    }
-    try { await showReplay(chatId,symbol,asOf); }
-    catch(err){
-      console.error("replay command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"PIT-Replay gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/audit") {
-    try { await showAudit(chatId); }
-    catch(err){
-      console.error("audit command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Institutional Kernel Audit gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/witness") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    if(!symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /witness BTC"});
-      return true;
-    }
-    try { await showWitness(chatId,symbol); }
-    catch(err){
-      console.error("witness command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Independent Witness Network gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/engine") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    if(!symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /engine BTC"});
-      return true;
-    }
-    try { await showEngine(chatId,symbol); }
-    catch(err){
-      console.error("engine command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"MTL Engine gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/memory") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    if(!symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /memory BTC"});
-      return true;
-    }
-    try { await showMemory(chatId,symbol); }
-    catch(err){
-      console.error("memory command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Episode Memory gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/evidence") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    if(!symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /evidence BTC"});
-      return true;
-    }
-    try { await showEvidence(chatId,null,symbol); }
-    catch(err){
-      console.error("evidence command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Evidence-Diagnostik gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-  if (command === "/history") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    if(!symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /history BTC"});
-      return true;
-    }
-    try { await showEvidenceHistory(chatId,null,symbol); }
-    catch(err){
-      console.error("history command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Evidence-Historie gerade nicht verfügbar."});
-    }
-    return true;
-  }
-
-
-  if (command === "/validity") {
-    const symbol=normalizeSymbol(parts[1]||"");
-    if(!symbol){
-      await tg("sendMessage",{chat_id:chatId,text:"Beispiel: /validity BTC"});
-      return true;
-    }
-    try { await showValidity(chatId,null,symbol); }
-    catch(err){
-      console.error("validity command error",err instanceof Error?err.message:String(err));
-      await tg("sendMessage",{chat_id:chatId,text:"Research-Validity gerade nicht verfügbar."});
     }
     return true;
   }
@@ -3725,8 +3507,12 @@ const server = http.createServer((req,res) => {
       },
       telegramCommandRouter:{
         version:TELEGRAM_COMMAND_ROUTER_VERSION,
-        primaryCommands:7,
+        primaryCommands:Object.keys(readCommandHandlers).length,
         legacyFallback:true
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
       },
       episodeMemory:{
         file:episodeFile,
