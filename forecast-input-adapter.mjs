@@ -31,7 +31,8 @@ export function buildCanonicalForecastInput({
   dataQuality,
   regimeId='UNKNOWN',
   regimeConfidence=0,
-  extraFeatures=[]
+  extraFeatures=[],
+  expansionEvidence=null
 }={}){
   const integrity=replayEnvelopeIntegrity(envelope);
   if(!integrity.ok) throw new Error('invalid TCX research envelope integrity');
@@ -68,6 +69,8 @@ export function buildCanonicalForecastInput({
   addFeature(features,featureSources,'engine.transitionSupport',engine.transitionSupport,'MASTER_ENVELOPE');
 
   let blockedFutureExtras=0;
+  let blockedFutureExpansion=0;
+  let rejectedExpansion=0;
   let rejectedExtras=0;
   for(const row of Array.isArray(extraFeatures)?extraFeatures:[]){
     const id=String(row?.id??'').trim();
@@ -83,6 +86,34 @@ export function buildCanonicalForecastInput({
     }
     features[id]=value;
     featureSources[id]=String(row?.source??'MASTER_DERIVED');
+  }
+
+  if(expansionEvidence!=null){
+    const expAsOf=Number(expansionEvidence?.asOf);
+    const fp=String(expansionEvidence?.fingerprint??'');
+    const restrictions=expansionEvidence?.restrictions??{};
+    const safe=expansionEvidence?.executionMode==='SHADOW_ONLY'&&
+      expansionEvidence?.action==='ABSTAIN'&&
+      expansionEvidence?.canExecute===false&&
+      restrictions?.mayMutateForecast===false&&
+      restrictions?.mayBypassInstitutionalAdmission===false;
+    if(!Number.isFinite(expAsOf)||!fp||!safe){
+      rejectedExpansion++;
+    }else if(expAsOf>asOf){
+      blockedFutureExpansion++;
+    }else{
+      const liq=expansionEvidence?.liquiditySnapshot??{};
+      addFeature(features,featureSources,'expansion.liquidity.spreadBps',liq.spreadBps,'TCX_EXPANSION_LIQUIDITY');
+      addFeature(features,featureSources,'expansion.liquidity.imbalance',liq.imbalance,'TCX_EXPANSION_LIQUIDITY');
+      addFeature(features,featureSources,'expansion.liquidity.depthBid',liq.depthBid,'TCX_EXPANSION_LIQUIDITY');
+      addFeature(features,featureSources,'expansion.liquidity.depthAsk',liq.depthAsk,'TCX_EXPANSION_LIQUIDITY');
+      const impact=expansionEvidence?.eventImpactEstimate??{};
+      addFeature(features,featureSources,'expansion.eventImpact.meanReturn',impact.meanReturn,'TCX_EXPANSION_EVENT_IMPACT');
+      addFeature(features,featureSources,'expansion.eventImpact.medianReturn',impact.medianReturn,'TCX_EXPANSION_EVENT_IMPACT');
+      const source=expansionEvidence?.sourceReliability??{};
+      addFeature(features,featureSources,'expansion.source.sampleSize',source.sampleSize,'TCX_EXPANSION_SOURCE_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.source.reliability',source.reliability,'TCX_EXPANSION_SOURCE_INTELLIGENCE');
+    }
   }
 
   if(!Object.keys(features).length) throw new Error('no forecast features available');
@@ -122,6 +153,9 @@ export function buildCanonicalForecastInput({
       marketAvailableAt,
       blockedFutureExtras,
       rejectedExtras,
+      blockedFutureExpansion,
+      rejectedExpansion,
+      expansionFingerprint:expansionEvidence&&rejectedExpansion===0&&blockedFutureExpansion===0?String(expansionEvidence.fingerprint):null,
       duplicateMarketTruthCreated:false
     }
   };
