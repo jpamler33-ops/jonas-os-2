@@ -1435,6 +1435,23 @@ async function handleCommand(msg) {
   }
 
 
+  if (command === "/obs") {
+    try { await showObservability(chatId); }
+    catch(err){
+      recordError(observability,{scope:'command.obs',message:err instanceof Error?err.message:String(err)});
+      await tg("sendMessage",{chat_id:chatId,text:"Observability gerade nicht verfügbar."});
+    }
+    return true;
+  }
+
+  if (command === "/chaos") {
+    try { await showChaos(chatId,parts[1]||null); }
+    catch(err){
+      recordError(observability,{scope:'command.chaos',message:err instanceof Error?err.message:String(err)});
+      await tg("sendMessage",{chat_id:chatId,text:"Chaos Harness gerade nicht verfügbar."});
+    }
+    return true;
+  }
   if (command === "/release") {
     try { await showRelease(chatId); }
     catch(err){
