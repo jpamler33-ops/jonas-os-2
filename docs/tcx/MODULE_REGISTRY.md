@@ -98,6 +98,7 @@ Source package SHA-256:
 | Public on-chain RPC provider | `expansion-runtime/onchain-public-provider.mjs` | MAIN CANONICAL FOUNDATION |
 | Memecoin Intelligence evidence | `expansion-runtime/memecoin-intelligence.mjs` | MAIN CANONICAL V1 |
 | Narrative / Reflexivity evidence | `expansion-runtime/narrative-reflexivity.mjs` | MAIN CANONICAL V1 |
+| Future Intelligence slow evidence | `expansion-runtime/future-intelligence.mjs` | MAIN CANONICAL V1 |
 
 The original expansion orchestrator, Ghost Portfolio, forecast ledger, duplicate science gates and self-improvement controller are not canonical because TCX already has stronger owners.
 
