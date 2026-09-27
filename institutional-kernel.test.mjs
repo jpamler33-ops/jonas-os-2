@@ -134,3 +134,19 @@ test('malformed ledger boots diagnostics in unhealthy SAFE_STOP-compatible state
   assert.equal(ledger.healthy,false);
   assert.equal(ledger.verification.error,'LEDGER_READ_OR_PARSE_FAILURE');
 });
+
+
+test('control plane SAFE_STOPs when market data fabric integrity is unhealthy',()=>{
+  const now=1_000_000;
+  const s=determineSafetyState({
+    marketAudit:auditMarketSnapshot(market(now),{now}),
+    witnessAudit:auditWitnessReport(witness()),
+    engineAudit:auditEngineResult(engine()),
+    ledgerHealthy:true,
+    fabricHealthy:false
+  });
+  assert.equal(s.state,'SAFE_STOP');
+  assert.ok(s.hardReasons.includes('MARKET_DATA_FABRIC_UNHEALTHY'));
+  assert.equal(s.canResearch,false);
+  assert.equal(s.canExecute,false);
+});
