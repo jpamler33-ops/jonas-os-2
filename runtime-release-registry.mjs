@@ -21,6 +21,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'chaos-engineering.mjs',
   'shadow-oms.mjs',
   'multi-venue-shadow-sor.mjs',
+  'venue-quality-memory.mjs',
   'telegram-product-ui.mjs',
   'alert-engine.mjs',
   'evidence-history.mjs',
