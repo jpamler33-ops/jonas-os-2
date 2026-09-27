@@ -1177,6 +1177,8 @@ function helpText() {
     '/shadow BTC BUY 100 LIMIT 65000 [latencyMs] – virtuelle Limit-Order',
     '/shadoworders [BTC] – Shadow-Orders',
     '/shadowcancel ORDER_ID – virtuelle Order abbrechen',
+    '/sor BTC BUY 100 – Multi-Venue Shadow Smart Order Route',
+    '/sorstatus [BTC] – Venue-Qualität / Routing-Fähigkeit',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alertregime BTC – Regime-Wechsel',
