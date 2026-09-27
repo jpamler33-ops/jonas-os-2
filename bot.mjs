@@ -17,7 +17,7 @@ import { runPersistenceSmokeTest, PERSISTENCE_SMOKE_VERSION } from './persistenc
 import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from './forecast-learning-center.mjs';
 import { createShadowCompetition, refreshShadowCompetitionHypotheses, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
 import { createExperimentGovernor, evaluateExperimentGovernor, experimentGovernorSummary, loadExperimentGovernor, saveExperimentGovernor, FORECAST_EXPERIMENT_GOVERNOR_VERSION } from './forecast-experiment-governor.mjs';
-import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
+import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
@@ -38,6 +38,7 @@ import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } 
 import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/dexscreener-public-provider.mjs';
 import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
+import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -152,6 +153,7 @@ const marketDataProvider=createMarketDataProvider({
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch});
+const liquidationResearchStream=createLiquidationPublicStream({symbols:autoLearnSymbols});
 const {
   fetchJson,
   fetchMarketParts,
@@ -1674,6 +1676,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
       `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
       `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
+      `Liquidation-Stream: ${liquidationResearchStream.health().connected?'🟢 verbunden':'🟡 verbindet'} · ${LIQUIDATION_PUBLIC_STREAM_VERSION}`,
       `Beobachtete Märkte: ${markets.length}`,
       `Aktive Sitzungen: ${sessions.size}`,'',
       ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
@@ -2997,6 +3000,10 @@ async function showIntelligence(chatId,symbol){
   try{
     derivatives=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
   }catch{}
+  let liquidations=null;
+  try{
+    liquidations=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});
+  }catch{}
   const expansion=buildInstitutionalExpansionEvidence({
     asOf:Number(s.availableAt),
     orderBook:{timestamp:Number(s.timestamp),availableAt:Number(s.availableAt),source:String(s.source),version:String(s.version),bids:[[Number(s.bid),1]],asks:[[Number(s.ask),1]]},
@@ -3018,6 +3025,10 @@ async function showIntelligence(chatId,symbol){
     `• Global Long/Short: ${Number.isFinite(derivatives?.binance?.globalLongShortRatio)?derivatives.binance.globalLongShortRatio.toFixed(3):'—'}`,
     `• Taker Buy/Sell: ${Number.isFinite(derivatives?.binance?.takerBuySellRatio)?derivatives.binance.takerBuySellRatio.toFixed(3):'—'}`,
     'Diese Werte laufen nur in Feature-Research und verändern das aktive Forecast-Modell nicht.','',
+    'LIQUIDATION-RESEARCH',
+    `⚡ Stream: ${liquidations?.connected?'🟢 verbunden':'🟡 nicht verbunden'}`,
+    `• 5m-Abdeckung: ${liquidations?.ready5m?'bereit':'sammelt'}`,
+    `• Liquidationsvolumen 5m: ${liquidations?.ready5m?'
     'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
     '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
     '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
@@ -3049,6 +3060,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   }
 
   let derivativesResearchSnapshot=null;
+  let liquidationResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
       derivativesResearchSnapshot=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
@@ -3060,6 +3072,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       });
     }catch(err){
       recordError(observability,{scope:'derivatives_research',message:err instanceof Error?err.message:String(err)});
+    }
+    try{
+      liquidationResearchSnapshot=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});
+    }catch(err){
+      recordError(observability,{scope:'liquidation_research',message:err instanceof Error?err.message:String(err)});
     }
   }
 
@@ -3085,7 +3102,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   );
   const derivativesExtraFeatures=derivativesSnapshotToExtraFeatures(derivativesResearchSnapshot)
     .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
-  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures];
+  const liquidationExtraFeatures=liquidationSnapshotToExtraFeatures(liquidationResearchSnapshot)
+    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
+  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures];
   const runtimeQuality=deriveForecastRuntimeQuality({
     safety,
     marketAudit,
@@ -3286,7 +3305,1650 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       auditHealthy:auditHealthyAfter,
       dataQuality:runtimeQuality.dataQuality,
       derivativesFeatureCount:derivativesExtraFeatures.length,
-      derivativesSourceCount:Number(derivativesResearchSnapshot?.witness?.sourceCount||0)
+      derivativesSourceCount:Number(derivativesResearchSnapshot?.witness?.sourceCount||0),
+      liquidationFeatureCount:liquidationExtraFeatures.length,
+      liquidationReady5m:liquidationResearchSnapshot?.ready5m===true
+    };
+  }
+
+  const payload={text,reply_markup:forecastProductKeyboard(symbol)};
+  return deliverTelegramTextCard(tg,chatId,messageId,payload);
+}
+
+function parseAction(data='') {
+  const product=parseProductCallback(data);
+  if(product.kind!=='UNKNOWN') return product;
+  if (data === 'commands') return { kind:'COMMANDS' };
+  if (String(data).startsWith('cmd:')) return { kind:'COMMAND_PICK', command:String(data).split(':')[1] };
+  if (String(data).startsWith('cmdrun:')) { const x=String(data).split(':'); return { kind:'COMMAND_RUN', command:x[1], symbol:x[2] }; }
+  if (data === 'back') return { kind:'BACK' };
+  if (data === 'favorites') return { kind:'FAVORITES' };
+  if (data === 'compare') return { kind:'COMPARE' };
+  if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
+  const p = String(data).split(':');
+  if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
+  if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
+  if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
+  if (p[0] === 'fav' && p[1]) return { kind:'FAV', symbol:p[1] };
+  if (p[0] === 'alerthelp' && p[1]) return { kind:'ALERT_HELP', symbol:p[1] };
+  if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
+  if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
+  if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
+  if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
+  if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
+  if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
+  if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
+  if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
+  return { kind:'UNKNOWN' };
+}
+
+
+const readCommandHandlers=createReadCommandHandlers({
+  tg,
+  helpText,
+  normalizeSymbol,
+  showStart,
+  showCommandMenu,
+  showFavorites,
+  showCompare,
+  showMarket,
+  showChart,
+  showStructure,
+  showObservability,
+  showChaos,
+  showOms,
+  showExecutionResearch,
+  showVenueQuality,
+  showSorStatus,
+  showRelease,
+  showFabric,
+  parseReplayTime,
+  showReplay,
+  showAudit,
+  showWitness,
+  showEngine,
+  showForecast,
+  showIntelligence,
+  showMemory,
+  showEvidence,
+  showEvidenceHistory,
+  showValidity,
+  recordError,
+  recordOperation,
+  observability
+});
+
+const mutationCommandHandlers=createMutationCommandHandlers({
+  tg,
+  normalizeSymbol,
+  showShadowOrders,
+  getShadowOrders:()=>shadowOrders,
+  replaceShadowOrder:(index,order)=>{ shadowOrders[index]=order; },
+  cancelShadowOrder,
+  persistShadowOms,
+  isAuditHealthy:()=>auditLedger.healthy,
+  appendInstitutionalAudit,
+  shadowAuditPayload,
+  showPlacedShadowOrder,
+  shadowDefaultLatencyMs,
+  getShadowOmsStatus:()=>({healthy:shadowOmsHealthy,lastError:shadowOmsLastError}),
+  placeShadowOrder,
+  recordError,
+  recordOperation,
+  observability,
+  showSorRoute,
+  snapshot,
+  createAlert,
+  addTcXAlert,
+  symbolLabel,
+  fmt,
+  alertPreset,
+  describeAlert,
+  activeAlerts,
+  clearAlerts:async chatId=>{
+    alerts.set(String(chatId),[]);
+    return persistState("alerts-cleared");
+  }
+});
+
+const telegramCommandHandlers={
+  ...readCommandHandlers,
+  ...mutationCommandHandlers
+};
+
+const routeTelegramCommand=createTelegramCommandRouter({
+  permitted,
+  handlers:telegramCommandHandlers
+});
+
+async function handleCommand(msg){
+  return routeTelegramCommand(msg);
+}
+
+async function handle(update) {
+  const msg = update?.message;
+  if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
+    if (await handleCommand(msg)) return;
+  }
+
+  const q = update?.callback_query;
+  if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
+  const chatId = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  if (!permitted(chatId)) {
+    await ack(q.id,'Nicht freigegeben');
+    return;
+  }
+
+  const a = parseAction(q.data);
+  try {
+    if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
+    if (a.kind === 'COMMAND_PICK') {
+      if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
+      await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
+    }
+    if (a.kind === 'COMMAND_RUN') {
+      if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
+      if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
+      else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
+      else if(a.command==='market') await showMarket(chatId,messageId,a.symbol);
+      else if(a.command==='chart') await showChart(chatId,a.symbol,'5m');
+      else if(a.command==='evidence') await showEvidence(chatId,messageId,a.symbol);
+      else if(a.command==='memory') await showMemory(chatId,a.symbol);
+      else if(a.command==='engine') await showEngine(chatId,a.symbol);
+      await ack(q.id); return;
+    }
+    if (a.kind === 'HOME') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'HOME_SECTION') {
+      await showHomeSection(chatId,messageId,a.section);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'WHY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showWhy(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'REGIME') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showRegime(chatId,messageId,a.symbol);
+      await ack(q.id,'Regime geladen');
+      return;
+    }
+    if (a.kind === 'EVIDENCE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidence(chatId,messageId,a.symbol);
+      await ack(q.id,'Evidence geladen');
+      return;
+    }
+    if (a.kind === 'HISTORY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showEvidenceHistory(chatId,messageId,a.symbol);
+      await ack(q.id,'History geladen');
+      return;
+    }
+    if (a.kind === 'VALIDITY') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showValidity(chatId,messageId,a.symbol);
+      await ack(q.id,'Validity geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showReplayMenu(chatId,messageId,a.symbol);
+      await ack(q.id,'Replay-Punkte geladen');
+      return;
+    }
+    if (a.kind === 'REPLAY_AT') {
+      if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
+      await showReplay(chatId,a.symbol,a.asOf,messageId);
+      await ack(q.id,'Replay geladen');
+      return;
+    }
+    if (a.kind === 'OMS') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showShadowOrders(chatId,a.symbol);
+      await ack(q.id,'Shadow OMS geladen');
+      return;
+    }
+    if (a.kind === 'SOR') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showSorStatus(chatId,a.symbol);
+      await ack(q.id,'Shadow SOR geladen');
+      return;
+    }
+    if (a.kind === 'VQM') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showVenueQuality(chatId,{symbol:a.symbol,side:'BUY',notionalQuote:1000});
+      await ack(q.id,'Venue Memory geladen');
+      return;
+    }
+    if (a.kind === 'ERL') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await showExecutionResearch(chatId,{symbol:a.symbol});
+      await ack(q.id,'Execution Lab geladen');
+      return;
+    }
+    if (a.kind === 'BACK') {
+      await showStart(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'FAVORITES') {
+      await showFavorites(chatId,messageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'COMPARE') {
+      await showCompare(chatId,messageId);
+      await ack(q.id,'Compare geladen');
+      return;
+    }
+    if (a.kind === 'SEARCH_HELP') {
+      await ack(q.id,'Schreibe z. B. /coin BTC');
+      return;
+    }
+    if (a.kind === 'UNKNOWN' || (a.symbol && !symbolOk(a.symbol))) {
+      await ack(q.id,'Unbekannte Aktion');
+      return;
+    }
+    if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'LIVE') {
+      await showMarket(chatId,messageId,a.symbol,a.enabled);
+      await ack(q.id,a.enabled?'Live aktiviert':'Live deaktiviert');
+      return;
+    }
+    if (a.kind === 'TCX') {
+      await showTcx(chatId,messageId,a.symbol);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'TIMEFRAME') {
+      await showTimeframe(chatId,messageId,a.symbol,a.interval);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === "CHART") {
+      await showChart(chatId,a.symbol,a.interval);
+      await ack(q.id,`Chart ${a.interval}`);
+      return;
+    }
+    if (a.kind === "STRUCTURE") {
+      await showStructure(chatId,a.symbol);
+      await ack(q.id,"Struktur geladen");
+      return;
+    }
+
+
+    if (a.kind === "WITNESS") {
+      await showWitness(chatId,a.symbol);
+      await ack(q.id,"Witness Audit geladen");
+      return;
+    }
+
+    if (a.kind === "ENGINE") {
+      await showEngine(chatId,a.symbol);
+      await ack(q.id,"MTL Engine geladen");
+      return;
+    }
+
+    if (a.kind === "FORECAST") {
+      await showForecast(chatId,a.symbol,messageId);
+      await ack(q.id,"Forecast geladen");
+      return;
+    }
+
+    if (a.kind === "MEMORY") {
+      await showMemory(chatId,a.symbol);
+      await ack(q.id,"Episode Memory geladen");
+      return;
+    }
+
+    if (a.kind === 'FAV') {
+      const set = favoriteSet(chatId);
+      if (set.has(a.symbol)) set.delete(a.symbol); else set.add(a.symbol);
+      const persisted = await persistState('favorite-toggled');
+      await showMarket(chatId,messageId,a.symbol,sessions.get(String(chatId))?.live === true);
+      await ack(
+        q.id,
+        persisted
+          ? (set.has(a.symbol)?'Favorit gespeichert':'Favorit entfernt')
+          : 'Favorit nur temporär – State-Volume prüfen'
+      );
+      return;
+    }
+    if (a.kind === 'ALERT_HELP') {
+      await showAlertSetup(chatId,a.symbol);
+      await ack(q.id,'Alert-Auswahl geöffnet');
+      return;
+    }
+    if (a.kind === 'ALERT_PRESET') {
+      const alert=alertPreset(a.symbol,a.preset);
+      if(!alert){
+        await ack(q.id,'Unbekannter Alert');
+        return;
+      }
+      const added=await addTcXAlert(chatId,alert);
+      await ack(q.id,added.added?'Alert gespeichert':(added.reason==='DUPLICATE'?'Schon aktiv':'Limit erreicht'));
+      if(added.added){
+        await tg('sendMessage',{chat_id:chatId,text:'🔔 '+describeAlert(alert)+'\nAction bleibt ABSTAIN / SHADOW_ONLY.'});
+      }
+      return;
+    }
+  } catch (err) {
+    console.error('callback error', err instanceof Error ? err.message : String(err));
+    await ack(q.id,'Live-Daten gerade nicht verfügbar');
+  }
+}
+
+async function poll() {
+  while (running) {
+    try {
+      const updates = await tg('getUpdates',{
+        offset,
+        timeout:25,
+        allowed_updates:['message','callback_query']
+      }) || [];
+      for (const u of updates) {
+        offset = Math.max(offset,Number(u.update_id)+1);
+        await handle(u);
+      }
+    } catch (err) {
+      console.error('poll error', err instanceof Error ? err.message : String(err));
+      await sleep(1500);
+    }
+  }
+}
+
+async function refresher() {
+  while (running) {
+    await sleep(1000);
+    const now = Date.now();
+    for (const [key,s] of [...sessions]) {
+      if (!s.live || now - s.lastRefresh < refreshMs) continue;
+      try {
+        if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
+        else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
+        else await showMarket(s.chatId,s.messageId,s.symbol,true);
+      } catch (err) {
+        console.error('refresh error', err instanceof Error ? err.message : String(err));
+        const cur = sessions.get(key);
+        if (cur) cur.lastRefresh = now;
+      }
+    }
+  }
+}
+
+async function alertWatcher() {
+  while (running) {
+    await sleep(alertCheckMs);
+    const grouped = new Map();
+    for (const [chatKey,list] of alerts) {
+      for (const alert of list) {
+        if(alert?.enabled===false) continue;
+        if (!grouped.has(alert.symbol)) grouped.set(alert.symbol,[]);
+        grouped.get(alert.symbol).push({ chatKey, alert });
+      }
+    }
+
+    let persistenceChanged=false;
+    for (const [symbol,items] of grouped) {
+      const needsResearch=items.some(({alert})=>
+        [...requiredContext(alert)].some(root=>root!=='market')
+      );
+      let context;
+      try {
+        if(needsResearch){
+          context=await researchAlertContext(symbol);
+        } else {
+          const s=await snapshot(symbol);
+          context={
+            capturedAt:Date.now(),
+            market:{
+              price:Number(s.price),
+              spreadBps:Number(s.spreadBps),
+              change24hPct:Number(s.changePct),
+              availableAt:Number(s.availableAt)
+            }
+          };
+        }
+      } catch (err) {
+        console.error('alert context error',symbol,err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      for (const { chatKey, alert } of items) {
+        const result=evaluateAlert(alert,context,{now:Date.now()});
+        if(!result.alert) continue;
+        const list=alertList(chatKey);
+        const idx=list.findIndex(x=>x?.id===alert.id);
+        if(idx<0) continue;
+
+        if(result.triggered){
+          let delivered=false;
+          try {
+            await tg('sendMessage',{
+              chat_id:chatKey,
+              text:[
+                '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
+                describeAlert(alert),'',
+                ...alertCurrentStateLines(context),'',
+                'Trigger: '+result.message,
+                'Action: ABSTAIN / SHADOW_ONLY'
+              ].join('\n').slice(0,4096)
+            });
+            delivered=true;
+          } catch (err) {
+            console.error('alert send error',err instanceof Error ? err.message : String(err));
+          }
+          if(!delivered) continue;
+          if(result.alert.once && result.alert.enabled===false) list.splice(idx,1);
+          else list[idx]=result.alert;
+          persistenceChanged=true;
+          continue;
+        }
+
+        if(result.reason==='EXPIRED'){
+          list.splice(idx,1);
+          persistenceChanged=true;
+          continue;
+        }
+
+        const before=JSON.stringify(list[idx]);
+        list[idx]=result.alert;
+        if(JSON.stringify(result.alert)!==before) persistenceChanged=true;
+      }
+    }
+    if(persistenceChanged) await persistState('alert-v2-sweep');
+  }
+}
+
+async function shadowOmsWatcher() {
+  while(running){
+    await sleep(shadowWatchMs);
+    if(!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false;
+    try {
+      for(let i=0;i<shadowOrders.length;i++){
+        let order=shadowOrders[i];
+        if(!['ACTIVE','PARTIALLY_FILLED'].includes(order.status) || order.liquidity!=='MAKER') continue;
+
+        if(!Number.isFinite(Number(order.lastAggTradeId))){
+          try {
+            const cursor=await fetchLatestAggTradeId(order.symbol);
+            order={...order,lastAggTradeId:cursor,dataQuality:'RECOVERED_CURSOR_NO_BACKFILL',updatedAt:Date.now()};
+            shadowOrders[i]=order;
+            changed=true;
+          } catch(err){
+            recordError(observability,{scope:'shadow_oms.cursor_recovery',message:err instanceof Error?err.message:String(err)});
+          }
+          continue;
+        }
+
+        try {
+          const batch=await fetchAggTradesSince(order.symbol,Number(order.lastAggTradeId)+1,{maxPages:3});
+          if(!batch.trades.length) continue;
+          const beforeFill=Number(order.fillBase||0);
+          const beforeStatus=order.status;
+          const applied=applyAggTrades(order,batch.trades,{at:Date.now()});
+          if(applied.changed){
+            order=applied.order;
+            order.dataQuality=batch.truncated?'BACKLOG_REPLAYING':'OK';
+            shadowOrders[i]=order;
+            changed=true;
+            if((Number(order.fillBase||0)>beforeFill+1e-12 || order.status!==beforeStatus) && auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('FILL_UPDATE',order,{
+                previousStatus:beforeStatus,
+                previousFillBase:beforeFill,
+                aggTradesProcessed:batch.trades.length,
+                backlog:batch.truncated
+              }));
+            }
+          }
+        } catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          order={...order,dataQuality:'DEGRADED_AGGTRADE_UNAVAILABLE',updatedAt:Date.now()};
+          shadowOrders[i]=order;
+          changed=true;
+          recordError(observability,{scope:'shadow_oms.aggtrades',message:msg});
+        }
+      }
+
+      const markable=shadowOrders.filter(o=>
+        Number(o.fillBase||0)>0 &&
+        (o.liquidity==='TAKER' || ['FILLED','CANCELLED'].includes(o.status)) &&
+        Object.keys(o.markouts||{}).length<3
+      );
+      const symbols=[...new Set(markable.map(o=>o.symbol))];
+      for(const symbol of symbols){
+        let book;
+        try { book=await fetchExecutionBook(symbol); }
+        catch(err){
+          recordError(observability,{scope:'shadow_oms.markout_book',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        for(let i=0;i<shadowOrders.length;i++){
+          const order=shadowOrders[i];
+          if(order.symbol!==symbol || !markable.some(x=>x.id===order.id)) continue;
+          const beforeCount=Object.keys(order.markouts||{}).length;
+          const next=markShadowOrder(order,{mid:book.mid,at:book.availableAt});
+          const afterCount=Object.keys(next.markouts||{}).length;
+          if(afterCount>beforeCount){
+            shadowOrders[i]=next;
+            changed=true;
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_SHADOW_ORDER_EVENT',shadowAuditPayload('MARKOUT_UPDATE',next,{
+                addedMarkouts:afterCount-beforeCount
+              }));
+            }
+          }
+        }
+      }
+
+      if(changed) await persistShadowOms('watcher');
+      recordOperation(observability,{name:'shadow_oms.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'shadow_oms.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'shadow_oms.watch',message:msg});
+    }
+  }
+}
+
+async function venueQualityWatcher() {
+  const horizons=[60_000,300_000,900_000];
+  while(running){
+    await sleep(vqmWatchMs);
+    if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    const started=Date.now();
+    let changed=false,observed=0,missed=0;
+    try {
+      const now=Date.now();
+
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const before=JSON.stringify(r.markouts||{});
+        const matured=matureVenueQualityObservation(r,{mid:null,at:now,maxLagMs:vqmMarkoutMaxLagMs});
+        if(matured.changed){
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          const after=matured.record.markouts||{};
+          for(const h of horizons){
+            const key=String(h);
+            if(!JSON.parse(before||'{}')[key] && after[key]?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      const dueBySymbol=new Map();
+      for(let i=0;i<venueQualityRecords.length;i++){
+        const r=venueQualityRecords[i];
+        if(!(Number(r.fillRatio)>0) || !(Number(r.avgFillPrice)>0) || Object.keys(r.markouts||{}).length>=3) continue;
+        const elapsed=now-Number(r.capturedAt);
+        const due=horizons.some(h=>{
+          const key=String(h);
+          return !r.markouts?.[key] && elapsed>=h && elapsed<=h+vqmMarkoutMaxLagMs;
+        });
+        if(!due) continue;
+        if(!dueBySymbol.has(r.symbol)) dueBySymbol.set(r.symbol,[]);
+        dueBySymbol.get(r.symbol).push(i);
+      }
+
+      for(const [symbol,indexes] of dueBySymbol){
+        let books=[];
+        try { ({books}=await fetchSorVenueBooks(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'venue_quality.markout_books',message:err instanceof Error?err.message:String(err)});
+          continue;
+        }
+        const byVenue=new Map(books.map(b=>[b.venue,b]));
+        for(const i of indexes){
+          const r=venueQualityRecords[i];
+          const book=byVenue.get(r.venue);
+          if(!book || book.quote!==r.quote) continue;
+          const beforeKeys=new Set(Object.keys(r.markouts||{}));
+          const matured=matureVenueQualityObservation(r,{mid:book.mid,at:book.availableAt,maxLagMs:vqmMarkoutMaxLagMs});
+          if(!matured.changed) continue;
+          venueQualityRecords[i]=matured.record;
+          changed=true;
+          for(const [key,m] of Object.entries(matured.record.markouts||{})){
+            if(beforeKeys.has(key)) continue;
+            if(m?.status==='OBSERVED') observed++;
+            if(m?.status==='MISSED_CAPTURE_WINDOW') missed++;
+          }
+        }
+      }
+
+      if(changed){
+        await persistVenueQualityMemory('markout-maturity');
+        if(auditLedger.healthy){
+          await appendInstitutionalAudit('TCX_VENUE_QUALITY_MATURITY',{
+            version:VENUE_QUALITY_MEMORY_VERSION,
+            at:Date.now(),
+            observed,missed,
+            records:venueQualityRecords.length,
+            execution:'SHADOW_ONLY'
+          });
+        }
+      }
+      recordOperation(observability,{name:'venue_quality.watch',ok:true,latencyMs:Date.now()-started});
+    } catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordOperation(observability,{name:'venue_quality.watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      recordError(observability,{scope:'venue_quality.watch',message:msg});
+    }
+  }
+}
+
+async function syncFeatureResearch(reason='update'){
+  try{
+    const beforeStatus=featureResearchState?.status||'UNINITIALIZED';
+    const expectedFeatureExperimentIds=new Set(DEFAULT_RESEARCH_FEATURES.map(x=>x.id));
+    const currentFeatureExperimentIds=new Set((featureResearchState?.experiments||[]).map(x=>x.id));
+    const grammarExpanded=[...expectedFeatureExperimentIds].some(id=>!currentFeatureExperimentIds.has(id));
+    if(featureResearchState?.status==='COLLECTING_SEED'&&grammarExpanded){
+      featureResearchState=null;
+    }
+    if(!featureResearchState){
+      featureResearchState=createFeatureResearchRound({
+        journalEntries:forecastRuntime.journal.all(),
+        incumbentConfig:forecastRuntime.engine.configSnapshot(),
+        generationNumber:1,
+        now:Date.now()
+      });
+    }else{
+      featureResearchState=advanceFeatureResearchRound(featureResearchState,{
+        journalEntries:forecastRuntime.journal.all(),
+        incumbentConfig:forecastRuntime.engine.configSnapshot(),
+        now:Date.now(),
+        minimumTrainCases:40
+      });
+    }
+    await saveFeatureResearch(featureResearchFile,featureResearchState);
+    const summary=featureResearchSummary(featureResearchState);
+    console.log('feature research sync',JSON.stringify({
+      reason,
+      status:summary.status,
+      generationNumber:summary.generationNumber,
+      experiments:summary.experiments.length,
+      supported:summary.supported.length,
+      changed:beforeStatus!==summary.status
+    }));
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'forecast_feature_research',message:msg});
+    console.error('feature research error',reason,msg);
+    return null;
+  }
+}
+
+async function autoLearnForecastWatcher() {
+  await sleep(15000);
+  while(running) {
+    const started=Date.now();
+    let issued=0,skipped=0,failed=0;
+    if(autoLearnEnabled&&forecastRuntime.healthy){
+      for(const symbol of autoLearnSymbols){
+        if(!running) break;
+        try{
+          const latest=latestInstitutionalForecast(forecastRuntime,symbol);
+          const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
+          if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
+            skipped++;
+            continue;
+          }
+          const result=await showForecast(null,symbol,null,{silent:true,source:'TCX_AUTOLEARN_V1'});
+          if(result?.ok){
+            issued++;
+            console.log('autolearn forecast issued',JSON.stringify({
+              symbol,
+              gate:result.issuance?.gate||'UNKNOWN',
+              dataQuality:result.dataQuality,
+              derivativesFeatures:result.derivativesFeatureCount||0,
+              derivativesSources:result.derivativesSourceCount||0,
+              liquidationFeatures:result.liquidationFeatureCount||0,
+              liquidationReady5m:result.liquidationReady5m===true,
+              duplicate:result.duplicate===true
+            }));
+          }else{
+            skipped++;
+            if(result?.reason&&result.reason!=='AUTOLEARN_QUALITY_GATE'){
+              console.log('autolearn forecast skipped',JSON.stringify({symbol,reason:result.reason}));
+            }
+          }
+        }catch(err){
+          failed++;
+          const msg=err instanceof Error?err.message:String(err);
+          recordError(observability,{scope:'forecast_runtime.autolearn',message:msg});
+          console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
+        }
+        await sleep(250);
+      }
+    }
+    recordOperation(observability,{
+      name:'forecast_autolearn_cycle',
+      ok:failed===0,
+      latencyMs:Date.now()-started,
+      error:failed?failed+' symbol(s) failed':null
+    });
+    if(issued||failed){
+      console.log('autolearn cycle',JSON.stringify({
+        issued,skipped,failed,
+        symbols:autoLearnSymbols.length,
+        nextSweepMs:autoLearnSweepMs,
+        forecastIntervalMs:autoLearnForecastMs
+      }));
+    }
+    await sleep(autoLearnSweepMs);
+  }
+}
+
+async function syncExperimentGovernor({evaluate=false}={}){
+  if(!shadowCompetitionState||shadowCompetitionState.status!=='ACTIVE') return null;
+  const cfgHash=String(shadowCompetitionState.incumbentConfigHash||sha256(forecastRuntime.engine.configSnapshot()));
+  if(!experimentGovernorState){
+    experimentGovernorState=createExperimentGovernor({
+      competition:shadowCompetitionState,
+      championConfigHash:cfgHash,
+      championReleaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      generationNumber:1,
+      now:Date.now()
+    });
+    await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
+    console.log('experiment governor initialized',JSON.stringify({
+      generationId:experimentGovernorState.generationId,
+      generationNumber:experimentGovernorState.generationNumber,
+      participants:experimentGovernorState.participants.length,
+      cutoff:experimentGovernorState.dataCutoffAt
+    }));
+    return experimentGovernorState;
+  }
+  if(evaluate&&experimentGovernorState.status==='ACTIVE'){
+    const before=experimentGovernorState.status;
+    experimentGovernorState=evaluateExperimentGovernor(experimentGovernorState,{
+      competition:shadowCompetitionState,
+      now:Date.now()
+    });
+    await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
+    const summary=experimentGovernorSummary(experimentGovernorState);
+    console.log('experiment governor evaluated',JSON.stringify({
+      generationId:summary.generationId,
+      status:summary.status,
+      participants:summary.participantCount,
+      measuring:summary.counts?.MEASURING||0,
+      rejected:summary.counts?.REJECTED||0,
+      promotionCandidates:summary.counts?.PROMOTION_CANDIDATE||0,
+      changed:before!==summary.status
+    }));
+  }
+  return experimentGovernorState;
+}
+
+async function shadowCompetitionWatcher(){
+  while(running){
+    const started=Date.now();
+    try{
+      if(shadowCompetitionEnabled&&forecastRuntime.healthy){
+        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY);
+        const cfg=forecastRuntime.engine.configSnapshot();
+        const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
+
+        if(
+          !shadowCompetitionState||
+          shadowCompetitionState.status==='WAITING_FOR_SEED_HISTORY'||
+          shadowCompetitionState.status==='STALE_INCUMBENT_CONFIG'
+        ){
+          shadowCompetitionState=createShadowCompetition({
+            historyRows:history,
+            incumbentConfig:cfg,
+            parentReleaseId:releaseId,
+            now:Date.now(),
+            minSeedRows:shadowCompetitionMinSeedRows
+          });
+          shadowCompetitionLastHistorySize=history.length;
+          shadowCompetitionState={...shadowCompetitionState,evaluatedHistoryRows:history.length};
+          await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+          console.log('shadow competition initialized',JSON.stringify({
+            status:shadowCompetitionState.status,
+            candidates:shadowCompetitionState.candidates?.length||0,
+            seedRows:shadowCompetitionState.seedRows||0,
+            cutoff:shadowCompetitionState.dataCutoffAt||null
+          }));
+          await syncExperimentGovernor({evaluate:false});
+        }else{
+          const beforeCount=shadowCompetitionState.candidates?.length||0;
+          const refreshed=refreshShadowCompetitionHypotheses(shadowCompetitionState,{
+            historyRows:history,
+            incumbentConfig:cfg,
+            asOf:Date.now(),
+            maxGeneratedHypotheses:4
+          });
+          const afterCount=refreshed.candidates?.length||0;
+          if(afterCount!==beforeCount||refreshed.hypothesisGenerator?.version!==shadowCompetitionState.hypothesisGenerator?.version){
+            shadowCompetitionState={...refreshed,evaluatedHistoryRows:shadowCompetitionLastHistorySize};
+            await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+            console.log('shadow hypotheses refreshed',JSON.stringify({
+              before:beforeCount,
+              after:afterCount,
+              generated:shadowCompetitionState.hypothesisGenerator?.generatedCandidates||0,
+              added:shadowCompetitionState.hypothesisGenerator?.addedCandidates||0
+            }));
+            await syncExperimentGovernor({evaluate:false});
+          }
+          if(history.length>shadowCompetitionLastHistorySize){
+          const evaluated=evaluateShadowCompetition(shadowCompetitionState,{
+            historyRows:history,
+            incumbentConfig:cfg,
+            asOf:Date.now(),
+            minimumTrainCases:shadowCompetitionMinTrainCases
+          });
+          shadowCompetitionLastHistorySize=history.length;
+          shadowCompetitionState={...evaluated,evaluatedHistoryRows:history.length};
+          await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+          const summary=shadowCompetitionSummary(shadowCompetitionState);
+          console.log('shadow competition evaluated',JSON.stringify({
+            historyRows:history.length,
+            oosRows:summary.competition?.oosRows||0,
+            evaluatedCandidates:summary.competition?.evaluatedCandidates||0,
+            bestBrierCandidate:summary.competition?.bestBrierCandidate||null,
+            bestLogLossCandidate:summary.competition?.bestLogLossCandidate||null
+          }));
+          await syncExperimentGovernor({evaluate:true});
+          }
+        }
+        if(!experimentGovernorState&&shadowCompetitionState?.status==='ACTIVE'){
+          await syncExperimentGovernor({evaluate:false});
+        }
+      }
+      recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'forecast_shadow_competition',message:msg});
+      recordOperation(observability,{name:'forecast_shadow_competition',ok:false,latencyMs:Date.now()-started,error:msg});
+      console.error('shadow competition error',msg);
+    }
+    await sleep(shadowCompetitionEvalMs);
+  }
+}
+
+async function forecastOutcomeWatcher() {
+  while(running) {
+    await sleep(forecastOutcomeCheckMs);
+    if(!forecastRuntime.healthy) continue;
+    const pending=forecastRuntime.journal.pending();
+    if(!pending.length) continue;
+
+    const started=Date.now();
+    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+    let observedSymbols=0;
+    let resolvedCount=0;
+    let auditFailures=0;
+
+    for(const symbol of symbols) {
+      if(!running) break;
+      try {
+        const s=await snapshot(symbol);
+        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+          symbol,
+          timestamp:Number(s.availableAt),
+          price:Number(s.price),
+          quality:1
+        });
+        observedSymbols++;
+        resolvedCount+=result.resolved.length;
+
+        for(const row of result.evaluations) {
+          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+          if(!audit) auditFailures++;
+        }
+      } catch(err) {
+        const msg=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+        console.error('forecast outcome watcher error',symbol,msg);
+      }
+      await sleep(150);
+    }
+
+    try {
+      await persistForecastRuntime('outcome-watch');
+    } catch {}
+
+    recordOperation(observability,{
+      name:'forecast_outcome_watch',
+      ok:forecastRuntime.healthy&&auditFailures===0,
+      latencyMs:Date.now()-started,
+      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+    });
+
+    if(resolvedCount){
+      console.log('forecast outcomes resolved',JSON.stringify({
+        resolved:resolvedCount,
+        observedSymbols,
+        pendingBefore:pending.length,
+        pendingAfter:forecastRuntime.journal.pending().length,
+        auditFailures
+      }));
+      await syncFeatureResearch('resolved-outcomes');
+    }
+  }
+}
+
+async function episodeWatcher() {
+  while(running) {
+    let changed=false;
+    let evidenceChanged=false;
+    for(const symbol of requestedSymbols) {
+      if(!running) break;
+      try {
+        const state=await researchState(symbol,"5m");
+        const before=episodes.length;
+        await captureEpisodeFromState(state,{persist:false});
+        if(episodes.length!==before) changed=true;
+        if(matureSymbolEpisodes(symbol,state.byTf["5m"],state.availableAt)) changed=true;
+        try {
+          const witnessReport=await witnessState(symbol,state.market,{maxAgeMs:60000});
+          const context=buildResearchAlertContext(state,witnessReport);
+          researchAlertContextCache.set(symbol,{at:Date.now(),context});
+          updateRadarCache(symbol,context);
+          const evidenceAppend=appendEvidenceFromContext(symbol,context);
+          if(evidenceAppend.changed) evidenceChanged=true;
+        } catch(radarErr) {
+          console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
+        }
+      } catch(err) {
+        console.error("episode watcher error",symbol,err instanceof Error?err.message:String(err));
+      }
+      await sleep(250);
+    }
+    if(changed) await persistEpisodeMemory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    await sleep(episodeSweepMs);
+  }
+}
+
+function currentPersistenceCompatibility(){
+  return evaluatePersistenceCompatibility({
+    stores:{
+      USER_STATE:{
+        healthy:persistenceHealthy,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+        migrationNeeded:loadedState.migrationNeeded,
+        loadedSchema:loadedState.loadedSchemaVersion
+      },
+      EPISODE_MEMORY:{
+        healthy:episodePersistenceHealthy,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      EVIDENCE_HISTORY:{
+        healthy:evidenceHistoryHealthy,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      FORECAST_RUNTIME:{
+        healthy:forecastRuntime.healthy,
+        recoveredFromCorrupt:forecastRuntime.recoveredFromCorrupt
+      },
+      SHADOW_OMS:{
+        healthy:shadowOmsHealthy,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+      },
+      VENUE_QUALITY_MEMORY:{
+        healthy:venueQualityHealthy,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+      },
+      AUDIT_LEDGER:{healthy:auditLedger.healthy},
+      MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
+      RELEASE_REGISTRY:{healthy:releaseRegistry.healthy}
+    },
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+function currentOperationalReadiness(){
+  const snapshot=observabilitySnapshot(observability);
+  const slo=deriveSloHealth(snapshot);
+  return evaluateOperationalReadiness({
+    auditLedger,
+    marketFabric,
+    releaseRegistry,
+    runtimeReleaseRecord,
+    forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+    persistence:{
+      healthy:persistenceHealthy,
+      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+    },
+    episodePersistence:{
+      healthy:episodePersistenceHealthy,
+      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+    },
+    evidenceHistory:{
+      healthy:evidenceHistoryHealthy,
+      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+    },
+    providerHealth:marketDataProvider.providerHealth(),
+    slo,
+    persistenceCompatibility:currentPersistenceCompatibility(),
+    localFilePersistence:true,
+    replicaCount:configuredReplicaCount
+  });
+}
+
+const port = Number(process.env.PORT || 8080);
+const server = http.createServer((req,res) => {
+  if (req.url === '/ready') {
+    const readiness=currentOperationalReadiness();
+    res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify({
+      ok:readiness.ready,
+      service:'TCX Telegram',
+      readiness,
+      releaseId:runtimeManifest?.releaseId||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false
+    }));
+    return;
+  }
+  if (req.url === '/health' || req.url === '/') {
+    const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({
+      ok:true,
+      service:'TCX Telegram',
+      execution:'SHADOW_ONLY',
+      markets:markets.map(x => x.symbol),
+      sessions:sessions.size,
+      favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+      alerts:activeAlerts,
+      alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      institutionalKernel:{
+        version:INSTITUTIONAL_KERNEL_VERSION,
+        ledgerHealthy:auditLedger.healthy,
+        ledgerSeq:auditLedger.seq,
+        ledgerTailHash:auditLedger.tailHash,
+        canExecute:false,
+        execution:'SHADOW_ONLY'
+      },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
+      marketDataFabric:{
+        version:MARKET_DATA_FABRIC_VERSION,
+        healthy:marketFabric.healthy,
+        seq:marketFabric.seq,
+        tailHash:marketFabric.tailHash,
+        events:marketFabric.events.length,
+        file:marketFabricFile
+      },
+      deterministicReplay:{
+        version:DETERMINISTIC_REPLAY_VERSION
+      },
+      observability:{
+        version:OBSERVABILITY_VERSION,
+        snapshot:observabilitySnapshot(observability),
+        slo:deriveSloHealth(observabilitySnapshot(observability))
+      },
+      operationalReadiness:{
+        version:OPERATIONAL_READINESS_VERSION,
+        ...currentOperationalReadiness()
+      },
+      persistenceContracts:{
+        version:PERSISTENCE_CONTRACTS_VERSION,
+        ...currentPersistenceCompatibility()
+      },
+      chaosEngineering:{
+        version:CHAOS_ENGINEERING_VERSION,
+        mode:'SYNTHETIC_SIDE_EFFECT_FREE'
+      },
+      shadowOms:{
+        version:SHADOW_OMS_VERSION,
+        healthy:shadowOmsHealthy,
+        file:shadowOmsFile,
+        total:shadowOrders.length,
+        active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+        filled:shadowOrders.filter(o=>o.status==='FILLED').length,
+        lastError:shadowOmsLastError,
+        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        capabilities:SHADOW_OMS_CAPABILITIES
+      },
+      shadowSor:{
+        version:SHADOW_SOR_VERSION,
+        routeQuote:'USDT',
+        maxBookAgeMs:sorMaxBookAgeMs,
+        feeAssumptionsBps:{
+          BINANCE:sorBinanceFeeBps,
+          OKX:sorOkxFeeBps,
+          KRAKEN:sorKrakenFeeBps
+        },
+        capabilities:SHADOW_SOR_CAPABILITIES
+      },
+      venueQualityMemory:{
+        version:VENUE_QUALITY_MEMORY_VERSION,
+        healthy:venueQualityHealthy,
+        file:venueQualityFile,
+        records:venueQualityRecords.length,
+        lastError:venueQualityLastError,
+        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        watchMs:vqmWatchMs,
+        markoutMaxLagMs:vqmMarkoutMaxLagMs,
+        minSamples:vqmMinSamples,
+        minToxicitySamples:vqmMinToxicitySamples,
+        capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+      },
+      executionResearchLab:{
+        version:EXECUTION_RESEARCH_LAB_VERSION,
+        venueObservations:venueQualityRecords.length,
+        capabilities:EXECUTION_RESEARCH_CAPABILITIES
+      },
+      witnessNetwork:{
+        cacheEntries:witnessCache.size,
+        providers:["BINANCE","OKX","KRAKEN"]
+      },
+      marketDataProvider:{
+        version:MARKET_DATA_PROVIDER_VERSION,
+        binanceFallbacks:binanceBases.length,
+        okxHost:new URL(okxBase).host,
+        krakenHost:new URL(krakenBase).host
+      },
+      telegramCommandRouter:{
+        version:TELEGRAM_COMMAND_ROUTER_VERSION,
+        commands:Object.keys(telegramCommandHandlers).length,
+        legacyFallback:false
+      },
+      telegramReadCommands:{
+        version:TELEGRAM_READ_COMMANDS_VERSION,
+        commands:Object.keys(readCommandHandlers).length
+      },
+      telegramMutationCommands:{
+        version:TELEGRAM_MUTATION_COMMANDS_VERSION,
+        commands:Object.keys(mutationCommandHandlers).length
+      },
+      episodeMemory:{
+        file:episodeFile,
+        total:episodes.length,
+        mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
+        healthy:episodePersistenceHealthy,
+        lastError:episodePersistenceLastError,
+        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      },
+      evidenceHistory:{
+        version:EVIDENCE_HISTORY_VERSION,
+        file:evidenceHistoryFile,
+        total:evidenceRecords.length,
+        healthy:evidenceHistoryHealthy,
+        lastError:evidenceHistoryLastError,
+        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      },
+      stateValidity:{
+        version:STATE_VALIDITY_VERSION,
+        staleAfterMs:researchValidityStaleMs,
+        expireAfterMs:researchValidityExpireMs,
+        driftThreshold:researchValidityDriftThreshold,
+        canExecute:false
+      },
+      researchLifecycle:{
+        version:RESEARCH_LIFECYCLE_VERSION,
+        evidenceSnapshots:evidenceRecords.length
+      },
+      institutionalForecastRuntime:{
+        ...institutionalForecastRuntimeSummary(forecastRuntime),
+        file:forecastRuntimeFile,
+        outcomeCheckMs:forecastOutcomeCheckMs
+      },
+      persistence:{
+        file:stateFile,
+        healthy:persistenceHealthy,
+        lastError:persistenceLastError,
+        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      }
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+server.listen(port,'0.0.0.0',() => console.log(`health server :${port}`));
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  running = false;
+  console.log('shutdown', signal);
+  await persistState(`shutdown:${signal}`);
+  await persistEpisodeMemory(`shutdown:${signal}`);
+  await persistEvidenceHistory(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistShadowOms(`shutdown:${signal}`);
+  await persistVenueQualityMemory(`shutdown:${signal}`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0),5000).unref();
+}
+process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
+process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
+
+liquidationResearchStream.start();
+await syncFeatureResearch('startup');
+const me = await tg('getMe',{});
+const persistenceSmoke=runPersistenceSmokeTest();
+console.log('[TCX_PERSISTENCE_SMOKE]',JSON.stringify(persistenceSmoke));
+console.log(JSON.stringify({
+  service:'TCX Telegram UI',
+  botUsername:me?.username || 'UNKNOWN',
+  markets:markets.map(x=>x.symbol),
+  refreshMs,
+  alertCheckMs,
+  researchAlertCheckMs,
+  episodeSweepMs,
+  forecastOutcomeCheckMs,
+  autoLearn:{enabled:autoLearnEnabled,symbols:autoLearnSymbols,forecastIntervalMs:autoLearnForecastMs,sweepMs:autoLearnSweepMs,version:FORECAST_LEARNING_CENTER_VERSION},
+  shadowCompetition:{enabled:shadowCompetitionEnabled,evaluationMs:shadowCompetitionEvalMs,minSeedRows:shadowCompetitionMinSeedRows,minTrainCases:shadowCompetitionMinTrainCases,version:FORECAST_SHADOW_COMPETITION_VERSION,status:shadowCompetitionState?.status||'UNINITIALIZED'},
+  experimentGovernor:{version:FORECAST_EXPERIMENT_GOVERNOR_VERSION,file:experimentGovernorFile,status:experimentGovernorState?.status||'UNINITIALIZED',generationNumber:experimentGovernorState?.generationNumber||0},
+  featureResearch:{version:FORECAST_FEATURE_RESEARCH_VERSION,file:featureResearchFile,status:featureResearchState?.status||'UNINITIALIZED',generationNumber:featureResearchState?.generationNumber||0,provider:DERIVATIVES_PUBLIC_PROVIDER_VERSION},
+  liquidationResearch:{version:LIQUIDATION_PUBLIC_STREAM_VERSION,health:liquidationResearchStream.health()},
+  institutionalForecastRuntime:{
+    ...institutionalForecastRuntimeSummary(forecastRuntime),
+    file:forecastRuntimeFile
+  },
+  forecastProduct:FORECAST_PRODUCT_VERSION,
+  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
+  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
+  marketDataFabric:{
+    version:MARKET_DATA_FABRIC_VERSION,
+    file:marketFabricFile,
+    healthy:marketFabric.healthy,
+    seq:marketFabric.seq,
+    tailHash:marketFabric.tailHash
+  },
+  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+  observability:OBSERVABILITY_VERSION,
+  operationalReadiness:currentOperationalReadiness(),
+  persistenceContracts:currentPersistenceCompatibility(),
+  chaosEngineering:CHAOS_ENGINEERING_VERSION,
+  alertEngine:ALERT_ENGINE_VERSION,
+  stateValidity:{
+    version:STATE_VALIDITY_VERSION,
+    staleAfterMs:researchValidityStaleMs,
+    expireAfterMs:researchValidityExpireMs,
+    driftThreshold:researchValidityDriftThreshold
+  },
+  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
+  shadowOms:{
+    version:SHADOW_OMS_VERSION,
+    file:shadowOmsFile,
+    healthy:shadowOmsHealthy,
+    loaded:shadowOrders.length,
+    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+    watchMs:shadowWatchMs,
+    capabilities:SHADOW_OMS_CAPABILITIES
+  },
+  shadowSor:{
+    version:SHADOW_SOR_VERSION,
+    routeQuote:'USDT',
+    maxBookAgeMs:sorMaxBookAgeMs,
+    feeAssumptionsBps:{
+      BINANCE:sorBinanceFeeBps,
+      OKX:sorOkxFeeBps,
+      KRAKEN:sorKrakenFeeBps
+    },
+    capabilities:SHADOW_SOR_CAPABILITIES
+  },
+  venueQualityMemory:{
+    version:VENUE_QUALITY_MEMORY_VERSION,
+    file:venueQualityFile,
+    healthy:venueQualityHealthy,
+    loaded:venueQualityRecords.length,
+    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+    watchMs:vqmWatchMs,
+    markoutMaxLagMs:vqmMarkoutMaxLagMs,
+    minSamples:vqmMinSamples,
+    minToxicitySamples:vqmMinToxicitySamples,
+    halfLifeDays:vqmHalfLifeDays,
+    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
+  },
+  executionResearchLab:{
+    version:EXECUTION_RESEARCH_LAB_VERSION,
+    capabilities:EXECUTION_RESEARCH_CAPABILITIES
+  },
+  execution:'SHADOW_ONLY',
+  allowedChats:allowedChats.size || 'ALL',
+  recommendedReplicas:1,
+  configuredReplicaCount,
+  marketDataHosts:binanceBases.map(x => new URL(x).host),
+  witnessProviders:{
+    okx:new URL(okxBase).host,
+    kraken:new URL(krakenBase).host
+  },
+  persistence:{
+    file:stateFile,
+    healthy:persistenceHealthy,
+    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
+    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
+    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
+  },
+  episodeMemory:{
+    file:episodeFile,
+    loaded:episodes.length,
+    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+  }
+},null,2));
+
+await tg('deleteWebhook',{ drop_pending_updates:false });
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),venueQualityWatcher()]);
++Math.round(liquidations.window5m.totalUsd).toLocaleString('en-US'):'—'}`,
+    `• Long-Liquidationsanteil: ${liquidations?.ready5m?(liquidations.window5m.longShare*100).toFixed(1)+'%':'—'}`,
+    `• Imbalance: ${liquidations?.ready5m?(liquidations.window5m.imbalance*100).toFixed(1)+'%':'—'}`,
+    'Liquidationen werden nur als Forschungsfeature gespeichert; keine Handelsfreigabe.','',
+    'NOCH NICHT MIT LIVE-DATEN VERBUNDEN',
+    '👛 Wallet-/Trader-Beobachtung: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🪙 Memecoin-On-Chain: Modul vorhanden, aktuelle Live-Daten fehlen',
+    '🗣 Nachrichten/Narrative: Modul vorhanden, aktuelle Quelle fehlt',
+    '🔭 Langfristige Zukunftssignale: Modul vorhanden, aktuelle Datenquelle fehlt','',
+    'TCX zählt ein Modul erst als aktiv, wenn echte Daten vorhanden sind. Fehlende Daten werden nicht erfunden.','',
+    'Systemmodus: ABSTAIN / SHADOW_ONLY'
+  ];
+  await tg('sendMessage',{chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showForecast(chatId,symbol,messageId=null,options={}){
+  const started=Date.now();
+  const silent=options?.silent===true;
+  const issuanceSource=String(options?.source||'TCX_TELEGRAM_INSTITUTIONAL_FORECAST');
+  if(!forecastRuntime.healthy){
+    const failure={ok:false,skipped:true,reason:'FORECAST_RUNTIME_UNHEALTHY'};
+    if(silent) return failure;
+    return tg('sendMessage',{
+      chat_id:chatId,
+      text:[
+        '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+        '',
+        'Runtime: UNHEALTHY',
+        'Forecast-Ausgabe fail-closed.',
+        'Action: ABSTAIN / SHADOW_ONLY'
+      ].join('\n')
+    });
+  }
+
+  let derivativesResearchSnapshot=null;
+  let liquidationResearchSnapshot=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      derivativesResearchSnapshot=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
+      recordOperation(observability,{
+        name:'derivatives_research_snapshot',
+        ok:derivativesResearchSnapshot?.ok===true,
+        latencyMs:0,
+        error:derivativesResearchSnapshot?.ok?null:(derivativesResearchSnapshot?.errors||[]).map(x=>x.source+':'+x.error).join(' | ')
+      });
+    }catch(err){
+      recordError(observability,{scope:'derivatives_research',message:err instanceof Error?err.message:String(err)});
+    }
+    try{
+      liquidationResearchSnapshot=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});
+    }catch(err){
+      recordError(observability,{scope:'liquidation_research',message:err instanceof Error?err.message:String(err)});
+    }
+  }
+
+  const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
+  const {
+    state,witnessReport,r15,
+    marketAudit,witnessAudit,engineAudit,safety,envelope
+  }=ctx;
+
+  const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+  if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
+
+  const evidenceContext=buildResearchAlertContext(state,witnessReport,{
+    engineOverride:r15,
+    safetyOverride:safety
+  });
+  const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+
+  const episodeExtraFeatures=episodeVectorExtraFeatures(
+    episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
+    state.availableAt
+  );
+  const derivativesExtraFeatures=derivativesSnapshotToExtraFeatures(derivativesResearchSnapshot)
+    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
+  const liquidationExtraFeatures=liquidationSnapshotToExtraFeatures(liquidationResearchSnapshot)
+    .filter(row=>Number(row.availableAt)<=Number(state.availableAt));
+  const extraFeatures=[...episodeExtraFeatures,...derivativesExtraFeatures,...liquidationExtraFeatures];
+  const runtimeQuality=deriveForecastRuntimeQuality({
+    safety,
+    marketAudit,
+    witnessAudit,
+    engineAudit,
+    witnessReport,
+    dashboard:state.memoryDashboard,
+    extraFeatureCount:episodeExtraFeatures.length,
+    expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
+  });
+  if(silent&&issuanceSource==='TCX_AUTOLEARN_V1'){
+    const cleanAudit=
+      marketAudit?.ok===true&&
+      witnessAudit?.ok===true&&
+      engineAudit?.ok===true&&
+      auditLedger.healthy===true&&
+      marketFabric.healthy===true&&
+      safety?.canResearch===true&&
+      runtimeQuality.dataQuality>=0.70;
+    if(!cleanAudit){
+      return {
+        ok:false,
+        skipped:true,
+        reason:'AUTOLEARN_QUALITY_GATE',
+        dataQuality:runtimeQuality.dataQuality,
+        safetyState:String(safety?.state||'UNKNOWN')
+      };
+    }
+  }
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  let expansionEvidence=null;
+  try{
+    const expansionBook=await marketDataProvider.fetchExecutionBook(symbol);
+    expansionEvidence=buildInstitutionalExpansionEvidence({
+      asOf:Number(expansionBook.availableAt),
+      orderBook:{
+        timestamp:Number(expansionBook.availableAt),
+        availableAt:Number(expansionBook.availableAt),
+        source:String(expansionBook.source||'BINANCE_PUBLIC_REST_DEPTH100'),
+        version:String(expansionBook.version||'UNKNOWN'),
+        bids:(expansionBook.bids||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])]),
+        asks:(expansionBook.asks||[]).map(x=>[Number(x.price??x[0]),Number(x.qty??x[1])])
+      }
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'forecast.expansion_evidence',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+  const input=buildCanonicalForecastInput({
+    envelope,
+    dataQuality:runtimeQuality.dataQuality,
+    regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
+    regimeConfidence:runtimeQuality.regimeConfidence,
+    extraFeatures,
+    expansionEvidence
+  });
+
+  const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
+    input,
+    quality:runtimeQuality.dataQuality
+  });
+  let observationAuditFailures=0;
+  for(const row of liveObservation.evaluations){
+    const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+    if(!audit) observationAuditFailures++;
+  }
+  if(
+    liveObservation.revisions.length||
+    liveObservation.resolved.length||
+    liveObservation.evaluations.length
+  ){
+    await persistForecastRuntime('forecast-live-observation');
+  }
+  if(observationAuditFailures||!auditLedger.healthy){
+    recordError(observability,{
+      scope:'forecast.live_observation',
+      message:'forecast outcome audit binding failed'
+    });
+    const failText=[
+      '🔮 TCX Forecast Intelligence · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Institutional Gate: ABSTAIN',
+      'Audit: FAILED',
+      'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    if(silent) return {ok:false,skipped:true,reason:'AUDIT_BINDING_FAILED'};
+    const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
+    return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
+  }
+
+  const scienceAdapter=buildForecastScienceInputs({
+    engine:forecastRuntime.engine,
+    asOf:input.asOf,
+    symbol,
+    witnessReport
+  });
+  const scienceCore=runScientificCore({
+    asOf:input.asOf,
+    inputs:scienceAdapter.inputs,
+    options:scienceAdapter.options,
+    profile:scienceAdapter.profile,
+    minimumRequiredCoverage:1
+  });
+
+  const evidenceRecord=evidenceAppend.record;
+  const traceContext={
+    data:{
+      fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
+      fabricTailHash:String(envelope.dataFabric?.tailHash??marketFabric.tailHash),
+      inputFingerprint:input.inputFingerprint
+    },
+    release:{
+      releaseId:String(runtimeManifest?.releaseId||'UNAVAILABLE'),
+      configHash:String(runtimeManifest?.configHash||'')
+    },
+    researchState:{
+      fingerprint:String(evidenceRecord?.stateFingerprint?.hash||''),
+      regime:input.regimeId,
+      epistemic:'DERIVED_RESEARCH_STATE'
+    },
+    expansion:expansionEvidence,
+    evidence:[
+      ...(expansionEvidence?[{
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      }]:[]),
+      {
+        type:'EVIDENCE_SNAPSHOT',
+        fingerprint:evidenceRecord?.fingerprint??null,
+        stateFingerprint:evidenceRecord?.stateFingerprint?.hash??null,
+        index:Number(evidenceRecord?.index??0),
+        gate:String(evidenceRecord?.gate??'UNKNOWN')
+      },
+      {
+        type:'INDEPENDENT_WITNESS_MESH',
+        venues:[...(witnessReport?.distinctVenues||[])],
+        agreementScore:Number(witnessReport?.agreementScore||0),
+        independentWitnessSatisfied:witnessReport?.independentWitnessSatisfied===true
+      }
+    ],
+    contradictions:(witnessReport?.contradictions||[]).map(code=>({
+      type:'WITNESS_CONTRADICTION',
+      code:String(code)
+    })),
+    provenance:{
+      source:issuanceSource,
+      version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
+    }
+  };
+
+  const issued=issueInstitutionalForecast(forecastRuntime,{
+    input,
+    scientificValidity:scienceCore.validity,
+    dataSafety:safety,
+    researchValidity:forecastResearchValidity(evidenceAppend),
+    traceContext,
+    generatedAt:Math.max(Date.now(),input.asOf)
+  });
+
+  const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
+  await persistForecastRuntime('forecast-issued');
+
+  const issuance=issued.issuance;
+  const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+  const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
+  const scienceGuardLines=Object.entries(scienceAdapter.profile)
+    .filter(([,cfg])=>cfg.required===true)
+    .map(([id])=>id.replaceAll('_',' ')+': '+String(scienceCore.reports[id]?.gate||'INSUFFICIENT'));
+  const text=renderInstitutionalForecastCard(issuance,{
+    runtimeSummary,
+    auditHealthy:auditHealthyAfter,
+    scienceGuardLines,
+    now:Date.now()
+  });
+
+
+  recordOperation(observability,{
+    name:silent?'institutional_forecast_autolearn':'institutional_forecast',
+    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    latencyMs:Date.now()-started,
+    error:auditHealthyAfter?null:'forecast audit binding failed'
+  });
+
+  if(silent){
+    return {
+      ok:true,
+      skipped:false,
+      duplicate:issued.duplicate,
+      symbol,
+      issuance,
+      auditHealthy:auditHealthyAfter,
+      dataQuality:runtimeQuality.dataQuality,
+      derivativesFeatureCount:derivativesExtraFeatures.length,
+      derivativesSourceCount:Number(derivativesResearchSnapshot?.witness?.sourceCount||0),
+      liquidationFeatureCount:liquidationExtraFeatures.length,
+      liquidationReady5m:liquidationResearchSnapshot?.ready5m===true
     };
   }
 
@@ -3994,6 +5656,8 @@ async function autoLearnForecastWatcher() {
               dataQuality:result.dataQuality,
               derivativesFeatures:result.derivativesFeatureCount||0,
               derivativesSources:result.derivativesSourceCount||0,
+              liquidationFeatures:result.liquidationFeatureCount||0,
+              liquidationReady5m:result.liquidationReady5m===true,
               duplicate:result.duplicate===true
             }));
           }else{
