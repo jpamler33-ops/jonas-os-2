@@ -28,6 +28,7 @@ import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADO
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
 import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
+import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } from './expansion-runtime/institutional-expansion.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -2773,12 +2774,33 @@ async function showForecast(chatId,symbol,messageId=null){
     extraFeatureCount:extraFeatures.length,
     expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
   });
+  // Expansion V1 is wired only from evidence we actually observe here.
+  // No synthetic wallet, memecoin, narrative or future-intelligence inputs are fabricated.
+  const expansionSnapshot=await snapshot(symbol);
+  const expansionEvidence=buildInstitutionalExpansionEvidence({
+    asOf:Number(expansionSnapshot.availableAt),
+    orderBook:{
+      timestamp:Number(expansionSnapshot.timestamp),
+      availableAt:Number(expansionSnapshot.availableAt),
+      source:String(expansionSnapshot.source),
+      version:String(expansionSnapshot.version),
+      bids:[[Number(expansionSnapshot.bid),1]],
+      asks:[[Number(expansionSnapshot.ask),1]]
+    },
+    liquidityContext:{
+      aggressiveFlow:Number(expansionSnapshot.imbalance||0),
+      priceResponse:0,
+      visibleBarrierStrength:Math.min(1,Math.abs(Number(expansionSnapshot.imbalance||0))),
+      approachVelocity:0
+    }
+  });
   const input=buildCanonicalForecastInput({
     envelope,
     dataQuality:runtimeQuality.dataQuality,
     regimeId:String(state.memoryDashboard?.regime||'UNKNOWN'),
     regimeConfidence:runtimeQuality.regimeConfidence,
-    extraFeatures
+    extraFeatures,
+    expansionEvidence
   });
 
   const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
@@ -2845,7 +2867,15 @@ async function showForecast(chatId,symbol,messageId=null){
       regime:input.regimeId,
       epistemic:'DERIVED_RESEARCH_STATE'
     },
+    expansion:expansionEvidence,
     evidence:[
+      {
+        type:'EXPANSION_EVIDENCE',
+        version:INSTITUTIONAL_EXPANSION_VERSION,
+        fingerprint:expansionEvidence.fingerprint,
+        gate:expansionEvidence.evidenceGate,
+        epistemic:'VERIFIED_READ_ONLY_EXPANSION_EVIDENCE'
+      },
       {
         type:'EVIDENCE_SNAPSHOT',
         fingerprint:evidenceRecord?.fingerprint??null,
