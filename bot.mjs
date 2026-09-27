@@ -9,6 +9,7 @@ import { fetchIndependentWitnesses } from './independent-witness-network.mjs';
 import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
+import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -56,6 +57,8 @@ const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.j
 const auditLedger = await openAuditLedger(auditFile);
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
 const marketFabric = await openMarketDataFabric(marketFabricFile);
+const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-release-registry.jsonl';
+const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 const institutionalConfig = Object.freeze({
@@ -67,6 +70,40 @@ const institutionalConfig = Object.freeze({
   mechanismCausalStatus:'NOT_IDENTIFIED',
   orderExecutionPath:false
 });
+
+let runtimeManifest=null;
+let runtimeReleaseRecord=null;
+try {
+  runtimeManifest=await buildRuntimeManifest({
+    rootDir:'.',
+    config:institutionalConfig,
+    deployment:{
+      gitCommit:process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || '',
+      gitBranch:process.env.RAILWAY_GIT_BRANCH || process.env.GIT_BRANCH || '',
+      service:process.env.RAILWAY_SERVICE_NAME || 'tcx-telegram'
+    },
+    versions:{
+      institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
+      mechanismEngine:'MTL_V1',
+      witnessNetwork:'IWN_V1',
+      marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
+      releaseRegistry:RELEASE_REGISTRY_VERSION
+    }
+  });
+  if(releaseRegistry.healthy){
+    const registered=await registerRuntimeRelease(releaseRegistry,runtimeManifest,{registeredAt:Date.now()});
+    runtimeReleaseRecord=registered.record;
+  }
+} catch(err) {
+  releaseRegistry.healthy=false;
+  releaseRegistry.verification={
+    ok:false,
+    error:'RUNTIME_RELEASE_REGISTRATION_FAILURE',
+    detail:err instanceof Error?err.message:String(err)
+  };
+  console.error('runtime release registration failure',releaseRegistry.verification.detail);
+}
 let episodePersistenceHealthy = true;
 let episodePersistenceLastError = null;
 let episodePersistenceQueue = Promise.resolve();
@@ -572,6 +609,7 @@ function helpText() {
     '/audit – Institutional Kernel / Ledger-Integrität',
     '/fabric – Event-Sourced Market Data Fabric',
     '/replay BTC [ISO-Zeit] – Point-in-Time Replay',
+    '/release – Runtime Release & Configuration Registry',
     '/favorites – Favoriten',
     '/alert BTC 70000 – einmaliger Preisalarm',
     '/alerts – aktive Preisalarme',
@@ -941,6 +979,32 @@ function parseReplayTime(raw) {
   return Number.isFinite(t)?t:null;
 }
 
+async function showRelease(chatId) {
+  const verification=verifyReleaseRegistry(releaseRegistry.records);
+  const s=releaseRegistrySummary(releaseRegistry,runtimeManifest);
+  const text=[
+    '🧬 TCX Runtime Release Registry',
+    '',
+    `Registry: ${RELEASE_REGISTRY_VERSION}`,
+    `Health: ${releaseRegistry.healthy&&verification.ok?'HEALTHY':'UNHEALTHY / SAFE_STOP'}`,
+    `Releases: ${s.releases} · seq ${s.seq}`,
+    `Tail hash: ${s.tailHash.slice(0,20)}…`,
+    `Current registered: ${s.currentRegistered?'YES':'NO'}`,
+    `Current release: ${s.currentReleaseId?s.currentReleaseId.slice(0,20)+'…':'UNAVAILABLE'}`,
+    `Registry record: ${s.currentRegistrySeq??'n/a'}`,
+    '',
+    runtimeManifest?`Package: ${runtimeManifest.package.name} ${runtimeManifest.package.version}`:'Package: unavailable',
+    runtimeManifest?`Node: ${runtimeManifest.runtime.node} · ${runtimeManifest.runtime.platform}/${runtimeManifest.runtime.arch}`:'Runtime: unavailable',
+    runtimeManifest?`Config hash: ${runtimeManifest.configHash.slice(0,20)}…`:'Config hash: unavailable',
+    runtimeManifest?`Components hashed: ${Object.keys(runtimeManifest.componentHashes||{}).length}`:'Components hashed: 0',
+    '',
+    `Chain verification: ${verification.ok?'PASS':'FAIL '+(verification.error||'UNKNOWN')}`,
+    'Secrets werden nicht in die Release Registry aufgenommen.',
+    'Execution: SHADOW_ONLY'
+  ].join('\n');
+  return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
+}
+
 async function showFabric(chatId) {
   const verification=verifyMarketEventChain(marketFabric.events);
   const s=marketFabricSummary(marketFabric);
@@ -1030,7 +1094,8 @@ async function showEngine(chatId,symbol){
     witnessAudit,
     engineAudit,
     ledgerHealthy:auditLedger.healthy,
-    fabricHealthy:marketFabric.healthy
+    fabricHealthy:marketFabric.healthy,
+    registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
   });
   let envelope=buildResearchEnvelope({
     symbol,
@@ -1053,6 +1118,13 @@ async function showEngine(chatId,symbol){
       seq:fabricSummary.seq,
       tailHash:fabricSummary.tailHash,
       healthy:fabricSummary.healthy
+    },
+    runtimeRelease:{
+      registryVersion:RELEASE_REGISTRY_VERSION,
+      releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+      registrySeq:runtimeReleaseRecord?.seq??null,
+      registryTailHash:releaseRegistry.tailHash,
+      registryHealthy:releaseRegistry.healthy
     }
   });
   const auditRecord=await appendInstitutionalAudit('TCX_RESEARCH_ENVELOPE',envelope);
@@ -1062,7 +1134,8 @@ async function showEngine(chatId,symbol){
       witnessAudit,
       engineAudit,
       ledgerHealthy:false,
-      fabricHealthy:marketFabric.healthy
+      fabricHealthy:marketFabric.healthy,
+      registryHealthy:releaseRegistry.healthy && Boolean(runtimeReleaseRecord)
     });
     envelope=buildResearchEnvelope({
       symbol,
@@ -1085,6 +1158,13 @@ async function showEngine(chatId,symbol){
         seq:marketFabric.seq,
         tailHash:marketFabric.tailHash,
         healthy:marketFabric.healthy
+      },
+      runtimeRelease:{
+        registryVersion:RELEASE_REGISTRY_VERSION,
+        releaseId:runtimeManifest?.releaseId||'UNAVAILABLE',
+        registrySeq:runtimeReleaseRecord?.seq??null,
+        registryTailHash:releaseRegistry.tailHash,
+        registryHealthy:releaseRegistry.healthy
       }
     });
   }
@@ -1122,6 +1202,8 @@ async function showEngine(chatId,symbol){
     `Audit ledger: ${auditLedger.healthy?"HEALTHY":"UNHEALTHY"} · seq ${auditLedger.seq}`,
     `Market Fabric: ${marketFabric.healthy?"HEALTHY":"UNHEALTHY"} · seq ${marketFabric.seq} · +${fabricWrite.appended?.length||0} events`,
     `Fabric tail: ${marketFabric.tailHash.slice(0,16)}…`,
+    `Runtime release: ${runtimeManifest?.releaseId?runtimeManifest.releaseId.slice(0,16)+'…':'UNAVAILABLE'}`,
+    `Release Registry: ${releaseRegistry.healthy?"HEALTHY":"UNHEALTHY"} · seq ${releaseRegistry.seq}`,
     `Envelope: ${envelope.envelopeHash.slice(0,16)}…`,
     `Audit record: ${auditRecord?"#"+auditRecord.seq:"NOT WRITTEN"}`,
     `canResearch: ${safety.canResearch?"YES":"NO"} · canExecute: NO`,
@@ -1222,6 +1304,15 @@ async function handleCommand(msg) {
     return true;
   }
 
+
+  if (command === "/release") {
+    try { await showRelease(chatId); }
+    catch(err){
+      console.error("release command error",err instanceof Error?err.message:String(err));
+      await tg("sendMessage",{chat_id:chatId,text:"Release Registry gerade nicht verfügbar."});
+    }
+    return true;
+  }
 
   if (command === "/fabric") {
     try { await showFabric(chatId); }
@@ -1591,6 +1682,15 @@ const server = http.createServer((req,res) => {
         canExecute:false,
         execution:'SHADOW_ONLY'
       },
+      releaseRegistry:{
+        version:RELEASE_REGISTRY_VERSION,
+        healthy:releaseRegistry.healthy,
+        seq:releaseRegistry.seq,
+        tailHash:releaseRegistry.tailHash,
+        currentReleaseId:runtimeManifest?.releaseId||null,
+        currentRegistered:Boolean(runtimeReleaseRecord),
+        file:releaseRegistryFile
+      },
       marketDataFabric:{
         version:MARKET_DATA_FABRIC_VERSION,
         healthy:marketFabric.healthy,
@@ -1653,6 +1753,15 @@ console.log(JSON.stringify({
   episodeSweepMs,
   institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
   auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
+  releaseRegistry:{
+    version:RELEASE_REGISTRY_VERSION,
+    file:releaseRegistryFile,
+    healthy:releaseRegistry.healthy,
+    seq:releaseRegistry.seq,
+    tailHash:releaseRegistry.tailHash,
+    currentReleaseId:runtimeManifest?.releaseId||null,
+    currentRegistrySeq:runtimeReleaseRecord?.seq??null
+  },
   marketDataFabric:{
     version:MARKET_DATA_FABRIC_VERSION,
     file:marketFabricFile,
