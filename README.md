@@ -43,6 +43,7 @@ TCX_TELEGRAM_ALERT_CHECK_MS=15000
 TCX_EPISODE_SWEEP_MS=300000
 TCX_EPISODE_FILE=/data/tcx-episodes.json
 TCX_AUDIT_LEDGER_FILE=/data/tcx-audit-ledger.jsonl
+TCX_MARKET_FABRIC_FILE=/data/tcx-market-events.jsonl
 TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS=15000
 TCX_OKX_REST_BASE=https://www.okx.com
 TCX_KRAKEN_REST_BASE=https://api.kraken.com
@@ -321,3 +322,92 @@ The stored envelope is designed to answer:
 It does not claim that later code will reproduce identical market outcomes. Reproducibility refers to the recorded research input/state and deterministic envelope integrity.
 
 No order-execution path exists in this repository.
+
+
+## TCX Event-Sourced Market Data Fabric v1
+
+TCX now persists market knowledge as an immutable event stream at:
+
+```text
+/data/tcx-market-events.jsonl
+```
+
+The fabric stores:
+
+- `PRIMARY_MARKET`
+- `WITNESS_CONSENSUS`
+- `CANDLE_CLOSE`
+
+Each event contains:
+
+- sequence number
+- previous event hash
+- source and stream key
+- stable source-event id
+- eventTime
+- availableAt
+- ingestedAt
+- payload hash
+- event hash
+
+The chain is SHA-256 verified on startup and by `/fabric`.
+
+### Point-in-time rule
+
+A historical candle fetched today does **not** inherit its historical close time as knowledge availability.
+
+Example:
+
+```text
+candle closeTime = 2026-09-20 12:05
+TCX first ingests it = 2026-09-27 15:10
+
+eventTime   = 2026-09-20 12:05
+availableAt = 2026-09-27 15:10
+```
+
+Therefore a replay for 2026-09-20 cannot see information TCX only acquired on 2026-09-27.
+
+Repeated identical provider rows are deduplicated. If a provider later corrects the same source event with different content, the correction is appended with its later `availableAt` instead of rewriting history.
+
+Telegram:
+
+```text
+/fabric
+/replay BTC
+/replay BTC 2026-09-27T14:30:00Z
+```
+
+## TCX Deterministic Replay Engine v1
+
+Replay reconstructs the information set using only events satisfying:
+
+```text
+event.availableAt <= requested asOf
+```
+
+It currently reconstructs:
+
+- latest primary market observation known by `asOf`
+- latest witness consensus known by `asOf`
+- 4h / 1h / 15m / 5m candles known by `asOf`
+
+The resulting state receives a deterministic replay hash and a future-leakage audit.
+
+Every institutional Research Envelope is now bound to the current Market Data Fabric sequence and tail hash. This creates a verifiable relationship:
+
+```text
+Market Event Chain
+      ↓
+Fabric seq + tail hash
+      ↓
+Research Envelope
+      ↓
+Institutional Audit Ledger
+```
+
+If the Market Data Fabric chain is corrupted or unreadable, the Institutional Kernel enters `SAFE_STOP`.
+
+The current replay reconstructs the point-in-time information state. Re-running all historical strategy/engine code versions from archived binaries/configuration is a separate later layer.
+
+Execution remains disabled: `ABSTAIN / SHADOW_ONLY`.
