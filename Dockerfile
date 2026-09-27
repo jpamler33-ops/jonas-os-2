@@ -10,7 +10,7 @@ COPY research-trace.mjs scientific-validity.mjs scientific-core.mjs institutiona
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs ./
+COPY telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs ./
 
 RUN npm run check
 RUN npm run test:ui
