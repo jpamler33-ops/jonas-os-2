@@ -61,7 +61,13 @@ These are authoritative only inside the integration branch until promoted to mai
 | Transportability | `science-runtime/transportability.mjs` | STAGED / TESTED / CI GREEN |
 | Evidence lineage independence | `science-runtime/evidence-lineage-independence.mjs` | STAGED / TESTED / CI GREEN |
 | Model promotion ladder | `model-promotion-ladder.mjs` | STAGED / TESTED / CI GREEN |
+| Model candidate registry | `model-candidate-registry.mjs` | STAGED / TESTED / CI GREEN |
 | Institutional release file set | `runtime-release-registry.mjs` | STAGED / TESTED / CI GREEN |
+| Expansion pack provenance | `expansion-runtime/provenance.mjs` | STAGED / TESTED / CI GREEN |
+| Expansion evidence bundle | `expansion-runtime/institutional-expansion.mjs` | STAGED / TESTED / CI GREEN |
+| Source Intelligence | `expansion-runtime/source-intelligence.mjs` | STAGED / TESTED / CI GREEN |
+| Event Impact Memory | `expansion-runtime/event-impact-memory.mjs` | STAGED / TESTED / CI GREEN |
+| Liquidity Intelligence | `expansion-runtime/liquidity-intelligence.mjs` | STAGED / TESTED / CI GREEN |
 
 ## Ownership decisions
 
@@ -86,6 +92,25 @@ Do not import Alpha.30 as a competing:
 - execution stack
 - portfolio stack
 - deployment shell
+
+### V3 Expansion Pack
+
+Source package:
+`TCX_V3_EXPANSION_PACK_INSERTABLE_2026-09-27`
+
+Verified package SHA-256:
+`e15a7c66bbbdcfcb8c3680842e0071e2728cb872592b455b073fd218681f2180`
+
+The second uploaded copy is byte-identical to the first. It does not create a new version.
+
+Institutional adaptations currently staged:
+- resolved-event Source Intelligence
+- PIT/matured Event Impact Memory
+- evidence-typed Liquidity Intelligence
+- read-only expansion evidence bundle
+- package/source provenance binding
+
+The original expansion orchestrator, Ghost Portfolio, forecast ledger, science gates and self-improvement controller are not imported as competing owners because stronger canonical TCX equivalents already exist.
 
 ### Product / Telegram
 
