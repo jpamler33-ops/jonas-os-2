@@ -206,3 +206,23 @@ test('governed quarantine decisions are excluded and current source blocks are r
   });
   assert.equal(blocked.features.length,0);
 });
+
+
+test('explicit unusable governance is excluded even when decision is degraded',async()=>{
+  const p=await plane();
+  const base=snap({
+    sourceEventId:'gov-degraded-unusable',
+    features:[{id:'research.z',value:3}]
+  });
+  const governed=Object.freeze({...base,governance:Object.freeze({
+    version:'TCX_RESEARCH_DATA_GOVERNANCE_V1',
+    decision:'DEGRADED',
+    sourceKey:'ONCHAIN:ETHEREUM_PUBLIC_RPC',
+    sourceStatus:'DEGRADED',
+    usableForResearch:false,
+    canExecute:false
+  })});
+  await appendResearchDataPlane(p,[governed]);
+  const q=researchFeaturesAsOf(p,{streamKey:'ETHUSDT',asOf:1_015_000,requireGoverned:true});
+  assert.equal(q.features.length,0);
+});
