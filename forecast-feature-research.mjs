@@ -70,6 +70,64 @@ export const DEFAULT_RESEARCH_FEATURES=Object.freeze([
     id:'LIQUIDATION_COUNT',
     label:'Liquidation Count 5m',
     featureIds:Object.freeze(['research.liquidation.logCount5m'])
+  }),
+  Object.freeze({
+    id:'BTC_MEMPOOL_PRESSURE',
+    label:'BTC Mempool Pressure',
+    featureIds:Object.freeze(['research.onchain.btc.mempoolLogCount'])
+  }),
+  Object.freeze({
+    id:'BTC_FEE_PRESSURE',
+    label:'BTC Fee Pressure',
+    featureIds:Object.freeze(['research.onchain.btc.fastestFeeSatVb'])
+  }),
+  Object.freeze({
+    id:'ETH_GAS_UTILIZATION',
+    label:'ETH Gas Utilization',
+    featureIds:Object.freeze(['research.onchain.eth.gasUtilization'])
+  }),
+  Object.freeze({
+    id:'ETH_BASE_FEE',
+    label:'ETH Base Fee',
+    featureIds:Object.freeze(['research.onchain.eth.baseFeeGwei'])
+  }),
+  Object.freeze({
+    id:'ETH_LARGE_NATIVE_TRANSFER',
+    label:'ETH Large Native Transfer Activity',
+    featureIds:Object.freeze(['research.onchain.eth.largeNativeTransferLogEth'])
+  }),
+  Object.freeze({
+    id:'SOL_TPS',
+    label:'SOL Network Throughput',
+    featureIds:Object.freeze(['research.onchain.sol.tps'])
+  }),
+  Object.freeze({
+    id:'SOL_PRIORITY_FEE',
+    label:'SOL Priority Fee',
+    featureIds:Object.freeze(['research.onchain.sol.priorityFeeMedian'])
+  })
+]);
+
+export const WALLET_RESEARCH_FEATURES=Object.freeze([
+  Object.freeze({
+    id:'WALLET_ACTIVITY_5M',
+    label:'Wallet Cohort Activity 5m',
+    featureIds:Object.freeze(['research.wallet.activity5m'])
+  }),
+  Object.freeze({
+    id:'WALLET_ACTIVITY_15M',
+    label:'Wallet Cohort Activity 15m',
+    featureIds:Object.freeze(['research.wallet.activity15m'])
+  }),
+  Object.freeze({
+    id:'WALLET_NATIVE_NET_FLOW',
+    label:'Wallet Cohort Native Net Flow',
+    featureIds:Object.freeze(['research.wallet.nativeNetFlowSignedLog'])
+  }),
+  Object.freeze({
+    id:'WALLET_NATIVE_GROSS_FLOW',
+    label:'Wallet Cohort Native Gross Flow',
+    featureIds:Object.freeze(['research.wallet.nativeGrossFlowLog'])
   })
 ]);
 
