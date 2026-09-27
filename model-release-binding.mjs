@@ -35,6 +35,10 @@ export function createModelReleaseBinding({
   if(runtimeReleaseRecord.releaseId!==runtimeReleaseRecord.manifest.releaseId){
     throw new Error('runtime release record/manifest mismatch');
   }
+  const boundForecastConfigHash=String(runtimeReleaseRecord.manifest?.versions?.forecastConfigHash??'');
+  if(boundForecastConfigHash!==candidate.configHash){
+    throw new Error('runtime release is not bound to candidate forecast config hash');
+  }
   const at=finite(createdAt,'createdAt');
   if(at<candidate.createdAt) throw new Error('binding cannot predate candidate');
 
@@ -92,7 +96,12 @@ export function verifyPromotionReleaseLink({
 
   const software=runtimeRecord(releaseRegistry,binding?.softwareReleaseId);
   if(!software) reasons.push('SOFTWARE_RELEASE_NOT_REGISTERED');
-  else if(sha256(software.manifest)!==binding.softwareManifestHash) reasons.push('SOFTWARE_MANIFEST_HASH_MISMATCH');
+  else {
+    if(sha256(software.manifest)!==binding.softwareManifestHash) reasons.push('SOFTWARE_MANIFEST_HASH_MISMATCH');
+    if(String(software.manifest?.versions?.forecastConfigHash??'')!==String(binding?.modelConfigHash??'')){
+      reasons.push('SOFTWARE_FORECAST_CONFIG_HASH_MISMATCH');
+    }
+  }
 
   return deepFreeze({
     version:MODEL_RELEASE_BINDING_VERSION,
