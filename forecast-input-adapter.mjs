@@ -113,6 +113,10 @@ export function buildCanonicalForecastInput({
       const source=expansionEvidence?.sourceReliability??{};
       addFeature(features,featureSources,'expansion.source.sampleSize',source.sampleSize,'TCX_EXPANSION_SOURCE_INTELLIGENCE');
       addFeature(features,featureSources,'expansion.source.reliability',source.reliability,'TCX_EXPANSION_SOURCE_INTELLIGENCE');
+      const trader=expansionEvidence?.traderWalletEvidence?.performance??{};
+      addFeature(features,featureSources,'expansion.traderWallet.sampleSize',trader.sampleSize,'TCX_TRADER_WALLET_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.traderWallet.meanNetReturn',trader.meanNetReturn,'TCX_TRADER_WALLET_INTELLIGENCE');
+      addFeature(features,featureSources,'expansion.traderWallet.hitRate',trader.hitRate,'TCX_TRADER_WALLET_INTELLIGENCE');
     }
   }
 
