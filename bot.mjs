@@ -45,7 +45,7 @@ import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityReg
 import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
 import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
-import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
+import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';\nimport { buildResearchDependencyGraph, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -3365,6 +3365,24 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     expansionEvidence
   });
 
+  let researchDependencyGraph=null;
+  try{
+    researchDependencyGraph=buildResearchDependencyGraph({
+      plane:researchDataPlane,
+      governanceSummary:researchGovernanceView,
+      streamKey:symbol,
+      asOf:Number(input.asOf),
+      knowledgeTime:Math.max(Date.now(),Number(input.asOf)),
+      forecastInputFingerprint:input.inputFingerprint,
+      requireGoverned:true
+    });
+  }catch(err){
+    recordError(observability,{
+      scope:'research_dependency_graph.build',
+      message:err instanceof Error?err.message:String(err)
+    });
+  }
+
   const liveObservation=observeInstitutionalForecastRuntime(forecastRuntime,{
     input,
     quality:runtimeQuality.dataQuality
@@ -3442,6 +3460,18 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         epistemic:'POINT_IN_TIME_RESEARCH_FEATURES'
       }]:[]),
       {type:'RESEARCH_DATA_GOVERNANCE',version:RESEARCH_DATA_GOVERNANCE_VERSION,fingerprint:researchGovernanceView.fingerprint,epistemic:'POINT_IN_TIME_DATA_POLICY'},
+      ...(researchDependencyGraph?[{
+        type:'RESEARCH_DEPENDENCY_GRAPH',
+        version:RESEARCH_DEPENDENCY_GRAPH_VERSION,
+        fingerprint:researchDependencyGraph.fingerprint,
+        gate:researchDependencyGraph.gate,
+        totalFeatures:researchDependencyGraph.impact.totalFeatures,
+        usableFeatures:researchDependencyGraph.impact.usableFeatures,
+        blockedFeatures:researchDependencyGraph.impact.blockedFeatures,
+        degradedFeatures:researchDependencyGraph.impact.degradedFeatures,
+        coverage:researchDependencyGraph.impact.coverage,
+        epistemic:'POINT_IN_TIME_DEPENDENCY_LINEAGE'
+      }]:[]),
       ...(expansionEvidence?[{
         type:'EXPANSION_EVIDENCE',
         version:INSTITUTIONAL_EXPANSION_VERSION,
@@ -3530,7 +3560,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
       researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,
       researchGovernanceIssueCount:Number(researchGovernanceView.statuses?.QUARANTINED||0),
-      researchGovernanceFingerprint:researchGovernanceView.fingerprint
+      researchGovernanceFingerprint:researchGovernanceView.fingerprint,
+      researchDependencyGate:researchDependencyGraph?.gate||'UNAVAILABLE',
+      researchDependencyCoverage:Number(researchDependencyGraph?.impact?.coverage||0),
+      researchDependencyBlockedFeatures:Number(researchDependencyGraph?.impact?.blockedFeatures||0),
+      researchDependencyFingerprint:researchDependencyGraph?.fingerprint||null
     };
   }
 
@@ -4327,6 +4361,10 @@ async function autoLearnForecastWatcher() {
               researchDataPlaneAppendOk:result.researchDataPlaneAppendOk===true,
               researchGovernanceIssueCount:result.researchGovernanceIssueCount||0,
               researchGovernanceFingerprint:result.researchGovernanceFingerprint||null,
+              researchDependencyGate:result.researchDependencyGate||'UNAVAILABLE',
+              researchDependencyCoverage:result.researchDependencyCoverage||0,
+              researchDependencyBlockedFeatures:result.researchDependencyBlockedFeatures||0,
+              researchDependencyFingerprint:result.researchDependencyFingerprint||null,
               duplicate:result.duplicate===true
             }));
           }else{
