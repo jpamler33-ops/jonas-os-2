@@ -44,9 +44,12 @@ These are authoritative only inside the integration branch until promoted to mai
 |---|---|---|
 | Immutable Research Trace | `research-trace.mjs` | STAGED / TESTED |
 | Forecast Intelligence runtime | `forecast-runtime/forecast/*` | STAGED / TESTED / NOT PRODUCT-CANONICAL |
+| Canonical forecast contract | `forecast-contract.mjs` | STAGED / TESTED / CI GREEN |
 | Forecast regression guards | `forecast-intelligence.integration.test.mjs` | STAGED / CI GREEN |
-| Scientific validity aggregation | `scientific-validity.mjs` | STAGED / TEST REQUIRED |
-| Alpha.30 guard adapters | isolated future `science-runtime/*` | CANDIDATE / NOT YET IMPORTED |
+| Scientific validity aggregation | `scientific-validity.mjs` | STAGED / TESTED / CI GREEN |
+| Alpha.30 empirical support | `science-runtime/empirical-support.mjs` | STAGED / TESTED / CI GREEN |
+| Alpha.30 research integrity | `science-runtime/research-integrity.mjs` | STAGED / TESTED / CI GREEN |
+| Alpha.30 remaining science guards | future `science-runtime/*` | CANDIDATE / PARTIAL EXTRACTION |
 
 ## Forecast Specialist Engine
 
