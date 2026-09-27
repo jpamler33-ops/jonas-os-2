@@ -7,6 +7,7 @@ import {
   evaluateForecastCandidateWalkForward
 } from './forecast-candidate-lab.mjs';
 import { DEFAULT_PROMOTION_POLICY } from './model-promotion-ladder.mjs';
+import { generateControlledForecastHypotheses, FORECAST_HYPOTHESIS_GENERATOR_VERSION } from './forecast-hypothesis-generator.mjs';
 
 export const FORECAST_SHADOW_COMPETITION_VERSION='TCX_FORECAST_SHADOW_COMPETITION_V1';
 
@@ -105,6 +106,30 @@ export function buildShadowCandidateBlueprints(incumbentConfig){
   ]);
 }
 
+function candidateFromBlueprint(bp,{rows,incumbentConfig,dataCutoffAt,createdAt,parentReleaseId,source}){
+  const artifact=buildForecastCandidateArtifact({
+    historyRows:rows,
+    incumbentConfig,
+    candidateConfig:bp.config,
+    dataCutoffAt,
+    createdAt,
+    parentReleaseId,
+    source
+  });
+  return Object.freeze({
+    blueprintId:bp.id,
+    label:bp.label,
+    description:bp.description,
+    reason:bp.reason??null,
+    priority:Number(bp.priority??0),
+    source:String(bp.source||source),
+    generatorVersion:bp.generatorVersion??null,
+    artifact,
+    status:'WAITING_FOR_OOS',
+    lastEvaluation:null
+  });
+}
+
 export function createShadowCompetition({
   historyRows,
   incumbentConfig,
@@ -126,6 +151,11 @@ export function createShadowCompetition({
       seedRows:rows.length,
       requiredSeedRows:Math.max(1,Number(minSeedRows)||1),
       parentReleaseId:String(parentReleaseId||'UNKNOWN'),
+      hypothesisGenerator:Object.freeze({
+        version:FORECAST_HYPOTHESIS_GENERATOR_VERSION,
+        diagnostics:null,
+        generatedCandidates:0
+      }),
       candidates:Object.freeze([]),
       lastEvaluatedAt:null,
       executionMode:'SHADOW_ONLY',
@@ -134,25 +164,23 @@ export function createShadowCompetition({
   }
 
   const dataCutoffAt=Math.max(...rows.map(r=>Number(r.resolvedAt)));
-  const candidates=buildShadowCandidateBlueprints(incumbentConfig).map(bp=>{
-    const artifact=buildForecastCandidateArtifact({
-      historyRows:rows,
-      incumbentConfig,
-      candidateConfig:bp.config,
-      dataCutoffAt,
-      createdAt:t,
-      parentReleaseId,
-      source:'TCX_AUTOMATIC_SHADOW_COMPETITION'
-    });
-    return Object.freeze({
-      blueprintId:bp.id,
-      label:bp.label,
-      description:bp.description,
-      artifact,
-      status:'WAITING_FOR_OOS',
-      lastEvaluation:null
-    });
+  const fixed=buildShadowCandidateBlueprints(incumbentConfig);
+  const generated=generateControlledForecastHypotheses({
+    historyRows:rows,
+    incumbentConfig,
+    asOf:dataCutoffAt,
+    maxHypotheses:4
   });
+  const candidates=[
+    ...fixed.map(bp=>candidateFromBlueprint(bp,{
+      rows,incumbentConfig,dataCutoffAt,createdAt:t,parentReleaseId,
+      source:'TCX_AUTOMATIC_SHADOW_COMPETITION'
+    })),
+    ...generated.hypotheses.map(bp=>candidateFromBlueprint(bp,{
+      rows,incumbentConfig,dataCutoffAt,createdAt:t,parentReleaseId,
+      source:'TCX_CONTROLLED_HYPOTHESIS_GENERATOR'
+    }))
+  ];
 
   return Object.freeze({
     version:FORECAST_SHADOW_COMPETITION_VERSION,
@@ -164,9 +192,63 @@ export function createShadowCompetition({
     seedRows:rows.length,
     requiredSeedRows:Math.max(1,Number(minSeedRows)||1),
     parentReleaseId:String(parentReleaseId||'UNKNOWN'),
+    hypothesisGenerator:Object.freeze({
+      version:FORECAST_HYPOTHESIS_GENERATOR_VERSION,
+      diagnostics:generated.diagnostics,
+      generatedCandidates:generated.hypotheses.length
+    }),
     candidates:Object.freeze(candidates),
     lastEvaluatedAt:null,
     executionMode:'SHADOW_ONLY',
+    productionMutationPerformed:false
+  });
+}
+
+export function refreshShadowCompetitionHypotheses(state,{
+  historyRows,
+  incumbentConfig,
+  asOf=Date.now(),
+  maxGeneratedHypotheses=4
+}={}){
+  if(state?.version!==FORECAST_SHADOW_COMPETITION_VERSION) throw new Error('shadow competition version invalid');
+  if(state.status!=='ACTIVE'||!Number.isFinite(Number(state.dataCutoffAt))) return Object.freeze(clone(state));
+  if(state.incumbentConfigHash!==sha256(incumbentConfig)){
+    return Object.freeze({...clone(state),status:'STALE_INCUMBENT_CONFIG'});
+  }
+
+  const t=finite(asOf);
+  if(t==null) throw new Error('asOf must be finite');
+  const training=validHistory(historyRows,state.dataCutoffAt);
+  const generated=generateControlledForecastHypotheses({
+    historyRows:training,
+    incumbentConfig,
+    asOf:state.dataCutoffAt,
+    maxHypotheses:maxGeneratedHypotheses
+  });
+  const existingIds=new Set((state.candidates||[]).map(x=>String(x.blueprintId)));
+  const additions=[];
+  for(const bp of generated.hypotheses){
+    if(existingIds.has(bp.id)) continue;
+    additions.push(candidateFromBlueprint(bp,{
+      rows:training,
+      incumbentConfig,
+      dataCutoffAt:Number(state.dataCutoffAt),
+      createdAt:t,
+      parentReleaseId:String(state.parentReleaseId||'UNKNOWN'),
+      source:'TCX_CONTROLLED_HYPOTHESIS_GENERATOR'
+    }));
+  }
+
+  return Object.freeze({
+    ...clone(state),
+    hypothesisGenerator:Object.freeze({
+      version:FORECAST_HYPOTHESIS_GENERATOR_VERSION,
+      diagnostics:generated.diagnostics,
+      generatedCandidates:generated.hypotheses.length,
+      addedCandidates:additions.length,
+      refreshedAt:t
+    }),
+    candidates:Object.freeze([...(state.candidates||[]).map(clone),...additions]),
     productionMutationPerformed:false
   });
 }
@@ -297,6 +379,7 @@ export function shadowCompetitionSummary(state,{promotionPolicy=DEFAULT_PROMOTIO
     dataCutoffAt:finite(state?.dataCutoffAt),
     seedRows:Number(state?.seedRows??0),
     lastEvaluatedAt:finite(state?.lastEvaluatedAt),
+    hypothesisGenerator:state?.hypothesisGenerator??null,
     candidates,
     competition:state?.competition??null,
     promotionPolicy:{
