@@ -195,14 +195,34 @@ export function buildShadowSmartRoute(intent,venueBooks,opts={}){
 
   const normalized={side,notionalQuote};
   const route=simulateRouteCore(normalized,venueBooks,opts);
-  const singles=venueBooks.map(book=>({
-    ...simulateRouteCore(normalized,[book],opts),
-    venue:book.venue,
-    quote:book.quote,
-    source:book.source,
-    fetchLatencyMs:book.fetchLatencyMs,
-    feeBps:book.feeBps
-  }));
+  const singles=venueBooks.map(book=>{
+    const single=simulateRouteCore(normalized,[book],opts);
+    const tox=toxicityPenalty(book,opts);
+    const ref=Number(route.referenceMid);
+    const sideSign=side==='BUY'?1:-1;
+    const benchmarkSlippageBps=
+      single.avgFillPrice!=null && ref>0
+        ? sideSign*(Number(single.avgFillPrice)-ref)/ref*10000
+        : null;
+    const benchmarkAllInBps=
+      single.filledBase>EPS && ref>0
+        ? sideSign*(Number(single.netCashQuote)-Number(single.filledBase)*ref)/(Number(single.filledBase)*ref)*10000
+        : null;
+    return {
+      ...single,
+      venue:book.venue,
+      quote:book.quote,
+      source:book.source,
+      fetchLatencyMs:book.fetchLatencyMs,
+      feeBps:book.feeBps,
+      benchmarkReferenceMid:ref>0?ref:null,
+      benchmarkSlippageBps,
+      benchmarkAllInBps,
+      predictedToxicityBps:tox.appliedBps,
+      predictedToxicityStatus:tox.status,
+      predictedToxicityEvidenceN:tox.evidenceN
+    };
+  });
   const bestSingle=chooseBestSingle(side,singles);
 
   let improvementQuote=null,improvementBps=null;
@@ -226,6 +246,12 @@ export function buildShadowSmartRoute(intent,venueBooks,opts={}){
       feesQuote:x.feesQuote,
       slippageBps:x.slippageBps,
       allInBps:x.allInBps,
+      benchmarkReferenceMid:x.benchmarkReferenceMid,
+      benchmarkSlippageBps:x.benchmarkSlippageBps,
+      benchmarkAllInBps:x.benchmarkAllInBps,
+      predictedToxicityBps:x.predictedToxicityBps,
+      predictedToxicityStatus:x.predictedToxicityStatus,
+      predictedToxicityEvidenceN:x.predictedToxicityEvidenceN,
       depthExhausted:x.depthExhausted,
       fetchLatencyMs:x.fetchLatencyMs,
       feeBps:x.feeBps,
