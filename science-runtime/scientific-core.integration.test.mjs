@@ -32,7 +32,7 @@ function exposure(id,role,purpose,partitionId,extra={}){
   return {
     id,claimId:'C1',mechanismId:'M1',datasetId:'D1',partitionId,
     role,purpose,experimentId:`E-${id}`,systemVersion:'v1',
-    timestamp:100,availableAt:100,source:'TEST',version:'1',
+    timestamp:extra.timestamp??100,availableAt:extra.availableAt??extra.timestamp??100,source:'TEST',version:'1',
     provenance:'fixture',resultRevealed:true,informedChange:false,
     ...extra
   };
