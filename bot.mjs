@@ -4028,6 +4028,27 @@ async function venueQualityWatcher() {
   }
 }
 
+async function onchainResearchStartupProbe(){
+  const symbols=['BTCUSDT','ETHUSDT','SOLUSDT'];
+  const results=[];
+  for(const symbol of symbols){
+    try{
+      const s=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
+      results.push({
+        symbol,
+        ok:s?.ok===true,
+        chain:s?.chain||null,
+        features:onchainSnapshotToExtraFeatures(s).length,
+        error:s?.error||s?.reason||null
+      });
+    }catch(err){
+      results.push({symbol,ok:false,chain:null,features:0,error:err instanceof Error?err.message:String(err)});
+    }
+  }
+  console.log('onchain research startup probe',JSON.stringify(results));
+  return results;
+}
+
 async function syncFeatureResearch(reason='update'){
   try{
     const beforeStatus=featureResearchState?.status||'UNINITIALIZED';
@@ -4628,6 +4649,7 @@ process.on('SIGINT',() => void gracefulShutdown('SIGINT'));
 process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 
 liquidationResearchStream.start();
+await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
 const me = await tg('getMe',{});
 const persistenceSmoke=runPersistenceSmokeTest();
