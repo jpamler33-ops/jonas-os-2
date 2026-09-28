@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 
 import { sha256 } from './institutional-kernel.mjs';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
@@ -312,4 +312,17 @@ test('online forecast memories accept explicit bounded row caps',async()=>{
   assert.equal(r.engine.modelPerformance.maxRows,703);
   assert.equal(r.engine.intervalCalibration.maxRows,704);
   assert.equal(r.engine.drift.maxRows,705);
+});
+
+test('oversized legacy snapshot recovery is distinguished from corruption and written forward',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-oversize-'));
+  const file=path.join(dir,'runtime.json');
+  await writeFile(file,' '.repeat(2048));
+  const r=await openInstitutionalForecastRuntime(file,{maxSnapshotBytes:1024});
+  assert.equal(r.healthy,true);
+  assert.equal(r.recoveredFromCorrupt,false);
+  assert.equal(r.recoveredFromOversizedSnapshot,true);
+  assert.match(r.backupPath,/\.oversized-/);
+  const summary=institutionalForecastRuntimeSummary(r);
+  assert.equal(summary.recoveredFromOversizedSnapshot,true);
 });

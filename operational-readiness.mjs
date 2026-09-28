@@ -31,6 +31,7 @@ export function evaluateOperationalReadiness({
   if(!bool(evidenceHistory?.healthy)) hard.push('EVIDENCE_HISTORY_UNHEALTHY');
 
   if(bool(forecastRuntime?.recoveredFromCorrupt)) hard.push('FORECAST_RUNTIME_RECOVERED_FROM_CORRUPT');
+  if(bool(forecastRuntime?.recoveredFromOversizedSnapshot)) warnings.push('FORECAST_RUNTIME_OVERSIZED_SNAPSHOT_RECOVERED');
   if(bool(episodePersistence?.recoveredFromCorrupt)) hard.push('EPISODE_MEMORY_RECOVERED_FROM_CORRUPT');
   if(bool(evidenceHistory?.recoveredFromCorrupt)) hard.push('EVIDENCE_HISTORY_RECOVERED_FROM_CORRUPT');
   if(bool(persistence?.recoveredFromCorrupt)) warnings.push('USER_STATE_RECOVERED_FROM_CORRUPT');

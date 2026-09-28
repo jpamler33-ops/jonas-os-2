@@ -243,6 +243,7 @@ function createRuntimeState(filePath,config,opts={}){
     issuances:[],
     healthy:true,
     recoveredFromCorrupt:false,
+    recoveredFromOversizedSnapshot:false,
     backupPath:null,
     lastError:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
@@ -252,6 +253,7 @@ function createRuntimeState(filePath,config,opts={}){
 export async function openInstitutionalForecastRuntime(filePath,{
   config=DEFAULT_INSTITUTIONAL_FORECAST_CONFIG,
   maxHistoryRows=8_000,
+  maxSnapshotBytes=48*1024*1024,
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
@@ -259,7 +261,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
 
   try{
     const snapshotStat=await stat(filePath);
-    if(snapshotStat.size>48*1024*1024) throw Object.assign(new Error('forecast runtime snapshot exceeds 48 MiB safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE'});
+    if(snapshotStat.size>Math.max(1024,Number(maxSnapshotBytes)||48*1024*1024)) throw Object.assign(new Error('forecast runtime snapshot exceeds configured safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE'});
     const raw=await readFile(filePath,'utf8');
     const snapshot=JSON.parse(raw);
     if(snapshot?.version!==INSTITUTIONAL_FORECAST_RUNTIME_VERSION){
@@ -274,9 +276,11 @@ export async function openInstitutionalForecastRuntime(filePath,{
     );
   }catch(err){
     if(err?.code!=='ENOENT'){
-      runtime.recoveredFromCorrupt=true;
+      const oversized=err?.code==='TCX_RUNTIME_SNAPSHOT_TOO_LARGE';
+      runtime.recoveredFromCorrupt=!oversized;
+      runtime.recoveredFromOversizedSnapshot=oversized;
       runtime.lastError=err instanceof Error?err.message:String(err);
-      const backup=filePath+'.corrupt-'+Date.now();
+      const backup=filePath+(oversized?'.oversized-':'.corrupt-')+Date.now();
       try{
         await rename(filePath,backup);
         runtime.backupPath=backup;
@@ -509,6 +513,7 @@ export function institutionalForecastRuntimeSummary(runtime){
     version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
     healthy:runtime?.healthy===true,
     recoveredFromCorrupt:runtime?.recoveredFromCorrupt===true,
+    recoveredFromOversizedSnapshot:runtime?.recoveredFromOversizedSnapshot===true,
     backupPath:runtime?.backupPath??null,
     lastError:runtime?.lastError??null,
     historyCases:runtime?.engine?.historySize?.()??0,
