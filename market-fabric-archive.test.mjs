@@ -1,29 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,writeFile,readdir,readFile,stat } from 'node:fs/promises';
-import { gzipSync,brotliDecompressSync } from 'node:zlib';
+import { gzipSync,brotliDecompressSync,gunzipSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { archiveMarketFabricSegments,MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { sha256 } from './institutional-kernel.mjs';
 
-test('streams segment to Brotli, manifests hashes, then removes only raw copy',async()=>{
+test('streams new segment to gzip-9, manifests hashes, then removes only raw copy',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-'));
   const file=path.join(dir,'tcx-market-events.jsonl');
   const seg=file+'.segment-2-1.jsonl';
   const raw=JSON.stringify({seq:2,eventHash:'abc'})+'\n';
   await writeFile(seg,raw);
-  const r=await archiveMarketFabricSegments({filePath:file});
+  const r=await archiveMarketFabricSegments({filePath:file,migrateExisting:false});
   assert.equal(r.segments,1);
-  assert.equal(r.coldCodec,'brotli');
+  assert.equal(r.preferredNewCodec,'gzip-9');
   const names=await readdir(dir);
-  const br=names.find(x=>x.endsWith('.jsonl.br'));
-  assert.ok(br);
+  const gz=names.find(x=>x.endsWith('.jsonl.gz'));
+  assert.ok(gz);
   assert.ok(!names.includes(path.basename(seg)));
-  assert.equal(brotliDecompressSync(await readFile(path.join(dir,br))).toString('utf8'),raw);
+  assert.equal(gunzipSync(await readFile(path.join(dir,gz))).toString('utf8'),raw);
   const m=JSON.parse(await readFile(file+'.segments-manifest.json','utf8'));
   assert.equal(m.version,MARKET_FABRIC_ARCHIVE_VERSION);
-  assert.equal(m.segments[0].codec,'brotli');
+  assert.equal(m.segments[0].codec,'gzip');
   assert.equal(m.segments[0].lastSeq,2);
   assert.ok(m.segments[0].rawSha256);
   assert.ok(m.fingerprint);
@@ -43,74 +43,64 @@ test('restart is idempotent after successful archive',async()=>{
   const file=path.join(dir,'tcx-market-events.jsonl');
   const seg=file+'.segment-3-2.jsonl';
   await writeFile(seg,JSON.stringify({seq:3,eventHash:'def'})+'\n');
-  const a=await archiveMarketFabricSegments({filePath:file});
-  const b=await archiveMarketFabricSegments({filePath:file});
+  const a=await archiveMarketFabricSegments({filePath:file,migrateExisting:false});
+  const b=await archiveMarketFabricSegments({filePath:file,migrateExisting:false});
   assert.equal(a.segments,1);
   assert.equal(b.segments,1);
-  assert.equal(b.codecBreakdown.brotli.segments,1);
+  assert.equal(b.codecBreakdown.gzip.segments,1);
 });
 
-test('migrates one legacy gzip segment to Brotli without changing raw bytes or chain metadata',async()=>{
+test('legacy gzip migration candidate is accepted only when Brotli saves at least two percent',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-migrate-'));
   const file=path.join(dir,'tcx-market-events.jsonl');
   const sourceName='tcx-market-events.jsonl.segment-1-2-123.jsonl';
   const gzipName=sourceName+'.gz';
-  const raw=[
-    JSON.stringify({seq:1,eventHash:'a',payload:'x'.repeat(5000)}),
-    JSON.stringify({seq:2,eventHash:'b',payload:'x'.repeat(5000)})
-  ].join('\n')+'\n';
+  const rows=[];
+  for(let i=0;i<200;i++) rows.push(JSON.stringify({seq:i,eventHash:String(i),kind:'MARKET_SNAPSHOT',symbol:'BTCUSDT',nested:{a:'repeat-pattern-'+(i%5),b:Array(20).fill('same-value')}}));
+  const raw=rows.join('\n')+'\n';
   const gz=gzipSync(Buffer.from(raw,'utf8'),{level:9});
   await writeFile(path.join(dir,gzipName),gz);
   const item={
-    name:gzipName,
-    sourceName,
-    rawBytes:Buffer.byteLength(raw),
-    compressedBytes:gz.length,
-    rawSha256:sha256(raw),
-    compressedSha256:sha256(gz),
-    firstSeq:1,
-    lastSeq:2,
-    tailHash:'b',
-    createdAt:123
+    name:gzipName,sourceName,rawBytes:Buffer.byteLength(raw),compressedBytes:gz.length,
+    rawSha256:sha256(raw),compressedSha256:sha256(gz),firstSeq:0,lastSeq:199,tailHash:'199',createdAt:123
   };
   const core={version:'TCX_MARKET_FABRIC_ARCHIVE_V2',segments:[item]};
   await writeFile(file+'.segments-manifest.json',JSON.stringify({...core,fingerprint:sha256(core)})+'\n');
 
   const r=await archiveMarketFabricSegments({filePath:file,maxMigrationsPerRun:1});
-  assert.equal(r.migratedSegments,1);
-  assert.equal(r.codecBreakdown.brotli.segments,1);
-  assert.equal(r.codecBreakdown.gzip.segments,0);
+  assert.equal(r.migrationAttempts,1);
   const m=JSON.parse(await readFile(file+'.segments-manifest.json','utf8'));
-  assert.equal(m.version,MARKET_FABRIC_ARCHIVE_VERSION);
-  assert.equal(m.segments[0].codec,'brotli');
-  assert.equal(m.segments[0].rawSha256,item.rawSha256);
-  assert.equal(m.segments[0].lastSeq,2);
-  const migrated=await readFile(path.join(dir,m.segments[0].name));
-  assert.equal(brotliDecompressSync(migrated).toString('utf8'),raw);
-  await assert.rejects(()=>stat(path.join(dir,gzipName)),err=>err?.code==='ENOENT');
+  const persisted=m.segments[0];
+  if(r.migratedSegments===1){
+    assert.equal(persisted.codec,'brotli');
+    const migrated=await readFile(path.join(dir,persisted.name));
+    assert.equal(brotliDecompressSync(migrated).toString('utf8'),raw);
+    assert.ok(persisted.compressedBytes<gz.length*.98);
+    await assert.rejects(()=>stat(path.join(dir,gzipName)),err=>err?.code==='ENOENT');
+  }else{
+    assert.equal(r.migrationRejected,1);
+    assert.equal(persisted.codec,'gzip');
+    assert.ok(persisted.brotliCandidateRejectedAt);
+    assert.equal(gunzipSync(await readFile(path.join(dir,gzipName))).toString('utf8'),raw);
+  }
 });
 
-test('migrates at most one legacy segment per run to bound maintenance CPU',async()=>{
-  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-migrate-bound-'));
+test('rejected Brotli candidate is not retried on every maintenance pass',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-no-retry-'));
   const file=path.join(dir,'tcx-market-events.jsonl');
-  const segments=[];
-  for(let i=0;i<2;i++){
-    const sourceName='tcx-market-events.jsonl.segment-'+i+'-'+i+'-'+i+'.jsonl';
-    const gzipName=sourceName+'.gz';
-    const raw=JSON.stringify({seq:i,eventHash:String(i),payload:'y'.repeat(2000)})+'\n';
-    const gz=gzipSync(Buffer.from(raw,'utf8'),{level:9});
-    await writeFile(path.join(dir,gzipName),gz);
-    segments.push({
-      name:gzipName,sourceName,rawBytes:Buffer.byteLength(raw),compressedBytes:gz.length,
-      rawSha256:sha256(raw),compressedSha256:sha256(gz),firstSeq:i,lastSeq:i,tailHash:String(i),createdAt:i
-    });
-  }
-  const core={version:'TCX_MARKET_FABRIC_ARCHIVE_V2',segments};
+  const sourceName='tcx-market-events.jsonl.segment-1-1-1.jsonl';
+  const gzipName=sourceName+'.gz';
+  const raw=JSON.stringify({seq:1,eventHash:'x',payload:'abc'})+'\n';
+  const gz=gzipSync(Buffer.from(raw,'utf8'),{level:9});
+  await writeFile(path.join(dir,gzipName),gz);
+  const item={
+    name:gzipName,sourceName,codec:'gzip',rawBytes:Buffer.byteLength(raw),compressedBytes:gz.length,
+    rawSha256:sha256(raw),compressedSha256:sha256(gz),firstSeq:1,lastSeq:1,tailHash:'x',createdAt:1,
+    brotliCandidateRejectedAt:Date.now(),brotliCandidateBytes:gz.length+10,brotliCandidateQuality:11
+  };
+  const core={version:MARKET_FABRIC_ARCHIVE_VERSION,segments:[item]};
   await writeFile(file+'.segments-manifest.json',JSON.stringify({...core,fingerprint:sha256(core)})+'\n');
-  const first=await archiveMarketFabricSegments({filePath:file,maxMigrationsPerRun:1});
-  assert.equal(first.codecBreakdown.brotli.segments,1);
-  assert.equal(first.codecBreakdown.gzip.segments,1);
-  const second=await archiveMarketFabricSegments({filePath:file,maxMigrationsPerRun:1});
-  assert.equal(second.codecBreakdown.brotli.segments,2);
-  assert.equal(second.codecBreakdown.gzip.segments,0);
+  const r=await archiveMarketFabricSegments({filePath:file,maxMigrationsPerRun:1});
+  assert.equal(r.migrationAttempts,0);
+  assert.equal(r.codecBreakdown.gzip.segments,1);
 });

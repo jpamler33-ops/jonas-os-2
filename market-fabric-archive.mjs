@@ -3,15 +3,15 @@ import { readdir,readFile,writeFile,stat,unlink,rename,open } from 'node:fs/prom
 import { createReadStream,createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
 import { createHash } from 'node:crypto';
-import { createBrotliCompress,createGunzip,constants as zlibConstants } from 'node:zlib';
+import { createBrotliCompress,createGunzip,createGzip,constants as zlibConstants } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { canonicalJson,sha256 } from './institutional-kernel.mjs';
 
 export const MARKET_FABRIC_ARCHIVE_VERSION='TCX_MARKET_FABRIC_ARCHIVE_V3';
 const LEGACY_ARCHIVE_VERSION='TCX_MARKET_FABRIC_ARCHIVE_V2';
-const COLD_CODEC='brotli';
-const BROTLI_QUALITY=7;
 const LAST_LINE_MAX_BYTES=4*1024*1024;
+const BROTLI_QUALITY=11;
+const BROTLI_MIN_SAVINGS_RATIO=0.02;
 
 async function hashFile(file){
   const h=createHash('sha256');
@@ -83,13 +83,11 @@ function rawAuditTransform(){
       cb(null,chunk);
     }
   });
-  return {
-    stream,
-    finish:()=>({bytes,sha256:h.digest('hex')})
-  };
+  return {stream,finish:()=>({bytes,sha256:h.digest('hex')})};
 }
 
-function brotli(){
+function gzipLevel9(){return createGzip({level:9});}
+function brotliCandidate(){
   return createBrotliCompress({
     params:{
       [zlibConstants.BROTLI_PARAM_QUALITY]:BROTLI_QUALITY,
@@ -98,28 +96,17 @@ function brotli(){
   });
 }
 
-async function durableBrotliFromRaw({raw,tmp}){
+async function durableCompressedFromRaw({raw,tmp,compressor}){
   const audit=rawAuditTransform();
-  await pipeline(
-    createReadStream(raw),
-    audit.stream,
-    brotli(),
-    createWriteStream(tmp,{flags:'wx'})
-  );
+  await pipeline(createReadStream(raw),audit.stream,compressor(),createWriteStream(tmp,{flags:'wx'}));
   const fh=await open(tmp,'r');
   try{await fh.sync();}finally{await fh.close();}
   return audit.finish();
 }
 
-async function durableBrotliFromGzip({gzipFile,tmp}){
+async function durableBrotliCandidateFromGzip({gzipFile,tmp}){
   const audit=rawAuditTransform();
-  await pipeline(
-    createReadStream(gzipFile),
-    createGunzip(),
-    audit.stream,
-    brotli(),
-    createWriteStream(tmp,{flags:'wx'})
-  );
+  await pipeline(createReadStream(gzipFile),createGunzip(),audit.stream,brotliCandidate(),createWriteStream(tmp,{flags:'wx'}));
   const fh=await open(tmp,'r');
   try{await fh.sync();}finally{await fh.close();}
   return audit.finish();
@@ -131,16 +118,17 @@ function codecOf(item){
   return 'gzip';
 }
 
-async function migrateOneLegacySegment({dir,manifest,manifestPath}){
-  const legacy=manifest.segments.find(x=>codecOf(x)==='gzip');
-  if(!legacy) return {manifest,migrated:null};
+async function tryMigrateOneGzipSegment({dir,manifest,manifestPath}){
+  const legacy=manifest.segments.find(x=>codecOf(x)==='gzip'&&!x.brotliCandidateRejectedAt);
+  if(!legacy) return {manifest,attempted:null};
   const source=path.join(dir,legacy.name);
+  const sourceMeta=await stat(source);
   const destName=legacy.sourceName+'.br';
   const dest=path.join(dir,destName);
   const tmp=dest+'.tmp';
   await unlink(tmp).catch(e=>{if(e?.code!=='ENOENT')throw e;});
 
-  const audit=await durableBrotliFromGzip({gzipFile:source,tmp});
+  const audit=await durableBrotliCandidateFromGzip({gzipFile:source,tmp});
   if(legacy.rawSha256&&audit.sha256!==legacy.rawSha256){
     await unlink(tmp).catch(()=>{});
     throw new Error('MARKET_FABRIC_ARCHIVE_MIGRATION_RAW_HASH_MISMATCH');
@@ -149,29 +137,58 @@ async function migrateOneLegacySegment({dir,manifest,manifestPath}){
     await unlink(tmp).catch(()=>{});
     throw new Error('MARKET_FABRIC_ARCHIVE_MIGRATION_RAW_BYTES_MISMATCH');
   }
-  const compressedBytes=(await stat(tmp)).size;
+
+  const candidateBytes=(await stat(tmp)).size;
+  const requiredMax=Math.floor(sourceMeta.size*(1-BROTLI_MIN_SAVINGS_RATIO));
+  if(candidateBytes>=requiredMax){
+    await unlink(tmp).catch(()=>{});
+    const rejected={
+      ...legacy,
+      codec:'gzip',
+      brotliCandidateRejectedAt:Date.now(),
+      brotliCandidateBytes:candidateBytes,
+      brotliCandidateQuality:BROTLI_QUALITY
+    };
+    const next=manifestValue(manifest.segments.map(x=>x.sourceName===legacy.sourceName?rejected:x));
+    await atomicManifest(manifestPath,next);
+    return {
+      manifest:next,
+      attempted:{
+        accepted:false,
+        sourceName:legacy.sourceName,
+        fromBytes:sourceMeta.size,
+        candidateBytes,
+        reclaimedBytes:0
+      }
+    };
+  }
+
   const compressedSha256=await hashFile(tmp);
   await rename(tmp,dest);
-
   const nextItem={
     ...legacy,
     name:destName,
-    codec:COLD_CODEC,
-    compressedBytes,
+    codec:'brotli',
+    compressedBytes:candidateBytes,
     compressedSha256,
-    migratedAt:Date.now()
+    migratedAt:Date.now(),
+    migrationSourceBytes:sourceMeta.size,
+    migrationQuality:BROTLI_QUALITY
   };
-  const segments=manifest.segments.map(x=>x.sourceName===legacy.sourceName?nextItem:x);
-  const next=manifestValue(segments);
+  delete nextItem.brotliCandidateRejectedAt;
+  delete nextItem.brotliCandidateBytes;
+  delete nextItem.brotliCandidateQuality;
+  const next=manifestValue(manifest.segments.map(x=>x.sourceName===legacy.sourceName?nextItem:x));
   await atomicManifest(manifestPath,next);
   await unlink(source).catch(e=>{if(e?.code!=='ENOENT')throw e;});
   return {
     manifest:next,
-    migrated:{
+    attempted:{
+      accepted:true,
       sourceName:legacy.sourceName,
-      fromBytes:Number(legacy.compressedBytes)||null,
-      toBytes:compressedBytes,
-      reclaimedBytes:Math.max(0,(Number(legacy.compressedBytes)||compressedBytes)-compressedBytes)
+      fromBytes:sourceMeta.size,
+      candidateBytes,
+      reclaimedBytes:sourceMeta.size-candidateBytes
     }
   };
 }
@@ -191,7 +208,7 @@ export async function archiveMarketFabricSegments({
   const raws=(await readdir(dir)).filter(n=>n.startsWith(base+'.segment-')&&n.endsWith('.jsonl')).sort();
   for(const name of raws){
     const raw=path.join(dir,name);
-    const targetName=name+'.br';
+    const targetName=name+'.gz';
     const target=path.join(dir,targetName);
     const tmp=target+'.tmp';
     await unlink(tmp).catch(e=>{if(e?.code!=='ENOENT')throw e;});
@@ -214,7 +231,7 @@ export async function archiveMarketFabricSegments({
       }
     }
 
-    const audit=await durableBrotliFromRaw({raw,tmp});
+    const audit=await durableCompressedFromRaw({raw,tmp,compressor:gzipLevel9});
     if(audit.sha256!==rawSha256||audit.bytes!==rawMeta.size){
       await unlink(tmp).catch(()=>{});
       throw new Error('MARKET_FABRIC_ARCHIVE_STREAM_AUDIT_MISMATCH');
@@ -225,7 +242,7 @@ export async function archiveMarketFabricSegments({
     const item={
       name:targetName,
       sourceName:name,
-      codec:COLD_CODEC,
+      codec:'gzip',
       rawBytes:rawMeta.size,
       compressedBytes,
       rawSha256,
@@ -235,27 +252,29 @@ export async function archiveMarketFabricSegments({
       tailHash:last.eventHash,
       createdAt:Date.now()
     };
-    const segments=[...manifest.segments.filter(x=>x.sourceName!==name),item];
-    const next=manifestValue(segments);
+    const next=manifestValue([...manifest.segments.filter(x=>x.sourceName!==name),item]);
     await atomicManifest(manifestPath,next);
     manifest=next;
     await unlink(raw);
   }
 
-  let migratedSegments=0,reclaimedBytes=0;
+  let migrationAttempts=0,migratedSegments=0,migrationRejected=0,reclaimedBytes=0;
   if(migrateExisting){
     const max=Math.max(0,Math.floor(Number(maxMigrationsPerRun)||0));
     for(let i=0;i<max;i++){
-      const migrated=await migrateOneLegacySegment({dir,manifest,manifestPath});
-      manifest=migrated.manifest;
-      if(!migrated.migrated) break;
-      migratedSegments++;
-      reclaimedBytes+=migrated.migrated.reclaimedBytes;
+      const result=await tryMigrateOneGzipSegment({dir,manifest,manifestPath});
+      manifest=result.manifest;
+      if(!result.attempted) break;
+      migrationAttempts++;
+      if(result.attempted.accepted){
+        migratedSegments++;
+        reclaimedBytes+=result.attempted.reclaimedBytes;
+      }else{
+        migrationRejected++;
+      }
     }
   }
 
-  // If a manifest already points at Brotli, any old gzip is now only an orphan
-  // left behind by a crash between manifest commit and source cleanup.
   for(const item of manifest.segments){
     if(codecOf(item)!=='brotli') continue;
     const legacyGzip=path.join(dir,item.sourceName+'.gz');
@@ -281,8 +300,12 @@ export async function archiveMarketFabricSegments({
     budgetBytes:maxArchivedBytes,
     budgetExceeded:total>maxArchivedBytes,
     destructiveRetention:false,
-    coldCodec:COLD_CODEC,
+    preferredNewCodec:'gzip-9',
+    optionalCandidateCodec:'brotli-11',
+    minCandidateSavingsRatio:BROTLI_MIN_SAVINGS_RATIO,
+    migrationAttempts,
     migratedSegments,
+    migrationRejected,
     reclaimedBytes,
     codecBreakdown
   };
