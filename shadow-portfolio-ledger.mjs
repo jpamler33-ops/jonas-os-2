@@ -53,21 +53,22 @@ export function deriveShadowRiskPlan(expectedReturn,{
   });
 }
 
-function validAutoEntryOrder(order){
+function validAutoEntryOrder(order,{acceptedRoles=['ENTRY']}={}){
+  const role=String(order?.strategyMeta?.role||'ENTRY').toUpperCase();
   return Boolean(
     order&&
     order.execution==='SHADOW_ONLY'&&
     order.canExecuteLive===false&&
     String(order.strategyMeta?.strategy||'')==='TCX_AUTONOMOUS_SHADOW_TRADER_V1'&&
-    String(order.strategyMeta?.role||'ENTRY').toUpperCase()!=='EXIT'&&
+    acceptedRoles.map(String).map(x=>x.toUpperCase()).includes(role)&&
     finite(order.fillBase)>EPS&&
     finite(order.avgFillPrice)>0&&
     finite(order.fillQuote)>0
   );
 }
 
-export function shadowPositionFromEntryOrder(order,{openedAt=null}={}){
-  if(!validAutoEntryOrder(order)) throw new Error('AUTO_SHADOW_ENTRY_ORDER_REQUIRED');
+export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=['ENTRY']}={}){
+  if(!validAutoEntryOrder(order,{acceptedRoles})) throw new Error('AUTO_SHADOW_ENTRY_ORDER_REQUIRED');
   const openAt=finite(openedAt,finite(order.updatedAt,finite(order.createdAt,Date.now())));
   const horizonMs=Math.max(60_000,finite(order.strategyMeta?.horizonMs,15*60_000));
   const plan=deriveShadowRiskPlan(order.strategyMeta?.expectedReturn);
@@ -257,7 +258,7 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const known=new Set(base.positions.map(p=>String(p.entryOrderId)));
   let added=0;
   for(const order of Array.isArray(orders)?orders:[]){
-    if(!validAutoEntryOrder(order)||known.has(String(order.id))) continue;
+    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY']})||known.has(String(order.id))) continue;
     const p=shadowPositionFromEntryOrder(order,{openedAt:finite(order.updatedAt,finite(order.createdAt,now))});
     base.positions.push(p);
     known.add(String(order.id));
