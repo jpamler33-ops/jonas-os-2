@@ -282,8 +282,8 @@ function externalInputs(symbol,bundle,ingestedAt){
       features:optionsFeatures,ttlMs:10*60_000,qualityStatus:'PUBLIC_OPTIONS_SUMMARY'
     }),
     externalInput({
-      symbol,snapshot:bundle.macro,ingestedAt,domain:'MACRO',source:'FRED_REALTIME_V1',
-      features:macroFeatures,ttlMs:6*60*60_000,qualityStatus:'CURRENT_VINTAGE_CAPTURE'
+      symbol,snapshot:bundle.macro,ingestedAt,domain:'MACRO',source:String(bundle.macro?.source||'FRED_REALTIME_V1'),
+      features:macroFeatures,ttlMs:6*60*60_000,qualityStatus:bundle.macro?.provenance?.historicalVintageGuarantee===true?'CURRENT_VINTAGE_CAPTURE':'CURRENT_SERIES_CAPTURE'
     }),
     externalInput({
       symbol,snapshot:bundle.predictionMarket,ingestedAt,domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',
