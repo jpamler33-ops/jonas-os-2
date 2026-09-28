@@ -32,7 +32,7 @@ test('discovery diagnostics summarize gates and explain the cold calibration pat
   const rendered=renderTradeDiscoveryDiagnostics(summary);
   assert.match(rendered,/Datensicherheit NORMAL: 1\/1/);
   assert.match(rendered,/probability calibration history is insufficient/);
-  assert.match(rendered,/RESEARCH_DEPENDENCY_ABSTAIN|dependency validation is blocking/i);
+  assert.match(rendered,/RESEARCH_DEPENDENCY_ABSTAIN|Forschungsdaten blockiert/i);
   assert.match(rendered,/Academy: BOOTCAMP · Core freigegeben/);
   assert.match(rendered,/Training Supervisor: freigegeben · Mission DISCOVERY/);
 });

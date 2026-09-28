@@ -1,34 +1,33 @@
 export const TRADE_DISCOVERY_DIAGNOSTICS_VERSION='TCX_TRADE_DISCOVERY_DIAGNOSTICS_V1';
 
 const REASON_TEXT={
-  ADMISSION_ABSTAIN:'Forecast has not passed the admission gate',
-  ADMISSION_CAUTION:'Admission is cautious; the normal entry thresholds are stricter',
-  NO_ADMITTED_DIRECTIONAL_HORIZON:'No calibrated directional horizon passed its forecast gate',
-  DATA_SAFETY_NOT_NORMAL:'Data safety is not NORMAL',
-  EXPECTED_RETURN_TOO_SMALL:'Expected return is below the normal threshold',
-  DIRECTIONAL_PROBABILITY_TOO_LOW:'Directional probability is below the normal threshold',
-  PROBABILITY_EDGE_TOO_LOW:'The probability edge is below the normal threshold',
-  ACADEMY_RISK_HOLD:'Capital Academy currently holds core entries',
-  ACADEMY_MEME_HOLD:'Capital Academy currently holds memecoin entries',
-  TRAINING_SUPERVISOR_HOLD:'Training Supervisor has paused entries',
-  DISCOVERY_GLOBAL_OPEN_CAP:'The exploration trade limit is full',
-  DISCOVERY_SYMBOL_OPEN_CAP:'An exploration trade for this coin is already open',
-  DISCOVERY_SYMBOL_COOLDOWN:'This coin is inside its exploration cooldown',
-  DISCOVERY_DAILY_SYMBOL_CAP:'This coin reached its daily exploration limit',
-  DISCOVERY_RUNTIME_UNHEALTHY:'Audit, OMS, or portfolio health is blocking entries',
-  RUNTIME_AUDIT_OR_OMS_UNHEALTHY:'Audit or OMS health is blocking standard entries',
-  PROBABILITY_NOT_ADMITTED:'Probability display is not admitted',
-  FORECAST_STALE:'The forecast is too old to use',
-  MANDATORY_DISCOVERY_DISABLED:'Mandatory Discovery is disabled',
-  DATA_SAFETY_NOT_NORMAL:'Data safety is not NORMAL',
-  COVERAGE_SLOTS_PLACED:'Only isolated coverage probes were placed',
-  NO_SAFE_LEARNABLE_CANDIDATE:'No calibrated, directionally usable exploration candidate was found',
-  LEARNING_VALUE_TOO_LOW:'The candidate does not add enough learning value',
-  DISCOVERY_RESPECTS_STANDARD_BLOCK_ADMISSION_ABSTAIN:'Discovery correctly respects the ABSTAIN admission block',
-  DISCOVERY_RESPECTS_STANDARD_BLOCK_NO_ADMITTED_DIRECTIONAL_HORIZON:'Discovery correctly respects the missing admitted horizon',
-  FORECAST_ALL_HORIZONS_ABSTAIN:'Every forecast horizon is blocked; no entry signal is admitted',
-  NO_CALIBRATED_HORIZONS:'No horizon has enough resolved calibration evidence yet',
-  RESEARCH_DEPENDENCY_ABSTAIN:'Research dependency validation is blocking forecast admission'
+  ADMISSION_ABSTAIN:'Die Prognose hat keine Einstiegsfreigabe erhalten',
+  ADMISSION_CAUTION:'Die Freigabe ist vorsichtig; strengere Einstiegsschwellen gelten',
+  NO_ADMITTED_DIRECTIONAL_HORIZON:'Kein kalibrierter Richtungs-Horizont ist zugelassen',
+  DATA_SAFETY_NOT_NORMAL:'Die Datensicherheit steht nicht auf NORMAL',
+  EXPECTED_RETURN_TOO_SMALL:'Die erwartete Rendite liegt unter der Einstiegsschwelle',
+  DIRECTIONAL_PROBABILITY_TOO_LOW:'Die Richtungswahrscheinlichkeit liegt unter der Schwelle',
+  PROBABILITY_EDGE_TOO_LOW:'Der Wahrscheinlichkeitsvorsprung liegt unter der Schwelle',
+  ACADEMY_RISK_HOLD:'Capital Academy hält Core-Einstiege zurück',
+  ACADEMY_MEME_HOLD:'Capital Academy hält Memecoin-Einstiege zurück',
+  TRAINING_SUPERVISOR_HOLD:'Training Supervisor hat Einstiege pausiert',
+  DISCOVERY_GLOBAL_OPEN_CAP:'Das Limit offener Exploration-Trades ist erreicht',
+  DISCOVERY_SYMBOL_OPEN_CAP:'Für diesen Coin ist bereits ein Exploration-Trade offen',
+  DISCOVERY_SYMBOL_COOLDOWN:'Für diesen Coin läuft noch die Exploration-Abkühlzeit',
+  DISCOVERY_DAILY_SYMBOL_CAP:'Der Tageshöchstwert für diesen Coin ist erreicht',
+  DISCOVERY_RUNTIME_UNHEALTHY:'Audit, OMS oder Portfolio blockiert neue Einstiege',
+  RUNTIME_AUDIT_OR_OMS_UNHEALTHY:'Audit oder OMS blockiert normale Einstiege',
+  PROBABILITY_NOT_ADMITTED:'Wahrscheinlichkeiten sind nicht zur Nutzung freigegeben',
+  FORECAST_STALE:'Die Prognose ist zu alt für einen Einstieg',
+  MANDATORY_DISCOVERY_DISABLED:'Mandatory Discovery ist ausgeschaltet',
+  COVERAGE_SLOTS_PLACED:'Es wurden nur getrennte Coverage-Probes angelegt',
+  NO_SAFE_LEARNABLE_CANDIDATE:'Kein kalibrierter und gerichteter Exploration-Kandidat ist sicher genug',
+  LEARNING_VALUE_TOO_LOW:'Der Kandidat bringt zu wenig zusätzlichen Lernwert',
+  DISCOVERY_RESPECTS_STANDARD_BLOCK_ADMISSION_ABSTAIN:'Discovery respektiert die ABSTAIN-Sperre',
+  DISCOVERY_RESPECTS_STANDARD_BLOCK_NO_ADMITTED_DIRECTIONAL_HORIZON:'Discovery respektiert den fehlenden freigegebenen Horizont',
+  FORECAST_ALL_HORIZONS_ABSTAIN:'Alle Prognose-Horizonte sind gesperrt; es gibt kein freigegebenes Einstiegssignal',
+  NO_CALIBRATED_HORIZONS:'Noch fehlen genügend aufgelöste Ergebnisse zur Horizont-Kalibrierung',
+  RESEARCH_DEPENDENCY_ABSTAIN:'Die Prüfung der Forschungsdaten blockiert die Prognosefreigabe'
 };
 
 export function createTradeDiscoveryDiagnostics({maxSymbols=32}={}){
@@ -142,9 +141,9 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
     :'AutoLearn hat noch keinen vollständigen Scan erfasst.';
   const horizonText=(s.latestHorizonDetails||[]).map(h=>{
     const vals=[`${h.horizonId}: ${h.gate}/${h.calibration}`,h.direction&&h.direction!=='NEUTRAL'?h.direction:null,
-      Number.isFinite(Number(h.expectedReturn))?`Return ${(Number(h.expectedReturn)*100).toFixed(2)}%`:null,
-      Number.isFinite(Number(h.directionalProbability))?`Richtung ${(Number(h.directionalProbability)*100).toFixed(0)}%`:null,
-      Number.isFinite(Number(h.probabilityEdge))?`Edge ${(Number(h.probabilityEdge)*100).toFixed(0)}pp`:null].filter(Boolean);
+      h.expectedReturn!=null&&Number.isFinite(Number(h.expectedReturn))?`Rendite ${(Number(h.expectedReturn)*100).toFixed(2)}%`:null,
+      h.directionalProbability!=null&&Number.isFinite(Number(h.directionalProbability))?`Richtung ${(Number(h.directionalProbability)*100).toFixed(0)}%`:null,
+      h.probabilityEdge!=null&&Number.isFinite(Number(h.probabilityEdge))?`Vorsprung ${(Number(h.probabilityEdge)*100).toFixed(0)}pp`:null].filter(Boolean);
     return '• '+vals.join(' · ')+(h.reasons.length?' — '+h.reasons.join('; '):'');
   }).join('\n');
   return [
