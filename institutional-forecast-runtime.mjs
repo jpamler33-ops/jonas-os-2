@@ -442,13 +442,58 @@ function snapshotComponentProfile(payload){
   return {...profile,topLevelBytes:topLevel};
 }
 
+const TRACKER_REPORT_PERSISTENCE_PROJECTION='TCX_TRACKER_REPORT_OPERATIONAL_V1';
+
+function trackerReportForPersistence(report){
+  if(!report||typeof report!=='object') return report;
+  return {
+    persistenceProjection:TRACKER_REPORT_PERSISTENCE_PROJECTION,
+    symbol:report.symbol,
+    asOf:report.asOf,
+    price:report.price,
+    executionMode:report.executionMode,
+    forecasts:(Array.isArray(report.forecasts)?report.forecasts:[]).map(f=>({
+      horizonId:f.horizonId,
+      horizonMs:f.horizonMs,
+      flatThreshold:f.flatThreshold,
+      gate:f.gate,
+      direction:f.direction,
+      expectedReturn:f.expectedReturn,
+      probabilities:clone(f.probabilities),
+      interval:{
+        q10:f?.interval?.q10,
+        q90:f?.interval?.q90
+      },
+      operationalConfidence:f.operationalConfidence
+    }))
+  };
+}
+
+function intelligenceForPersistence(snapshot){
+  if(!snapshot?.tracker||!Array.isArray(snapshot.tracker.records)) return snapshot;
+  return {
+    ...snapshot,
+    tracker:{
+      ...snapshot.tracker,
+      records:snapshot.tracker.records.map(record=>({
+        ...record,
+        report:trackerReportForPersistence(record.report)
+      }))
+    }
+  };
+}
+
 export async function saveInstitutionalForecastRuntime(runtime){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
   await mkdir(path.dirname(runtime.filePath),{recursive:true});
   const payload=institutionalForecastRuntimeSnapshot(runtime);
+  const persistencePayload={
+    ...payload,
+    intelligence:intelligenceForPersistence(payload.intelligence)
+  };
   const tmp=runtime.filePath+'.tmp-'+process.pid;
   try{
-    const serialized=JSON.stringify(payload);
+    const serialized=JSON.stringify(persistencePayload);
     const bytes=Buffer.byteLength(serialized);
     const maxSnapshotBytes=snapshotByteLimit(runtime.maxSnapshotBytes);
     if(bytes>maxSnapshotBytes){
@@ -477,7 +522,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
     runtime.lastError=null;
     let componentProfile=null;
     if(runtime.snapshotProfilePending){
-      componentProfile=snapshotComponentProfile(payload);
+      componentProfile=snapshotComponentProfile(persistencePayload);
       runtime.snapshotProfilePending=false;
       runtime.lastSnapshotProfile=componentProfile;
     }
