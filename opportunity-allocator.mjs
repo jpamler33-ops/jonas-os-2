@@ -1,4 +1,5 @@
 import { sha256 } from './institutional-kernel.mjs';
+import { buildStrategyEdgeDecayMap, edgeDecayDecision } from './strategy-edge-decay.mjs';
 
 export const OPPORTUNITY_ALLOCATOR_VERSION='TCX_OPPORTUNITY_ALLOCATOR_V1';
 
@@ -46,7 +47,7 @@ export function buildStrategyDnaMemory(ledger,{minSamples=4}={}){
   return freeze({...core,fingerprint:sha256(core)});
 }
 
-export function allocateShadowOpportunity(memory,candidate,{baseNotionalQuote=100}={}){
+export function allocateShadowOpportunity(memory,candidate,{baseNotionalQuote=100,ledger=null}={}){
   const key=dnaKey(candidate);
   const cell=(memory?.cells||[]).find(x=>x.key===key)||null;
   const forecastEdge=clamp((finite(candidate.directionalProbability,.5)-.5)*2);
@@ -55,11 +56,13 @@ export function allocateShadowOpportunity(memory,candidate,{baseNotionalQuote=10
   const confidence=cell?cell.confidence:0;
   const failure=cell?cell.failureScore:.5;
   const score=clamp(.35*forecastEdge+.20*returnSignal+.30*learned+.15*confidence);
-  const blocked=cell?.status==='AVOID'&&cell.samples>=4;
+  const decay=ledger?edgeDecayDecision(buildStrategyEdgeDecayMap(ledger),candidate):null;
+  const blocked=(cell?.status==='AVOID'&&cell.samples>=4)||decay?.blocked===true;
   const multiplier=blocked?0:score>=.72?1.25:score>=.60?1:score>=.48?.75:.5;
   const core={
     version:OPPORTUNITY_ALLOCATOR_VERSION,key,score,multiplier,blocked,
-    reason:blocked?'FAILURE_MEMORY_AVOID':cell?'STRATEGY_DNA_ALLOCATED':'COLD_START_CONSERVATIVE',
+    reason:decay?.blocked?'EDGE_DECAY_DISABLE':blocked?'FAILURE_MEMORY_AVOID':cell?'STRATEGY_DNA_ALLOCATED':'COLD_START_CONSERVATIVE',
+    edgeDecayStatus:decay?.status||'UNAVAILABLE',edgeDecaySamples:decay?.samples||0,
     samples:cell?.samples||0,failureScore:cell?.failureScore??null,
     opportunityScore:cell?.opportunityScore??null,
     notionalQuote:Math.max(1,finite(baseNotionalQuote,100)*multiplier),
