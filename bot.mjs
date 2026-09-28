@@ -646,7 +646,8 @@ async function flushForecastRuntimePersistence(force=false){
         heapUsedMb:Math.round(m.heapUsed/1024/1024),
         historyRows:forecastRuntime.engine.historySize(),
         journalRows:forecastRuntime.journal.entries.length,
-        cacheRows:{calibration:forecastRuntime.engine.calibration.rows.length,reliability:forecastRuntime.engine.reliability.rows.length,modelPerformance:forecastRuntime.engine.modelPerformance.rows.length,interval:forecastRuntime.engine.intervalCalibration.rows.length,drift:forecastRuntime.engine.drift.rows.length}
+        cacheRows:{calibration:forecastRuntime.engine.calibration.rows.length,reliability:forecastRuntime.engine.reliability.rows.length,modelPerformance:forecastRuntime.engine.modelPerformance.rows.length,interval:forecastRuntime.engine.intervalCalibration.rows.length,drift:forecastRuntime.engine.drift.rows.length},
+        componentProfile:snapshotMeta?.componentProfile??null
       }));
       return true;
     }catch(err){
