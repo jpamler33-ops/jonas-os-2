@@ -52,6 +52,10 @@ import {
   deriveMandatoryShadowDiscovery, MANDATORY_SHADOW_DISCOVERY_VERSION
 } from './mandatory-shadow-discovery.mjs';
 import {
+  deriveCoverageCurriculumCandidates, coverageCurriculumSummary,
+  SHADOW_COVERAGE_CURRICULUM_VERSION, DEFAULT_COVERAGE_HORIZONS
+} from './shadow-coverage-curriculum.mjs';
+import {
   buildLearnedChallengerLab, deriveLearnedChallengerTrades, learnedChallengerSummary,
   LEARNED_CHALLENGER_ENGINE_VERSION
 } from './learned-challenger-engine.mjs';
@@ -180,6 +184,15 @@ const mandatoryAbstainProbeNotional = Math.max(1, Number(process.env.TCX_MANDATO
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
 const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
 const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
+const coverageCurriculumEnabled = String(process.env.TCX_COVERAGE_CURRICULUM_ENABLED || '1') !== '0';
+const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 2));
+const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
+const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
+const forecastJournalMaxEntries = Math.max(1000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 5000) || 5000));
+const forecastAuditMaxEvents = Math.max(200, Math.floor(Number(process.env.TCX_FORECAST_AUDIT_MAX_EVENTS || 1000) || 1000));
+const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_ISSUANCES || 1500) || 1500));
+const forecastMaxTracked = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_TRACKED || 1200) || 1200));
+const researchPlaneMaxMemoryRecords = Math.max(2000, Math.floor(Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS || 8000) || 8000));
 const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
 const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
 const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
@@ -208,7 +221,7 @@ const allowedChats = new Set((process.env.TCX_TELEGRAM_ALLOWED_CHATS || '').spli
 const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT,AVAXUSDT,DOTUSDT,LTCUSDT,TRXUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
-const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
+const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || requestedSymbols.join(','))
   .split(',').map(x=>x.trim().toUpperCase()).filter(x=>requestedSymbols.includes(x));
 const MEMECOIN_CEX_SYMBOLS=new Set(
   (process.env.TCX_MEMECOIN_CEX_SYMBOLS||'DOGEUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
@@ -336,7 +349,12 @@ const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
 const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
 const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
-const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile);
+const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile,{
+  maxJournalEntries:forecastJournalMaxEntries,
+  maxAuditEvents:forecastAuditMaxEvents,
+  maxIssuances:forecastMaxIssuances,
+  maxTrackedForecasts:forecastMaxTracked
+});
 const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
@@ -354,7 +372,7 @@ const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market
 const marketFabric = await openMarketDataFabric(marketFabricFile);
 const researchDataPlaneFile=process.env.TCX_RESEARCH_DATA_PLANE_FILE||'/data/tcx-research-data-plane.jsonl';
 const researchDataPlane=await openResearchDataPlane(researchDataPlaneFile,{
-  maxInMemoryRecords:Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS||50000),
+  maxInMemoryRecords:researchPlaneMaxMemoryRecords,
   warnBytes:Number(process.env.TCX_RESEARCH_DATA_PLANE_WARN_BYTES||125829120),
   hardBytes:Number(process.env.TCX_RESEARCH_DATA_PLANE_HARD_BYTES||167772160)
 });
@@ -492,6 +510,7 @@ try {
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
+      shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
       learnedChallengerEngine:LEARNED_CHALLENGER_ENGINE_VERSION,
       shadowRegimeBrain:SHADOW_REGIME_BRAIN_VERSION,
       adversarialStressLab:ADVERSARIAL_STRESS_LAB_VERSION,
@@ -1462,6 +1481,119 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
   return {...decision,placed:true,orderId:order.id,status:order.status,modelSamples:qualityModel.samples};
 }
 
+
+async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false}={}){
+  const now=Date.now();
+  if(!coverageCurriculumEnabled){
+    return {placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:0,eligible:0,reason:'COVERAGE_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+  if(reconciled.changed){
+    shadowPortfolioLedger=reconciled.ledger;
+    await persistShadowPortfolio('pre-coverage-curriculum-reconcile');
+  }
+
+  const existingCoverageKeys=[
+    ...shadowOrders.map(o=>o?.strategyMeta?.coverageKey).filter(Boolean),
+    ...(shadowPortfolioLedger.positions||[]).map(p=>p?.coverageKey).filter(Boolean)
+  ];
+  const derived=deriveCoverageCurriculumCandidates(issuance,{
+    now,
+    notionalQuote:coverageCurriculumNotional,
+    existingCoverageKeys,
+    assetClass:assetClassForSymbol(issuance?.symbol)
+  });
+  if(!derived.candidates.length){
+    return {placed:0,eligible:0,reason:derived.reason,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const openCoverage=(shadowPortfolioLedger.positions||[]).filter(p=>
+    p.status==='OPEN'&&String(p.entryMode||'').toUpperCase()==='COVERAGE_PROBE'
+  );
+  let remaining=Math.max(0,coverageCurriculumMaxOpenTotal-openCoverage.length);
+  if(remaining<=0){
+    return {placed:0,eligible:derived.candidates.length,reason:'COVERAGE_GLOBAL_OPEN_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  let placed=0;
+  const results=[];
+  for(const candidate of derived.candidates){
+    if(remaining<=0) break;
+    const laneOpen=openCoverage.filter(p=>
+      p.symbol===candidate.symbol&&String(p.horizonId)===candidate.horizonId
+    ).length+results.filter(x=>
+      x.placed===true&&x.symbol===candidate.symbol&&x.horizonId===candidate.horizonId
+    ).length;
+    if(laneOpen>=coverageCurriculumMaxOpenPerLane){
+      results.push({coverageKey:candidate.coverageKey,placed:false,reason:'COVERAGE_LANE_OPEN_CAP'});
+      continue;
+    }
+    if(shadowOrders.some(o=>o?.strategyMeta?.coverageKey===candidate.coverageKey)){
+      results.push({coverageKey:candidate.coverageKey,placed:false,reason:'COVERAGE_SLOT_ALREADY_TRADED'});
+      continue;
+    }
+
+    const order=await placeShadowOrder({
+      symbol:candidate.symbol,
+      side:candidate.side,
+      type:'MARKET',
+      notionalQuote:candidate.notionalQuote,
+      strategyMeta:{
+        strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+        role:'COVERAGE_PROBE_ENTRY',
+        entryMode:'COVERAGE_PROBE',
+        assetClass:candidate.assetClass,
+        strategyLane:['COVERAGE',candidate.symbol,candidate.horizonId].join(':'),
+        coverageCurriculumVersion:SHADOW_COVERAGE_CURRICULUM_VERSION,
+        coverageKey:candidate.coverageKey,
+        coverageSlotStart:candidate.slotStart,
+        coverageSlotEnd:candidate.slotEnd,
+        coveragePurpose:candidate.purpose,
+        horizonOnlyExit:true,
+        decisionKey:candidate.decisionKey,
+        issuanceId:candidate.issuanceId,
+        forecastFingerprint:candidate.forecastFingerprint,
+        horizonId:candidate.horizonId,
+        horizonMs:candidate.horizonMs,
+        admissionGate:candidate.admissionGate,
+        expectedReturn:candidate.expectedReturn,
+        directionalProbability:candidate.directionalProbability,
+        probabilityEdge:candidate.probabilityEdge,
+        generatedAt:candidate.generatedAt
+      }
+    });
+    placed++;remaining--;
+    results.push({
+      coverageKey:candidate.coverageKey,placed:true,orderId:order.id,
+      symbol:candidate.symbol,horizonId:candidate.horizonId,side:candidate.side,
+      notionalQuote:candidate.notionalQuote
+    });
+  }
+
+  if(placed){
+    recordOperation(observability,{name:'coverage_curriculum_entries',ok:true,latencyMs:0,error:null});
+    console.log('coverage curriculum entries',JSON.stringify({
+      symbol:String(issuance?.symbol||''),
+      eligible:derived.candidates.length,
+      placed,
+      horizons:results.filter(x=>x.placed).map(x=>x.horizonId),
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+  }
+  return {
+    placed,
+    eligible:derived.candidates.length,
+    reason:placed?'COVERAGE_SLOTS_PLACED':'COVERAGE_SLOTS_BLOCKED',
+    results,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+}
 
 async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,regimeContext=null}={}){
   const now=Date.now();
@@ -2484,6 +2616,7 @@ async function showHomeSection(chatId,messageId,section) {
       'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
       'Marktstimmung: 🟢 Live-Provider eingebaut',
       `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
+      `Coverage Curriculum: ${coverageCurriculumEnabled?'🟢 aktiv':'⏸ aus'} · 5/15/60/180 Min. · ${coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}).open} offen · ${coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}).closed} abgeschlossen`,
       `Auto-Shadow-Trading: ${autoShadowTradingEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).openPositions} offene Positionen`,
       `Parallel-Limit: ${autoShadowMaxOpenTotal} gesamt · ${autoShadowMaxOpenPerSymbol} je Coin · Cooldown ${Math.round(autoShadowCooldownMs/60000)} Min./Lane`,
       `Memecoin-AutoLearn: ${[...MEMECOIN_CEX_SYMBOLS].filter(x=>autoLearnSymbols.includes(x)).length} liquide CEX-Memecoins · strengere Entry-Gates`,
@@ -3432,6 +3565,7 @@ async function showShadowPortfolio(chatId,messageId=null){
   }
   const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
   const probes=shadowResearchProbeSummary(shadowPortfolioLedger,{asOf:Date.now()});
+  const coverage=coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols});
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pctv=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v)*100,2)+'%':'—');
   const lines=[
@@ -3454,6 +3588,11 @@ async function showShadowPortfolio(chatId,messageId=null){
     'Offen: '+probes.openPositions+' · abgeschlossen: '+probes.closedTrades+
       ' · PnL '+money(probes.netPnlQuote),
     'Diese Probes zählen nicht zur normalen Performance oder Capital Academy.','',
+    'COVERAGE CURRICULUM',
+    'Offen: '+coverage.open+' · abgeschlossen: '+coverage.closed+
+      ' · Coins '+coverage.coveredSymbols+'/'+coverage.targetSymbols,
+    'Lernfenster: '+DEFAULT_COVERAGE_HORIZONS.map(h=>h.label).join(' · '),
+    'Coverage-Probes schließen nur am Zeit-Horizont und zählen nicht zur normalen Performance.','',
     'AKTIVE TRADES'
   ];
   if(x.active.length){
@@ -3467,6 +3606,16 @@ async function showShadowPortfolio(chatId,messageId=null){
       );
     }
   }else lines.push('• aktuell keine normale offene Position');
+  if(coverage.active.length){
+    lines.push('','AKTIVE COVERAGE-PROBES');
+    for(const p of coverage.active.slice(0,8)){
+      lines.push(
+        '• '+p.symbol.replace('USDT','/')+' · '+p.side+
+        ' · '+String(p.horizonId||'')+
+        ' · PnL '+money(p.unrealizedNetPnlQuote)
+      );
+    }
+  }
   if(probes.active.length){
     lines.push('','AKTIVE LERN-PROBES');
     for(const p of probes.active.slice(0,6)){
@@ -4567,6 +4716,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       console.error('auto shadow trade error',symbol,msg);
     }
   }
+  let coverageCurriculumRun=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      coverageCurriculumRun=await maybePlaceCoverageCurriculum(issuance,{auditHealthy:auditHealthyAfter});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      coverageCurriculumRun={placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_ERROR'};
+      recordError(observability,{scope:'coverage_curriculum.entry',message:msg});
+      console.error('coverage curriculum error',symbol,msg);
+    }
+  }
   let mandatoryDiscoveryRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
@@ -4672,6 +4832,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       autoShadowTradeReason:autoShadowTrade?.reason||null,
       autoShadowOrderId:autoShadowTrade?.orderId||null,
       autoShadowSide:autoShadowTrade?.side||null,
+      coverageCurriculumPlaced:Number(coverageCurriculumRun?.placed||0),
+      coverageCurriculumEligible:Number(coverageCurriculumRun?.eligible||0),
+      coverageCurriculumReason:coverageCurriculumRun?.reason||null,
       mandatoryDiscoveryPlaced:mandatoryDiscoveryRun?.placed===true,
       mandatoryDiscoveryEligible:mandatoryDiscoveryRun?.eligible===true,
       mandatoryDiscoveryReason:mandatoryDiscoveryRun?.reason||null,
@@ -5771,6 +5934,9 @@ async function autoLearnForecastWatcher() {
               autoShadowTradeReason:result.autoShadowTradeReason||null,
               autoShadowOrderId:result.autoShadowOrderId||null,
               autoShadowSide:result.autoShadowSide||null,
+              coverageCurriculumPlaced:result.coverageCurriculumPlaced||0,
+              coverageCurriculumEligible:result.coverageCurriculumEligible||0,
+              coverageCurriculumReason:result.coverageCurriculumReason||null,
               mandatoryDiscoveryPlaced:result.mandatoryDiscoveryPlaced===true,
               mandatoryDiscoveryReason:result.mandatoryDiscoveryReason||null,
               mandatoryDiscoveryMode:result.mandatoryDiscoveryMode||null,
@@ -6333,6 +6499,16 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   shadowResearchWorkerState:shadowCompetitionServingWorkerEnabled?'ENABLED':'PAUSED_FOR_SERVING_STABILITY',
+  coverageCurriculum:coverageCurriculumEnabled?'ENABLED':'DISABLED',
+  coverageHorizons:DEFAULT_COVERAGE_HORIZONS.map(x=>x.id),
+  autoLearnSymbols:autoLearnSymbols.length,
+  forecastMemoryCaps:{
+    journal:forecastJournalMaxEntries,
+    audit:forecastAuditMaxEvents,
+    issuances:forecastMaxIssuances,
+    tracked:forecastMaxTracked,
+    researchPlane:researchPlaneMaxMemoryRecords
+  },
   execution:'SHADOW_ONLY',
   canExecute:false
 }));
