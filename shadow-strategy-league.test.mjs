@@ -142,12 +142,12 @@ test('league position can be marked and closed with public book simulation',()=>
 test('proven strategies receive evidence-weighted allocation only after independent sample threshold',()=>{
   const l=createEmptyStrategyLeagueLedger({initialEquityPerStrategy:5000});
   l.positions=[
-    ...Array.from({length:35},(_,i)=>closedPosition(i,'EDGE_HUNTER',{pnl:i%5===0?-1:2})),
-    ...Array.from({length:35},(_,i)=>closedPosition(i,'RETURN_HUNTER',{pnl:i%3===0?-2:1})),
+    ...Array.from({length:60},(_,i)=>closedPosition(i,'EDGE_HUNTER',{pnl:i%5===0?-1:2})),
+    ...Array.from({length:60},(_,i)=>closedPosition(i,'RETURN_HUNTER',{pnl:i%4===0?-1:2})),
     ...Array.from({length:10},(_,i)=>closedPosition(i,'DEFENSIVE',{pnl:1}))
   ];
   const s=strategyLeagueSummary(l,{asOf:Date.UTC(2026,8,20)});
-  assert.equal(s.allocationMode,'EVIDENCE_WEIGHTED');
+  assert.equal(s.allocationMode,'EVIDENCE_WEIGHTED_V2');
   const edge=s.strategies.find(x=>x.strategyId==='EDGE_HUNTER');
   const ret=s.strategies.find(x=>x.strategyId==='RETURN_HUNTER');
   const defensive=s.strategies.find(x=>x.strategyId==='DEFENSIVE');
@@ -167,4 +167,19 @@ test('league ledger persists and restores',async()=>{
   assert.equal(loaded.healthy,true);
   assert.equal(loaded.ledger.positions.length,1);
   assert.equal(loaded.ledger.positions[0].leagueStrategyId,'EDGE_HUNTER');
+});
+
+
+test('temporal evidence blocks a strategy whose recent performance collapses',()=>{
+  const l=createEmptyStrategyLeagueLedger({initialEquityPerStrategy:5000});
+  l.positions=[
+    ...Array.from({length:60},(_,i)=>closedPosition(i,'EDGE_HUNTER',{pnl:i<36?(i%6===0?-1:2):-2})),
+    ...Array.from({length:60},(_,i)=>closedPosition(i,'RETURN_HUNTER',{pnl:i%5===0?-1:2}))
+  ];
+  const s=strategyLeagueSummary(l,{asOf:Date.UTC(2026,8,20)});
+  const edge=s.strategies.find(x=>x.strategyId==='EDGE_HUNTER');
+  assert.equal(edge.evidence.degradationWatch,true);
+  assert.equal(edge.eligibleForAllocation,false);
+  assert.equal(edge.status,'DRIFT_WATCH');
+  assert.equal(edge.evidence.meaning,'CHRONOLOGICAL_STABILITY_PROXY_NOT_TRUE_OUT_OF_SAMPLE');
 });
