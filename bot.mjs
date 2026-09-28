@@ -25,6 +25,7 @@ import { buildSuperchartIntel, SUPERCHART_VERSION } from './superchart-intel.mjs
 import { buildSuperRadar, renderSuperRadar, buildSuperSetup, renderSuperSetup, buildSuperRisk, renderSuperRisk, buildSuperSignal, renderSuperSignal, INTELLIGENCE_TERMINAL_VERSION } from './intelligence-terminal.mjs';
 import { buildSuperMemory, discoverPatterns, buildDigitalTwin, renderCognitiveCore, COGNITIVE_CORE_VERSION } from './cognitive-core.mjs';
 import { validateDiscoveredPatterns, buildModelLeague, diagnoseScientificBrain, buildBullBearDebate, buildMetaJudge, renderScientificBrain, SCIENTIFIC_BRAIN_VERSION } from './scientific-brain.mjs';
+import { buildMarketGraph, buildCapitalRotation, buildRegimeGenome, renderWorldModelFoundation, WORLD_MODEL_FOUNDATION_VERSION } from './world-model-foundation.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -3027,6 +3028,28 @@ async function showSuperRadar(chatId,messageId){
  buttons.push([{text:'↻ REFRESH',callback_data:'terminal:radar'},{text:'🏠 Home',callback_data:'home'}]);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderSuperRadar(radar),reply_markup:{inline_keyboard:buttons}});
 }
+async function worldModelContext(symbol){
+ const state=await researchState(symbol,'5m');
+ const symbols=[...new Set([symbol,...requestedSymbols])].slice(0,12);
+ const fetched=await Promise.allSettled(symbols.map(async s=>({symbol:s,rows:(await fetchKlines(s,'5m',130)).rows})));
+ const series={};
+ for(const x of fetched){if(x.status!=='fulfilled')continue;const candles=closedCandles(candlesFromKlines(x.value.rows,state.availableAt));if(candles.length>=48)series[x.value.symbol]=candles.map(k=>({closeTime:k.closeTime,close:k.c}));}
+ const correlationModel=buildPointInTimeCorrelation(series,{asOf:state.availableAt,window:96,minSamples:48});
+ const graph=buildMarketGraph({correlationModel,seriesBySymbol:series,asOf:state.availableAt,minCorrelation:.35});
+ const assetClassBySymbol=Object.fromEntries(Object.keys(series).map(s=>[s,/DOGE|PEPE|SHIB|BONK|WIF|FLOKI|MEME/i.test(s)?'MEME':s===symbol?'FOCUS':'CORE']));
+ const rotation=buildCapitalRotation({seriesBySymbol:series,assetClassBySymbol,asOf:state.availableAt,minAssetsPerClass:2});
+ const genome=buildRegimeGenome({state,rotation,graph});
+ return {state,graph,rotation,genome};
+}
+async function showWorldModel(chatId,messageId,symbol){
+ const x=await worldModelContext(symbol);
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderWorldModelFoundation(x),reply_markup:{inline_keyboard:[
+  [{text:'🔬 SCIENTIFIC BRAIN',callback_data:`science:${symbol}`},{text:'🧬 COGNITIVE CORE',callback_data:`cognitive:${symbol}`}],
+  [{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`},{text:'◉ RADAR',callback_data:'terminal:radar'}],
+  [{text:'↻ REFRESH',callback_data:`world:${symbol}`},{text:'🏠 Home',callback_data:'home'}]
+ ]}});
+}
+
 async function scientificBrainContext(symbol){
  const base=await terminalContext(symbol);
  await captureEpisodeFromState(base.state,{persist:true});
@@ -3045,6 +3068,7 @@ async function showScientificBrain(chatId,messageId,symbol){
  const x=await scientificBrainContext(symbol);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderScientificBrain(x),reply_markup:{inline_keyboard:[
   [{text:'🧬 COGNITIVE CORE',callback_data:`cognitive:${symbol}`},{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`}],
+  [{text:'🌐 WORLD MODEL',callback_data:`world:${symbol}`}],
   [{text:'⚠️ RISK',callback_data:`terminal:risk:${symbol}`},{text:'📐 ACCURACY',callback_data:`accuracy:${symbol}`}],
   [{text:'↻ REFRESH',callback_data:`science:${symbol}`},{text:'🏠 Home',callback_data:'home'}]
  ]}});
@@ -5814,6 +5838,12 @@ async function handle(update) {
       else if(a.command==='memory') await showMemory(chatId,a.symbol);
       else if(a.command==='engine') await showEngine(chatId,a.symbol);
       await ack(q.id); return;
+    }
+    if (a.kind === 'WORLD_MODEL') {
+      if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showWorldModel(chatId,textMessageId,a.symbol); await ack(q.id,'World Model geladen'); return;
     }
     if (a.kind === 'SCIENTIFIC_BRAIN') {
       if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
