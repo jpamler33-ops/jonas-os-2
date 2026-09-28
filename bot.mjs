@@ -3,6 +3,7 @@ import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
+import { buildPointInTimeCorrelation, PIT_CORRELATION_ENGINE_VERSION } from './pit-correlation-engine.mjs';
 import { buildLeverageCounterfactualLab, LEVERAGE_COUNTERFACTUAL_LAB_VERSION } from './leverage-counterfactual-lab.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
@@ -1356,7 +1357,23 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   }
   const marginQuote=opportunityAllocation.notionalQuote;
   const requestedLeveragedExposureQuote=marginQuote*leverageRisk.allowedLeverage;
-  const portfolioRisk=evaluatePortfolioRiskBrain(shadowPortfolioLedger,{symbol:decision.symbol,side:decision.side,assetClass,exposureQuote:requestedLeveragedExposureQuote},{equityQuote:portfolioNow.equityQuote});
+  let correlationModel=null;
+  const openRiskSymbols=[...new Set((shadowPortfolioLedger?.positions||[]).filter(p=>p?.status==='OPEN').map(p=>String(p.symbol||'')).filter(Boolean))];
+  const correlationSymbols=[...new Set([...openRiskSymbols,decision.symbol])];
+  if(correlationSymbols.length>1){
+    try{
+      const fetched=await Promise.all(correlationSymbols.map(symbol=>fetchKlines(symbol,'15m',130)));
+      const series={};
+      for(let i=0;i<correlationSymbols.length;i++){
+        const candles=closedCandles(candlesFromKlines(fetched[i].rows,now));
+        series[correlationSymbols[i]]=candles.map(x=>({closeTime:x.closeTime,close:x.c}));
+      }
+      correlationModel=buildPointInTimeCorrelation(series,{asOf:now,window:96,stressWindow:24,minSamples:48});
+    }catch(err){
+      recordError(observability,{scope:'portfolio_risk.correlation',message:err instanceof Error?err.message:String(err)});
+    }
+  }
+  const portfolioRisk=evaluatePortfolioRiskBrain(shadowPortfolioLedger,{symbol:decision.symbol,side:decision.side,assetClass,exposureQuote:requestedLeveragedExposureQuote},{equityQuote:portfolioNow.equityQuote,correlationModel});
   if(portfolioRisk.blocked){
     return {...decision,placed:false,reason:'PORTFOLIO_RISK_BLOCK',opportunityAllocation,leverageRisk,portfolioRisk};
   }
@@ -1415,7 +1432,11 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
       requestedMarginQuote:marginQuote,
       leveragedExposureQuote,
       portfolioRiskVersion:PORTFOLIO_RISK_BRAIN_VERSION,
+      correlationEngineVersion:PIT_CORRELATION_ENGINE_VERSION,
+      correlationMode:portfolioRisk.correlationMode,
+      correlationFingerprint:correlationModel?.fingerprint||null,
       portfolioRiskMultiplier:portfolioRisk.multiplier,
+    correlationMode:portfolioRisk.correlationMode,
       portfolioRiskReasons:portfolioRisk.reasons,
       portfolioRiskFingerprint:portfolioRisk.fingerprint,
       leverageRiskCap:leverageRisk.riskCap,
