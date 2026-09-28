@@ -138,3 +138,37 @@ test('duplicate liquidation payload does not double count',()=>{
   assert.equal(s.window5m.totalUsd,200);
   p.stop();
 });
+
+
+test('snapshot exposes observed liquidation price clusters around reference price',()=>{
+  let t=1_000_000;
+  FakeWebSocket.instances=[];
+  const p=createLiquidationPublicStream({
+    symbols:['BTCUSDT'],
+    WebSocketImpl:FakeWebSocket,
+    now:()=>t,
+    pingMs:999999,
+    reconnectMs:999999
+  });
+  p.start();
+  const ws=FakeWebSocket.instances[0];
+  ws.emit('open',{});
+  t+=15*60_000+1;
+  ws.emit('message',{data:JSON.stringify({
+    topic:'allLiquidation.BTCUSDT',
+    ts:t,
+    data:[
+      {T:t-30_000,s:'BTCUSDT',S:'Buy',v:'5',p:'100.10'},
+      {T:t-25_000,s:'BTCUSDT',S:'Buy',v:'4',p:'100.12'},
+      {T:t-20_000,s:'BTCUSDT',S:'Sell',v:'2',p:'99.80'}
+    ]
+  })});
+  const s=p.snapshot('BTCUSDT',{asOf:t,referencePrice:100,clusterBinBps:25,maxClusters:8});
+  assert.equal(s.restrictions.clustersAreObservedPastEvents,true);
+  assert.equal(s.restrictions.futureLiquidationLevels,false);
+  assert.ok(s.clusters5m.length>=2);
+  assert.ok(s.clusters5m[0].totalUsd>0);
+  assert.ok(Number.isFinite(s.clusters5m[0].distanceBps));
+  assert.equal(s.clusterReferencePrice,100);
+  p.stop();
+});
