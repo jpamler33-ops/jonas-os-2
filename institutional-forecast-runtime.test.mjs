@@ -434,6 +434,43 @@ test('gzip snapshot migration loads legacy JSON, writes compressed target, and r
   assert.equal(reopened.engine.historySize(),original.engine.historySize());
 });
 
+test('gzip persistence externalizes immutable issuances into an atomic A/B sidecar and restores them',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-sidecar-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.equal(meta.encoding,'gzip');
+  assert.ok(meta.issuanceStore);
+  assert.equal(meta.issuanceStore.count,1);
+  assert.ok(meta.issuanceStore.logicalBytes>0);
+  assert.ok(meta.issuanceStore.storageBytes<meta.issuanceStore.logicalBytes);
+
+  const reopened=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  assert.equal(reopened.issuances.length,1);
+  assert.equal(reopened.issuances[0].issuanceId,issued.issuance.issuanceId);
+  assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
+  assert.equal(reopened.issuanceStoreCount,1);
+  assert.ok(['a','b'].includes(reopened.issuanceStoreSlot));
+
+  const second=await saveInstitutionalForecastRuntime(reopened);
+  assert.equal(second.issuanceStore.sha256,meta.issuanceStore.sha256);
+  assert.equal(second.issuanceStore.slot,meta.issuanceStore.slot);
+});
+
 test('snapshot writer enforces the same byte ceiling as reload and preserves the last valid file',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-contract-'));
   const file=path.join(dir,'runtime.json');
