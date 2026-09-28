@@ -2722,6 +2722,11 @@ async function showLearningCenter(chatId,messageId=null){
   });
 }
 
+async function showPremiumMore(chatId,messageId){
+  const payload={chat_id:chatId,text:['☰ TCX · MEHR','','Lernen & Entwicklung','Strategien testen, Qualität prüfen und Fortschritt verfolgen.','','System & Tools','Technische Diagnose und erweiterte Funktionen.'].join('\n'),reply_markup:{inline_keyboard:[[{text:'🧪 Lernzentrum',callback_data:'home:performance'},{text:'🏆 Academy',callback_data:'home:academy'}],[{text:'🧠 Coach',callback_data:'home:coach'},{text:'🏁 Strategy League',callback_data:'home:league'}],[{text:'🧭 Trends',callback_data:'home:trends'},{text:'🐸 Memecoins',callback_data:'home:memecoins'}],[{text:'🖥 System',callback_data:'home:system'},{text:'⚙️ Tools',callback_data:'commands'}],[{text:'🏠 Command Center',callback_data:'home'}]]}};
+  if(messageId)return tg('editMessageText',{...payload,message_id:messageId});return tg('sendMessage',payload);
+}
+
 async function showHomeSection(chatId,messageId,section) {
   if(section==='MARKETS') return showMarkets(chatId,messageId);
   if(section==='WATCHLIST') return showFavorites(chatId,messageId);
@@ -2736,6 +2741,7 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='STATS_WEEK') return showShadowTradeStats(chatId,messageId,'WEEK');
   if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
   if(section==='STATS_ALL') return showShadowTradeStats(chatId,messageId,'ALL');
+  if(section==='MORE') return showPremiumMore(chatId,messageId);
 
   let text='';
   if(section==='ALERTS') {

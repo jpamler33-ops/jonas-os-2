@@ -1,4 +1,4 @@
-export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v4-autolearn";
+export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v5-premium";
 
 export const PRODUCT_STATUS = Object.freeze([
   "VALID",
@@ -125,54 +125,21 @@ export function buildMarketViewModel({
 export function homeText({marketCount=0,systemStatus="ONLINE"}={}) {
   const online=String(systemStatus).toUpperCase()==="ONLINE";
   return [
-    "⚡ TCX · MARKT- & PROGNOSE-SYSTEM",
-    "",
-    "TCX analysiert Kryptomärkte, vergleicht mehrere Datenquellen",
-    "und lernt aus früheren Marktsituationen.",
-    "",
-    (online?"🟢":"🟡")+" System: "+safeText(systemStatus),
-    "📊 Beobachtete Märkte: "+(Number(marketCount)||0),
-    "",
-    "Wichtig: TCX führt keine echten Käufe oder Verkäufe aus.",
-    "Es bewertet den Markt und zeigt Unsicherheit sichtbar an.",
-    "",
-    "Was möchtest du machen?"
+    "⚡ TCX COMMAND CENTER","",
+    "🟢 SYSTEM "+(online?"ONLINE":"CHECK")+"   ·   🧪 SHADOW ONLY",
+    "📡 "+(Number(marketCount)||0)+" Märkte verbunden","",
+    "Dein Markt-Dashboard für Analyse, Signale und",
+    "virtuelle Strategie-Tests.","",
+    "Wähle einen Bereich:"
   ].join("\n");
 }
 
 export function homeKeyboard() {
   return {inline_keyboard:[
-    [
-      {text:"🔮 Kursprognose",callback_data:"cmd:forecast"},
-      {text:"📊 Coin analysieren",callback_data:"home:markets"}
-    ],
-    [
-      {text:"🎯 Auffällige Bewegungen",callback_data:"home:radar"},
-      {text:"🐸 Memecoin-Radar",callback_data:"home:memecoins"}
-    ],
-    [
-      {text:"🧭 Stimmung & Trends",callback_data:"home:trends"},
-      {text:"⭐ Watchlist",callback_data:"home:watchlist"}
-    ],
-    [
-      {text:"🔔 Alerts",callback_data:"home:alerts"},
-      {text:"🧪 TCX Lernzentrum",callback_data:"home:performance"}
-    ],
-    [
-      {text:"💼 Shadow-Portfolio",callback_data:"home:portfolio"},
-      {text:"📈 Trade-Statistik",callback_data:"home:stats_day"}
-    ],
-    [
-      {text:"🏆 Capital Academy",callback_data:"home:academy"},
-      {text:"🧠 Training Coach",callback_data:"home:coach"}
-    ],
-    [
-      {text:"🏁 Strategy League",callback_data:"home:league"}
-    ],
-    [
-      {text:"🖥 System",callback_data:"home:system"},
-      {text:"⚙️ Alle Funktionen",callback_data:"commands"}
-    ]
+    [{text:"📊 Märkte",callback_data:"home:markets"},{text:"🎯 Signale",callback_data:"home:radar"}],
+    [{text:"💼 Portfolio",callback_data:"home:portfolio"},{text:"📈 Statistik",callback_data:"home:stats_day"}],
+    [{text:"⭐ Watchlist",callback_data:"home:watchlist"},{text:"🔔 Alerts",callback_data:"home:alerts"}],
+    [{text:"🧠 TCX Analyse",callback_data:"cmd:forecast"},{text:"☰ Mehr",callback_data:"home:more"}]
   ]};
 }
 
