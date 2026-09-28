@@ -74,6 +74,10 @@ import { createTelegramCommandRouter, TELEGRAM_COMMAND_ROUTER_VERSION } from './
 import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './telegram-read-command-handlers.mjs';
 import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } from './telegram-mutation-command-handlers.mjs';
 import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } from './telegram-update-dispatcher.mjs';
+import {
+  runForecastShadowEvaluationWorker,
+  FORECAST_SHADOW_EVALUATION_WORKER_VERSION
+} from './forecast-shadow-evaluation-client.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
@@ -147,6 +151,8 @@ const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABL
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
+const shadowCompetitionWorkerTimeoutMs = Math.max(60_000, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_TIMEOUT_MS || 8*60_000));
+const shadowCompetitionWorkerHeapMb = Math.max(128, Math.min(384, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_HEAP_MB || 256)));
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
@@ -5826,80 +5832,58 @@ async function shadowCompetitionWatcher(){
         const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY);
         const cfg=forecastRuntime.engine.configSnapshot();
         const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
+        const heapBefore=Math.round(process.memoryUsage().heapUsed/1024/1024);
 
-        if(
-          !shadowCompetitionState||
-          shadowCompetitionState.status==='WAITING_FOR_SEED_HISTORY'||
-          shadowCompetitionState.status==='STALE_INCUMBENT_CONFIG'
-        ){
-          shadowCompetitionState=createShadowCompetition({
-            historyRows:history,
-            incumbentConfig:cfg,
-            parentReleaseId:releaseId,
-            now:Date.now(),
-            minSeedRows:shadowCompetitionMinSeedRows
-          });
-          shadowCompetitionLastHistorySize=history.length;
-          shadowCompetitionState={...shadowCompetitionState,evaluatedHistoryRows:history.length};
-          await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
-          console.log('shadow competition initialized',JSON.stringify({
-            status:shadowCompetitionState.status,
-            candidates:shadowCompetitionState.candidates?.length||0,
-            seedRows:shadowCompetitionState.seedRows||0,
-            cutoff:shadowCompetitionState.dataCutoffAt||null
-          }));
-          await syncExperimentGovernor({evaluate:false});
-        }else{
-          const beforeCount=shadowCompetitionState.candidates?.length||0;
-          const refreshed=refreshShadowCompetitionHypotheses(shadowCompetitionState,{
-            historyRows:history,
-            incumbentConfig:cfg,
-            asOf:Date.now(),
-            maxGeneratedHypotheses:4
-          });
-          const afterCount=refreshed.candidates?.length||0;
-          if(afterCount!==beforeCount||refreshed.hypothesisGenerator?.version!==shadowCompetitionState.hypothesisGenerator?.version){
-            shadowCompetitionState={...refreshed,evaluatedHistoryRows:shadowCompetitionLastHistorySize};
-            await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
-            console.log('shadow hypotheses refreshed',JSON.stringify({
-              before:beforeCount,
-              after:afterCount,
-              generated:shadowCompetitionState.hypothesisGenerator?.generatedCandidates||0,
-              added:shadowCompetitionState.hypothesisGenerator?.addedCandidates||0
-            }));
-            await syncExperimentGovernor({evaluate:false});
-          }
-          if(history.length>shadowCompetitionLastHistorySize){
-          const evaluated=evaluateShadowCompetition(shadowCompetitionState,{
-            historyRows:history,
-            incumbentConfig:cfg,
-            asOf:Date.now(),
-            minimumTrainCases:shadowCompetitionMinTrainCases
-          });
-          shadowCompetitionLastHistorySize=history.length;
-          shadowCompetitionState={...evaluated,evaluatedHistoryRows:history.length};
-          await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
-          const summary=shadowCompetitionSummary(shadowCompetitionState);
-          console.log('shadow competition evaluated',JSON.stringify({
-            historyRows:history.length,
-            oosRows:summary.competition?.oosRows||0,
-            evaluatedCandidates:summary.competition?.evaluatedCandidates||0,
-            bestBrierCandidate:summary.competition?.bestBrierCandidate||null,
-            bestLogLossCandidate:summary.competition?.bestLogLossCandidate||null
-          }));
-          await syncExperimentGovernor({evaluate:true});
-          }
-        }
-        if(!experimentGovernorState&&shadowCompetitionState?.status==='ACTIVE'){
-          await syncExperimentGovernor({evaluate:false});
-        }
+        const result=await runForecastShadowEvaluationWorker({
+          competitionState:shadowCompetitionState,
+          experimentGovernorState,
+          historyRows:history,
+          incumbentConfig:cfg,
+          releaseId,
+          minSeedRows:shadowCompetitionMinSeedRows,
+          minimumTrainCases:shadowCompetitionMinTrainCases,
+          maxGeneratedHypotheses:4,
+          now:Date.now()
+        },{
+          timeoutMs:shadowCompetitionWorkerTimeoutMs,
+          maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+        });
+
+        shadowCompetitionState=result.competitionState;
+        experimentGovernorState=result.experimentGovernorState;
+        shadowCompetitionLastHistorySize=Number(result.historyRows||history.length);
+
+        await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
+        if(experimentGovernorState) await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
+
+        const summary=result.summary||shadowCompetitionSummary(shadowCompetitionState);
+        const gov=result.governorSummary||null;
+        console.log('shadow competition worker completed',JSON.stringify({
+          workerVersion:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+          historyRows:result.historyRows,
+          initialized:result.flags?.initialized===true,
+          refreshed:result.flags?.refreshed===true,
+          evaluated:result.flags?.evaluated===true,
+          governorCreated:result.flags?.governorCreated===true,
+          governorEvaluated:result.flags?.governorEvaluated===true,
+          oosRows:summary.competition?.oosRows||0,
+          evaluatedCandidates:summary.competition?.evaluatedCandidates||0,
+          governorStatus:gov?.status||experimentGovernorState?.status||null,
+          durationMs:Date.now()-started,
+          mainHeapBeforeMb:heapBefore,
+          mainHeapAfterMb:Math.round(process.memoryUsage().heapUsed/1024/1024)
+        }));
       }
       recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started});
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'forecast_shadow_competition',message:msg});
+      recordError(observability,{scope:'forecast_shadow_competition.worker',message:msg});
       recordOperation(observability,{name:'forecast_shadow_competition',ok:false,latencyMs:Date.now()-started,error:msg});
-      console.error('shadow competition error',msg);
+      console.error('shadow competition worker error',JSON.stringify({
+        error:msg,
+        durationMs:Date.now()-started,
+        mainHeapMb:Math.round(process.memoryUsage().heapUsed/1024/1024)
+      }));
     }
     await sleep(shadowCompetitionEvalMs);
   }
@@ -6102,6 +6086,12 @@ const server = http.createServer((req,res) => {
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
       alerts:activeAlerts,
+      shadowResearchWorker:{
+        version:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+        timeoutMs:shadowCompetitionWorkerTimeoutMs,
+        maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb,
+        mainHeapUsedMb:Math.round(process.memoryUsage().heapUsed/1024/1024)
+      },
       telegramPolling:{
         dispatcher:telegramUpdateDispatcher.snapshot(),
         lastPollAt:telegramLastPollAt,
@@ -6310,6 +6300,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
+  shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   execution:'SHADOW_ONLY',
   canExecute:false
 }));
