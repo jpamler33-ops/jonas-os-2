@@ -59,6 +59,10 @@ import {
   deriveShadowRegimeFingerprint, buildRegimeStrategyMatrix, regimeDecisionForStrategy,
   regimeBrainSummary, SHADOW_REGIME_BRAIN_VERSION
 } from './shadow-regime-brain.mjs';
+import {
+  buildAdversarialStressLab, stressDecisionForRule, adversarialStressSummary,
+  ADVERSARIAL_STRESS_LAB_VERSION
+} from './adversarial-stress-lab.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -478,6 +482,7 @@ try {
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       learnedChallengerEngine:LEARNED_CHALLENGER_ENGINE_VERSION,
       shadowRegimeBrain:SHADOW_REGIME_BRAIN_VERSION,
+      adversarialStressLab:ADVERSARIAL_STRESS_LAB_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -1458,6 +1463,7 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
   const assetClass=assetClassForSymbol(issuance?.symbol);
   const regime=regimeContext||deriveShadowRegimeFingerprint({assetClass});
   const regimeMatrix=buildRegimeStrategyMatrix(shadowPortfolioLedger);
+  const stressLab=buildAdversarialStressLab(shadowPortfolioLedger,lab);
   const derived=deriveLearnedChallengerTrades(issuance,lab,{
     now,
     assetClass,
@@ -1465,6 +1471,9 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
     maxCandidates:learnedChallengerMaxPerIssuance,
     regimeBrain:{
       decisionForRule:(ruleId)=>regimeDecisionForStrategy(regimeMatrix,regime,ruleId)
+    },
+    stressLab:{
+      decisionForRule:(ruleId)=>stressDecisionForRule(stressLab,ruleId)
     }
   });
   if(!derived.candidates.length){
@@ -1532,6 +1541,16 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
         challengerRegimeStatus:candidate.regimeStatus,
         challengerRegimeSamples:candidate.regimeSamples,
         challengerRegimeMultiplier:candidate.regimeMultiplier,
+        challengerStressStatus:candidate.stressStatus,
+        challengerStressSamples:candidate.stressSamples,
+        challengerStressMultiplier:candidate.stressMultiplier,
+        challengerStressRobustnessScore:candidate.stressRobustnessScore,
+        entryStressLabVersion:ADVERSARIAL_STRESS_LAB_VERSION,
+        entryStressStatus:candidate.stressStatus,
+        entryStressSamples:candidate.stressSamples,
+        entryStressMultiplier:candidate.stressMultiplier,
+        entryStressRobustnessScore:candidate.stressRobustnessScore,
+        entryStressFailedChecks:candidate.stressFailedChecks,
         entryRegimeBrainVersion:SHADOW_REGIME_BRAIN_VERSION,
         entryRegimeKey:regime.regimeKey,
         entryRegimeFingerprint:regime.fingerprint,
@@ -1554,6 +1573,8 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
       ruleId:candidate.ruleId,placed:true,orderId:order.id,symbol:candidate.symbol,
       status:candidate.ruleStatus,side:candidate.side,horizonId:candidate.horizonId,
       regimeStatus:candidate.regimeStatus,regimeMultiplier:candidate.regimeMultiplier,
+      stressStatus:candidate.stressStatus,stressMultiplier:candidate.stressMultiplier,
+      stressRobustnessScore:candidate.stressRobustnessScore,
       notionalQuote:candidate.notionalQuote
     });
   }
@@ -1571,6 +1592,7 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
     results,lab:learnedChallengerSummary(lab),
     regime:{regimeKey:regime.regimeKey,confidence:regime.confidence},
     regimeBrain:regimeBrainSummary(regimeMatrix,regime),
+    stressLab:adversarialStressSummary(stressLab),
     execution:'SHADOW_ONLY',canExecuteLive:false
   };
 }
@@ -3257,6 +3279,8 @@ async function showShadowTrainingCoach(chatId,messageId=null){
   const challengers=learnedChallengerSummary(challengerLab);
   const regimeMatrix=buildRegimeStrategyMatrix(shadowPortfolioLedger);
   const regimeSummary=regimeBrainSummary(regimeMatrix);
+  const stressLab=buildAdversarialStressLab(shadowPortfolioLedger,challengerLab);
+  const stressSummary=adversarialStressSummary(stressLab);
   const pf=x.profitFactor==null?'—':Number.isFinite(x.profitFactor)?fmt(x.profitFactor,2):'∞';
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
@@ -3304,6 +3328,16 @@ async function showShadowTrainingCoach(chatId,messageId=null){
     'Favored Matrix-Zellen: '+Number(regimeMatrix.favored?.length||0)+' · Avoid: '+Number(regimeMatrix.avoid?.length||0),
     'Challenger werden je Marktregime separat bewertet: FAVORED 1.15x · NEUTRAL 0.75x · unbekannt 0.65x · AVOID 0x.',
     'Regime wird beim Entry eingefroren; spätere Daten dürfen den historischen Entry-Kontext nicht umschreiben.','',
+    'LEARNING V4 · ADVERSARIAL STRESS LAB',
+    'Regeln: '+stressSummary.ruleCount+
+      ' · sammeln '+Number(stressSummary.counts?.collecting||0)+
+      ' · resilient '+Number(stressSummary.counts?.resilient||0)+
+      ' · stress-mature '+Number(stressSummary.counts?.stressMature||0)+
+      ' · watch '+Number(stressSummary.counts?.watch||0)+
+      ' · fragil '+Number(stressSummary.counts?.fragile||0),
+    'Stress prüft Zusatzkosten, harte Zusatzkosten, fehlende Top-Gewinner, jüngste Hälfte, Zeit-Folds sowie Coin-/Regime-Abhängigkeit.',
+    'COLLECTING 1.00x · RESILIENT 0.85x · STRESS_MATURE 1.00x · WATCH 0.50x · FRAGILE 0x.',
+    'Das Stress-Lab darf Risiko nur begrenzen, niemals über 1.00x erhöhen.','',
     'AUTOMATISCHE RISIKOANPASSUNG',
     'Academy-Budget wird aktuell mit '+fmt(x.riskMultiplier,2)+'× skaliert.',
     'Status: '+(x.hold?'⛔ Trainingspause':'🟢 neue qualifizierte Shadow-Entries erlaubt'),
@@ -4613,6 +4647,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       learnedChallengerRules:Number(learnedChallengerRun?.lab?.ruleCount||0),
       learnedChallengerQualified:Number(learnedChallengerRun?.lab?.counts?.qualified||0),
       learnedChallengerRegime:learnedChallengerRun?.regime?.regimeKey||null,
+      learnedChallengerStressRules:Number(learnedChallengerRun?.stressLab?.ruleCount||0),
+      learnedChallengerStressFragile:Number(learnedChallengerRun?.stressLab?.counts?.fragile||0),
+      learnedChallengerStressMature:Number(learnedChallengerRun?.stressLab?.counts?.stressMature||0),
       strategyLeaguePlaced:Number(strategyLeagueRun?.placed||0),
       strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
       strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null
