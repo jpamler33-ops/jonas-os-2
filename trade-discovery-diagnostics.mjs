@@ -8,6 +8,10 @@ const REASON_TEXT={
   EXPECTED_RETURN_TOO_SMALL:'Die erwartete Rendite liegt unter der Einstiegsschwelle',
   DIRECTIONAL_PROBABILITY_TOO_LOW:'Die Richtungswahrscheinlichkeit liegt unter der Schwelle',
   PROBABILITY_EDGE_TOO_LOW:'Der Wahrscheinlichkeitsvorsprung liegt unter der Schwelle',
+  STRATEGY_LANE_COOLDOWN:'Für diese Coin-, Richtung- und Horizont-Kombination läuft noch die Abkühlzeit',
+  DAILY_SYMBOL_CAP:'Der Tageshöchstwert für normale Einstiege dieses Coins ist erreicht',
+  ACADEMY_GLOBAL_OPEN_CAP:'Das von der Academy erlaubte Gesamtlimit offener Positionen ist erreicht',
+  ACADEMY_SYMBOL_OPEN_CAP:'Das von der Academy erlaubte Coin-Limit offener Positionen ist erreicht',
   ACADEMY_RISK_HOLD:'Capital Academy hält Core-Einstiege zurück',
   ACADEMY_MEME_HOLD:'Capital Academy hält Memecoin-Einstiege zurück',
   TRAINING_SUPERVISOR_HOLD:'Training Supervisor hat Einstiege pausiert',
@@ -119,7 +123,9 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
       horizonId:String(h.horizonId||'unknown'),gate:String(h.gate||'UNKNOWN'),
       calibration:String(h.calibration||'UNKNOWN'),direction:String(h.direction||'NEUTRAL'),
       expectedReturn:h.expectedReturn,directionalProbability:h.directionalProbability,
-      probabilityEdge:h.probabilityEdge,reasons:Array.isArray(h.reasons)?h.reasons.slice(0,2):[]
+      probabilityEdge:h.probabilityEdge,expectedReturnThreshold:h.expectedReturnThreshold,
+      directionThreshold:h.directionThreshold,edgeThreshold:h.edgeThreshold,
+      reasons:Array.isArray(h.reasons)?h.reasons.slice(0,2):[]
     })),
     nextStep,
     runtime:{...runtime,execution:'SHADOW_ONLY',canExecuteLive:false},
@@ -141,9 +147,9 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
     :'AutoLearn hat noch keinen vollständigen Scan erfasst.';
   const horizonText=(s.latestHorizonDetails||[]).map(h=>{
     const vals=[`${h.horizonId}: ${h.gate}/${h.calibration}`,h.direction&&h.direction!=='NEUTRAL'?h.direction:null,
-      h.expectedReturn!=null&&Number.isFinite(Number(h.expectedReturn))?`Rendite ${(Number(h.expectedReturn)*100).toFixed(2)}%`:null,
-      h.directionalProbability!=null&&Number.isFinite(Number(h.directionalProbability))?`Richtung ${(Number(h.directionalProbability)*100).toFixed(0)}%`:null,
-      h.probabilityEdge!=null&&Number.isFinite(Number(h.probabilityEdge))?`Vorsprung ${(Number(h.probabilityEdge)*100).toFixed(0)}pp`:null].filter(Boolean);
+      h.expectedReturn!=null&&Number.isFinite(Number(h.expectedReturn))?`Rendite ${(Number(h.expectedReturn)*100).toFixed(2)}% (Schwelle ${(Number(h.expectedReturnThreshold)*100).toFixed(2)}%)`:null,
+      h.directionalProbability!=null&&Number.isFinite(Number(h.directionalProbability))?`Richtung ${(Number(h.directionalProbability)*100).toFixed(0)}% (Schwelle ${(Number(h.directionThreshold)*100).toFixed(0)}%)`:null,
+      h.probabilityEdge!=null&&Number.isFinite(Number(h.probabilityEdge))?`Vorsprung ${(Number(h.probabilityEdge)*100).toFixed(0)}pp (Schwelle ${(Number(h.edgeThreshold)*100).toFixed(0)}pp)`:null].filter(Boolean);
     return '• '+vals.join(' · ')+(h.reasons.length?' — '+h.reasons.join('; '):'');
   }).join('\n');
   return [
