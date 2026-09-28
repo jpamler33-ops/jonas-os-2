@@ -2248,6 +2248,10 @@ function xrayKeyboard(symbol,live=false){
       {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`}
     ],
     [
+      {text:"🐋 FLOW",callback_data:`flow:${symbol}`},
+      {text:"📐 ACCURACY",callback_data:`accuracy:${symbol}`}
+    ],
+    [
       {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`},
       {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
     ],
@@ -2348,6 +2352,10 @@ function confluenceKeyboard(symbol){
     [
       {text:"◫ X-RAY",callback_data:`xray:${symbol}`},
       {text:"▦ MTF MATRIX",callback_data:`mtf:${symbol}`}
+    ],
+    [
+      {text:"🐋 FLOW",callback_data:`flow:${symbol}`},
+      {text:"📐 ACCURACY",callback_data:`accuracy:${symbol}`}
     ],
     [
       {text:"▥ CHART",callback_data:`chart:${symbol}:5m`},
