@@ -30,6 +30,7 @@ import { buildForecastLearningSummary, FORECAST_LEARNING_CENTER_VERSION } from '
 import { createShadowCompetition, refreshShadowCompetitionHypotheses, evaluateShadowCompetition, shadowCompetitionSummary, loadShadowCompetition, saveShadowCompetition, FORECAST_SHADOW_COMPETITION_VERSION } from './forecast-shadow-competition.mjs';
 import { createExperimentGovernor, evaluateExperimentGovernor, experimentGovernorSummary, loadExperimentGovernor, saveExperimentGovernor, FORECAST_EXPERIMENT_GOVERNOR_VERSION } from './forecast-experiment-governor.mjs';
 import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, WALLET_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
+import { buildDerivedResearchIntelligenceFeatures, EXTERNAL_RESEARCH_FEATURE_EXPERIMENTS, DERIVED_INTELLIGENCE_RESEARCH_EXPERIMENTS, PREDICTION_MARKET_RESEARCH_EXPERIMENTS, RESEARCH_INTELLIGENCE_FEATURES_VERSION } from './research-intelligence-features.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
@@ -355,8 +356,17 @@ const walletCohortResearchProvider=createWalletCohortPublicProvider({
   ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
   solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
 });
+const predictionMarketResearchEnabled=(()=>{
+  try{
+    const cfg=JSON.parse(process.env.TCX_POLYMARKET_MARKETS_JSON||'{}');
+    return Boolean(cfg&&typeof cfg==='object'&&Object.keys(cfg).length);
+  }catch{return false;}
+})();
 const activeFeatureResearchFeatures=[
   ...DEFAULT_RESEARCH_FEATURES,
+  ...EXTERNAL_RESEARCH_FEATURE_EXPERIMENTS,
+  ...DERIVED_INTELLIGENCE_RESEARCH_EXPERIMENTS,
+  ...(predictionMarketResearchEnabled?PREDICTION_MARKET_RESEARCH_EXPERIMENTS:[]),
   ...(walletCohortResearchProvider.configuredCohorts>0?WALLET_RESEARCH_FEATURES:[])
 ];
 const {
@@ -4542,7 +4552,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   const onchainExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ONCHAIN');
   const entityFlowExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ENTITY_FLOW');
   const walletExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='WALLET_COHORT');
-  const extraFeatures=[...episodeExtraFeatures,...researchPlaneExtraFeatures];
+  const intelligenceExtraFeatures=buildDerivedResearchIntelligenceFeatures([
+    ...episodeExtraFeatures,
+    ...researchPlaneExtraFeatures
+  ]);
+  const extraFeatures=[...episodeExtraFeatures,...researchPlaneExtraFeatures,...intelligenceExtraFeatures];
   const runtimeQuality=deriveForecastRuntimeQuality({
     safety,
     marketAudit,
@@ -4872,6 +4886,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       entityFlowBaselineSamples:Number(entityFlowResearchSnapshot?.entities?.OKX?.['5m']?.baselineSamples||0),
       walletFeatureCount:walletExtraFeatures.length,
       walletCohorts:walletCohortResearchProvider.configuredCohorts,
+      intelligenceFeatureCount:intelligenceExtraFeatures.length,
+      intelligenceFeatureIds:intelligenceExtraFeatures.map(x=>x.id),
+      intelligenceVersion:RESEARCH_INTELLIGENCE_FEATURES_VERSION,
       researchDataPlaneSeq:researchPlaneView.planeSeq||0,
       researchDataPlaneFeatures:researchPlaneExtraFeatures.length,
       researchDataPlaneAppendOk:researchPlaneWrite?.ok===true,
@@ -6094,6 +6111,8 @@ async function autoLearnForecastWatcher() {
               entityFlowBaselineSamples:result.entityFlowBaselineSamples||0,
               walletFeatures:result.walletFeatureCount||0,
               walletCohorts:result.walletCohorts||0,
+              intelligenceFeatures:result.intelligenceFeatureCount||0,
+              intelligenceFeatureIds:(result.intelligenceFeatureIds||[]).slice(0,12),
               researchDataPlaneSeq:result.researchDataPlaneSeq||0,
               researchDataPlaneFeatures:result.researchDataPlaneFeatures||0,
               researchDataPlaneAppendOk:result.researchDataPlaneAppendOk===true,
