@@ -39,6 +39,7 @@ export function createReadCommandHandlers(deps={}){
     showEvidence,
     showEvidenceHistory,
     showValidity,
+    showDataStatus,
     recordError=()=>{},
     recordOperation=()=>{},
     observability=null
@@ -102,6 +103,15 @@ export function createReadCommandHandlers(deps={}){
     "/help":async ({chatId})=>tg("sendMessage",{chat_id:chatId,text:helpText()}),
     "/favorites":async ({chatId})=>showFavorites(chatId),
     "/compare":async ({chatId})=>showCompare(chatId,null),
+
+    "/data":async ({chatId})=>{
+      try{ await showDataStatus(chatId,null); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.data",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Data-Status gerade nicht verfügbar."});
+      }
+    },
 
     "/coin":async ({chatId,args})=>{
       const symbol=normalizeSymbol(args[0]||"");
