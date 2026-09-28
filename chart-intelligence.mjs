@@ -77,6 +77,7 @@ export function buildChartIntelligence({
   mtf={},
   candles=[],
   live=false,
+  refreshSeconds=10,
   now=Date.now()
 }={}){
   const pivots=Array.isArray(analysis?.classifiedPivots)?analysis.classifiedPivots:[];
@@ -103,7 +104,7 @@ export function buildChartIntelligence({
 
   const caption=[
     'TCX // LIVE CHART · '+String(symbol||'').replace('USDT','/USDT'),
-    String(interval).toUpperCase()+' · '+(live?'⚡ AUTO '+Math.round(10)+'s':'Snapshot'),
+    String(interval).toUpperCase()+' · '+(live?'⚡ AUTO '+Math.max(1,Math.round(Number(refreshSeconds)||10))+'s':'Snapshot'),
     '',
     'STRUKTUR  '+directionIcon(trend)+' '+trend,
     sequence,
