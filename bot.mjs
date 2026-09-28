@@ -668,6 +668,7 @@ async function flushForecastRuntimePersistence(force=false){
         issuanceStore:snapshotMeta?.issuanceStore??null,
         trackerArchive:snapshotMeta?.trackerArchive??null,
         engineStore:snapshotMeta?.engineStore??null,
+        journalStore:snapshotMeta?.journalStore??null,
         componentProfile:snapshotMeta?.componentProfile??null
       }));
       return true;
@@ -6948,6 +6949,12 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
       slot:forecastRuntime.engineStoreSlot??null,
       storageBytes:forecastRuntime.lastEngineStoreBytes??null,
       logicalBytes:forecastRuntime.lastEngineStoreLogicalBytes??null
+    },
+    journalStore:{
+      slot:forecastRuntime.journalStoreSlot??null,
+      count:forecastRuntime.journalStoreCount??0,
+      storageBytes:forecastRuntime.lastJournalStoreBytes??null,
+      logicalBytes:forecastRuntime.lastJournalStoreLogicalBytes??null
     }
   },
   forecastMemoryCaps:{
