@@ -271,9 +271,9 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
   }else{
-    if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
+    if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+    else if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
     else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
-    else if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
   }
   return {position:{...next,lifecycle},trigger,changed:true,exit,lifecycle};
 }
