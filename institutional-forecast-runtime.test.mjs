@@ -210,6 +210,40 @@ test('issuance persistence deduplicates trace forecast/science and restores a va
   assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
 });
 
+test('tracker persistence projects raw reports but preserves invalidation and counterfactual behavior after restart',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  await saveInstitutionalForecastRuntime(r);
+
+  const disk=JSON.parse(await readFile(r.filePath,'utf8'));
+  const persistedReport=disk.intelligence.tracker.records[0].report;
+  assert.equal(persistedReport.persistenceProjection,'TCX_TRACKER_REPORT_OPERATIONAL_V1');
+  assert.equal('path' in persistedReport,false);
+  assert.equal('models' in persistedReport.forecasts[0],false);
+  assert.equal('analogs' in persistedReport.forecasts[0],false);
+
+  const reopened=await openInstitutionalForecastRuntime(r.filePath,{config:r.engine.configSnapshot()});
+  const cf=reopened.intelligence.counterfactual(issued.forecastId,{maxFeatures:2});
+  assert.equal(cf.symbol,'BTCUSDT');
+  assert.equal(cf.interpretation,'MODEL_SENSITIVITY_NOT_CAUSAL');
+
+  const observed=observeInstitutionalForecastRuntime(reopened,{
+    input:input(inp.asOf+60_000,inp.price*1.001),
+    quality:1
+  });
+  assert.ok(observed.revisions.length>=1);
+  assert.equal(reopened.intelligence.get(issued.forecastId).revisions.length,1);
+});
+
 test('matured journal outcome becomes Research Trace evaluation only after due time',async()=>{
   const r=await runtime();
   seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
