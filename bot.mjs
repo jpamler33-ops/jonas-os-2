@@ -356,7 +356,7 @@ const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
 const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
 const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile,{
-  maxHistoryRows:Math.max(2000,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||8000)))),
+  maxHistoryRows:Math.max(2000,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||2000)))),
   maxJournalEntries:forecastJournalMaxEntries,
   maxAuditEvents:forecastAuditMaxEvents,
   maxIssuances:forecastMaxIssuances,
@@ -418,6 +418,7 @@ let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 let forecastRuntimePersistenceQueue = Promise.resolve();
 let researchDataPlaneAppendQueue=Promise.resolve();
+let activeBackgroundResearchJob=null;
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
   marketMaxAgeMs:institutionalMarketMaxAgeMs,
@@ -5994,6 +5995,10 @@ async function autoLearnForecastWatcher() {
     const started=Date.now();
     let issued=0,skipped=0,failed=0,deferred=0;
     if(autoLearnEnabled&&forecastRuntime.healthy){
+      while(running&&activeBackgroundResearchJob) await sleep(250);
+      if(!running) break;
+      activeBackgroundResearchJob='autolearn';
+      try{
       for(const symbol of autoLearnSymbols){
         if(!running) break;
         const memory=process.memoryUsage();
@@ -6074,6 +6079,9 @@ async function autoLearnForecastWatcher() {
           console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
         }
         await sleep(250);
+      }
+      }finally{
+        if(activeBackgroundResearchJob==='autolearn') activeBackgroundResearchJob=null;
       }
     }
     recordOperation(observability,{
@@ -6286,6 +6294,10 @@ async function forecastOutcomeWatcher() {
 
 async function episodeWatcher() {
   while(running) {
+    while(running&&activeBackgroundResearchJob) await sleep(250);
+    if(!running) break;
+    activeBackgroundResearchJob='episode-sweep';
+    try{
     let changed=false;
     let evidenceChanged=false;
     for(const symbol of requestedSymbols) {
@@ -6313,6 +6325,9 @@ async function episodeWatcher() {
     }
     if(changed) await persistEpisodeMemory("sweep");
     if(evidenceChanged) await persistEvidenceHistory("sweep");
+    }finally{
+      if(activeBackgroundResearchJob==='episode-sweep') activeBackgroundResearchJob=null;
+    }
     await sleep(episodeSweepMs);
   }
 }
@@ -6648,6 +6663,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   coverageHorizons:DEFAULT_COVERAGE_HORIZONS.map(x=>x.id),
   autoLearnSymbols:autoLearnSymbols.length,
   forecastMemoryCaps:{
+    history:forecastRuntime.engine.maxHistoryRows,
     journal:forecastJournalMaxEntries,
     audit:forecastAuditMaxEvents,
     issuances:forecastMaxIssuances,
