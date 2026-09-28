@@ -663,6 +663,8 @@ async function flushForecastRuntimePersistence(force=false){
         historyRows:forecastRuntime.engine.historySize(),
         journalRows:forecastRuntime.journal.entries.length,
         cacheRows:{calibration:forecastRuntime.engine.calibration.rows.length,reliability:forecastRuntime.engine.reliability.rows.length,modelPerformance:forecastRuntime.engine.modelPerformance.rows.length,interval:forecastRuntime.engine.intervalCalibration.rows.length,drift:forecastRuntime.engine.drift.rows.length},
+        issuanceStore:snapshotMeta?.issuanceStore??null,
+        trackerArchive:snapshotMeta?.trackerArchive??null,
         componentProfile:snapshotMeta?.componentProfile??null
       }));
       return true;
@@ -6746,7 +6748,14 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     encoding:forecastRuntime.snapshotEncoding??'unknown',
     loadedFromPath:forecastRuntime.loadedFromPath??null,
     utilization:forecastRuntime.maxSnapshotBytes&&forecastRuntime.lastPersistedLogicalBytes!=null?forecastRuntime.lastPersistedLogicalBytes/forecastRuntime.maxSnapshotBytes:null,
-    compressionRatio:forecastRuntime.lastPersistedLogicalBytes>0&&forecastRuntime.lastPersistedBytes!=null?forecastRuntime.lastPersistedBytes/forecastRuntime.lastPersistedLogicalBytes:null
+    compressionRatio:forecastRuntime.lastPersistedLogicalBytes>0&&forecastRuntime.lastPersistedBytes!=null?forecastRuntime.lastPersistedBytes/forecastRuntime.lastPersistedLogicalBytes:null,
+    trackerArchive:{
+      slot:forecastRuntime.trackerArchiveSlot??null,
+      recordCount:forecastRuntime.trackerArchiveRecordCount??0,
+      revisionCount:forecastRuntime.trackerArchiveRevisionCount??0,
+      storageBytes:forecastRuntime.lastTrackerArchiveBytes??null,
+      logicalBytes:forecastRuntime.lastTrackerArchiveLogicalBytes??null
+    }
   },
   forecastMemoryCaps:{
     history:forecastRuntime.engine.maxHistoryRows,
