@@ -33,15 +33,18 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
   minDirectionalProbability=.505,
   minAbsoluteExpectedReturn=.0004,
   minLearningValue=.10,
-  assetClass='CORE'
+  assetClass='CORE',
+  allowAbstainProbe=false,
+  abstainProbeNotionalQuote=5
 }={}){
   if(!issuance||typeof issuance!=='object') return no('ISSUANCE_MISSING');
   if(issuance.executionMode!=='SHADOW_ONLY'||issuance.action!=='ABSTAIN'||issuance.canExecute!==false){
     return no('ISSUANCE_SAFETY_INVARIANT_INVALID');
   }
   const admissionGate=String(issuance.admission?.gate||'ABSTAIN').toUpperCase();
-  if(!['PASS','CAUTION'].includes(admissionGate)) return no('ADMISSION_'+admissionGate,{admissionGate});
-  if(issuance.probabilityDisplayAllowed!==true) return no('PROBABILITY_NOT_ADMITTED',{admissionGate});
+  const abstainProbe=admissionGate==='ABSTAIN'&&allowAbstainProbe===true;
+  if(!abstainProbe&&!['PASS','CAUTION'].includes(admissionGate)) return no('ADMISSION_'+admissionGate,{admissionGate});
+  if(!abstainProbe&&issuance.probabilityDisplayAllowed!==true) return no('PROBABILITY_NOT_ADMITTED',{admissionGate});
   if(String(issuance.trace?.safety?.state||'UNKNOWN').toUpperCase()!=='NORMAL'){
     return no('DATA_SAFETY_NOT_NORMAL',{admissionGate});
   }
@@ -52,22 +55,30 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
 
   const candidates=[];
   for(const h of Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[]){
-    if(
-      String(h?.gate||'').toUpperCase()!=='PASS'||
-      h?.display?.probabilityDisplayAllowed!==true||
-      String(h?.calibration?.status||'').toUpperCase()!=='CALIBRATED'||
-      !['UP','DOWN'].includes(String(h?.direction||'').toUpperCase())
-    ) continue;
+    const horizonGate=String(h?.gate||'').toUpperCase();
+    const calibrated=String(h?.calibration?.status||'').toUpperCase()==='CALIBRATED';
+    const directional=['UP','DOWN'].includes(String(h?.direction||'').toUpperCase());
+    const normalEligible=
+      horizonGate==='PASS'&&
+      h?.display?.probabilityDisplayAllowed===true&&
+      calibrated&&directional;
+    const probeEligible=
+      abstainProbe&&
+      horizonGate!=='INSUFFICIENT'&&
+      calibrated&&directional;
+    if(!normalEligible&&!probeEligible) continue;
     const direction=String(h.direction).toUpperCase();
-    const p=h.display?.probabilities||h.probabilities||{};
+    const p=h.probabilities||h.display?.probabilities||{};
     const pUp=finite(p.up),pDown=finite(p.down),pFlat=finite(p.flat);
     const expectedReturn=finite(h.expectedReturn);
     if([pUp,pDown,pFlat,expectedReturn].some(x=>x==null)) continue;
     const directionalProbability=direction==='UP'?pUp:pDown;
     const oppositeProbability=direction==='UP'?pDown:pUp;
     const probabilityEdge=directionalProbability-oppositeProbability;
-    if(directionalProbability<minDirectionalProbability) continue;
-    if(Math.abs(expectedReturn)<minAbsoluteExpectedReturn) continue;
+    const minProb=abstainProbe?0.50:minDirectionalProbability;
+    const minMove=abstainProbe?0.0001:minAbsoluteExpectedReturn;
+    if(directionalProbability<minProb) continue;
+    if(Math.abs(expectedReturn)<minMove) continue;
     const side=direction==='UP'?'BUY':'SELL';
     const features={
       assetClass:String(assetClass||'CORE').toUpperCase(),
@@ -113,14 +124,20 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
     generatedAt,
     admissionGate
   };
+  const entryMode=abstainProbe?'ABSTAIN_PROBE':'EXPLORATION';
   return freeze({
     ...core,
     eligible:true,
-    reason:'MANDATORY_SHADOW_EXPLORATION_CANDIDATE',
-    decisionKey:sha256(core),
+    reason:abstainProbe?'MANDATORY_ABSTAIN_SHADOW_PROBE_CANDIDATE':'MANDATORY_SHADOW_EXPLORATION_CANDIDATE',
+    decisionKey:sha256({...core,entryMode}),
     type:'MARKET',
-    notionalQuote:Math.max(1,Number(notionalQuote)||12),
-    entryMode:'EXPLORATION',
+    notionalQuote:abstainProbe
+      ?Math.max(1,Number(abstainProbeNotionalQuote)||5)
+      :Math.max(1,Number(notionalQuote)||12),
+    entryMode,
+    probeOnly:abstainProbe,
+    admissionOverrideForLearning:abstainProbe,
+    admissionReasons:Array.isArray(issuance.admission?.reasons)?issuance.admission.reasons.slice(0,12).map(String):[],
     searchRequired:true,
     learning:{
       qualityLabel:c.learned.qualityLabel,
