@@ -6,6 +6,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 
 import { sha256 } from './institutional-kernel.mjs';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
+import { verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import {
   openInstitutionalForecastRuntime,
   saveInstitutionalForecastRuntime,
@@ -181,6 +182,32 @@ test('runtime issues immutable institutional forecast and persists restart state
   assert.equal(summary.healthy,true);
   assert.equal(summary.historyCases,60);
   assert.equal(summary.issuedForecasts,1);
+});
+
+test('issuance persistence deduplicates trace forecast/science and restores a valid full issuance',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const out=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  await saveInstitutionalForecastRuntime(r);
+  const disk=JSON.parse(await readFile(r.filePath,'utf8'));
+  assert.equal(disk.issuances.length,1);
+  assert.equal(disk.issuances[0].persistenceEncoding,'TCX_FORECAST_ISSUANCE_DEDUP_V1');
+  assert.equal('forecast' in disk.issuances[0].trace,false);
+  assert.equal('science' in disk.issuances[0].trace,false);
+
+  const reopened=await openInstitutionalForecastRuntime(r.filePath,{config:r.engine.configSnapshot()});
+  assert.equal(reopened.issuances.length,1);
+  assert.equal(reopened.issuances[0].trace.forecast.fingerprint,out.issuance.forecast.fingerprint);
+  assert.equal(reopened.issuances[0].trace.science.fingerprint,out.issuance.scientificValidity.fingerprint);
+  assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
 });
 
 test('matured journal outcome becomes Research Trace evaluation only after due time',async()=>{

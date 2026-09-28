@@ -7,7 +7,7 @@ import {
   ForecastIntelligenceService
 } from './forecast-runtime/forecast/index.js';
 import { verifyCanonicalForecastInput } from './forecast-input-adapter.mjs';
-import { createInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
+import { createInstitutionalForecastIssuance, verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { createResearchTraceEvaluation } from './research-trace.mjs';
 import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
 
@@ -95,6 +95,38 @@ function deepFreeze(v){
   return v;
 }
 function clone(v){return structuredClone(v);}
+const FORECAST_ISSUANCE_PERSISTENCE_ENCODING='TCX_FORECAST_ISSUANCE_DEDUP_V1';
+
+function issuanceForPersistence(value){
+  const issuance=clone(value);
+  if(!issuance?.trace||!issuance?.forecast||!issuance?.scientificValidity) return issuance;
+  const trace={...issuance.trace};
+  delete trace.forecast;
+  delete trace.science;
+  issuance.trace=trace;
+  issuance.persistenceEncoding=FORECAST_ISSUANCE_PERSISTENCE_ENCODING;
+  return issuance;
+}
+
+function issuanceFromPersistence(value){
+  const issuance=clone(value);
+  if(issuance?.persistenceEncoding!==FORECAST_ISSUANCE_PERSISTENCE_ENCODING) return issuance;
+  delete issuance.persistenceEncoding;
+  if(!issuance?.trace||!issuance?.forecast||!issuance?.scientificValidity){
+    throw new Error('invalid compact forecast issuance snapshot');
+  }
+  issuance.trace={
+    ...issuance.trace,
+    forecast:clone(issuance.forecast),
+    science:clone(issuance.scientificValidity)
+  };
+  const verification=verifyInstitutionalForecastIssuance(issuance);
+  if(!verification.ok){
+    throw new Error('compact forecast issuance restore failed: '+verification.reasons.join(','));
+  }
+  return issuance;
+}
+
 function trimIssuances(rows,max){
   const sorted=[...(rows||[])].sort((a,b)=>Number(a.generatedAt)-Number(b.generatedAt));
   return sorted.slice(-Math.max(50,Math.floor(max)));
@@ -281,7 +313,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
     if(snapshot.journal) runtime.journal.restore(snapshot.journal,{rehydrateLearningMemory:false});
     if(snapshot.intelligence) runtime.intelligence.restore(snapshot.intelligence,Date.now());
     runtime.issuances=trimIssuances(
-      Array.isArray(snapshot.issuances)?snapshot.issuances:[],
+      (Array.isArray(snapshot.issuances)?snapshot.issuances:[]).map(issuanceFromPersistence),
       runtime.maxIssuances
     );
   }catch(err){
@@ -308,7 +340,7 @@ export function institutionalForecastRuntimeSnapshot(runtime){
     engine:engineSnapshot(runtime.engine),
     journal:{version:3,entries:runtime.journal.entries},
     intelligence:runtime.intelligence.snapshot(),
-    issuances:trimIssuances(runtime.issuances,runtime.maxIssuances)
+    issuances:trimIssuances(runtime.issuances,runtime.maxIssuances).map(issuanceForPersistence)
   };
 }
 
