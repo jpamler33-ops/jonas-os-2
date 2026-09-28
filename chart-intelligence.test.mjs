@@ -20,7 +20,7 @@ test('builds beginner-readable bullish chart intelligence',()=>{
   });
   assert.match(out.caption,/HH → HL → HH → HL/);
   assert.match(out.caption,/HH höheres Hoch/);
-  assert.match(out.caption,/Support 95\.00 · Resistance 110\.00/);
+  assert.match(out.caption,/Support 95\.000 · Resistance 110\.00/);
   assert.match(out.caption,/BULLISH ALIGNMENT/);
   assert.match(out.caption,/Laufende Kerze zählt NICHT/);
   assert.equal(out.lastPivot.label,'HL');
