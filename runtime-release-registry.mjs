@@ -31,6 +31,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'mandatory-shadow-discovery.mjs',
   'learned-challenger-engine.mjs',
   'shadow-regime-brain.mjs',
+  'adversarial-stress-lab.mjs',
   'shadow-strategy-league.mjs',
   'multi-venue-shadow-sor.mjs',
   'venue-quality-memory.mjs',

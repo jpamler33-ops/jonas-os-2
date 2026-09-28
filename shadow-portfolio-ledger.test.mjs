@@ -275,3 +275,28 @@ test('portfolio freezes regime metadata from the entry order',()=>{
   assert.equal(l.positions[0].entryRegimeState.trend,'UP');
   assert.equal(l.positions[0].entryRegimeKey,'CORE|TREND_UP|UP|HIGH|DEEP|BUY_HEAVY');
 });
+
+
+test('portfolio freezes adversarial stress metadata from challenger entry',()=>{
+  const e=entry({
+    id:'sh_stress_1',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'LEARNED_CHALLENGER_ENTRY',
+      entryMode:'CHALLENGER',
+      challengerRuleId:'lc_stress',
+      entryStressLabVersion:'TCX_ADVERSARIAL_STRESS_LAB_V1',
+      entryStressStatus:'WATCH',
+      entryStressSamples:20,
+      entryStressMultiplier:.5,
+      entryStressRobustnessScore:.55,
+      entryStressFailedChecks:['severeCostPositive']
+    }
+  });
+  const l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:2000}).ledger;
+  const p=l.positions[0];
+  assert.equal(p.entryStressStatus,'WATCH');
+  assert.equal(p.entryStressSamples,20);
+  assert.equal(p.entryStressMultiplier,.5);
+  assert.deepEqual(p.entryStressFailedChecks,['severeCostPositive']);
+});

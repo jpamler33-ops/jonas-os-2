@@ -115,3 +115,51 @@ test('unsafe issuance cannot create challenger trades',()=>{
   assert.equal(out.candidates.length,0);
   assert.equal(out.reason,'DATA_SAFETY_NOT_NORMAL');
 });
+
+
+test('stress gate can block a fragile challenger',()=>{
+  const ledger=baseLedger();
+  const model=buildShadowTradeQualityModel(ledger,{asOf:2000});
+  const lab=buildLearnedChallengerLab(model,ledger,{asOf:2000});
+  const out=deriveLearnedChallengerTrades(issuance(),lab,{
+    now:2000,
+    assetClass:'CORE',
+    baseNotionalQuote:10,
+    stressLab:{
+      decisionForRule:()=>({
+        status:'FRAGILE',
+        multiplier:0,
+        samples:20,
+        robustnessScore:.2,
+        reason:'ADVERSARIAL_STRESS_RESULT'
+      })
+    }
+  });
+  assert.equal(out.candidates.length,0);
+});
+
+test('stress gate can only reduce challenger notional',()=>{
+  const ledger=baseLedger();
+  const model=buildShadowTradeQualityModel(ledger,{asOf:2000});
+  const lab=buildLearnedChallengerLab(model,ledger,{asOf:2000});
+  const out=deriveLearnedChallengerTrades(issuance(),lab,{
+    now:2000,
+    assetClass:'CORE',
+    baseNotionalQuote:10,
+    stressLab:{
+      decisionForRule:()=>({
+        status:'WATCH',
+        multiplier:.5,
+        samples:20,
+        robustnessScore:.55,
+        reason:'ADVERSARIAL_STRESS_RESULT',
+        failedChecks:['severeCostPositive']
+      })
+    }
+  });
+  assert.equal(out.candidates.length,1);
+  assert.equal(out.candidates[0].stressStatus,'WATCH');
+  assert.equal(out.candidates[0].stressMultiplier,.5);
+  assert.equal(out.candidates[0].notionalQuote,2.5);
+  assert.equal(out.candidates[0].canExecuteLive,false);
+});
