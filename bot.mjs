@@ -153,6 +153,7 @@ const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
 const shadowCompetitionWorkerTimeoutMs = Math.max(60_000, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_TIMEOUT_MS || 8*60_000));
 const shadowCompetitionWorkerHeapMb = Math.max(128, Math.min(384, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_HEAP_MB || 256)));
+const shadowCompetitionServingWorkerEnabled = String(process.env.TCX_SHADOW_COMPETITION_SERVING_WORKER_ENABLED || '0') === '1';
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
@@ -5828,7 +5829,7 @@ async function shadowCompetitionWatcher(){
   while(running){
     const started=Date.now();
     try{
-      if(shadowCompetitionEnabled&&forecastRuntime.healthy){
+      if(shadowCompetitionEnabled&&shadowCompetitionServingWorkerEnabled&&forecastRuntime.healthy){
         const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY);
         const cfg=forecastRuntime.engine.configSnapshot();
         const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
@@ -6088,6 +6089,8 @@ const server = http.createServer((req,res) => {
       alerts:activeAlerts,
       shadowResearchWorker:{
         version:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+        enabledInServingProcess:shadowCompetitionServingWorkerEnabled,
+        state:shadowCompetitionServingWorkerEnabled?'ENABLED':'PAUSED_FOR_SERVING_STABILITY',
         timeoutMs:shadowCompetitionWorkerTimeoutMs,
         maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb,
         mainHeapUsedMb:Math.round(process.memoryUsage().heapUsed/1024/1024)
@@ -6301,6 +6304,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   strategyLeagueHealthy,
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+  shadowResearchWorkerState:shadowCompetitionServingWorkerEnabled?'ENABLED':'PAUSED_FOR_SERVING_STABILITY',
   execution:'SHADOW_ONLY',
   canExecute:false
 }));
