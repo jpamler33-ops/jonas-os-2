@@ -256,3 +256,22 @@ test('learned challenger is tracked but excluded from primary portfolio metrics'
   const stats=shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000});
   assert.equal(stats.trades,0);
 });
+
+
+test('portfolio freezes regime metadata from the entry order',()=>{
+  const e=entry({
+    id:'sh_regime_1',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      entryRegimeBrainVersion:'TCX_SHADOW_REGIME_BRAIN_V1',
+      entryRegimeKey:'CORE|TREND_UP|UP|HIGH|DEEP|BUY_HEAVY',
+      entryRegimeFingerprint:'r'.repeat(64),
+      entryRegimeConfidence:.82,
+      entryRegimeState:{trend:'UP',volatility:'HIGH',liquidity:'DEEP'}
+    }
+  });
+  const l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:2000}).ledger;
+  assert.equal(l.positions[0].entryRegimeConfidence,.82);
+  assert.equal(l.positions[0].entryRegimeState.trend,'UP');
+  assert.equal(l.positions[0].entryRegimeKey,'CORE|TREND_UP|UP|HIGH|DEEP|BUY_HEAVY');
+});

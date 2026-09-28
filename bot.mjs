@@ -55,6 +55,10 @@ import {
   buildLearnedChallengerLab, deriveLearnedChallengerTrades, learnedChallengerSummary,
   LEARNED_CHALLENGER_ENGINE_VERSION
 } from './learned-challenger-engine.mjs';
+import {
+  deriveShadowRegimeFingerprint, buildRegimeStrategyMatrix, regimeDecisionForStrategy,
+  regimeBrainSummary, SHADOW_REGIME_BRAIN_VERSION
+} from './shadow-regime-brain.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -473,6 +477,7 @@ try {
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       learnedChallengerEngine:LEARNED_CHALLENGER_ENGINE_VERSION,
+      shadowRegimeBrain:SHADOW_REGIME_BRAIN_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -1434,7 +1439,7 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
 }
 
 
-async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={}){
+async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,regimeContext=null}={}){
   const now=Date.now();
   if(!learnedChallengerEnabled){
     return {placed:0,eligible:0,reason:'LEARNED_CHALLENGER_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
@@ -1451,11 +1456,16 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const lab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
   const assetClass=assetClassForSymbol(issuance?.symbol);
+  const regime=regimeContext||deriveShadowRegimeFingerprint({assetClass});
+  const regimeMatrix=buildRegimeStrategyMatrix(shadowPortfolioLedger);
   const derived=deriveLearnedChallengerTrades(issuance,lab,{
     now,
     assetClass,
     baseNotionalQuote:learnedChallengerBaseNotional,
-    maxCandidates:learnedChallengerMaxPerIssuance
+    maxCandidates:learnedChallengerMaxPerIssuance,
+    regimeBrain:{
+      decisionForRule:(ruleId)=>regimeDecisionForStrategy(regimeMatrix,regime,ruleId)
+    }
   });
   if(!derived.candidates.length){
     return {placed:0,eligible:0,reason:derived.reason,lab:learnedChallengerSummary(lab),execution:'SHADOW_ONLY',canExecuteLive:false};
@@ -1519,6 +1529,14 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={
         challengerForwardSamples:candidate.forwardSamples,
         challengerWhyFeature:candidate.why?.[0]?.feature||'',
         challengerWhyValue:candidate.why?.[0]?.value||'',
+        challengerRegimeStatus:candidate.regimeStatus,
+        challengerRegimeSamples:candidate.regimeSamples,
+        challengerRegimeMultiplier:candidate.regimeMultiplier,
+        entryRegimeBrainVersion:SHADOW_REGIME_BRAIN_VERSION,
+        entryRegimeKey:regime.regimeKey,
+        entryRegimeFingerprint:regime.fingerprint,
+        entryRegimeConfidence:regime.confidence,
+        entryRegimeState:regime.components,
         decisionKey:candidate.challengerDecisionKey,
         issuanceId:candidate.issuanceId,
         forecastFingerprint:candidate.forecastFingerprint,
@@ -1535,6 +1553,7 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={
     results.push({
       ruleId:candidate.ruleId,placed:true,orderId:order.id,symbol:candidate.symbol,
       status:candidate.ruleStatus,side:candidate.side,horizonId:candidate.horizonId,
+      regimeStatus:candidate.regimeStatus,regimeMultiplier:candidate.regimeMultiplier,
       notionalQuote:candidate.notionalQuote
     });
   }
@@ -1550,6 +1569,8 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={
   return {
     placed,eligible:derived.candidates.length,reason:placed?'CHALLENGERS_PLACED':'CHALLENGERS_BLOCKED',
     results,lab:learnedChallengerSummary(lab),
+    regime:{regimeKey:regime.regimeKey,confidence:regime.confidence},
+    regimeBrain:regimeBrainSummary(regimeMatrix,regime),
     execution:'SHADOW_ONLY',canExecuteLive:false
   };
 }
@@ -3234,6 +3255,8 @@ async function showShadowTrainingCoach(chatId,messageId=null){
   const quality=qualityLearnerSummary(qualityModel);
   const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:Date.now()});
   const challengers=learnedChallengerSummary(challengerLab);
+  const regimeMatrix=buildRegimeStrategyMatrix(shadowPortfolioLedger);
+  const regimeSummary=regimeBrainSummary(regimeMatrix);
   const pf=x.profitFactor==null?'—':Number.isFinite(x.profitFactor)?fmt(x.profitFactor,2):'∞';
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
@@ -3276,6 +3299,11 @@ async function showShadowTrainingCoach(chatId,messageId=null){
       :'noch zu wenig Daten'),
     'Challenger handeln nur vorwärts im eigenen Testmodus; ihre Ergebnisse fließen nicht zurück in die Musterentdeckung.',
     'Budget: '+fmt(learnedChallengerBaseNotional,0)+' USDT virtuell Basis · max. '+learnedChallengerMaxOpenTotal+' offen · max. '+learnedChallengerMaxOpenPerSymbol+' je Coin.','',
+    'LEARNING V3 · REGIME BRAIN',
+    'Regime-markierte abgeschlossene Trades: '+regimeSummary.samples+' · gelernte Regime: '+regimeSummary.regimes,
+    'Favored Matrix-Zellen: '+Number(regimeMatrix.favored?.length||0)+' · Avoid: '+Number(regimeMatrix.avoid?.length||0),
+    'Challenger werden je Marktregime separat bewertet: FAVORED 1.15x · NEUTRAL 0.75x · unbekannt 0.65x · AVOID 0x.',
+    'Regime wird beim Entry eingefroren; spätere Daten dürfen den historischen Entry-Kontext nicht umschreiben.','',
     'AUTOMATISCHE RISIKOANPASSUNG',
     'Academy-Budget wird aktuell mit '+fmt(x.riskMultiplier,2)+'× skaliert.',
     'Status: '+(x.hold?'⛔ Trainingspause':'🟢 neue qualifizierte Shadow-Entries erlaubt'),
@@ -4485,7 +4513,22 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let learnedChallengerRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
-      learnedChallengerRun=await maybePlaceLearnedChallengerTrades(issuance,{auditHealthy:auditHealthyAfter});
+      const regimeContext=deriveShadowRegimeFingerprint({
+        regimeId:String(input.regimeId||state.memoryDashboard?.regime||'UNKNOWN'),
+        regimeConfidence:runtimeQuality.regimeConfidence,
+        mtfBias:String(state.mtf?.bias||state.memoryDashboard?.bias||'UNKNOWN'),
+        pressureScore:state.memoryDashboard?.pressureScore,
+        volatilityState:String(state.memoryDashboard?.volatilityState||state.memoryDashboard?.volatility||input.regimeId||'UNKNOWN'),
+        liquidityState:String(state.memoryDashboard?.liquidityState||state.memoryDashboard?.liquidity||'UNKNOWN'),
+        fundingState:derivativesExtraFeatures.length?'OBSERVED':'UNKNOWN',
+        liquidationState:liquidationResearchSnapshot?.ready5m===true?'OBSERVED':'UNKNOWN',
+        narrativeState:assetClassForSymbol(symbol)==='MEME'?'MEME':'CORE',
+        assetClass:assetClassForSymbol(symbol)
+      });
+      learnedChallengerRun=await maybePlaceLearnedChallengerTrades(issuance,{
+        auditHealthy:auditHealthyAfter,
+        regimeContext
+      });
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
       learnedChallengerRun={placed:0,eligible:0,reason:'LEARNED_CHALLENGER_ERROR'};
@@ -4569,6 +4612,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       learnedChallengerReason:learnedChallengerRun?.reason||null,
       learnedChallengerRules:Number(learnedChallengerRun?.lab?.ruleCount||0),
       learnedChallengerQualified:Number(learnedChallengerRun?.lab?.counts?.qualified||0),
+      learnedChallengerRegime:learnedChallengerRun?.regime?.regimeKey||null,
       strategyLeaguePlaced:Number(strategyLeagueRun?.placed||0),
       strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
       strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null
