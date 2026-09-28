@@ -372,7 +372,7 @@ let episodes = loadedEpisodeMemory.episodes;
 const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
 const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile,{
   maxHistoryRows:Math.max(2000,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||2000)))),
-  maxSnapshotBytes:Math.max(64*1024*1024,Math.min(96*1024*1024,Math.floor(Number(process.env.TCX_FORECAST_MAX_SNAPSHOT_BYTES||64*1024*1024)))),
+  maxSnapshotBytes:Math.max(64*1024*1024,Math.min(96*1024*1024,Math.floor(Number(process.env.TCX_FORECAST_MAX_SNAPSHOT_BYTES||80*1024*1024)))),
   maxJournalEntries:forecastJournalMaxEntries,
   maxAuditEvents:forecastAuditMaxEvents,
   maxIssuances:forecastMaxIssuances,
