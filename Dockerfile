@@ -23,6 +23,7 @@ RUN npm run test:learning-v2
 RUN npm run test:learning-v3
 RUN npm run test:learning-v4
 RUN npm run test:stability
+RUN npm run test:serving-memory
 RUN npm run test:telegram-resilience
 RUN npm run test:ui
 RUN npm run test:intel

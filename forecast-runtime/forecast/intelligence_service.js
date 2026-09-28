@@ -15,8 +15,11 @@ export class ForecastIntelligenceService {
     constructor(engine, options = {}) {
         this.engine = engine;
         this.layer = new ForecastIntelligenceLayer(engine, options.intelligence);
-        this.tracker = new ForecastRevisionTracker(options.invalidation);
-        this.maxAuditEvents = Math.max(100, Math.floor(options.maxAuditEvents ?? 5_000));
+        this.tracker = new ForecastRevisionTracker({
+            ...(options.invalidation ?? {}),
+            maxRecords: options.maxTrackerRecords ?? 1200,
+        });
+        this.maxAuditEvents = Math.max(100, Math.floor(options.maxAuditEvents ?? 1_000));
     }
     issue(input) {
         const report = this.layer.issue(input);

@@ -272,3 +272,59 @@ test('cold-start issuance remains serializable and fail-closed',async()=>{
   const serialized=JSON.stringify(out.issuance);
   assert.doesNotMatch(serialized,/Infinity|NaN/);
 });
+
+
+test('serving runtime bounds tracker journal and issuance memory',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-runtime-bounded-'));
+  const r=await openInstitutionalForecastRuntime(path.join(dir,'runtime.json'),{
+    config:{
+      featureIds:[...EPISODE_FORECAST_FEATURE_IDS],
+      horizons:[
+        {id:'5m',horizonMs:300000,flatThreshold:.0008,topK:20,minSimilarity:.01,analogBandwidth:2,independenceWindowMs:300000}
+      ],
+      minTrainingCases:8,
+      minRegimeCases:4,
+      minAnalogCount:5,
+      minAnalogEffectiveSamples:3,
+      minAnalogIndependentEpisodes:3,
+      minDataQuality:.5,
+      minRegimeConfidence:.3,
+      calibrationMinCases:500,
+      reliabilityMinCases:500,
+      intervalCalibrationMinCases:500,
+      pathMinCompleteTrajectories:5,
+      pathMinEffectiveSamples:3,
+      pathTopK:20,
+      pathMinSimilarity:.01
+    },
+    maxTrackerRecords:100,
+    maxJournalEntries:100,
+    maxIssuances:100,
+    maxAuditEvents:100
+  });
+  for(let i=0;i<110;i++){
+    const inp=input(900_000_000+i*60_000,65000+i);
+    issueInstitutionalForecast(r,{
+      input:inp,
+      scientificValidity:science(inp.asOf,'INSUFFICIENT'),
+      dataSafety:{state:'NORMAL'},
+      researchValidity:{status:'VALID'},
+      traceContext:traceContext(inp),
+      generatedAt:inp.asOf+100
+    });
+  }
+  assert.ok(r.intelligence.all().length<=100);
+  assert.ok(r.journal.all().length<=100);
+  assert.ok(r.issuances.length<=100);
+  await saveInstitutionalForecastRuntime(r);
+  const reopened=await openInstitutionalForecastRuntime(r.filePath,{
+    config:r.engine.configSnapshot(),
+    maxTrackerRecords:100,
+    maxJournalEntries:100,
+    maxIssuances:100,
+    maxAuditEvents:100
+  });
+  assert.ok(reopened.intelligence.all().length<=100);
+  assert.ok(reopened.journal.all().length<=100);
+  assert.ok(reopened.issuances.length<=100);
+});
