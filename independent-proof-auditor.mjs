@@ -8,7 +8,7 @@ export function auditTcxEvidence(ledger,{minTrades=100,maxTopWinnerShare=.40,max
  const r=rows(ledger),pnls=r.map(x=>finite(x.realizedNetPnlQuote,0)),positive=r.filter(x=>finite(x.realizedNetPnlQuote,0)>0).sort((a,b)=>finite(b.realizedNetPnlQuote,0)-finite(a.realizedNetPnlQuote,0));
  const grossProfit=sum(positive.map(x=>finite(x.realizedNetPnlQuote,0))),topCount=Math.max(1,Math.ceil(positive.length*.05)),topWinnerShare=grossProfit>0?sum(positive.slice(0,topCount).map(x=>finite(x.realizedNetPnlQuote,0)))/grossProfit:1;
  const bySymbol=new Map();for(const p of r)bySymbol.set(String(p.symbol||'UNKNOWN'),(bySymbol.get(String(p.symbol||'UNKNOWN'))||0)+1);
- const maxSymbolShare=r.length?Math.max(0,...bySymbol.values())/r.length:1;
+ const observedMaxSymbolShare=r.length?Math.max(0,...bySymbol.values())/r.length:1;
  const temporalViolations=r.filter(p=>finite(p.openedAt)!=null&&finite(p.closedAt)!=null&&finite(p.openedAt)>finite(p.closedAt)).length;
  const missingForecastLink=r.filter(p=>!String(p.forecastFingerprint||'').trim()&&!String(p.issuanceId||'').trim()).length;
  const duplicateKeys=new Map();for(const p of r){const k=[p.symbol,p.openedAt,p.closedAt,p.entryQuote,p.realizedNetPnlQuote].join('|');duplicateKeys.set(k,(duplicateKeys.get(k)||0)+1);}
@@ -17,7 +17,7 @@ export function auditTcxEvidence(ledger,{minTrades=100,maxTopWinnerShare=.40,max
  const findings={
   insufficientSample:r.length<minTrades,
   winnerConcentration:topWinnerShare>maxTopWinnerShare,
-  symbolConcentration:maxSymbolShare>maxSymbolShare,
+  symbolConcentration:observedMaxSymbolShare>maxSymbolShare,
   temporalIntegrity:temporalViolations>0,
   weakForecastLineage:r.length>0&&missingForecastLink/r.length>.10,
   duplicateEvidence:duplicateRate>.02,
@@ -26,6 +26,6 @@ export function auditTcxEvidence(ledger,{minTrades=100,maxTopWinnerShare=.40,max
  const critical=['temporalIntegrity','duplicateEvidence','recentCollapse'].filter(k=>findings[k]);
  const warnings=Object.entries(findings).filter(([,v])=>v).map(([k])=>k);
  const passed=r.length>=minTrades&&critical.length===0&&warnings.length<=1;
- const core={version:INDEPENDENT_PROOF_AUDITOR_VERSION,samples:r.length,passed,findings,critical,warnings,metrics:{topWinnerShare,maxSymbolShare,temporalViolations,missingForecastLinkRate:r.length?missingForecastLink/r.length:null,duplicateRate,recentTrades:recent.length,recentNetPnlQuote:recentNet},execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false,meaning:'ADVERSARIAL_EVIDENCE_AUDIT_NOT_LIVE_AUTHORIZATION'};
+ const core={version:INDEPENDENT_PROOF_AUDITOR_VERSION,samples:r.length,passed,findings,critical,warnings,metrics:{topWinnerShare,maxSymbolShare:observedMaxSymbolShare,temporalViolations,missingForecastLinkRate:r.length?missingForecastLink/r.length:null,duplicateRate,recentTrades:recent.length,recentNetPnlQuote:recentNet},execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false,meaning:'ADVERSARIAL_EVIDENCE_AUDIT_NOT_LIVE_AUTHORIZATION'};
  return freeze({...core,fingerprint:sha256(core)});
 }
