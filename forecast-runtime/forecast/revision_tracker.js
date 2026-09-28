@@ -2,8 +2,24 @@ import { assessForecastInvalidation } from './invalidation.js';
 export class ForecastRevisionTracker {
     options;
     records = new Map();
+    maxRecords;
     constructor(options = {}) {
         this.options = options;
+        this.maxRecords = Math.max(100, Math.floor(options.maxRecords ?? 1200));
+    }
+    prune() {
+        if (this.records.size <= this.maxRecords)
+            return;
+        const rows = [...this.records.values()].sort((a, b) => a.issuedAt - b.issuedAt);
+        const removable = [
+            ...rows.filter(r => r.status === 'EXPIRED' || r.status === 'INVALIDATED'),
+            ...rows.filter(r => r.status !== 'EXPIRED' && r.status !== 'INVALIDATED')
+        ];
+        for (const r of removable) {
+            if (this.records.size <= this.maxRecords)
+                break;
+            this.records.delete(r.id);
+        }
     }
     issue(input, report) {
         if (input.symbol !== report.forecast.symbol || input.asOf !== report.forecast.asOf)
@@ -13,6 +29,7 @@ export class ForecastRevisionTracker {
             return id;
         const expiresAt = input.asOf + Math.max(0, ...report.forecast.forecasts.map(f => f.horizonMs));
         this.records.set(id, { id, symbol: input.symbol, issuedAt: input.asOf, expiresAt, issuePrice: input.price, issueRegimeId: input.regimeId, report: structuredClone(report.forecast), transitionAtIssue: structuredClone(report.regimeTransition), issueState: structuredClone(input), revisions: [], status: 'ACTIVE' });
+        this.prune();
         return id;
     }
     observe(current) { const changed = []; for (const r of this.records.values()) {
@@ -37,6 +54,6 @@ export class ForecastRevisionTracker {
     all() { return [...this.records.values()].map(x => structuredClone(x)); }
     snapshot() { return { version: 1, records: this.all() }; }
     restore(s) { if (s.version !== 1)
-        throw new Error('unsupported revision snapshot version'); this.records.clear(); for (const r of s.records)
-        this.records.set(r.id, structuredClone(r)); }
+        throw new Error('unsupported revision snapshot version'); this.records.clear(); const rows = Array.isArray(s.records) ? s.records : []; const kept = rows.slice().sort((a, b) => Number(a.issuedAt || 0) - Number(b.issuedAt || 0)).slice(-this.maxRecords); for (const r of kept)
+        this.records.set(r.id, structuredClone(r)); this.prune(); }
 }
