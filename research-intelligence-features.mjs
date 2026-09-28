@@ -1,6 +1,7 @@
 export const RESEARCH_INTELLIGENCE_FEATURES_VERSION='TCX_RESEARCH_INTELLIGENCE_FEATURES_V1';
 
 function finite(v){
+  if(v===null||v===undefined||v==='') return null;
   const n=Number(v);
   return Number.isFinite(n)?n:null;
 }
