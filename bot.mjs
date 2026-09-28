@@ -439,6 +439,9 @@ let strategyLeagueHealthy = loadedStrategyLeague.healthy;
 let strategyLeagueLastError = loadedStrategyLeague.error || null;
 let strategyLeaguePersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
+let marketFabricMaintenanceQueue = Promise.resolve();
+let marketFabricLastMaintenanceAt = 0;
+const marketFabricMaintenanceMs = Math.max(60000, Number(process.env.TCX_MARKET_FABRIC_MAINTENANCE_MS || 60000));
 let auditAppendQueue = Promise.resolve();
 let researchDataPlaneAppendQueue=Promise.resolve();
 let activeBackgroundResearchJob=null;
@@ -5300,6 +5303,23 @@ async function refresher() {
   }
 }
 
+async function maintainMarketFabric(){
+  if(!marketFabric?.healthy) return;
+  if(Date.now()-marketFabricLastMaintenanceAt<marketFabricMaintenanceMs) return;
+  marketFabricLastMaintenanceAt=Date.now();
+  marketFabricMaintenanceQueue=marketFabricMaintenanceQueue.then(async()=>{
+    const rotation=await rotateVerifiedMarketFabric({filePath:marketFabricFile,maxBytes:Number(process.env.TCX_MARKET_FABRIC_ROTATE_BYTES||80*1024*1024),verification:marketFabric.verification});
+    if(!rotation.rotated) return;
+    console.info('[TCX_MARKET_FABRIC_RUNTIME_ROTATED]',JSON.stringify({lastSeq:rotation.lastSeq,archivedBytes:rotation.archivedBytes,segment:rotation.archivedSegment}));
+    marketFabric=await openMarketDataFabric(marketFabricFile);
+    const archive=await archiveMarketFabricSegments({filePath:marketFabricFile,maxArchivedBytes:Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||80*1024*1024)});
+    console.info('[TCX_MARKET_FABRIC_RUNTIME_ARCHIVE]',JSON.stringify(archive));
+  }).catch(err=>console.error('market fabric maintenance error',err instanceof Error?err.message:String(err)));
+  await marketFabricMaintenanceQueue;
+}
+
+async function marketFabricMaintenanceWatcher(){while(running){await sleep(marketFabricMaintenanceMs);await maintainMarketFabric();}}
+
 async function alertWatcher() {
   while (running) {
     await sleep(alertCheckMs);
@@ -6590,4 +6610,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher()]);
