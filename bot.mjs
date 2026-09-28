@@ -24,6 +24,7 @@ import { buildForecastAccuracyView, FORECAST_ACCURACY_VIEW_VERSION } from './for
 import { buildSuperchartIntel, SUPERCHART_VERSION } from './superchart-intel.mjs';
 import { buildSuperRadar, renderSuperRadar, buildSuperSetup, renderSuperSetup, buildSuperRisk, renderSuperRisk, buildSuperSignal, renderSuperSignal, INTELLIGENCE_TERMINAL_VERSION } from './intelligence-terminal.mjs';
 import { buildSuperMemory, discoverPatterns, buildDigitalTwin, renderCognitiveCore, COGNITIVE_CORE_VERSION } from './cognitive-core.mjs';
+import { validateDiscoveredPatterns, buildModelLeague, diagnoseScientificBrain, buildBullBearDebate, buildMetaJudge, renderScientificBrain, SCIENTIFIC_BRAIN_VERSION } from './scientific-brain.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -3026,6 +3027,29 @@ async function showSuperRadar(chatId,messageId){
  buttons.push([{text:'↻ REFRESH',callback_data:'terminal:radar'},{text:'🏠 Home',callback_data:'home'}]);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderSuperRadar(radar),reply_markup:{inline_keyboard:buttons}});
 }
+async function scientificBrainContext(symbol){
+ const base=await terminalContext(symbol);
+ await captureEpisodeFromState(base.state,{persist:true});
+ const memory=buildSuperMemory(episodeVector({analysis:base.state.memoryAnalysis,dashboard:base.state.memoryDashboard}),episodes,{symbol,horizonBars:12,k:60,minSimilarity:.35});
+ const discovered=discoverPatterns(episodes.filter(e=>e.symbol===symbol),{horizonBars:12,minCases:20,minIndependentCases:10,minAbsMedianReturn:.20,maxPatterns:12});
+ const validation=validateDiscoveredPatterns(discovered,{minIndependentCases:20,minDirectionalHitRate:.56,minRobustness:.55});
+ const twin=buildDigitalTwin({symbol,price:Number(base.state.market.price),forecast:base.forecast,memory,patterns:validation});
+ const shadowLeague=strategyLeagueSummary(strategyLeagueLedger,{asOf:base.state.availableAt});
+ const league=buildModelLeague({strategyLeague:shadowLeague,accuracy:base.accuracy,patterns:validation,memory});
+ const diagnostics=diagnoseScientificBrain({state:base.state,accuracy:base.accuracy,memory,patterns:validation,twin,league});
+ const debate=buildBullBearDebate({setup:base.setup,risk:base.risk,memory,patterns:validation,twin,diagnostics});
+ const judge=buildMetaJudge({setup:base.setup,risk:base.risk,debate,diagnostics,league});
+ return {...base,memory,validation,twin,league,diagnostics,debate,judge};
+}
+async function showScientificBrain(chatId,messageId,symbol){
+ const x=await scientificBrainContext(symbol);
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderScientificBrain(x),reply_markup:{inline_keyboard:[
+  [{text:'🧬 COGNITIVE CORE',callback_data:`cognitive:${symbol}`},{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`}],
+  [{text:'⚠️ RISK',callback_data:`terminal:risk:${symbol}`},{text:'📐 ACCURACY',callback_data:`accuracy:${symbol}`}],
+  [{text:'↻ REFRESH',callback_data:`science:${symbol}`},{text:'🏠 Home',callback_data:'home'}]
+ ]}});
+}
+
 async function showCognitiveCore(chatId,messageId,symbol){
  const state=await researchState(symbol,'5m');
  await captureEpisodeFromState(state,{persist:true});
@@ -3036,6 +3060,7 @@ async function showCognitiveCore(chatId,messageId,symbol){
  const text=renderCognitiveCore({memory,patterns,twin});
  return deliverTelegramTextCard(tg,chatId,messageId,{text,reply_markup:{inline_keyboard:[
    [{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`},{text:'🎯 SETUP',callback_data:`terminal:setup:${symbol}`}],
+   [{text:'🔬 SCIENTIFIC BRAIN',callback_data:`science:${symbol}`}],
    [{text:'↻ REFRESH',callback_data:`cognitive:${symbol}`},{text:'◉ RADAR',callback_data:'terminal:radar'}],
    [{text:'🏠 Home',callback_data:'home'}]
  ]}});
@@ -5789,6 +5814,12 @@ async function handle(update) {
       else if(a.command==='memory') await showMemory(chatId,a.symbol);
       else if(a.command==='engine') await showEngine(chatId,a.symbol);
       await ack(q.id); return;
+    }
+    if (a.kind === 'SCIENTIFIC_BRAIN') {
+      if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showScientificBrain(chatId,textMessageId,a.symbol); await ack(q.id,'Scientific Brain geladen'); return;
     }
     if (a.kind === 'COGNITIVE_CORE') {
       if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
