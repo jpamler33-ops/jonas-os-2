@@ -176,6 +176,7 @@ export function parseProductCallback(data="") {
   if(p[0]==="superchart"&&p[1]) return {kind:"SUPERCHART",symbol:p[1],mode:String(p[2]||"PRO").toUpperCase(),interval:String(p[3]||"5m").toLowerCase()};
   if(p[0]==="terminal"&&p[1]==="radar") return {kind:"SUPER_RADAR"};
   if(p[0]==="terminal"&&["setup","risk","signal"].includes(p[1])&&p[2]) return {kind:"TERMINAL_VIEW",view:p[1].toUpperCase(),symbol:p[2]};
+  if(p[0]==="cognitive"&&p[1]) return {kind:"COGNITIVE_CORE",symbol:p[1]};
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
