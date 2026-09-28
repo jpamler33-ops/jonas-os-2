@@ -23,6 +23,7 @@ import { buildFlowRadar, FLOW_RADAR_VIEW_VERSION } from './flow-radar-view.mjs';
 import { buildForecastAccuracyView, FORECAST_ACCURACY_VIEW_VERSION } from './forecast-accuracy-view.mjs';
 import { buildSuperchartIntel, SUPERCHART_VERSION } from './superchart-intel.mjs';
 import { buildSuperRadar, renderSuperRadar, buildSuperSetup, renderSuperSetup, buildSuperRisk, renderSuperRisk, buildSuperSignal, renderSuperSignal, INTELLIGENCE_TERMINAL_VERSION } from './intelligence-terminal.mjs';
+import { buildSuperMemory, discoverPatterns, buildDigitalTwin, renderCognitiveCore, COGNITIVE_CORE_VERSION } from './cognitive-core.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -3021,6 +3022,21 @@ async function showSuperRadar(chatId,messageId){
  buttons.push([{text:'↻ REFRESH',callback_data:'terminal:radar'},{text:'🏠 Home',callback_data:'home'}]);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderSuperRadar(radar),reply_markup:{inline_keyboard:buttons}});
 }
+async function showCognitiveCore(chatId,messageId,symbol){
+ const state=await researchState(symbol,'5m');
+ await captureEpisodeFromState(state,{persist:true});
+ const memory=buildSuperMemory(episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),episodes,{symbol,horizonBars:12,k:60,minSimilarity:.35});
+ const patterns=discoverPatterns(episodes.filter(e=>e.symbol===symbol),{horizonBars:12,minCases:20,minIndependentCases:10,minAbsMedianReturn:.20,maxPatterns:12});
+ const forecast=forecastIssuanceToChartOverlay(latestInstitutionalForecast(forecastRuntime,symbol),{now:state.availableAt,maxAgeMs:6*60*60_000});
+ const twin=buildDigitalTwin({symbol,price:Number(state.market.price),forecast,memory,patterns});
+ const text=renderCognitiveCore({memory,patterns,twin});
+ return deliverTelegramTextCard(tg,chatId,messageId,{text,reply_markup:{inline_keyboard:[
+   [{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`},{text:'🎯 SETUP',callback_data:`terminal:setup:${symbol}`}],
+   [{text:'↻ REFRESH',callback_data:`cognitive:${symbol}`},{text:'◉ RADAR',callback_data:'terminal:radar'}],
+   [{text:'🏠 Home',callback_data:'home'}]
+ ]}});
+}
+
 async function showTerminalView(chatId,messageId,symbol,view){
  const x=await terminalContext(symbol);
  const text=view==='RISK'?renderSuperRisk(x.risk):view==='SIGNAL'?renderSuperSignal(x.signal):renderSuperSetup(x.setup);
@@ -5769,6 +5785,12 @@ async function handle(update) {
       else if(a.command==='memory') await showMemory(chatId,a.symbol);
       else if(a.command==='engine') await showEngine(chatId,a.symbol);
       await ack(q.id); return;
+    }
+    if (a.kind === 'COGNITIVE_CORE') {
+      if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showCognitiveCore(chatId,textMessageId,a.symbol); await ack(q.id,'Cognitive Core geladen'); return;
     }
     if (a.kind === 'SUPER_RADAR') {
       stopLiveAnalysisAuto(chatId);
