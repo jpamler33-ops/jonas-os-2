@@ -2773,12 +2773,7 @@ async function showHomeSection(chatId,messageId,section) {
       const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
       return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
     });
-    text=['🎯 CHANCEN & AUFFÄLLIGE BEWEGUNGEN','',
-      'TCX sucht nach ungewöhnlichen Marktbedingungen. Das ist kein Buy-/Sell-Ranking.','',
-      ...lines,'',
-      '🟢 = Datenlage relativ sauber · 🟡 = vorsichtig · ⚪ = noch unklar',
-      'Öffne einen Coin für die eigentliche Analyse.'
-    ].join('\n');
+    text=['🎯 SIGNAL RADAR','','Live-Marktbedingungen mit auffälliger Aktivität.','',...lines,'','🟢 sauber   ·   🟡 vorsichtig   ·   ⚪ unklar','','Tippe anschließend auf Märkte, um Forecast und Risiko zu öffnen.'].join('\n');
   } else if(section==='SYSTEM') {
     text=[
       '🖥 TCX SYSTEMSTATUS','',
@@ -2845,7 +2840,8 @@ async function showHomeSection(chatId,messageId,section) {
     text='Dieser Bereich ist noch nicht verfügbar.';
   }
 
-  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:homeBackKeyboard()};
+  const sectionKb=section==='RADAR'?{inline_keyboard:[[{text:'📊 Märkte öffnen',callback_data:'home:markets'},{text:'🔄 Radar',callback_data:'home:radar'}],[{text:'⭐ Watchlist',callback_data:'home:watchlist'},{text:'🏠 Command Center',callback_data:'home'}]]}:homeBackKeyboard();
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:sectionKb};
   if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
   else await tg('sendMessage',payload);
 }
