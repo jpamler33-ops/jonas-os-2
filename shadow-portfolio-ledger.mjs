@@ -265,7 +265,9 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
     availableAt:finite(book?.availableAt,markAt),
     epistemic:exit.epistemic
   };
-  const next={...position,lastMark:mark};
+  const priorMfe=Number.isFinite(Number(position.mfeMarginRoePct))?Number(position.mfeMarginRoePct):-Infinity;
+  const priorMae=Number.isFinite(Number(position.maeMarginRoePct))?Number(position.maeMarginRoePct):Infinity;
+  const next={...position,lastMark:mark,mfeMarginRoePct:Math.max(priorMfe,finite(exit.marginRoePct,0)),maeMarginRoePct:Math.min(priorMae,finite(exit.marginRoePct,0))};
   if(!exit.fullyExecutable) return {position:next,trigger:null,changed:true,reason:'EXIT_LIQUIDITY_INSUFFICIENT'};
 
   let trigger=null;
@@ -309,7 +311,10 @@ export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=D
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
-  return {...closed,tradeAttribution:attributeClosedShadowTrade(closed)};
+  closed.exitRegretMarginRoePct=Number.isFinite(Number(closed.mfeMarginRoePct))?Math.max(0,Number(closed.mfeMarginRoePct)-Number(closed.realizedMarginRoePct||0)):null;
+  closed.adverseExcursionMarginRoePct=Number.isFinite(Number(closed.maeMarginRoePct))?Number(closed.maeMarginRoePct):null;
+  closed.captureEfficiency=Number(closed.mfeMarginRoePct)>0?Number(closed.realizedMarginRoePct||0)/Number(closed.mfeMarginRoePct):null;
+  return {...closed,tradeAttribution:{...attributeClosedShadowTrade(closed),mfeMarginRoePct:closed.mfeMarginRoePct??null,maeMarginRoePct:closed.maeMarginRoePct??null,exitRegretMarginRoePct:closed.exitRegretMarginRoePct,captureEfficiency:closed.captureEfficiency}};
 }
 
 export function createEmptyShadowPortfolioLedger({initialEquityQuote=10_000}={}){
