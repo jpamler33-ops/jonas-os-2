@@ -18,6 +18,7 @@ export function createReadCommandHandlers(deps={}){
     showChaos,
     showOms,
     showShadowPortfolio,
+    showTradeDiscoveryDiagnostics,
     showShadowTradeStats,
     showShadowCapitalAcademy,
     showShadowTrainingCoach,
@@ -174,6 +175,22 @@ export function createReadCommandHandlers(deps={}){
         const msg=message(err);
         recordError(observability,{scope:"command.portfolio",message:msg});
         await tg("sendMessage",{chat_id:chatId,text:"Shadow-Portfolio gerade nicht verfügbar."});
+      }
+    },
+    "/why_not_trade":async ({chatId})=>{
+      try{ await showTradeDiscoveryDiagnostics(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.why_not_trade",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Trade Discovery Diagnostics gerade nicht verfügbar."});
+      }
+    },
+    "/whynottrade":async ({chatId})=>{
+      try{ await showTradeDiscoveryDiagnostics(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.whynottrade",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Trade Discovery Diagnostics gerade nicht verfügbar."});
       }
     },
     "/trades":async ({chatId})=>{

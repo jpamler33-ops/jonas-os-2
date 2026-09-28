@@ -156,6 +156,7 @@ function dependencyAdjustedWeights(rows, base, windowMs) {
 export class ProbabilisticForecastEngine {
     history = [];
     historyKeys = new Set();
+    maxHistoryRows;
     duplicateHistoryCasesBlocked = 0;
     calibration = new ProbabilityCalibrationMemory();
     reliability = new ForecastReliabilityMemory();
@@ -163,7 +164,7 @@ export class ProbabilisticForecastEngine {
     intervalCalibration = new ForecastIntervalCalibrationMemory();
     drift = new ForecastDriftMemory();
     cfg;
-    constructor(config) {
+    constructor(config, opts = {}) {
         if (!config.featureIds.length)
             throw new Error('featureIds required');
         if (!config.horizons.length)
@@ -182,12 +183,20 @@ export class ProbabilisticForecastEngine {
             driftRecentCases: config.driftRecentCases ?? 24, driftBaselineCases: config.driftBaselineCases ?? 60, driftMinRecentIndependent: config.driftMinRecentIndependent ?? 10, driftMinBaselineIndependent: config.driftMinBaselineIndependent ?? 20, driftWatchScore: config.driftWatchScore ?? .35, driftHardScore: config.driftHardScore ?? .65,
             pathMinCompleteTrajectories: config.pathMinCompleteTrajectories ?? 20, pathMinEffectiveSamples: config.pathMinEffectiveSamples ?? 8, pathTopK: config.pathTopK ?? 180, pathMinSimilarity: config.pathMinSimilarity ?? .08, pathMarginalConflictWarn: config.pathMarginalConflictWarn ?? .20, pathMarginalConflictHard: config.pathMarginalConflictHard ?? .35
         };
+        this.maxHistoryRows = Math.max(500, Math.floor(Number(opts.maxHistoryRows) || 12_000));
+    }
+    trimHistory() {
+        if (this.history.length <= this.maxHistoryRows)
+            return;
+        const removed = this.history.splice(0, this.history.length - this.maxHistoryRows);
+        for (const row of removed)
+            this.historyKeys.delete(this.historyKey(row));
     }
     historyKey(r) { return r.id ?? `${r.symbol}:${r.timestamp}:${r.horizonMs}`; }
     addHistory(row) { const k = this.historyKey(row); if (this.historyKeys.has(k)) {
         this.duplicateHistoryCasesBlocked++;
         return;
-    } this.history.push(structuredClone(row)); this.historyKeys.add(k); this.history.sort((a, b) => a.timestamp - b.timestamp); }
+    } this.history.push(structuredClone(row)); this.historyKeys.add(k); this.history.sort((a, b) => a.timestamp - b.timestamp); this.trimHistory(); }
     addHistoryMany(rows) { let added = false; for (const row of rows) {
         const k = this.historyKey(row);
         if (this.historyKeys.has(k)) {
@@ -197,12 +206,16 @@ export class ProbabilisticForecastEngine {
         this.history.push(structuredClone(row));
         this.historyKeys.add(k);
         added = true;
-    } if (added)
-        this.history.sort((a, b) => a.timestamp - b.timestamp); }
+    } if (added) {
+        this.history.sort((a, b) => a.timestamp - b.timestamp);
+        this.trimHistory();
+    } }
     historySize() { return this.history.length; }
     /** Point-in-time safe copy for diagnostics/intelligence layers. */
-    historySnapshot(asOf = Number.POSITIVE_INFINITY) {
-        return this.history.filter(r => r.timestamp <= asOf && r.availableAt <= asOf).map(r => structuredClone(r));
+    historySnapshot(asOf = Number.POSITIVE_INFINITY, { limit = Number.POSITIVE_INFINITY } = {}) {
+        const eligible = this.history.filter(r => r.timestamp <= asOf && r.availableAt <= asOf);
+        const n = Number.isFinite(Number(limit)) ? Math.max(0, Math.floor(Number(limit))) : eligible.length;
+        return (n === 0 ? [] : eligible.slice(-n)).map(r => structuredClone(r));
     }
     /** Read-only configuration snapshot for compatible intelligence layers. */
     configSnapshot() { return structuredClone(this.cfg); }

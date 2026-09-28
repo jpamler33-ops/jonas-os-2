@@ -19,6 +19,7 @@ function deps(overrides={}){
     showChaos:async(...x)=>calls.push(["chaos",...x]),
     showOms:async(...x)=>calls.push(["oms",...x]),
     showShadowPortfolio:async(...x)=>calls.push(["portfolio",...x]),
+    showTradeDiscoveryDiagnostics:async(...x)=>calls.push(["discovery-diagnostics",...x]),
     showShadowTradeStats:async(...x)=>calls.push(["stats",...x]),
     showShadowCapitalAcademy:async(...x)=>calls.push(["academy",...x]),
     showShadowTrainingCoach:async(...x)=>calls.push(["coach",...x]),
@@ -93,6 +94,14 @@ test("portfolio and trades aliases open the same shadow portfolio",async()=>{
   await h["/portfolio"]({chatId:9,args:[]});
   await h["/trades"]({chatId:9,args:[]});
   assert.equal(calls.filter(x=>x[0]==="portfolio").length,2);
+});
+
+test("why not trade command opens readable discovery diagnostics",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/why_not_trade"]({chatId:19,args:[]});
+  await h["/whynottrade"]({chatId:19,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="discovery-diagnostics").length,2);
 });
 
 
