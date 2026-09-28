@@ -92,3 +92,31 @@ test('institutional replay is deterministic and future-leak free',async()=>{
   assert.equal(verifyNoFutureLeakage(a).ok,true);
   assert.equal(compareReplayStates(a,b).identical,true);
 });
+
+
+test('large fabric reopens with bounded in-memory tail while preserving full chain seq',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-fabric-'));
+  const file=path.join(dir,'events.jsonl');
+  const fabric=await openMarketDataFabric(file,{maxInMemoryEvents:1000});
+  const batch=[];
+  for(let i=0;i<1100;i++){
+    batch.push(input({
+      sourceEventId:'e'+i,
+      eventTime:1000+i,
+      availableAt:2000+i,
+      ingestedAt:2000+i,
+      payload:{x:i}
+    }));
+  }
+  await appendMarketEvents(fabric,batch);
+  assert.equal(fabric.seq,1100);
+  assert.equal(fabric.events.length,1000);
+  assert.equal(fabric.totalEvents,1100);
+  const reopened=await openMarketDataFabric(file,{maxInMemoryEvents:1000});
+  assert.equal(reopened.healthy,true);
+  assert.equal(reopened.seq,1100);
+  assert.equal(reopened.totalEvents,1100);
+  assert.equal(reopened.events.length,1000);
+  assert.equal(reopened.events[0].seq,101);
+  assert.equal(reopened.events.at(-1).seq,1100);
+});
