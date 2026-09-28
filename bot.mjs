@@ -43,6 +43,7 @@ import {
   strategyLeagueSummary, deriveStrategyLeagueCandidates,
   SHADOW_STRATEGY_LEAGUE_VERSION, SHADOW_STRATEGIES
 } from './shadow-strategy-league.mjs';
+import { STRATEGY_EVIDENCE_ENGINE_VERSION } from './strategy-evidence-engine.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -375,6 +376,7 @@ const institutionalConfig = Object.freeze({
   },
   strategyLeague:{
     version:SHADOW_STRATEGY_LEAGUE_VERSION,
+    evidenceEngineVersion:STRATEGY_EVIDENCE_ENGINE_VERSION,
     canExecuteLive:false,
     enabled:strategyLeagueEnabled,
     strategies:SHADOW_STRATEGIES.map(x=>x.id),
@@ -445,6 +447,7 @@ try {
       shadowOms:SHADOW_OMS_VERSION,
       shadowPortfolio:SHADOW_PORTFOLIO_LEDGER_VERSION,
       strategyLeague:SHADOW_STRATEGY_LEAGUE_VERSION,
+      strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -1350,6 +1353,8 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
         leagueAllocationWeight:candidate.leagueAllocationWeight,
         leagueNotionalMultiplier:candidate.leagueNotionalMultiplier,
         leaguePerformanceScore:candidate.leaguePerformanceScore,
+        leagueEvidenceGrade:candidate.leagueEvidenceGrade,
+        leagueEvidenceFailedGates:candidate.leagueEvidenceFailedGates,
         leagueStatus:candidate.leagueStatus,
         decisionKey:candidate.leagueDecisionKey,
         issuanceId:candidate.issuanceId,
@@ -2933,13 +2938,17 @@ async function showStrategyLeague(chatId,messageId=null){
       (i+1)+'. '+r.label+' · '+r.status,
       '   Gewicht '+pct(r.allocationWeight)+' · Equity '+fmt(r.account.equityQuote,2)+' · PnL '+money(r.account.netPnlQuote),
       '   Trades '+r.account.closedTrades+' · PF '+pf+' · DD '+pct(r.account.maxDrawdownPct),
-      '   unabhängig '+r.independentDecisions+' · Tage '+r.tradingDays
+      '   Evidenz '+r.evidence.grade+' · Score '+fmt(r.evidence.score*100,0)+'/100',
+      '   unabhängig '+r.independentDecisions+' · Tage '+r.tradingDays+' · Coin-Konz. '+pct(r.symbolConcentration),
+      r.evidence.failedGates.length?'   offen: '+r.evidence.failedGates.join(', '):'   Gates: bestanden'
     );
   });
   lines.push(
     '',
-    'Extra-Kapital wird erst evidenzgewichtet, wenn mindestens 2 Strategien jeweils ≥30 unabhängige Trades, ≥7 Handelstage und ≤60% Coin-Konzentration haben.',
-    'Bis dahin läuft die League mit gleicher Explorations-Allokation.',
+    'Mehr virtuelles Kapital gibt es erst bei belastbarer Evidenz: ≥40 unabhängige Entscheidungen, ≥10 Tage, ≥16 Trades im jüngsten 40%-Fenster, ≤55% Coin-Konzentration, positive jüngste Erwartung, PF ≥1,05 und DD ≤10%.',
+    'Die jüngsten 40% werden gegen die älteren 60% auf Stabilität geprüft. Das ist ein Zeitstabilitäts-Check, kein echtes unangetastetes OOS.',
+    'Mehr getestete Strategien senken den Evidenz-Score konservativ; ein kurzer Glückslauf reicht nicht.',
+    'Bis mindestens 2 Strategien qualifiziert sind, bleibt die Allokation gleich verteilt.',
     '',
     'Mode: SHADOW_ONLY · getrennte virtuelle Konten · echte Orders gesperrt.'
   );
