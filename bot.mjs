@@ -435,7 +435,11 @@ if(marketFabric.healthy){
     console.info('[TCX_MARKET_FABRIC_ROTATED]',JSON.stringify({version:MARKET_FABRIC_ROTATION_VERSION,lastSeq:rotation.lastSeq,archivedBytes:rotation.archivedBytes,segment:rotation.archivedSegment}));
     marketFabric=await openMarketDataFabric(marketFabricFile);
   }
-  const archive=await archiveMarketFabricSegments({filePath:marketFabricFile,maxArchivedBytes:Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||120*1024*1024)});
+  const archive=await archiveMarketFabricSegments({
+    filePath:marketFabricFile,
+    maxArchivedBytes:Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||120*1024*1024),
+    migrateExisting:false
+  });
   if(archive.segments||archive.budgetExceeded) console.info('[TCX_MARKET_FABRIC_ARCHIVE]',JSON.stringify(archive));
 }
 const researchDataPlaneFile=process.env.TCX_RESEARCH_DATA_PLANE_FILE||'/data/tcx-research-data-plane.jsonl';
