@@ -1,4 +1,4 @@
-export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v5-premium";
+export const TCX_TELEGRAM_PRODUCT_UI_VERSION = "v6-command-center";
 
 export const PRODUCT_STATUS = Object.freeze([
   "VALID",
@@ -124,24 +124,10 @@ export function buildMarketViewModel({
 
 export function homeText({marketCount=0,systemStatus="ONLINE"}={}) {
   const online=String(systemStatus).toUpperCase()==="ONLINE";
-  return [
-    "⚡ TCX COMMAND CENTER","",
-    "🟢 SYSTEM "+(online?"ONLINE":"CHECK")+"   ·   🧪 SHADOW ONLY",
-    "📡 "+(Number(marketCount)||0)+" Märkte verbunden","",
-    "Dein Markt-Dashboard für Analyse, Signale und",
-    "virtuelle Strategie-Tests.","",
-    "Wähle einen Bereich:"
-  ].join("\n");
+  return ["TCX // COMMAND CENTER","━━━━━━━━━━━━━━━━━━━━","SYSTEM  "+(online?"● ONLINE":"◐ CHECK")+"   SHADOW  ● ACTIVE","MARKETS "+(Number(marketCount)||0)+" CONNECTED","","MARKET INTELLIGENCE · DECISION ENGINE","","Radar → Forecast → Why → Risk → Shadow → Learning","","REAL ORDERS BLOCKED"].join("\n");
 }
 
-export function homeKeyboard() {
-  return {inline_keyboard:[
-    [{text:"📊 Märkte",callback_data:"home:markets"},{text:"🎯 Signale",callback_data:"home:radar"}],
-    [{text:"💼 Portfolio",callback_data:"home:portfolio"},{text:"📈 Statistik",callback_data:"home:stats_day"}],
-    [{text:"⭐ Watchlist",callback_data:"home:watchlist"},{text:"🔔 Alerts",callback_data:"home:alerts"}],
-    [{text:"🧠 TCX Analyse",callback_data:"cmd:forecast"},{text:"☰ Mehr",callback_data:"home:more"}]
-  ]};
-}
+export function homeKeyboard() {return {inline_keyboard:[[{text:"◉ LIVE RADAR",callback_data:"home:radar"},{text:"▦ MÄRKTE",callback_data:"home:markets"}],[{text:"▤ PORTFOLIO",callback_data:"home:portfolio"},{text:"⌁ STATISTIK",callback_data:"home:stats_day"}],[{text:"☆ WATCHLIST",callback_data:"home:watchlist"},{text:"◇ ALERTS",callback_data:"home:alerts"}],[{text:"⌁ FORECAST",callback_data:"cmd:forecast"},{text:"☰ MEHR",callback_data:"home:more"}]]};}
 
 export function marketsKeyboard(markets=[],favoritesCount=0) {
   const rows=[];
@@ -166,12 +152,12 @@ export function marketCardText(vm,{live=false,detailMode="SIMPLE"}={}) {
  const pressure=flow.includes("BUY")||flow.includes("BID")?"BUY":flow.includes("SELL")||flow.includes("ASK")?"SELL":"BALANCED";
  const ev=vm.evidence.witnessAgreement==null?"—":fmt(vm.evidence.witnessAgreement*100,0)+"%";
  const risk=vm.safety.status==="VALID"?"NORMAL":vm.safety.status==="CAUTION"?"CAUTION":"RESTRICTED";
- const lines=["📊 "+vm.symbol.replace("USDT","/USDT")+" · LIVE","","$ "+fmt(p.price,p.price!=null&&Math.abs(p.price)<1?6:2)+"   ·   24H "+(chg==null?"—":sign+fmt(chg,2)+"%"),"","TCX SNAPSHOT","Direction   "+direction,"Regime      "+phase,"Flow        "+pressure,"Evidence    "+ev,"Risk        "+risk];
+ const lines=["TCX // "+vm.symbol.replace("USDT","/USDT"),"━━━━━━━━━━━━━━━━━━━━","MARKET SNAPSHOT · "+(live?"LIVE":"NOW"),"","$ "+fmt(p.price,p.price!=null&&Math.abs(p.price)<1?6:2)+"   ·   24H "+(chg==null?"—":sign+fmt(chg,2)+"%"),"","DECISION STATE","Direction   "+direction,"Regime      "+phase,"Flow        "+pressure,"Evidence    "+ev,"Risk        "+risk];
  if(detailMode!=="SIMPLE")lines.push("","MARKET DATA","Spread "+fmt(p.spreadBps,3)+" bps","Memory "+(vm.evidence.memorySupport??"—"),"Source "+vm.provenance.source);
- lines.push("",(live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht")+" · ABSTAIN / SHADOW_ONLY");return lines.join("\n");
+ lines.push("","TRACE","Market → Forecast → Why → Risk","",live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht","ABSTAIN / SHADOW_ONLY · REAL ORDERS BLOCKED");return lines.join("\n");
 }
 
-export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"🔮 Forecast",callback_data:"forecast:"+s},{text:"📈 Chart",callback_data:"chart:"+s+":5m"}],[{text:"🔎 Warum?",callback_data:"why:"+s},{text:"🔔 Alert",callback_data:"alerthelp:"+s}],[{text:isFavorite?"★ Watchlist":"☆ Watchlist",callback_data:"fav:"+s},{text:"🔄 Refresh",callback_data:"refresh:"+s}],[{text:"🧠 Details",callback_data:"tcx:"+s},{text:"🏠 Command Center",callback_data:"home"}]]};}
+export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"⌁ FORECAST",callback_data:"forecast:"+s},{text:"▥ CHART",callback_data:"chart:"+s+":5m"}],[{text:"◇ WHY",callback_data:"why:"+s},{text:"◉ ALERT",callback_data:"alerthelp:"+s}],[{text:isFavorite?"★ WATCHLIST":"☆ WATCHLIST",callback_data:"fav:"+s},{text:"↻ REFRESH",callback_data:"refresh:"+s}],[{text:"⌁ DETAILS",callback_data:"tcx:"+s},{text:"⌂ COMMAND",callback_data:"home"}]]};}
 
 export function parseProductCallback(data="") {
   const raw=String(data);
