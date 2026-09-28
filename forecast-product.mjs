@@ -73,101 +73,7 @@ export function deriveForecastRuntimeQuality({
   });
 }
 
-export function renderInstitutionalForecastCard(issuance,{
-  runtimeSummary=null,
-  scienceGuardLines=[],
-  auditBound=null,
-  auditHealthy=null,
-  now=Date.now()
-}={}){
-  if(!issuance?.forecast||!issuance?.admission) throw new Error('institutional issuance required');
-  const auditOk=typeof auditBound==='boolean'?auditBound:(typeof auditHealthy==='boolean'?auditHealthy:true);
-  const f=issuance.forecast;
-  const horizons=Array.isArray(f.horizons)?f.horizons:[];
-  const directionWord=d=>{
-    const x=String(d||'UNKNOWN').toUpperCase();
-    if(x==='UP') return '🟢 eher steigend';
-    if(x==='DOWN') return '🔴 eher fallend';
-    if(x==='FLAT'||x==='SIDEWAYS') return '🟡 eher seitwärts';
-    return '⚪ noch unklar';
-  };
-  const admitted=auditOk&&String(issuance.admission.gate||'').toUpperCase()==='PASS';
-  const lead=horizons[0]||null;
-  const leadDisplay=lead&&auditOk&&issuance.probabilityDisplayAllowed===true&&lead.display?.probabilityDisplayAllowed===true;
-  const lines=[
-    '🔮 KURSPROGNOSE · '+String(issuance.symbol).replace('USDT','/USDT'),
-    '',
-    'KURZ GESAGT',
-    lead?('Richtung: '+directionWord(lead.direction)):'Richtung: ⚪ noch unklar',
-    admitted?'Belastbarkeit: 🟢 ausreichend geprüft':'Belastbarkeit: 🟡 noch nicht belastbar',
-    lead?('Erwartete Bewegung: '+signedPct(lead.expectedReturn)):'',
-    lead?('Möglicher Bereich: '+signedPct(lead.interval?.q10)+' bis '+signedPct(lead.interval?.q90)):'',
-    leadDisplay
-      ?('Modellverteilung: ↑ '+pct(lead.display.probabilities.up,0)+' · ↔ '+pct(lead.display.probabilities.flat,0)+' · ↓ '+pct(lead.display.probabilities.down,0))
-      :'Wahrscheinlichkeit: noch nicht freigegeben',
-    ''
-  ].filter(Boolean);
-
-  if(horizons.length){
-    lines.push('ZEITHORIZONTE');
-    for(const h of horizons){
-      const display=auditOk&&issuance.probabilityDisplayAllowed===true&&h.display?.probabilityDisplayAllowed===true;
-      lines.push(
-        '• '+h.horizonId+' · '+directionWord(h.direction)+' · '+signedPct(h.expectedReturn),
-        '  Bereich: '+signedPct(h.interval?.q10)+' bis '+signedPct(h.interval?.q90),
-        display
-          ?'  ↑ '+pct(h.display.probabilities.up,0)+' · ↔ '+pct(h.display.probabilities.flat,0)+' · ↓ '+pct(h.display.probabilities.down,0)
-          :'  Wahrscheinlichkeit: noch nicht freigegeben'
-      );
-    }
-  }
-
-  lines.push('','WARUM TCX DAS SO SIEHT');
-  lines.push('• Datenprüfung: '+(issuance.trace?.safety?.state==='NORMAL'?'🟢 sauber':'🟡 eingeschränkt'));
-  lines.push('• Wissenschaftlicher Check: '+String(f.scienceGate||'UNKNOWN'));
-  lines.push('• Forecast-Check: '+String(f.overallGate||'UNKNOWN'));
-  lines.push('• Aktueller Forschungsstand: '+String(issuance.trace?.validity?.state||'UNKNOWN'));
-  const dependency=(issuance.trace?.evidence||[]).find(x=>x?.type==='RESEARCH_DEPENDENCY_GRAPH');
-  if(dependency){
-    const usable=Number(dependency.usableFeatures||0);
-    const total=Number(dependency.totalFeatures||0);
-    const blocked=Number(dependency.blockedFeatures||0);
-    const icon=blocked>0?'🟡':'🟢';
-    lines.push('• Forschungsdaten: '+icon+' '+usable+'/'+total+' Zusatzmerkmale nutzbar'+(blocked>0?' · '+blocked+' gesperrt':''));
-  }
-  lines.push('• Audit: '+(auditOk?'🟢 vollständig':'FEHLER → Forecast gesperrt'));
-
-  if(!auditOk){
-    lines.push('Probability: SUPPRESSED');
-  }
-
-  if(Array.isArray(scienceGuardLines)&&scienceGuardLines.length){
-    lines.push('','PROFI-CHECKS',...scienceGuardLines.slice(0,5).map(x=>'• '+String(x)));
-  }
-
-  lines.push('','WAS DAS FÜR DICH BEDEUTET');
-  if(!auditOk){
-    lines.push('Die Datenprüfung ist nicht sauber. TCX verwirft die Prognose deshalb.');
-  }else if(!admitted){
-    lines.push('TCX sieht zwar eine mögliche Richtung, aber die Belege reichen noch nicht für eine belastbare Aussage.');
-  }else{
-    lines.push('Die Prognose hat die internen Prüfungen bestanden. Sie bleibt trotzdem unsicher und kann sich mit neuen Daten ändern.');
-  }
-
-  lines.push(
-    '',
-    'RISIKO & GRENZEN',
-    '• Keine Kursprognose ist sicher.',
-    '• Neue Marktbewegungen oder widersprüchliche Daten können die Sicht ändern.',
-    '• TCX führt keine echten Orders aus.',
-    '',
-    'Systemmodus: ABSTAIN / SHADOW_ONLY',
-    'Trace '+String(issuance.traceId||'').slice(0,10)+'… · '+Math.max(0,Math.round((Number(now)-Number(issuance.generatedAt))/1000))+'s alt',
-    ...(runtimeSummary?['Lernbasis: '+Number(runtimeSummary.historyCases||0)+' ausgewertete Fälle · '+Number(runtimeSummary.pendingOutcomes||0)+' offen']:[])
-  );
-
-  return lines.join('\n').slice(0,4096);
-}
+export function renderInstitutionalForecastCard(issuance,{runtimeSummary=null,scienceGuardLines=[],auditBound=null,auditHealthy=null,now=Date.now()}={}){if(!issuance?.forecast||!issuance?.admission)throw new Error('institutional issuance required');const auditOk=typeof auditBound==='boolean'?auditBound:(typeof auditHealthy==='boolean'?auditHealthy:true),f=issuance.forecast,h=Array.isArray(f.horizons)?f.horizons:[],lead=h[0]||null,admitted=auditOk&&String(issuance.admission.gate||'').toUpperCase()==='PASS',dir=d=>String(d).toUpperCase()==='UP'?'↗ UP':String(d).toUpperCase()==='DOWN'?'↘ DOWN':'→ SIDEWAYS';const directionPlain=lead?(String(lead.direction).toUpperCase()==='UP'?'eher steigend':String(lead.direction).toUpperCase()==='DOWN'?'eher fallend':'eher seitwärts'):'noch unklar';const lines=['🔮 FORECAST · '+String(issuance.symbol).replace('USDT','/USDT'),'','KURZ GESAGT','Richtung: '+directionPlain,'DIRECTION   '+(lead?dir(lead.direction):'—'),'CONFIDENCE  '+(admitted?'🟢 VERIFIED':'🟡 LIMITED'),'EXPECTED    '+(lead?signedPct(lead.expectedReturn):'—'),'RANGE       '+(lead?signedPct(lead.interval?.q10)+'  →  '+signedPct(lead.interval?.q90):'—'),'','TIME HORIZONS'];for(const x of h.slice(0,4))lines.push(x.horizonId+'   '+dir(x.direction)+'   '+signedPct(x.expectedReturn));const dependency=(issuance.trace?.evidence||[]).find(x=>x?.type==='RESEARCH_DEPENDENCY_GRAPH');if(dependency){const usable=Number(dependency.usableFeatures||0),total=Number(dependency.totalFeatures||0),blocked=Number(dependency.blockedFeatures||0);lines.push('Forschungsdaten: '+(blocked>0?'🟡':'🟢')+' '+usable+'/'+total+' Zusatzmerkmale nutzbar'+(blocked>0?' · '+blocked+' gesperrt':''));}if(!(auditOk&&issuance.probabilityDisplayAllowed===true&&lead?.display?.probabilityDisplayAllowed===true))lines.push('','Wahrscheinlichkeit: noch nicht freigegeben');lines.push('','VALIDATION','Data '+(issuance.trace?.safety?.state==='NORMAL'?'🟢':'🟡')+' · Science '+String(f.scienceGate||'—')+' · Audit '+(auditOk?'🟢':'🔴'),...(auditOk?[]:['Audit: FEHLER → Forecast gesperrt','Probability: SUPPRESSED']),'','WAS DAS FÜR DICH BEDEUTET','STATUS',!auditOk?'Forecast gesperrt: Audit nicht vollständig.':!admitted?'Richtung erkannt, Evidenz noch nicht stark genug.':'Interne Prüfungen bestanden; Unsicherheit bleibt bestehen.','','ABSTAIN / SHADOW_ONLY','Trace '+String(issuance.traceId||'').slice(0,10)+'… · '+Math.max(0,Math.round((Number(now)-Number(issuance.generatedAt))/1000))+'s');return lines.join('\n').slice(0,4096);}
 
 function dependencyDomainLabel(domain){
   const d=String(domain||'UNKNOWN').toUpperCase();
@@ -300,24 +206,4 @@ export function researchDependencyKeyboard(symbol){
   ]};
 }
 
-export function forecastKeyboard(symbol){
-  const s=String(symbol||'').toUpperCase();
-  return {inline_keyboard:[
-    [
-      {text:'🔄 Neu berechnen',callback_data:'forecast:'+s},
-      {text:'📊 Markt',callback_data:'refresh:'+s}
-    ],
-    [
-      {text:'🔎 Warum?',callback_data:'why:'+s},
-      {text:'📈 Chart',callback_data:'chart:'+s+':5m'}
-    ],
-    [
-      {text:'🧬 Datenweg',callback_data:'lineage:'+s},
-      {text:'🧠 Belege',callback_data:'evidence:'+s}
-    ],
-    [
-      {text:'⏱ Gültigkeit',callback_data:'validity:'+s},
-      {text:'🏠 Start',callback_data:'home'}
-    ]
-  ]};
-}
+export function forecastKeyboard(symbol){const s=String(symbol||'').toUpperCase();return {inline_keyboard:[[{text:'🔄 Recalculate',callback_data:'forecast:'+s},{text:'📈 Chart',callback_data:'chart:'+s+':5m'}],[{text:'🔎 Why?',callback_data:'why:'+s},{text:'🔔 Alert',callback_data:'alerthelp:'+s}],[{text:'🧬 Datenweg',callback_data:'lineage:'+s},{text:'🧠 Evidence',callback_data:'evidence:'+s}],[{text:'🏠 Command Center',callback_data:'home'}]]};}
