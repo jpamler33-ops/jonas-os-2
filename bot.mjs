@@ -2550,137 +2550,7 @@ function learningPct01(v,d=1){
   return Number.isFinite(n)?(n*100).toFixed(d)+'%':'—';
 }
 
-function renderLearningCenterText(){
-  const s=buildForecastLearningSummary(forecastRuntime,{
-    minDisplaySamples:30,
-    autoLearnEnabled,
-    autoLearnSymbols,
-    autoLearnForecastMs,
-    now:Date.now()
-  });
-  const phaseLabel={
-    COLD_START:'⚪ Startphase',
-    LEARNING:'🟡 Lernphase',
-    MEASURING:'🟢 Messphase',
-    CANDIDATE_READY:'🧪 genug Daten für Kandidatenprüfung'
-  }[s.phase]||s.phase;
-  const lines=[
-    '🧪 TCX LERNZENTRUM','',
-    'AUTOLEARN',
-    'Status: '+(s.autoLearn.enabled?'🟢 aktiv':'⏸ aus'),
-    'Coins: '+(s.autoLearn.symbols.map(symbolLabel).join(', ')||'—'),
-    'Neuer Forecast: etwa alle '+Math.round(s.autoLearn.forecastIntervalMs/60000)+' Min. pro Coin','',
-    'LERNSTAND',
-    'Phase: '+phaseLabel,
-    'Erstellte Forecast-Snapshots: '+s.issuedForecasts,
-    'Ausgewertete Horizonte: '+s.resolvedOutcomes,
-    'Noch offen: '+s.pendingOutcomes,
-    'Abgelaufen/zu spät beobachtet: '+s.expiredOutcomes,
-    'Unabhängige Outcome-Fenster: '+s.independentEpisodes,''
-  ];
-  for(const h of s.horizons){
-    lines.push(
-      h.horizonId.toUpperCase()+' · '+h.resolved+' ausgewertet · '+h.pending+' offen',
-      h.metricsReady
-        ?'  Richtung '+learningPct01(h.metrics.directionalAccuracy,1)+' · Brier '+Number(h.metrics.meanBrier).toFixed(3)+' · Intervall '+learningPct01(h.metrics.intervalCoverage,1)
-        :'  Messwerte werden ab 30 ausgewerteten Fällen angezeigt.'
-    );
-  }
-  const comp=shadowCompetitionSummary(shadowCompetitionState||{});
-  lines.push(
-    '',
-    'SHADOW-MODELLWETTBEWERB',
-    'Status: '+(
-      comp.status==='ACTIVE'?'🟢 aktiv':
-      comp.status==='WAITING_FOR_SEED_HISTORY'?'🟡 wartet auf Trainingshistorie':
-      comp.status==='STALE_INCUMBENT_CONFIG'?'🟠 Basismodell geändert':
-      '⚪ noch nicht gestartet'
-    ),
-    'Kandidaten: '+comp.candidates.length
-  );
-  for(const candidate of comp.candidates){
-    const metric=candidate.candidateMetrics;
-    const label=candidate.label||candidate.blueprintId;
-    if(candidate.cases>0&&metric&&Number.isFinite(Number(metric.brier))){
-      lines.push(
-        '• '+label+' · '+candidate.cases+' OOS-Fälle · Brier '+Number(metric.brier).toFixed(3)+' · LogLoss '+Number(metric.logLoss).toFixed(3)
-      );
-    }else{
-      lines.push(
-        '• '+label+' · '+String(candidate.status||'WAITING_FOR_OOS').replaceAll('_',' ').toLowerCase()+
-        (candidate.blueprintId?.startsWith('HYP_')?' · selbst erzeugte Hypothese':'')
-      );
-    }
-  }
-  if(comp.competition?.bestBrierCandidate){
-    const leader=comp.candidates.find(x=>x.blueprintId===comp.competition.bestBrierCandidate);
-    lines.push('Aktuell niedrigster Brier: '+(leader?.label||comp.competition.bestBrierCandidate)+' (nur Shadow-Vergleich)');
-  }
-  const fr=featureResearchSummary(featureResearchState||{});
-  lines.push(
-    '',
-    'FEATURE-RESEARCH',
-    'Status: '+(
-      fr.status==='COLLECTING_SEED'?'🟡 sammelt Seed-Daten':
-      fr.status==='ACTIVE'?'🟢 OOS-Test aktiv':
-      fr.status==='COMPLETE_SUPPORTED_FEATURES'?'🧪 unterstützte Signale gefunden':
-      fr.status==='COMPLETE_NO_SUPPORTED_FEATURES'?'⚪ Runde abgeschlossen':
-      fr.status==='INTEGRITY_HOLD'?'🔴 Integritäts-Hold':
-      '⚪ noch nicht gestartet'
-    ),
-    'Generation: '+(fr.generationNumber||'—'),
-    'Experimente: '+fr.experiments.length
-  );
-  for(const x of fr.experiments){
-    if(x.status==='COLLECTING_SEED'){
-      const cov=(fr.coverage||[]).find(y=>y.id===x.id);
-      lines.push('• '+x.label+' · Seed '+Number(cov?.cases||0)+'/'+Number(fr.policy?.minSeedRows||40));
-    }else{
-      lines.push('• '+x.label+' · '+x.status.replaceAll('_',' ').toLowerCase()+' · '+x.cases+' OOS');
-    }
-  }
-  if(fr.supported.length) lines.push('Unterstützt im OOS: '+fr.supported.join(', '));
-  lines.push('Neue Signale verändern das Produktionsmodell nicht automatisch.');
-
-  const gov=experimentGovernorSummary(experimentGovernorState||{});
-  lines.push(
-    '',
-    'EXPERIMENT-GOVERNOR',
-    'Generation: '+(gov.generationNumber||'—')+' · '+(
-      gov.status==='ACTIVE'?'🟢 aktiv':
-      gov.status==='COMPLETE_PROMOTION_REVIEW_REQUIRED'?'🟣 Promotion-Prüfung nötig':
-      gov.status==='COMPLETE_NO_PROMOTION'?'⚪ Runde abgeschlossen':
-      gov.status==='INTEGRITY_HOLD'?'🔴 Integritäts-Hold':
-      '⚪ noch nicht gestartet'
-    ),
-    'Eingefrorene Kandidaten: '+gov.participantCount,
-    'Testing: '+(gov.counts?.SHADOW_TESTING||0)+' · Messung: '+(gov.counts?.MEASURING||0)+' · Abgelehnt: '+(gov.counts?.REJECTED||0),
-    'Promotion-Kandidaten: '+(gov.counts?.PROMOTION_CANDIDATE||0),
-    gov.policy
-      ?'Entscheidungsfenster: '+Number(gov.policy.minCases||0)+' Fälle + '+Number(gov.policy.minIndependentEpisodes||0)+' unabhängige Episoden'
-      :'Entscheidungsfenster: —',
-    'Mehrfachtests: Holm-Bonferroni · α '+(gov.policy?learningPct01(gov.policy.familyAlpha,0):'—'),
-    'Nur ein vorab festgelegter Decision-Look; kein Nachoptimieren auf demselben OOS-Fenster.'
-  );
-  for(const p of gov.promotionCandidates||[]){
-    lines.push('• Review: '+p.label+' · adj. p '+(Number.isFinite(Number(p.holmAdjustedP))?Number(p.holmAdjustedP).toFixed(4):'—'));
-  }
-
-  lines.push(
-    '',
-    'MODELL-PROMOTION',
-    'Datengate: '+(s.promotion.dataReady?'🟢 bereit':'🟡 sammelt noch'),
-    'Fälle: '+s.promotion.resolvedCases+'/'+s.promotion.requiredCases,
-    'Unabhängige Episoden: '+s.promotion.independentEpisodes+'/'+s.promotion.requiredIndependentEpisodes,
-    s.promotion.dataReady
-      ?'Kandidaten dürfen jetzt statistisch geprüft werden. Das Produktionsmodell wird nicht automatisch geändert.'
-      :'Eine Modell-Promotion bleibt gesperrt, bis genug unabhängige echte Outcomes vorliegen.',
-    '',
-    'Wichtig: Treffer-/Kalibrierungswerte werden bei zu wenig Daten bewusst nicht angezeigt.',
-    'Systemmodus: ABSTAIN / SHADOW_ONLY'
-  );
-  return lines.join('\n').slice(0,4096);
-}
+function renderLearningCenterText(){const s=buildForecastLearningSummary(forecastRuntime,{minDisplaySamples:30,autoLearnEnabled,autoLearnSymbols,autoLearnForecastMs,now:Date.now()}),comp=shadowCompetitionSummary(shadowCompetitionState||{}),fr=featureResearchSummary(featureResearchState||{}),gov=experimentGovernorSummary(experimentGovernorState||{}),phase={COLD_START:'⚪ Startphase',LEARNING:'🟡 Lernphase',MEASURING:'🟢 Messphase',CANDIDATE_READY:'🧪 Kandidatenprüfung'}[s.phase]||s.phase;const lines=['🧪 TCX LEARNING LAB','','STATUS       '+phase,'AUTOLEARN    '+(s.autoLearn.enabled?'🟢 aktiv':'⏸ aus'),'MÄRKTE       '+s.autoLearn.symbols.length,'FORECASTS    '+s.issuedForecasts,'AUSGEWERTET  '+s.resolvedOutcomes,'OFFEN        '+s.pendingOutcomes,'','FORTSCHRITT'];for(const h of s.horizons.slice(0,4))lines.push(h.horizonId.toUpperCase()+'   '+h.resolved+' fertig · '+h.pending+' offen'+(h.metricsReady?' · Treffer '+learningPct01(h.metrics.directionalAccuracy,0):''));lines.push('','RESEARCH','Modellwettbewerb  '+(comp.status==='ACTIVE'?'🟢 aktiv':'🟡 '+String(comp.status||'wartet').replaceAll('_',' ').toLowerCase())+' · '+comp.candidates.length+' Kandidaten','Feature Research   '+(fr.status==='ACTIVE'?'🟢 aktiv':'⚪ '+String(fr.status||'wartet').replaceAll('_',' ').toLowerCase())+' · '+fr.experiments.length+' Tests','Experiment Gate    '+String(gov.status||'UNINITIALIZED').replaceAll('_',' ')+' · Gen '+(gov.generationNumber||'—'),'','PROMOTION','Fälle '+s.promotion.resolvedCases+'/'+s.promotion.requiredCases+' · Episoden '+s.promotion.independentEpisodes+'/'+s.promotion.requiredIndependentEpisodes,'Gate '+(s.promotion.dataReady?'🟢 Datenbasis bereit':'🟡 sammelt Evidenz'),'','Produktionsmodell wird niemals automatisch durch einen Kandidaten ersetzt.','ABSTAIN / SHADOW_ONLY'];return lines.join('\n').slice(0,4096);}
 
 async function showLearningCenter(chatId,messageId=null){
   return deliverTelegramTextCard(tg,chatId,messageId,{
@@ -2744,42 +2614,7 @@ async function showHomeSection(chatId,messageId,section) {
       return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
     });
     text=['🎯 SIGNAL RADAR','','Live-Marktbedingungen mit auffälliger Aktivität.','',...lines,'','🟢 sauber   ·   🟡 vorsichtig   ·   ⚪ unklar','','Tippe anschließend auf Märkte, um Forecast und Risiko zu öffnen.'].join('\n');
-  } else if(section==='SYSTEM') {
-    text=[
-      '🖥 TCX SYSTEMSTATUS','',
-      `Kernsystem: ${auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 EINGESCHRÄNKT'}`,
-      `Marktdaten: ${marketFabric.healthy?'🟢 laufen':'🔴 gestört'}`,
-      `Dateispeicher: ${persistenceHealthy&&episodePersistenceHealthy?'🟢 schreibt':'🟡 eingeschränkt'}`,
-      `Persistenz über Deploys: ${persistentStorageMounted?'🟢 Railway-Volume aktiv':'🔴 kein Volume erkannt'}`,
-      `Belege: ${evidenceHistoryHealthy?'🟢 gespeichert':'🟡 eingeschränkt'}`,
-      'DEX-/Memecoin-Daten: 🟢 Live-Provider eingebaut',
-      'Marktstimmung: 🟢 Live-Provider eingebaut',
-      `AutoLearn: ${autoLearnEnabled?'🟢 aktiv':'⏸ aus'} · ${autoLearnSymbols.length} Coins · ${Math.round(autoLearnForecastMs/60000)} Min.`,
-      `Coverage Curriculum: ${coverageCurriculumEnabled?'🟢 aktiv':'⏸ aus'} · 5/15/60/180 Min. · ${coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}).open} offen · ${coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}).closed} abgeschlossen`,
-      `Auto-Shadow-Trading: ${autoShadowTradingEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).openPositions} offene Positionen`,
-      `Parallel-Limit: ${autoShadowMaxOpenTotal} gesamt · ${autoShadowMaxOpenPerSymbol} je Coin · Cooldown ${Math.round(autoShadowCooldownMs/60000)} Min./Lane`,
-      `Memecoin-AutoLearn: ${[...MEMECOIN_CEX_SYMBOLS].filter(x=>autoLearnSymbols.includes(x)).length} liquide CEX-Memecoins · strengere Entry-Gates`,
-      `Shadow-Portfolio: ${shadowPortfolioHealthy?'🟢':'🟡'} · Equity ${fmt(shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).equityQuote,2)} USDT`,
-      `Capital Academy: ${evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).activeStage} · ${fmt(evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).stageProgress*100,1)}%`,
-      `Training Coach: ${renderSupervisorCompact(evaluateShadowTrainingSupervisor(shadowPortfolioLedger,evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}),{asOf:Date.now()})).mission} · Risiko ${fmt(renderSupervisorCompact(evaluateShadowTrainingSupervisor(shadowPortfolioLedger,evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}),{asOf:Date.now()})).riskMultiplier,2)}×`,
-      `Strategy League: ${strategyLeagueEnabled?'🟢 aktiv':'⏸ aus'} · ${strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}).allocationMode} · ${strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}).eligibleStrategies} bewährt`,
-      `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
-      `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
-      `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
-      `Liquidation-Stream: ${liquidationResearchStream.health().connected?'🟢 verbunden':'🟡 verbindet'} · ${LIQUIDATION_PUBLIC_STREAM_VERSION}`,
-      `On-Chain-Research: 🟢 BTC/ETH/SOL · ${ONCHAIN_RESEARCH_PROVIDER_VERSION}`,
-      `Wallet-Cohorts: ${walletCohortResearchProvider.configuredCohorts>0?'🟢 '+walletCohortResearchProvider.configuredCohorts+' manuell':'⚪ keine manuellen'}`,
-      `Entity-Registry: ${entityRegistrySummary(entityRegistry||{}).entries} Adressen · ${entityRegistryRefreshError?'🟡 Cache':'🟢 offizieller PoR'}`,
-      `Entity-Flow: ${entityFlowAddressIndex.addressCount>0?'🟢 '+entityFlowAddressIndex.addressCount+' ETH-Adressen':'⚪ keine Adressen'} · finalisiert · Native ETH`,
-      `Research Data Plane: ${researchDataPlane.healthy?'🟢':'🔴'} seq ${researchDataPlane.seq} · ${researchDataPlane.totalRecords} Snapshots · ${researchDataPlane.capacityState}`,
-      `Data Governance: ${researchGovernanceHealthy?'🟢':'🟡'} · Katalog ${researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}).featureCatalog.featureCount} Features · problematische Quellen ${Number(researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}).statuses.DEGRADED||0)+Number(researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}).statuses.QUARANTINED||0)}`,
-      `Beobachtete Märkte: ${markets.length}`,
-      `Aktive Sitzungen: ${sessions.size}`,'',
-      ...(persistentStorageMounted?[]:['⚠️ Ohne Volume können Lernhistorie, Alerts und Forecast-Speicher bei einem Redeploy verloren gehen.','']),
-      'Sicherheitsmodus:',
-      'TCX darf keine echten Orders ausführen.',
-      'Systemmodus: ABSTAIN / SHADOW_ONLY.'
-    ].join('\n');
+  } else if(section==='SYSTEM') {const port=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),league=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}),coverage=coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}),gov=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});text=['🖥 TCX SYSTEM','','CORE HEALTH','Engine       '+(auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 DEGRADED'),'Market Data  '+(marketFabric.healthy?'🟢 HEALTHY':'🔴 ERROR'),'Persistence  '+(persistenceHealthy&&episodePersistenceHealthy&&persistentStorageMounted?'🟢 HEALTHY':'🟡 CHECK'),'Evidence     '+(evidenceHistoryHealthy?'🟢 HEALTHY':'🟡 CHECK'),'','AUTOMATION','AutoLearn    '+(autoLearnEnabled?'🟢 ON':'⏸ OFF')+' · '+autoLearnSymbols.length+' Märkte · '+Math.round(autoLearnForecastMs/60000)+'m','Shadow Trade '+(autoShadowTradingEnabled?'🟢 ON':'⏸ OFF')+' · '+port.openPositions+' offen','Coverage     '+(coverageCurriculumEnabled?'🟢 ON':'⏸ OFF')+' · '+coverage.open+' offen · '+coverage.closed+' fertig','Strategy     '+(strategyLeagueEnabled?'🟢 ON':'⏸ OFF')+' · '+league.eligibleStrategies+' qualifiziert','','DATA','Research     '+(researchDataPlane.healthy?'🟢':'🔴')+' · '+researchDataPlane.totalRecords+' Snapshots','Governance   '+(researchGovernanceHealthy?'🟢':'🟡')+' · '+gov.featureCatalog.featureCount+' Features','Liquidation  '+(liquidationResearchStream.health().connected?'🟢 LIVE':'🟡 CONNECTING'),'On-Chain     🟢 BTC · ETH · SOL','','SAFETY','Execution    SHADOW_ONLY','Real Orders  ⛔ BLOCKED','canExecute   false'].join('\n');
   } else if(section==='PERFORMANCE') {
     const total=episodes.length;
     const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
@@ -3477,46 +3312,7 @@ async function showShadowCapitalAcademy(chatId,messageId=null){
   return tg('sendMessage',payload);
 }
 
-async function showStrategyLeague(chatId,messageId=null){
-  const x=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()});
-  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
-  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
-  const lines=[
-    '🏁 TCX STRATEGY LEAGUE','',
-    'Modus: '+x.allocationMode.replaceAll('_',' '),
-    'Strategien: '+x.strategyCount+' · allocation-berechtigt: '+x.eligibleStrategies,
-    'Virtuelles Startkapital je Strategie: '+fmt(x.initialEquityPerStrategy,0)+' USDT',
-    'Gesamtes virtuelles League-Kapital: '+fmt(x.totalInitialVirtualCapital,0)+' USDT','',
-    'RANGLISTE'
-  ];
-  x.strategies.forEach((r,i)=>{
-    const pf=r.account.profitFactor==null?'—':fmt(r.account.profitFactor,2);
-    lines.push(
-      (i+1)+'. '+r.label+' · '+r.status,
-      '   Gewicht '+pct(r.allocationWeight)+' · Equity '+fmt(r.account.equityQuote,2)+' · PnL '+money(r.account.netPnlQuote),
-      '   Trades '+r.account.closedTrades+' · PF '+pf+' · DD '+pct(r.account.maxDrawdownPct),
-      '   Evidenz '+r.evidence.grade+' · Score '+fmt(r.evidence.score*100,0)+'/100',
-      '   unabhängig '+r.independentDecisions+' · Tage '+r.tradingDays+' · Coin-Konz. '+pct(r.symbolConcentration),
-      r.evidence.failedGates.length?'   offen: '+r.evidence.failedGates.join(', '):'   Gates: bestanden'
-    );
-  });
-  lines.push(
-    '',
-    'Mehr virtuelles Kapital gibt es erst bei belastbarer Evidenz: ≥40 unabhängige Entscheidungen, ≥10 Tage, ≥16 Trades im jüngsten 40%-Fenster, ≤55% Coin-Konzentration, positive jüngste Erwartung, PF ≥1,05 und DD ≤10%.',
-    'Die jüngsten 40% werden gegen die älteren 60% auf Stabilität geprüft. Das ist ein Zeitstabilitäts-Check, kein echtes unangetastetes OOS.',
-    'Mehr getestete Strategien senken den Evidenz-Score konservativ; ein kurzer Glückslauf reicht nicht.',
-    'Bis mindestens 2 Strategien qualifiziert sind, bleibt die Allokation gleich verteilt.',
-    '',
-    'Mode: SHADOW_ONLY · getrennte virtuelle Konten · echte Orders gesperrt.'
-  );
-  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
-    [{text:'🔄 Aktualisieren',callback_data:'home:league'},{text:'🧠 Coach',callback_data:'home:coach'}],
-    [{text:'🏆 Academy',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
-    [{text:'🏠 Start',callback_data:'home'}]
-  ]}};
-  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
-  return tg('sendMessage',payload);
-}
+async function showStrategyLeague(chatId,messageId=null){const x=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}),money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—'),pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—'),lines=['🏁 STRATEGY LEAGUE','','MODE         '+x.allocationMode.replaceAll('_',' '),'STRATEGIEN   '+x.strategyCount,'QUALIFIZIERT '+x.eligibleStrategies,'VIRT. KAPITAL '+fmt(x.totalInitialVirtualCapital,0)+' USDT','','RANGLISTE'];x.strategies.slice(0,6).forEach((r,i)=>lines.push((i+1)+'. '+r.label,'   '+r.status+' · Equity '+fmt(r.account.equityQuote,2)+' · '+money(r.account.netPnlQuote),'   Trades '+r.account.closedTrades+' · PF '+(r.account.profitFactor==null?'—':fmt(r.account.profitFactor,2))+' · DD '+pct(r.account.maxDrawdownPct),'   Evidenz '+r.evidence.grade+' · '+fmt(r.evidence.score*100,0)+'/100'));lines.push('','Qualifikation verlangt belastbare, zeitlich stabile Shadow-Evidenz.','Kurze Glücksläufe erhalten kein höheres Kapital.','SHADOW_ONLY · echte Orders gesperrt.');const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:league'},{text:'🧠 Coach',callback_data:'home:coach'}],[{text:'🏆 Academy',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],[{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);}
 
 async function showShadowTrainingCoach(chatId,messageId=null){
   const academy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
