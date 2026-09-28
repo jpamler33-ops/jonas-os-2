@@ -2,6 +2,7 @@ import http from 'node:http';
 import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
+import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
 import { buildLeverageCounterfactualLab, LEVERAGE_COUNTERFACTUAL_LAB_VERSION } from './leverage-counterfactual-lab.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
@@ -1354,7 +1355,13 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     return {...decision,placed:false,reason:'LEVERAGE_RISK_BLOCK',opportunityAllocation,leverageRisk};
   }
   const marginQuote=opportunityAllocation.notionalQuote;
-  const leveragedExposureQuote=marginQuote*leverageRisk.allowedLeverage;
+  const requestedLeveragedExposureQuote=marginQuote*leverageRisk.allowedLeverage;
+  const portfolioRisk=evaluatePortfolioRiskBrain(shadowPortfolioLedger,{symbol:decision.symbol,side:decision.side,assetClass,exposureQuote:requestedLeveragedExposureQuote},{equityQuote:portfolioNow.equityQuote});
+  if(portfolioRisk.blocked){
+    return {...decision,placed:false,reason:'PORTFOLIO_RISK_BLOCK',opportunityAllocation,leverageRisk,portfolioRisk};
+  }
+  const leveragedExposureQuote=portfolioRisk.allowedExposureQuote;
+  const effectiveMarginQuote=leveragedExposureQuote/leverageRisk.allowedLeverage;
   if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy){
     return {...decision,placed:false,reason:'RUNTIME_AUDIT_OR_OMS_UNHEALTHY'};
   }
@@ -1404,8 +1411,13 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
       leverageLabSamples:leverageLab.samples,
       leverageLabSuggested:leverageLab.suggestedShadowLeverage,
       leverage:leverageRisk.allowedLeverage,
-      marginQuote,
+      marginQuote:effectiveMarginQuote,
+      requestedMarginQuote:marginQuote,
       leveragedExposureQuote,
+      portfolioRiskVersion:PORTFOLIO_RISK_BRAIN_VERSION,
+      portfolioRiskMultiplier:portfolioRisk.multiplier,
+      portfolioRiskReasons:portfolioRisk.reasons,
+      portfolioRiskFingerprint:portfolioRisk.fingerprint,
       leverageRiskCap:leverageRisk.riskCap,
       leverageRiskFingerprint:leverageRisk.fingerprint,
       opportunityAllocatorVersion:OPPORTUNITY_ALLOCATOR_VERSION,
@@ -1445,8 +1457,11 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     symbol:decision.symbol,
     side:decision.side,
     notionalQuote:leveragedExposureQuote,
-    marginQuote,
+    marginQuote:effectiveMarginQuote,
+    requestedMarginQuote:marginQuote,
     leverage:leverageRisk.allowedLeverage,
+    portfolioRiskMultiplier:portfolioRisk.multiplier,
+    portfolioRiskReasons:portfolioRisk.reasons,
     opportunityScore:opportunityAllocation.score,
     opportunityMultiplier:opportunityAllocation.multiplier,
     failureMemoryScore:opportunityAllocation.failureScore,
@@ -1469,7 +1484,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     orderId:order.id,
     execution:'SHADOW_ONLY'
   }));
-  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,leverageLab,marginQuote,leveragedExposureQuote};
+  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,leverageLab,portfolioRisk,marginQuote:effectiveMarginQuote,requestedMarginQuote:marginQuote,leveragedExposureQuote};
 }
 
 
