@@ -3077,10 +3077,23 @@ function tradeReplayKeyboard(symbol){return {inline_keyboard:[[{text:'▥ CHART 
 async function showTradeReplay(chatId,messageId,symbol){
   const rows=(shadowPortfolioLedger?.positions||[]).filter(p=>p?.symbol===symbol&&p?.status==='CLOSED'&&p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false).sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0));
   const p=rows[0];
-  if(!p)return deliverTelegramTextCard(tg,chatId,messageId,{text:['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━','','Noch kein abgeschlossener Shadow-Trade für diesen Markt vorhanden.','','ABSTAIN / SHADOW_ONLY'].join('\n'),reply_markup:tradeReplayKeyboard(symbol)});
+  if(!p)return deliverTelegramTextCard(tg,chatId,messageId,{text:['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━','','Noch kein abgeschlossener Shadow-Trade für diesen Markt vorhanden.','','ABSTAIN / SHADOW_ONLY'].join('\\n'),reply_markup:tradeReplayKeyboard(symbol)});
   const roe=Number(p.realizedMarginRoePct),mfe=Number(p.mfeMarginRoePct),mae=Number(p.maeMarginRoePct),regret=Number(p.exitRegretMarginRoePct),capture=Number(p.captureEfficiency);
-  const lines=['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━','',String(p.side||'—')+' · '+String(p.setupType||'UNKNOWN')+' · '+String(p.horizonId||'—'),'','LIFECYCLE','Entry        '+priceText(p.entryPrice),'Exit         '+priceText(p.exitPrice),'Exit reason  '+String(p.closeReason||'UNKNOWN'),'Opened       '+new Date(Number(p.openedAt)).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}),'Closed       '+new Date(Number(p.closedAt)).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}),'','OUTCOME','Margin ROE   '+(Number.isFinite(roe)?fmt(roe*100,2)+'%':'—'),'MFE          '+(Number.isFinite(mfe)?fmt(mfe*100,2)+'%':'—'),'MAE          '+(Number.isFinite(mae)?fmt(mae*100,2)+'%':'—'),'Exit regret  '+(Number.isFinite(regret)?fmt(regret*100,2)+'%':'—'),'Capture      '+(Number.isFinite(capture)?fmt(capture*100,1)+'%':'—'),'','TRACE','Forecast → Entry → Excursion → Exit → Attribution → Learning','','MFE/MAE stammen aus gespeicherten ausführbaren Shadow-Marks, nicht aus Tick-Level-Extremen.','SHADOW_ONLY · REAL ORDERS BLOCKED'];
-  return deliverTelegramTextCard(tg,chatId,messageId,{text:lines.join('\n').slice(0,4096),reply_markup:tradeReplayKeyboard(symbol)});
+  const openedAt=Number(p.openedAt),closedAt=Number(p.closedAt);
+  try{
+    const replayEnd=Math.max(closedAt+30*60_000,openedAt+60*60_000);
+    const fetched=await fetchKlines(symbol,'5m',100,{endTime:replayEnd});
+    const replayCandles=candlesFromKlines(fetched.rows,replayEnd);
+    const entryCandles=replayCandles.filter(x=>x.closed===true&&Number(x.closeTime)<=openedAt);
+    const entryAnalysis=analyzeStructure(entryCandles);
+    const png=renderCandlestickPng(replayCandles,entryAnalysis,{width:1100,height:760,dashboard:null,tradeReplay:{entryAt:openedAt,entryPrice:Number(p.entryPrice),exitAt:closedAt,exitPrice:Number(p.exitPrice)}});
+    const caption=['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),String(p.side||'—')+' · '+String(p.setupType||'UNKNOWN')+' · '+String(p.horizonId||'—'),'Entry '+priceText(p.entryPrice)+' → Exit '+priceText(p.exitPrice),'Margin ROE '+(Number.isFinite(roe)?fmt(roe*100,2)+'%':'—')+' · MFE '+(Number.isFinite(mfe)?fmt(mfe*100,2)+'%':'—')+' · MAE '+(Number.isFinite(mae)?fmt(mae*100,2)+'%':'—'),'Entry-Struktur: '+String(entryAnalysis.trend||'UNKNOWN')+' · nur bis Entry geschlossene 5m-Kerzen','Exit: '+String(p.closeReason||'UNKNOWN'),'MFE/MAE: gespeicherte Shadow-Marks; keine erfundenen Extrem-Zeitpunkte.','SHADOW_ONLY · REAL ORDERS BLOCKED'].join('\\n');
+    return tgMultipart('sendPhoto',{chat_id:String(chatId),caption:caption.slice(0,1024),reply_markup:JSON.stringify(tradeReplayKeyboard(symbol))},'photo',symbol+'-trade-replay.png',png,'image/png');
+  }catch(err){
+    console.error('trade replay chart error',symbol,err instanceof Error?err.message:String(err));
+    const lines=['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━','',String(p.side||'—')+' · '+String(p.setupType||'UNKNOWN')+' · '+String(p.horizonId||'—'),'','LIFECYCLE','Entry        '+priceText(p.entryPrice),'Exit         '+priceText(p.exitPrice),'Exit reason  '+String(p.closeReason||'UNKNOWN'),'Opened       '+new Date(openedAt).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}),'Closed       '+new Date(closedAt).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}),'','OUTCOME','Margin ROE   '+(Number.isFinite(roe)?fmt(roe*100,2)+'%':'—'),'MFE          '+(Number.isFinite(mfe)?fmt(mfe*100,2)+'%':'—'),'MAE          '+(Number.isFinite(mae)?fmt(mae*100,2)+'%':'—'),'Exit regret  '+(Number.isFinite(regret)?fmt(regret*100,2)+'%':'—'),'Capture      '+(Number.isFinite(capture)?fmt(capture*100,1)+'%':'—'),'','Chart derzeit nicht verfügbar; Ledger-Replay bleibt erhalten.','SHADOW_ONLY · REAL ORDERS BLOCKED'];
+    return deliverTelegramTextCard(tg,chatId,messageId,{text:lines.join('\\n').slice(0,4096),reply_markup:tradeReplayKeyboard(symbol)});
+  }
 }
 
 async function showMemory(chatId,symbol) {
