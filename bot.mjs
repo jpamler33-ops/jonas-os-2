@@ -51,6 +51,10 @@ import {
 import {
   deriveMandatoryShadowDiscovery, MANDATORY_SHADOW_DISCOVERY_VERSION
 } from './mandatory-shadow-discovery.mjs';
+import {
+  buildLearnedChallengerLab, deriveLearnedChallengerTrades, learnedChallengerSummary,
+  LEARNED_CHALLENGER_ENGINE_VERSION
+} from './learned-challenger-engine.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -156,6 +160,12 @@ const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MAND
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
 const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
 const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
+const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
+const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
+const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
+const learnedChallengerMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_OPEN_TOTAL || 8) || 8));
+const learnedChallengerMaxOpenPerSymbol = Math.max(1, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_OPEN_PER_SYMBOL || 2) || 2));
+const learnedChallengerCooldownMs = Math.max(5*60_000, Number(process.env.TCX_LEARNED_CHALLENGER_COOLDOWN_MS || 30*60_000));
 const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
 const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
 const shadowStatsTimeZone = String(process.env.TCX_STATS_TIMEZONE || 'Europe/Berlin');
@@ -462,6 +472,7 @@ try {
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
+      learnedChallengerEngine:LEARNED_CHALLENGER_ENGINE_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -1420,6 +1431,127 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     canExecuteLive:false
   }));
   return {...decision,placed:true,orderId:order.id,status:order.status,modelSamples:qualityModel.samples};
+}
+
+
+async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={}){
+  const now=Date.now();
+  if(!learnedChallengerEnabled){
+    return {placed:0,eligible:0,reason:'LEARNED_CHALLENGER_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:0,eligible:0,reason:'LEARNED_CHALLENGER_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+  if(reconciled.changed){
+    shadowPortfolioLedger=reconciled.ledger;
+    await persistShadowPortfolio('pre-learned-challenger-reconcile');
+  }
+
+  const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
+  const lab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
+  const assetClass=assetClassForSymbol(issuance?.symbol);
+  const derived=deriveLearnedChallengerTrades(issuance,lab,{
+    now,
+    assetClass,
+    baseNotionalQuote:learnedChallengerBaseNotional,
+    maxCandidates:learnedChallengerMaxPerIssuance
+  });
+  if(!derived.candidates.length){
+    return {placed:0,eligible:0,reason:derived.reason,lab:learnedChallengerSummary(lab),execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const openAll=(shadowPortfolioLedger.positions||[]).filter(p=>
+    p.status==='OPEN'&&String(p.entryMode||'').toUpperCase()==='CHALLENGER'
+  );
+  let remainingGlobal=Math.max(0,learnedChallengerMaxOpenTotal-openAll.length);
+  if(remainingGlobal<=0){
+    return {placed:0,eligible:derived.candidates.length,reason:'CHALLENGER_GLOBAL_OPEN_CAP',lab:learnedChallengerSummary(lab),execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  let placed=0;
+  const results=[];
+  for(const candidate of derived.candidates){
+    if(remainingGlobal<=0) break;
+    if(shadowOrders.some(o=>o?.strategyMeta?.challengerDecisionKey===candidate.challengerDecisionKey)){
+      results.push({ruleId:candidate.ruleId,placed:false,reason:'CHALLENGER_DECISION_ALREADY_TRADED'});
+      continue;
+    }
+    const openSymbol=openAll.filter(p=>p.symbol===candidate.symbol);
+    const placedForSymbol=results.filter(x=>x.placed===true&&x.symbol===candidate.symbol).length;
+    if(openSymbol.length+placedForSymbol>=learnedChallengerMaxOpenPerSymbol){
+      results.push({ruleId:candidate.ruleId,placed:false,reason:'CHALLENGER_SYMBOL_OPEN_CAP'});
+      continue;
+    }
+    if(openAll.some(p=>p.challengerRuleId===candidate.ruleId)){
+      results.push({ruleId:candidate.ruleId,placed:false,reason:'CHALLENGER_RULE_ALREADY_OPEN'});
+      continue;
+    }
+    const prior=shadowOrders
+      .filter(o=>
+        String(o?.strategyMeta?.role||'').toUpperCase()==='LEARNED_CHALLENGER_ENTRY'&&
+        o?.strategyMeta?.challengerRuleId===candidate.ruleId&&
+        o.symbol===candidate.symbol
+      )
+      .sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
+    if(prior.length&&now-Number(prior[0].createdAt||0)<learnedChallengerCooldownMs){
+      results.push({ruleId:candidate.ruleId,placed:false,reason:'CHALLENGER_RULE_COOLDOWN'});
+      continue;
+    }
+
+    const order=await placeShadowOrder({
+      symbol:candidate.symbol,
+      side:candidate.side,
+      type:'MARKET',
+      notionalQuote:candidate.notionalQuote,
+      strategyMeta:{
+        strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+        role:'LEARNED_CHALLENGER_ENTRY',
+        entryMode:'CHALLENGER',
+        assetClass,
+        strategyLane:['LEARNED_CHALLENGER',candidate.ruleId,candidate.symbol,candidate.horizonId,candidate.side].join(':'),
+        challengerEngineVersion:LEARNED_CHALLENGER_ENGINE_VERSION,
+        challengerRuleId:candidate.ruleId,
+        challengerDecisionKey:candidate.challengerDecisionKey,
+        challengerRuleStatus:candidate.ruleStatus,
+        challengerDiscoveryStrength:candidate.discoveryStrength,
+        challengerSourceSamples:candidate.sourceSamples,
+        challengerForwardSamples:candidate.forwardSamples,
+        challengerWhyFeature:candidate.why?.[0]?.feature||'',
+        challengerWhyValue:candidate.why?.[0]?.value||'',
+        decisionKey:candidate.challengerDecisionKey,
+        issuanceId:candidate.issuanceId,
+        forecastFingerprint:candidate.forecastFingerprint,
+        horizonId:candidate.horizonId,
+        horizonMs:candidate.horizonMs,
+        admissionGate:candidate.admissionGate,
+        expectedReturn:candidate.expectedReturn,
+        directionalProbability:candidate.directionalProbability,
+        probabilityEdge:candidate.probabilityEdge,
+        generatedAt:candidate.generatedAt
+      }
+    });
+    placed++;remainingGlobal--;
+    results.push({
+      ruleId:candidate.ruleId,placed:true,orderId:order.id,symbol:candidate.symbol,
+      status:candidate.ruleStatus,side:candidate.side,horizonId:candidate.horizonId,
+      notionalQuote:candidate.notionalQuote
+    });
+  }
+  if(placed){
+    recordOperation(observability,{name:'learned_challenger_entries',ok:true,latencyMs:0,error:null});
+    console.log('learned challenger entries placed',JSON.stringify({
+      symbol:String(issuance?.symbol||''),assetClass,
+      eligible:derived.candidates.length,placed,results,
+      lab:learnedChallengerSummary(lab),
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    }));
+  }
+  return {
+    placed,eligible:derived.candidates.length,reason:placed?'CHALLENGERS_PLACED':'CHALLENGERS_BLOCKED',
+    results,lab:learnedChallengerSummary(lab),
+    execution:'SHADOW_ONLY',canExecuteLive:false
+  };
 }
 
 async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
@@ -3100,6 +3232,8 @@ async function showShadowTrainingCoach(chatId,messageId=null){
   const x=renderSupervisorCompact(t);
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:Date.now()});
   const quality=qualityLearnerSummary(qualityModel);
+  const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:Date.now()});
+  const challengers=learnedChallengerSummary(challengerLab);
   const pf=x.profitFactor==null?'—':Number.isFinite(x.profitFactor)?fmt(x.profitFactor,2):'∞';
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
@@ -3125,6 +3259,23 @@ async function showShadowTrainingCoach(chatId,messageId=null){
     'MANDATORY DISCOVERY',
     'Jeder Auto-Learn-Scan muss nach einem Lernkandidaten suchen, wenn kein normaler Entry die Qualitäts-Schwellen erreicht.',
     'Exploration: max. '+mandatoryShadowDiscoveryMaxPerSymbolDay+' je Coin/Tag · '+fmt(mandatoryShadowDiscoveryNotional,0)+' USDT virtuell · max. '+mandatoryShadowDiscoveryMaxOpenTotal+' gleichzeitig.','',
+    'LEARNING V2 · CHALLENGER FACTORY',
+    'Automatisch abgeleitete Regeln: '+challengers.ruleCount+
+      ' · qualifiziert '+Number(challengers.counts?.qualified||0)+
+      ' · Trial '+Number(challengers.counts?.trial||0)+
+      ' · Drift-Watch '+Number(challengers.counts?.driftWatch||0)+
+      ' · verworfen '+Number(challengers.counts?.rejected||0),
+    'Top-Regel: '+(challengers.topRule?
+      challengers.topRule.ruleId+' · '+challengers.topRule.status+
+      ' · Quelle n='+challengers.topRule.sourceSamples+
+      ' · Forward n='+challengers.topRule.forwardSamples
+      :'noch keine belastbare Regel'),
+    'Stärkster Unterschied: '+(challengers.strongestFeature?
+      challengers.strongestFeature.feature+'='+challengers.strongestFeature.value+
+      ' · Win-Lift '+(challengers.strongestFeature.winLift>=0?'+':'')+fmt(challengers.strongestFeature.winLift*100,1)+'pp'
+      :'noch zu wenig Daten'),
+    'Challenger handeln nur vorwärts im eigenen Testmodus; ihre Ergebnisse fließen nicht zurück in die Musterentdeckung.',
+    'Budget: '+fmt(learnedChallengerBaseNotional,0)+' USDT virtuell Basis · max. '+learnedChallengerMaxOpenTotal+' offen · max. '+learnedChallengerMaxOpenPerSymbol+' je Coin.','',
     'AUTOMATISCHE RISIKOANPASSUNG',
     'Academy-Budget wird aktuell mit '+fmt(x.riskMultiplier,2)+'× skaliert.',
     'Status: '+(x.hold?'⛔ Trainingspause':'🟢 neue qualifizierte Shadow-Entries erlaubt'),
@@ -4331,6 +4482,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       console.error('mandatory shadow discovery error',symbol,msg);
     }
   }
+  let learnedChallengerRun=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      learnedChallengerRun=await maybePlaceLearnedChallengerTrades(issuance,{auditHealthy:auditHealthyAfter});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      learnedChallengerRun={placed:0,eligible:0,reason:'LEARNED_CHALLENGER_ERROR'};
+      recordError(observability,{scope:'learned_challenger.entry',message:msg});
+      console.error('learned challenger entry error',symbol,msg);
+    }
+  }
   let strategyLeagueRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
@@ -4402,6 +4564,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       mandatoryDiscoveryOrderId:mandatoryDiscoveryRun?.orderId||null,
       mandatoryDiscoveryLearningValue:Number(mandatoryDiscoveryRun?.learning?.learningValue||0),
       mandatoryDiscoveryQualityLabel:mandatoryDiscoveryRun?.learning?.qualityLabel||null,
+      learnedChallengerPlaced:Number(learnedChallengerRun?.placed||0),
+      learnedChallengerEligible:Number(learnedChallengerRun?.eligible||0),
+      learnedChallengerReason:learnedChallengerRun?.reason||null,
+      learnedChallengerRules:Number(learnedChallengerRun?.lab?.ruleCount||0),
+      learnedChallengerQualified:Number(learnedChallengerRun?.lab?.counts?.qualified||0),
       strategyLeaguePlaced:Number(strategyLeagueRun?.placed||0),
       strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
       strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null

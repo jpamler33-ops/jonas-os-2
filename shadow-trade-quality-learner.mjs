@@ -46,7 +46,7 @@ function horizonBin(v){
   if(ms<=60*60_000) return 'H_INTRADAY';
   return 'H_LONG';
 }
-function featureShape(x={}){
+export function shadowTradeFeatureShape(x={}){
   return {
     assetClass:String(x.assetClass||'CORE').toUpperCase(),
     side:String(x.side||'UNKNOWN').toUpperCase(),
@@ -57,7 +57,7 @@ function featureShape(x={}){
   };
 }
 function keysFor(x={}){
-  const f=featureShape(x);
+  const f=shadowTradeFeatureShape(x);
   return [
     ['EXACT',[f.assetClass,f.side,f.horizon,f.probability,f.edge,f.expectedReturn].join('|')],
     ['CONTEXT',[f.assetClass,f.side,f.horizon].join('|')],
@@ -114,6 +114,7 @@ export function buildShadowTradeQualityModel(ledger,{
 }={}){
   const closed=(ledger?.positions||[]).filter(p=>
     p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED'&&
+    String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER'&&
     finite(p.realizedReturnPct)!=null&&finite(p.realizedNetPnlQuote)!=null
   );
   const maps={
@@ -166,7 +167,7 @@ export function scoreShadowTradeCandidate(model,features,{minExactSamples=8,minC
   const learningValue=clamp(.55*novelty+.45*uncertainty);
   const core={
     version:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
-    featureShape:featureShape(features),
+    featureShape:shadowTradeFeatureShape(features),
     matchedLevel:chosen.level,
     matchedKey:chosen.key,
     samples:chosen.samples,
