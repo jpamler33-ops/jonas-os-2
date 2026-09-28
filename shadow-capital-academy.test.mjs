@@ -94,3 +94,17 @@ test('loss streak triggers one hour cooldown',()=>{
   assert.ok(a.guard.blockers.includes('LOSS_STREAK_COOLDOWN'));
   assert.equal(a.guard.lossPauseUntil,last+60*60_000);
 });
+
+
+test('ABSTAIN probes cannot advance academy progression',()=>{
+  const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
+  l.positions=Array.from({length:25},(_,i)=>({
+    ...pos(i,{pnl:2}),
+    entryMode:'ABSTAIN_PROBE',
+    probeOnly:true
+  }));
+  const a=evaluateShadowCapitalAcademy(l,{asOf:Date.UTC(2026,8,5,12),timeZone:'Europe/Berlin'});
+  assert.equal(a.metrics.closedTrades,0);
+  assert.equal(a.achievedLevel,-1);
+  assert.equal(a.activeStage,'BOOTCAMP');
+});
