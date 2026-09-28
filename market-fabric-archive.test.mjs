@@ -85,6 +85,45 @@ test('legacy gzip migration candidate is accepted only when Brotli saves at leas
   }
 });
 
+test('legacy Brotli segment is re-packed at quality 11 only when it saves real bytes',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-repack-'));
+  const file=path.join(dir,'tcx-market-events.jsonl');
+  const sourceName='tcx-market-events.jsonl.segment-10-200-999.jsonl';
+  const brName=sourceName+'.br';
+  const rows=[];
+  for(let i=0;i<400;i++) rows.push(JSON.stringify({seq:i,eventHash:String(i),kind:'MARKET_SNAPSHOT',symbol:'ETHUSDT',payload:Array(25).fill('repeating-market-state-'+(i%7))}));
+  const raw=rows.join('\n')+'\n';
+  const {brotliCompressSync,constants}=await import('node:zlib');
+  const br=brotliCompressSync(Buffer.from(raw,'utf8'),{params:{
+    [constants.BROTLI_PARAM_QUALITY]:4,
+    [constants.BROTLI_PARAM_MODE]:constants.BROTLI_MODE_TEXT
+  }});
+  await writeFile(path.join(dir,brName),br);
+  const item={
+    name:brName,sourceName,codec:'brotli',rawBytes:Buffer.byteLength(raw),compressedBytes:br.length,
+    rawSha256:sha256(raw),compressedSha256:sha256(br),firstSeq:10,lastSeq:200,tailHash:'200',createdAt:999,
+    migrationQuality:4
+  };
+  const core={version:MARKET_FABRIC_ARCHIVE_VERSION,segments:[item]};
+  await writeFile(file+'.segments-manifest.json',JSON.stringify({...core,fingerprint:sha256(core)})+'\n');
+  const result=await archiveMarketFabricSegments({filePath:file,maxMigrationsPerRun:1});
+  assert.equal(result.migrationAttempts,1);
+  const m=JSON.parse(await readFile(file+'.segments-manifest.json','utf8'));
+  const persisted=m.segments[0];
+  if(result.recompressedSegments===1){
+    assert.equal(persisted.migrationQuality,11);
+    assert.ok(persisted.compressedBytes<br.length*.98);
+    assert.ok(persisted.name.endsWith('.q11.br'));
+    const packed=await readFile(path.join(dir,persisted.name));
+    assert.equal(brotliDecompressSync(packed).toString('utf8'),raw);
+    await assert.rejects(()=>stat(path.join(dir,brName)),err=>err?.code==='ENOENT');
+  }else{
+    assert.equal(result.recompressionRejected,1);
+    assert.equal(persisted.name,brName);
+    assert.ok(persisted.brotli11CandidateRejectedAt);
+  }
+});
+
 test('rejected Brotli candidate is not retried on every maintenance pass',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-no-retry-'));
   const file=path.join(dir,'tcx-market-events.jsonl');
