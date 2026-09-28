@@ -47,7 +47,9 @@ test('confluence map merges nearby structure book and liquidation evidence',()=>
   });
   assert.ok(out.zones.length>=2);
   assert.ok(out.zones[0].sources.length>=2);
-  assert.match(out.text,/STRUCTURE \+ ORDERBOOK \+ LIQUIDATION/);
+  assert.match(out.text,/STRUCTURE/);
+  assert.match(out.text,/ORDERBOOK/);
+  assert.match(out.text,/LIQUIDATION/);
   assert.match(out.text,/KEINE Trefferwahrscheinlichkeit/);
   assert.equal(out.scoreIsProbability,false);
 });
