@@ -160,116 +160,18 @@ export function marketsKeyboard(markets=[],favoritesCount=0) {
 }
 
 export function marketCardText(vm,{live=false,detailMode="SIMPLE"}={}) {
-  if(!vm?.market || !vm?.state || !vm?.safety) throw new Error("invalid MarketViewModel");
-  const p=vm.market;
-  const sign=(p.change24hPct??0)>=0?"+":"";
-  const rawBias=String(vm.state.mtfBias||"").toUpperCase();
-  const rawFlow=String(vm.state.flow||"").toUpperCase();
-  const rawRegime=String(vm.state.regime||"").toUpperCase();
-  const direction=rawBias.includes("BULL")||rawBias.includes("UP")
-    ?"🟢 eher steigend"
-    :rawBias.includes("BEAR")||rawBias.includes("DOWN")
-      ?"🔴 eher fallend"
-      :"🟡 keine klare Richtung";
-  const pressure=rawFlow.includes("BID")||rawFlow.includes("BUY")
-    ?"🟢 Käufer stärker"
-    :rawFlow.includes("ASK")||rawFlow.includes("SELL")
-      ?"🔴 Verkäufer stärker"
-      :rawFlow.includes("BALANC")
-        ?"⚪ ausgeglichen"
-        :"⚪ noch unklar";
-  const phase=rawRegime.includes("TREND")
-    ?"Trendmarkt"
-    :rawRegime.includes("RANGE")||rawRegime.includes("SIDE")
-      ?"Seitwärtsmarkt"
-      :rawRegime.includes("VOL")
-        ?"stark schwankender Markt"
-        :safeText(vm.state.regime,"noch unklar");
-  const risk=vm.safety.status==="VALID"
-    ?"🟢 normal"
-    :vm.safety.status==="CAUTION"
-      ?"🟡 erhöht"
-      :"🔴 hoch / Aussage eingeschränkt";
-  const simpleSummary=direction.includes("steigend")
-    ?"Mehr Signale zeigen aktuell nach oben, aber die Lage kann sich ändern."
-    :direction.includes("fallend")
-      ?"Mehr Signale zeigen aktuell nach unten, aber die Lage kann sich ändern."
-      :"TCX sieht gerade keinen eindeutigen Vorteil für steigende oder fallende Kurse.";
-
-  const lines=[
-    "📊 "+vm.symbol.replace("USDT","/USDT")+" · MARKTCHECK",
-    "",
-    "Preis: "+fmt(p.price,p.price!=null&&Math.abs(p.price)<1?6:2)+" USDT",
-    "24 Stunden: "+(p.change24hPct==null?"—":sign+fmt(p.change24hPct,2)+" %"),
-    "",
-    "TCX EINSCHÄTZUNG",
-    "Richtung: "+direction,
-    "Marktphase: "+phase,
-    "Kauf-/Verkaufsdruck: "+pressure,
-    "Risiko: "+risk,
-    "",
-    "EINFACH GESAGT",
-    simpleSummary
-  ];
-
-  if(detailMode!=="SIMPLE") {
-    lines.push(
-      "",
-      "PROFI-DETAILS",
-      "Regime: "+vm.state.regime,
-      "MTF-Bias: "+vm.state.mtfBias,
-      "Liquidität: "+vm.state.liquidity,
-      "Flow: "+vm.state.flow,
-      "Spread: "+fmt(p.spreadBps,3)+" bps",
-      "Quellen-Übereinstimmung: "+(vm.evidence.witnessAgreement==null?"—":fmt(vm.evidence.witnessAgreement*100,0)+" %"),
-      "Historische Vergleichsfälle: "+(vm.evidence.memorySupport??"—"),
-      "Datenqualität: "+(vm.evidence.dataQuality==null?"—":fmt(vm.evidence.dataQuality,1))
-    );
-  }
-  if(detailMode==="RESEARCH") {
-    lines.push(
-      "",
-      "FORSCHUNGSDATEN",
-      "availableAt: "+(vm.provenance.availableAt?new Date(vm.provenance.availableAt).toISOString():"—"),
-      "source: "+vm.provenance.source,
-      "version: "+vm.provenance.version
-    );
-  }
-
-  lines.push(
-    "",
-    live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht",
-    "Systemmodus: ABSTAIN / SHADOW_ONLY"
-  );
-  return lines.join("\n");
+ const p=vm.market,chg=p.change24hPct,sign=(chg??0)>=0?"+":"",bias=String(vm.state.mtfBias||"").toUpperCase(),flow=String(vm.state.flow||"").toUpperCase(),reg=String(vm.state.regime||"").toUpperCase();
+ const direction=bias.includes("BULL")||bias.includes("UP")?"↗ LONG BIAS":bias.includes("BEAR")||bias.includes("DOWN")?"↘ SHORT BIAS":"→ NEUTRAL";
+ const phase=reg.includes("TREND")?"TREND":reg.includes("RANGE")||reg.includes("SIDE")?"RANGE":reg.includes("VOL")?"HIGH VOL":safeText(vm.state.regime,"UNKNOWN");
+ const pressure=flow.includes("BUY")||flow.includes("BID")?"BUY":flow.includes("SELL")||flow.includes("ASK")?"SELL":"BALANCED";
+ const ev=vm.evidence.witnessAgreement==null?"—":fmt(vm.evidence.witnessAgreement*100,0)+"%";
+ const risk=vm.safety.status==="VALID"?"NORMAL":vm.safety.status==="CAUTION"?"CAUTION":"RESTRICTED";
+ const lines=["📊 "+vm.symbol.replace("USDT","/USDT")+" · LIVE","","$ "+fmt(p.price,p.price!=null&&Math.abs(p.price)<1?6:2)+"   ·   24H "+(chg==null?"—":sign+fmt(chg,2)+"%"),"","TCX SNAPSHOT","Direction   "+direction,"Regime      "+phase,"Flow        "+pressure,"Evidence    "+ev,"Risk        "+risk];
+ if(detailMode!=="SIMPLE")lines.push("","MARKET DATA","Spread "+fmt(p.spreadBps,3)+" bps","Memory "+(vm.evidence.memorySupport??"—"),"Source "+vm.provenance.source);
+ lines.push("","🧪 "+(live?"LIVE ON":"SNAPSHOT")+" · SHADOW_ONLY");return lines.join("\n");
 }
 
-export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {
-  const s=String(symbol||"").toUpperCase();
-  if(!s) throw new Error("symbol required");
-  return {inline_keyboard:[
-    [
-      {text:"🔮 Prognose",callback_data:"forecast:"+s},
-      {text:"🔎 Warum?",callback_data:"why:"+s}
-    ],
-    [
-      {text:"📈 Chart",callback_data:"chart:"+s+":5m"},
-      {text:"🧭 Marktstruktur",callback_data:"regime:"+s}
-    ],
-    [
-      {text:"🔔 Alert",callback_data:"alerthelp:"+s},
-      {text:isFavorite?"★ Beobachtet":"☆ Beobachten",callback_data:"fav:"+s}
-    ],
-    [
-      {text:"🧠 Profi-Details",callback_data:"tcx:"+s},
-      {text:"🔄 Aktualisieren",callback_data:"refresh:"+s}
-    ],
-    [
-      {text:live?"⏸ Live aus":"⚡ Live an",callback_data:"live:"+s+":"+(live?"off":"on")},
-      {text:"🏠 Start",callback_data:"home"}
-    ]
-  ]};
-}
+export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"🔮 Forecast",callback_data:"forecast:"+s},{text:"📈 Chart",callback_data:"chart:"+s+":5m"}],[{text:"🔎 Warum?",callback_data:"why:"+s},{text:"🔔 Alert",callback_data:"alerthelp:"+s}],[{text:isFavorite?"★ Watchlist":"☆ Watchlist",callback_data:"fav:"+s},{text:"🔄 Refresh",callback_data:"refresh:"+s}],[{text:"🧠 Details",callback_data:"tcx:"+s},{text:"🏠 Command Center",callback_data:"home"}]]};}
 
 export function parseProductCallback(data="") {
   const raw=String(data);
