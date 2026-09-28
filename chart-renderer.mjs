@@ -134,7 +134,7 @@ function fmtCompact(n){
   return n.toFixed(2);
 }
 
-export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null}={}){
+export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null,superchart=null}={}){
   const candles=candlesInput.slice(-100);
   if(candles.length<2)throw new Error('Need at least 2 candles');
 
@@ -144,6 +144,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
   const pivotC=color('#d0d7de'),activeC=color('#9aa4ad'),breakC=color('#ffd166'),retestC=color('#b388ff');
   const forecastBaseC=color('#4ea1ff'),forecastUpC=color('#3ddc97'),forecastDownC=color('#ff5c5c'),forecastBandC=color('#4ea1ff',32);
   const volUp=color('#147d68'),volDown=color('#9b3d45'),zoneSupport=color('#3ddc97',35),zoneResistance=color('#ff8c69',35);
+  const confluenceC=color('#ffd166'),liqLongC=color('#ff5c5c'),liqShortC=color('#3ddc97'),intelPanel=color('#101720',235);
 
   const buf=Buffer.alloc(width*height*4);
   for(let i=0;i<width*height;i++){buf[i*4]=bg[0];buf[i*4+1]=bg[1];buf[i*4+2]=bg[2];buf[i*4+3]=255;}
@@ -240,6 +241,24 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     }
   }
 
+  if(superchart&&superchart.mode!=='CLEAN'){
+    for(const z of superchart.confluenceZones||[]){
+      const p=Number(z?.price);if(!Number.isFinite(p)||p<scale.min||p>scale.max)continue;
+      const y=yOf(p),score=Math.max(0,Math.min(100,Number(z?.score)||0));
+      const half=Math.max(2,2+score/30);
+      fillRect(buf,width,height,left,y-half,candlePlotW,half*2,color('#ffd166',18+Math.round(score*.22)),true);
+      line(buf,width,height,left,y,left+candlePlotW,y,confluenceC);
+      labelBox(buf,width,height,left+6,Math.max(priceTop+4,Math.min(priceBottom-13,y-6)),'C'+Math.round(score),confluenceC,panel,1);
+    }
+    for(const z of superchart.liquidationZones||[]){
+      const p=Number(z?.price);if(!Number.isFinite(p)||p<scale.min||p>scale.max)continue;
+      const y=yOf(p),long=Number(z?.longUsd)||0,short=Number(z?.shortUsd)||0;
+      const fg=long>=short?liqLongC:liqShortC;
+      line(buf,width,height,left+candlePlotW*.72,y,left+candlePlotW,y,fg);
+      labelBox(buf,width,height,Math.max(left,left+candlePlotW-42),Math.max(priceTop+4,Math.min(priceBottom-13,y-6)),'LIQ',fg,panel,1);
+    }
+  }
+
   if(overlayActive){
     const allHorizonMs=[
       ...(forecastOverlay?.horizons||[]).map(x=>Number(x?.horizonMs)),
@@ -317,7 +336,28 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     hx+=tw+8;
     if(hx>width-160)break;
   }
-  drawText(buf,width,height,16,46,overlayActive?'OBSERVED OHLCV  DERIVED STRUCTURE  PROBABILISTIC FORECAST PATH  NOT GUARANTEED':'OBSERVED OHLCV  DERIVED STRUCTURE REGIME RIFT  MECHANISM NOT INFERRED',muted,1);
+  if(superchart){
+    let sx=Math.max(16,width-18);
+    const badges=[...(superchart.badges||[])].reverse();
+    for(const b of badges){
+      const txt=String(b.label)+' '+String(b.value),tw=textWidth(txt,1)+8;
+      sx-=tw;
+      if(sx<left+260)break;
+      fillRect(buf,width,height,sx,40,tw,14,color('#161f2b'));
+      drawText(buf,width,height,sx+4,44,txt,text,1);
+      sx-=4;
+    }
+    if(superchart.mode==='FULL'&&(superchart.panel||[]).length){
+      const pw=210,ph=Math.min(112,20+(superchart.panel.length*14)),px=width-right-pw-6,py=priceTop+42;
+      fillRect(buf,width,height,px,py,pw,ph,intelPanel,true);
+      drawText(buf,width,height,px+8,py+7,'FULL INTEL',confluenceC,1);
+      let yy=py+22;
+      for(const row of superchart.panel.slice(0,6)){
+        drawText(buf,width,height,px+8,yy,String(row),text,1);yy+=14;
+      }
+    }
+  }
+  drawText(buf,width,height,16,46,superchart?('TCX SUPERCHART '+superchart.mode+'  OBSERVED + DERIVED + PROBABILISTIC  SHADOW_ONLY'):(overlayActive?'OBSERVED OHLCV  DERIVED STRUCTURE  PROBABILISTIC FORECAST PATH  NOT GUARANTEED':'OBSERVED OHLCV  DERIVED STRUCTURE REGIME RIFT  MECHANISM NOT INFERRED'),muted,1);
 
   return pngEncode(width,height,buf);
 }
