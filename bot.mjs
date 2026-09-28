@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
+import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
@@ -1325,6 +1326,13 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
   });
   if(!decision.eligible) return {...decision,placed:false};
+  const strategyDnaMemory=buildStrategyDnaMemory(shadowPortfolioLedger);
+  const opportunityAllocation=allocateShadowOpportunity(strategyDnaMemory,{
+    ...decision,assetClass,symbol:decision.symbol
+  },{baseNotionalQuote:decision.notionalQuote});
+  if(opportunityAllocation.blocked){
+    return {...decision,placed:false,reason:'FAILURE_MEMORY_AVOID',opportunityAllocation};
+  }
   if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy){
     return {...decision,placed:false,reason:'RUNTIME_AUDIT_OR_OMS_UNHEALTHY'};
   }
@@ -1364,10 +1372,16 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     symbol:decision.symbol,
     side:decision.side,
     type:'MARKET',
-    notionalQuote:decision.notionalQuote,
+    notionalQuote:opportunityAllocation.notionalQuote,
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
       role:'ENTRY',
+      opportunityAllocatorVersion:OPPORTUNITY_ALLOCATOR_VERSION,
+      opportunityScore:opportunityAllocation.score,
+      opportunityMultiplier:opportunityAllocation.multiplier,
+      opportunityReason:opportunityAllocation.reason,
+      strategyDnaSamples:opportunityAllocation.samples,
+      failureMemoryScore:opportunityAllocation.failureScore,
       assetClass,
       strategyLane:[decision.symbol,decision.horizonId,decision.side].join(':'),
       academyVersion:SHADOW_CAPITAL_ACADEMY_VERSION,
@@ -1398,7 +1412,10 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   console.log('auto shadow trade placed',JSON.stringify({
     symbol:decision.symbol,
     side:decision.side,
-    notionalQuote:decision.notionalQuote,
+    notionalQuote:opportunityAllocation.notionalQuote,
+    opportunityScore:opportunityAllocation.score,
+    opportunityMultiplier:opportunityAllocation.multiplier,
+    failureMemoryScore:opportunityAllocation.failureScore,
     horizonId:decision.horizonId,
     expectedReturn:decision.expectedReturn,
     directionalProbability:decision.directionalProbability,
@@ -1418,7 +1435,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     orderId:order.id,
     execution:'SHADOW_ONLY'
   }));
-  return {...decision,placed:true,orderId:order.id,status:order.status};
+  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation};
 }
 
 
