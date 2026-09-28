@@ -30,6 +30,7 @@ export function runForecastShadowEvaluationWorker(payload,{
     timer.unref?.();
 
     worker.once('message',message=>{
+      worker.terminate().catch(()=>{});
       if(message?.ok===true) finish(resolve,message.result);
       else{
         const e=new Error(String(message?.error||'FORECAST_SHADOW_WORKER_FAILED'));
