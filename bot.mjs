@@ -3685,138 +3685,20 @@ async function showShadowTrainingCoach(chatId,messageId=null){
 }
 
 async function showShadowTradeStats(chatId,messageId=null,period='DAY'){
-  const p=String(period||'DAY').toUpperCase();
-  const stats=shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:p,asOf:Date.now(),timeZone:shadowStatsTimeZone});
-  const all=shadowPortfolioStatistics(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
-  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
-  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
-  const pf=stats.profitFactor==null?'—':fmt(stats.profitFactor,2);
-  const meme=stats.byAssetClass?.MEME||null;
-  const core=stats.byAssetClass?.CORE||null;
-  const topSymbols=Object.entries(stats.bySymbol||{})
-    .sort((a,b)=>Number(b[1].realizedPnlQuote||0)-Number(a[1].realizedPnlQuote||0))
-    .slice(0,5);
-  const lines=[
-    '📈 TCX TRADE-STATISTIK · '+stats.label,'',
-    'ERGEBNIS',
-    'Trades: '+stats.trades+' · Entries: '+stats.entries,
-    'Gewonnen / verloren / flat: '+stats.wins+' / '+stats.losses+' / '+stats.breakeven,
-    'Winrate: '+pct(stats.winRate),
-    'PnL: '+money(stats.realizedPnlQuote),
-    'Profit Factor: '+pf,
-    'Ø PnL pro Trade: '+money(stats.expectancyQuote),
-    'Ø Gewinn: '+money(stats.avgWinQuote)+' · Ø Verlust: '+(stats.avgLossQuote==null?'—':'-'+fmt(stats.avgLossQuote,2)+' USDT'),'',
-    'ASSET-KLASSEN',
-    'Core: '+(core?core.trades+' Trades · '+money(core.realizedPnlQuote):'keine abgeschlossenen Trades'),
-    'Memecoins: '+(meme?meme.trades+' Trades · '+money(meme.realizedPnlQuote):'keine abgeschlossenen Trades'),'',
-    'TOP COINS',
-    ...(topSymbols.length?topSymbols.map(([symbol,x])=>'• '+symbolLabel(symbol)+' · '+x.trades+' Trades · '+money(x.realizedPnlQuote)):['• noch keine abgeschlossenen Trades']),
-    '',
-    ...(stats.bestTrade?['Bester Trade: '+symbolLabel(stats.bestTrade.symbol)+' · '+money(stats.bestTrade.pnlQuote)]:[]),
-    ...(stats.worstTrade?['Schlechtester Trade: '+symbolLabel(stats.worstTrade.symbol)+' · '+money(stats.worstTrade.pnlQuote)]:[]),
-    '',
-    'SCHNELLÜBERSICHT',
-    'Heute '+money(all.DAY.realizedPnlQuote)+' · Woche '+money(all.WEEK.realizedPnlQuote),
-    'Monat '+money(all.MONTH.realizedPnlQuote)+' · Gesamt '+money(all.ALL.realizedPnlQuote),
-    '',
-    'Zeitzone: '+shadowStatsTimeZone,
-    'Mode: SHADOW_ONLY'
-  ];
-  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
-    [{text:'Heute',callback_data:'home:stats_day'},{text:'Woche',callback_data:'home:stats_week'}],
-    [{text:'Monat',callback_data:'home:stats_month'},{text:'Gesamt',callback_data:'home:stats_all'}],
-    [{text:'💼 Portfolio',callback_data:'home:portfolio'},{text:'🏠 Start',callback_data:'home'}]
-  ]}};
-  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
-  return tg('sendMessage',payload);
+ const p=String(period||'DAY').toUpperCase(),s=shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:p,asOf:Date.now(),timeZone:shadowStatsTimeZone}),all=shadowPortfolioStatistics(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
+ const money=v=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—', pct=v=>Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—';
+ const top=Object.entries(s.bySymbol||{}).sort((x,y)=>Number(y[1].realizedPnlQuote||0)-Number(x[1].realizedPnlQuote||0))[0];
+ const lines=['📈 PERFORMANCE · '+s.label,'','PnL        '+money(s.realizedPnlQuote),'Winrate    '+pct(s.winRate),'Trades     '+s.trades,'Profit F.  '+(s.profitFactor==null?'—':fmt(s.profitFactor,2)),'Ø / Trade  '+money(s.expectancyQuote),'','BESTER MARKT',top?symbolLabel(top[0])+' · '+money(top[1].realizedPnlQuote):'Noch keine abgeschlossenen Trades','','ZEITRAUM','Heute '+money(all.DAY.realizedPnlQuote)+'   ·   Woche '+money(all.WEEK.realizedPnlQuote),'Monat '+money(all.MONTH.realizedPnlQuote)+'   ·   Gesamt '+money(all.ALL.realizedPnlQuote),'','🧪 Virtuelle Performance · SHADOW_ONLY'];
+ const payload={chat_id:chatId,text:lines.join('\n'),reply_markup:{inline_keyboard:[[{text:'Heute',callback_data:'home:stats_day'},{text:'7 Tage',callback_data:'home:stats_week'}],[{text:'30 Tage',callback_data:'home:stats_month'},{text:'Gesamt',callback_data:'home:stats_all'}],[{text:'💼 Portfolio',callback_data:'home:portfolio'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
 }
 
 async function showShadowPortfolio(chatId,messageId=null){
-  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});
-  if(reconciled.changed){
-    shadowPortfolioLedger=reconciled.ledger;
-    await persistShadowPortfolio('ui-reconcile');
-  }
-  const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
-  const probes=shadowResearchProbeSummary(shadowPortfolioLedger,{asOf:Date.now()});
-  const coverage=coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols});
-  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
-  const pctv=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v)*100,2)+'%':'—');
-  const lines=[
-    '💼 TCX AUTONOMES SHADOW-PORTFOLIO','',
-    'VIRTUELLES KONTO',
-    'Startkapital: '+fmt(x.initialEquityQuote,2)+' USDT',
-    'Aktuelle Equity: '+fmt(x.equityQuote,2)+' USDT',
-    'Gesamt-PnL: '+money(x.netPnlQuote)+' · '+pctv(x.returnPct),
-    'Realisiert: '+money(x.realizedPnlQuote),
-    'Offen: '+money(x.unrealizedPnlQuote),'',
-    'PERFORMANCE',
-    'Offene Positionen: '+x.openPositions,
-    'Abgeschlossene Trades: '+x.closedTrades,
-    'Gewonnen / verloren: '+x.wins+' / '+x.losses,
-    'Winrate: '+(x.winRate==null?'noch keine Daten':fmt(x.winRate*100,1)+'%'),
-    'Profit Factor: '+(x.profitFactor==null?'noch nicht messbar':fmt(x.profitFactor,2)),
-    'Ø PnL je Trade: '+(x.expectancyQuote==null?'—':money(x.expectancyQuote)),
-    'Max. Drawdown: '+fmt(x.maxDrawdownQuote,2)+' USDT · '+fmt(x.maxDrawdownPct*100,2)+'%','',
-    'LERN-PROBES (ABSTAIN)',
-    'Offen: '+probes.openPositions+' · abgeschlossen: '+probes.closedTrades+
-      ' · PnL '+money(probes.netPnlQuote),
-    'Diese Probes zählen nicht zur normalen Performance oder Capital Academy.','',
-    'COVERAGE CURRICULUM',
-    'Offen: '+coverage.open+' · abgeschlossen: '+coverage.closed+
-      ' · Coins '+coverage.coveredSymbols+'/'+coverage.targetSymbols,
-    'Lernfenster: '+DEFAULT_COVERAGE_HORIZONS.map(h=>h.label).join(' · '),
-    'Coverage-Probes schließen nur am Zeit-Horizont und zählen nicht zur normalen Performance.','',
-    'AKTIVE TRADES'
-  ];
-  if(x.active.length){
-    for(const p of x.active.slice(0,8)){
-      lines.push(
-        '• '+p.symbol.replace('USDT','/')+' · '+p.side+
-        ' · Entry '+priceText(p.entryPrice)+
-        ' · PnL '+money(p.unrealizedNetPnlQuote)+
-        ' · SL '+fmt(Number(p.stopLossPct||0)*100,2)+'%'+
-        ' · TP '+fmt(Number(p.takeProfitPct||0)*100,2)+'%'
-      );
-    }
-  }else lines.push('• aktuell keine normale offene Position');
-  if(coverage.active.length){
-    lines.push('','AKTIVE COVERAGE-PROBES');
-    for(const p of coverage.active.slice(0,8)){
-      lines.push(
-        '• '+p.symbol.replace('USDT','/')+' · '+p.side+
-        ' · '+String(p.horizonId||'')+
-        ' · PnL '+money(p.unrealizedNetPnlQuote)
-      );
-    }
-  }
-  if(probes.active.length){
-    lines.push('','AKTIVE LERN-PROBES');
-    for(const p of probes.active.slice(0,6)){
-      lines.push(
-        '• '+p.symbol.replace('USDT','/')+' · '+p.side+
-        ' · Entry '+priceText(p.entryPrice)+
-        ' · PnL '+money(p.unrealizedNetPnlQuote)+
-        ' · '+String(p.horizonId||'')
-      );
-    }
-  }
-  lines.push(
-    '',
-    'Exit-Regeln: Stop-Loss · Take-Profit · Prognose-Horizont.',
-    'Entries und Exits werden gegen öffentliche Orderbuch-Tiefe simuliert.',
-    'Keine echte Börsenorder wird gesendet.',
-    '',
-    'Mode: SHADOW_ONLY · canExecuteLive: NO'
-  );
-  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
-    [{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
-    [{text:'🔎 Warum kein Trade?',callback_data:'cmdrun:why_not_trade'}],
-    [{text:'🏆 Capital Academy',callback_data:'home:academy'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],
-    [{text:'🏠 Start',callback_data:'home'}]
-  ]}};
-  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
-  return tg('sendMessage',payload);
+ const r=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});if(r.changed){shadowPortfolioLedger=r.ledger;await persistShadowPortfolio('ui-reconcile');}
+ const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),money=v=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—';
+ const lines=['💼 SHADOW PORTFOLIO','','EQUITY      '+fmt(x.equityQuote,2)+' USDT','GESAMT PnL  '+money(x.netPnlQuote),'HEUTE       '+money(shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:'DAY',asOf:Date.now(),timeZone:shadowStatsTimeZone}).realizedPnlQuote),'DRAWDOWN    '+fmt(x.maxDrawdownPct*100,2)+'%','','PERFORMANCE','Trades '+x.closedTrades+'   ·   Winrate '+(x.winRate==null?'—':fmt(x.winRate*100,1)+'%'),'Profit Factor '+(x.profitFactor==null?'—':fmt(x.profitFactor,2))+'   ·   Offen '+x.openPositions,'','AKTIVE POSITIONEN'];
+ if(x.active.length)for(const p of x.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.side+' · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene Hauptposition.');
+ lines.push('','🧪 Simuliertes Kapital · keine echten Orders','Mode: SHADOW_ONLY');
+ const payload={chat_id:chatId,text:lines.join('\n'),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Performance',callback_data:'home:stats_day'}],[{text:'🎯 Signale',callback_data:'home:radar'},{text:'🔎 Kein Trade?',callback_data:'cmdrun:why_not_trade'}],[{text:'🧠 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
 }
 
 async function showTradeDiscoveryDiagnostics(chatId,messageId=null){
