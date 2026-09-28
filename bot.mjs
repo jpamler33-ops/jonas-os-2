@@ -2148,6 +2148,9 @@ function chartKeyboard(symbol, interval) {
     ],
     [
       { text:"◇ WHY", callback_data:`why:${symbol}` },
+      { text:"↺ TRADE REPLAY", callback_data:`tradereplay:${symbol}` }
+    ],
+    [
       { text:"▦ MARKT", callback_data:`refresh:${symbol}` }
     ],
     [{ text:"🏠 Start", callback_data:"home" }]
@@ -3065,6 +3068,16 @@ function statLine(label,s) {
   if(!s||s.n<3) return `${label}: erst ${s?.n||0} brauchbare Vergleichsfälle – noch zu wenig für eine Zusammenfassung`;
   const r=s.returnPct,up=s.maxRisePct,down=s.maxFallPct;
   return [`${label}: ${s.n} ähnliche Fälle · Ähnlichkeit ${fmt(s.medianSimilarity,0)}%`,`  Danach: Ende ${fmt(r.median,2)}% · max. hoch ${fmt(up.median,2)}% · max. runter ${fmt(down.median,2)}%`].join('\n');
+}
+
+function tradeReplayKeyboard(symbol){return {inline_keyboard:[[{text:'▥ CHART LAB',callback_data:`chart:${symbol}:5m`},{text:'⌁ FORECAST',callback_data:`forecast:${symbol}`}],[{text:'▤ PORTFOLIO',callback_data:'home:portfolio'},{text:'⌂ COMMAND',callback_data:'home'}]]};}
+async function showTradeReplay(chatId,messageId,symbol){
+  const rows=(shadowPortfolioLedger?.positions||[]).filter(p=>p?.symbol===symbol&&p?.status==='CLOSED'&&p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false).sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0));
+  const p=rows[0];
+  if(!p)return deliverTelegramTextCard(tg,chatId,messageId,{text:['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━','','Noch kein abgeschlossener Shadow-Trade für diesen Markt vorhanden.','','ABSTAIN / SHADOW_ONLY'].join('\n'),reply_markup:tradeReplayKeyboard(symbol)});
+  const roe=Number(p.realizedMarginRoePct),mfe=Number(p.mfeMarginRoePct),mae=Number(p.maeMarginRoePct),regret=Number(p.exitRegretMarginRoePct),capture=Number(p.captureEfficiency);
+  const lines=['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━','',String(p.side||'—')+' · '+String(p.setupType||'UNKNOWN')+' · '+String(p.horizonId||'—'),'','LIFECYCLE','Entry        '+priceText(p.entryPrice),'Exit         '+priceText(p.exitPrice),'Exit reason  '+String(p.closeReason||'UNKNOWN'),'Opened       '+new Date(Number(p.openedAt)).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}),'Closed       '+new Date(Number(p.closedAt)).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}),'','OUTCOME','Margin ROE   '+(Number.isFinite(roe)?fmt(roe*100,2)+'%':'—'),'MFE          '+(Number.isFinite(mfe)?fmt(mfe*100,2)+'%':'—'),'MAE          '+(Number.isFinite(mae)?fmt(mae*100,2)+'%':'—'),'Exit regret  '+(Number.isFinite(regret)?fmt(regret*100,2)+'%':'—'),'Capture      '+(Number.isFinite(capture)?fmt(capture*100,1)+'%':'—'),'','TRACE','Forecast → Entry → Excursion → Exit → Attribution → Learning','','MFE/MAE stammen aus gespeicherten ausführbaren Shadow-Marks, nicht aus Tick-Level-Extremen.','SHADOW_ONLY · REAL ORDERS BLOCKED'];
+  return deliverTelegramTextCard(tg,chatId,messageId,{text:lines.join('\n').slice(0,4096),reply_markup:tradeReplayKeyboard(symbol)});
 }
 
 async function showMemory(chatId,symbol) {
@@ -4893,6 +4906,7 @@ function parseAction(data='') {
   if (p[0] === 'alertpreset' && p[1] && p[2]) return { kind:'ALERT_PRESET', symbol:p[1], preset:p[2] };
   if (p[0] === 'tf' && p[1] && ['1m','5m','15m','1h'].includes(p[2])) return { kind:'TIMEFRAME', symbol:p[1], interval:p[2] };
   if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
+  if (p[0] === 'tradereplay' && p[1]) return { kind:'TRADE_REPLAY', symbol:p[1] };
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
   if (p[0] === 'engine' && p[1]) return { kind:'ENGINE', symbol:p[1] };
@@ -5150,6 +5164,12 @@ async function handle(update) {
     if (a.kind === 'TIMEFRAME') {
       await showTimeframe(chatId,messageId,a.symbol,a.interval);
       await ack(q.id);
+      return;
+    }
+    if (a.kind === "TRADE_REPLAY") {
+      if(!symbolOk(a.symbol)){ await ack(q.id,"Unbekannter Markt"); return; }
+      await showTradeReplay(chatId,messageId,a.symbol);
+      await ack(q.id,"Trade Replay geladen");
       return;
     }
     if (a.kind === "CHART") {
