@@ -2571,6 +2571,11 @@ async function showTrendContext(chatId,messageId,{force=false}={}){
   });
 }
 
+const TCX_UI_VERSION='TCX_COMMAND_CENTER_UI_V2';
+function tcxShell(title,{subtitle=null,lines=[],footer='SHADOW ONLY · REAL ORDERS BLOCKED'}={}){return ['TCX // '+String(title).toUpperCase(),'━━━━━━━━━━━━━━━━━━━━',...(subtitle?[subtitle,'']:[]),...lines,'',footer].join('\n').slice(0,4096);}
+function tcxState(v){const x=String(v||'').toUpperCase();if(['READY','ONLINE','HEALTHY','ACTIVE','ON','VALID','SUPPORTED'].includes(x))return '● '+x;if(['DEGRADED','WATCH','CAUTION','LEARNING','COLLECTING_SEED'].includes(x))return '◐ '+x;if(['ERROR','BLOCKED','DECAYING','OFF'].includes(x))return '○ '+x;return '· '+(x||'UNKNOWN');}
+function tcxHomeKeyboard(){return {inline_keyboard:[[{text:'◉ LIVE RADAR',callback_data:'home:radar'},{text:'▦ MÄRKTE',callback_data:'home:markets'}],[{text:'▤ PORTFOLIO',callback_data:'home:portfolio'},{text:'⌁ LEARNING',callback_data:'home:performance'}],[{text:'◇ PROOF',callback_data:'home:proof'},{text:'⚙ SYSTEM',callback_data:'home:system'}],[{text:'☰ MEHR',callback_data:'home:more'}]]};}
+
 function learningPct01(v,d=1){
   const n=Number(v);
   return Number.isFinite(n)?(n*100).toFixed(d)+'%':'—';
@@ -2595,7 +2600,7 @@ function renderLearningCenterText(){
   }[summary.phase]||summary.phase;
 
   const lines=[
-    '🧪 TCX LEARNING LAB','',
+    'TCX // LEARNING LAB','━━━━━━━━━━━━━━━━━━━━','',
     'STATUS       '+phaseLabel,
     'AUTOLEARN    '+(summary.autoLearn.enabled?'🟢 aktiv':'⏸ aus'),
     'MÄRKTE       '+summary.autoLearn.symbols.length,
@@ -2698,8 +2703,8 @@ async function showHomeSection(chatId,messageId,section) {
       const icon=status==='VALID'?'🟢':status==='CAUTION'?'🟡':'⚪';
       return `${symbolLabel(symbol)} · ${icon} ${String(r.regime||'unklar').replaceAll('_',' ')} · Quellen ${witness}% · Lernfälle ${r.support||0} · ${Math.round(age/1000)}s alt`;
     });
-    text=['🎯 SIGNAL RADAR','','Live-Marktbedingungen mit auffälliger Aktivität.','',...lines,'','🟢 sauber   ·   🟡 vorsichtig   ·   ⚪ unklar','','Tippe anschließend auf Märkte, um Forecast und Risiko zu öffnen.'].join('\n');
-  } else if(section==='SYSTEM') {const port=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),league=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}),coverage=coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}),gov=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});text=['🖥 TCX SYSTEM','','CORE HEALTH','Engine       '+(auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 DEGRADED'),'Market Data  '+(marketFabric.healthy?'🟢 HEALTHY':'🔴 ERROR'),'Persistence  '+(persistenceHealthy&&episodePersistenceHealthy&&persistentStorageMounted?'🟢 HEALTHY':'🟡 CHECK'),'Evidence     '+(evidenceHistoryHealthy?'🟢 HEALTHY':'🟡 CHECK'),'','AUTOMATION','AutoLearn    '+(autoLearnEnabled?'🟢 ON':'⏸ OFF')+' · '+autoLearnSymbols.length+' Märkte · '+Math.round(autoLearnForecastMs/60000)+'m','Shadow Trade '+(autoShadowTradingEnabled?'🟢 ON':'⏸ OFF')+' · '+port.openPositions+' offen','Coverage     '+(coverageCurriculumEnabled?'🟢 ON':'⏸ OFF')+' · '+coverage.open+' offen · '+coverage.closed+' fertig','Strategy     '+(strategyLeagueEnabled?'🟢 ON':'⏸ OFF')+' · '+league.eligibleStrategies+' qualifiziert','','DATA','Research     '+(researchDataPlane.healthy?'🟢':'🔴')+' · '+researchDataPlane.totalRecords+' Snapshots','Governance   '+(researchGovernanceHealthy?'🟢':'🟡')+' · '+gov.featureCatalog.featureCount+' Features','Liquidation  '+(liquidationResearchStream.health().connected?'🟢 LIVE':'🟡 CONNECTING'),'On-Chain     🟢 BTC · ETH · SOL','','SAFETY','Execution    SHADOW_ONLY','Real Orders  ⛔ BLOCKED','canExecute   false'].join('\n');
+    text=tcxShell('SIGNAL RADAR',{subtitle:'MARKET INTELLIGENCE · LIVE',lines:[...lines,'','● sauber   ◐ vorsichtig   ○ unklar','','Coin öffnen → Forecast → Why → Risiko']});
+  } else if(section==='SYSTEM') {const port=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),league=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}),coverage=coverageCurriculumSummary(shadowPortfolioLedger,{symbols:autoLearnSymbols}),gov=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});text=['TCX // SYSTEM','━━━━━━━━━━━━━━━━━━━━','','CORE HEALTH','Engine       '+(auditLedger.healthy&&marketFabric.healthy?'🟢 ONLINE':'🟡 DEGRADED'),'Market Data  '+(marketFabric.healthy?'🟢 HEALTHY':'🔴 ERROR'),'Persistence  '+(persistenceHealthy&&episodePersistenceHealthy&&persistentStorageMounted?'🟢 HEALTHY':'🟡 CHECK'),'Evidence     '+(evidenceHistoryHealthy?'🟢 HEALTHY':'🟡 CHECK'),'','AUTOMATION','AutoLearn    '+(autoLearnEnabled?'🟢 ON':'⏸ OFF')+' · '+autoLearnSymbols.length+' Märkte · '+Math.round(autoLearnForecastMs/60000)+'m','Shadow Trade '+(autoShadowTradingEnabled?'🟢 ON':'⏸ OFF')+' · '+port.openPositions+' offen','Coverage     '+(coverageCurriculumEnabled?'🟢 ON':'⏸ OFF')+' · '+coverage.open+' offen · '+coverage.closed+' fertig','Strategy     '+(strategyLeagueEnabled?'🟢 ON':'⏸ OFF')+' · '+league.eligibleStrategies+' qualifiziert','','DATA','Research     '+(researchDataPlane.healthy?'🟢':'🔴')+' · '+researchDataPlane.totalRecords+' Snapshots','Governance   '+(researchGovernanceHealthy?'🟢':'🟡')+' · '+gov.featureCatalog.featureCount+' Features','Liquidation  '+(liquidationResearchStream.health().connected?'🟢 LIVE':'🟡 CONNECTING'),'On-Chain     🟢 BTC · ETH · SOL','','SAFETY','Execution    SHADOW_ONLY','Real Orders  ⛔ BLOCKED','canExecute   false'].join('\n');
   } else if(section==='PERFORMANCE') {
     const total=episodes.length;
     const mature15=episodes.filter(e=>e.outcomes?.['3']).length;
