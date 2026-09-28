@@ -99,10 +99,12 @@ function run(input){
 try{
   const result=run(workerData);
   parentPort.postMessage({ok:true,result});
+  parentPort.close();
 }catch(err){
   parentPort.postMessage({
     ok:false,
     error:err instanceof Error?err.message:String(err),
     stack:err instanceof Error?err.stack:null
   });
+  parentPort.close();
 }
