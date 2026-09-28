@@ -2967,15 +2967,24 @@ function chartCaption(symbol, interval, analysis, candles, availableAt, host, da
   const vol=Number(dashboard?.realizedVolPct)||0,atr=Number(dashboard?.atrPct)||0,vr=Number(dashboard?.volumeRatio)||0;
   const volBand=vol>=1?'HIGH':vol>=.45?'MEDIUM':'LOW';
   const trend=String(analysis?.trend||'UNKNOWN');
+  const ema20=Number(analysis?.ema20),ema50=Number(analysis?.ema50),last=Number(analysis?.lastClose);
+  const emaSpread=Number.isFinite(ema20)&&Number.isFinite(ema50)&&last>0?Math.abs(ema20-ema50)/last*100:0;
+  const trendStrength=trend==='NEUTRAL'?Math.min(49,Math.round(emaSpread*180)):Math.min(100,50+Math.round(emaSpread*220));
+  const br=analysis?.pattern;
+  const structureEvent=br?(br.side+' · '+br.stage.replaceAll('_',' ')+' @ '+priceText(br.level)):'NO ACTIVE BREAK / RETEST';
+  const recentPivots=(analysis?.classifiedPivots||[]).slice(-4).map(p=>p.label+' '+priceText(p.price)).join('  ·  ')||'—';
   return [
     'TCX // CHART LAB · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━',
     interval.toUpperCase()+' · LIVE STRUCTURE','',
     'STRUCTURE',piv,
-    'Trend        '+trend,
+    'Swings       '+recentPivots,
+    'Trend        '+trend+' · strength '+trendStrength+'/100',
+    'Event        '+structureEvent,
     'Support      '+priceText(analysis?.support),
     'Resistance   '+priceText(analysis?.resistance),'',
     'MARKET PULSE',
     'Volatilität  '+volBand+' · '+fmt(vol,3)+'% σ',
+    'Regime       '+String(dashboard?.regime||'UNKNOWN'),
     'ATR/Range    '+fmt(atr,3)+'%',
     'Volumen      '+fmt(vr,2)+'× Median',
     'Liquidität   '+String(dashboard?.liquidity||'UNKNOWN')+' · '+fmt(dashboard?.spreadBps,2)+' bps',
