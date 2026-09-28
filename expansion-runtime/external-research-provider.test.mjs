@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createExternalResearchProvider,coinMetricsSnapshotToExtraFeatures,deribitOptionsSnapshotToExtraFeatures,macroSnapshotToExtraFeatures,predictionMarketSnapshotToExtraFeatures} from './external-research-provider.mjs';
 
-function response(body){return {ok:true,status:200,json:async()=>body};}
+function response(body){return {ok:true,status:200,json:async()=>body,text:async()=>String(body)};}
+function csvResponse(seriesId,current,previous){
+  return {ok:true,status:200,text:async()=>['observation_date,'+seriesId,'2026-09-27,'+previous,'2026-09-28,'+current].join('\n')};
+}
 
 test('external research provider normalizes public and optional sources',async()=>{
   const fetchImpl=async url=>{
@@ -35,10 +38,19 @@ test('external research provider normalizes public and optional sources',async()
   assert.ok(predictionMarketSnapshotToExtraFeatures(bundle.predictionMarket).some(x=>x.id==='research.prediction.yesProbability'&&x.value===.63));
 });
 
-test('optional sources fail closed when not configured',async()=>{
-  const provider=createExternalResearchProvider({fetchImpl:async()=>{throw new Error('must not fetch');},now:()=>1});
+test('FRED macro falls back to public CSV when no API key is configured',async()=>{
+  const fetchImpl=async url=>{
+    const sid=new URL(String(url)).searchParams.get('id');
+    const val={DFF:[5,4.9],DGS10:[4,3.9],DTWEXBGS:[120,119],WALCL:[7000,6990]}[sid];
+    if(!val) throw new Error('unexpected '+url);
+    return csvResponse(sid,val[0],val[1]);
+  };
+  const provider=createExternalResearchProvider({fetchImpl,now:()=>1790629200000});
   const macro=await provider.fetchMacroSnapshot();
   const poly=await provider.fetchPredictionMarketSnapshot('BTCUSDT');
-  assert.equal(macro.ok,false);
+  assert.equal(macro.ok,true);
+  assert.equal(macro.source,'FRED_GRAPH_CSV_CURRENT');
+  assert.equal(macro.metrics.us10yPct,4);
+  assert.equal(macro.provenance.historicalVintageGuarantee,false);
   assert.equal(poly.ok,false);
 });
