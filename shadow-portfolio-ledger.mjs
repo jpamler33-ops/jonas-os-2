@@ -103,11 +103,17 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     horizonId:String(order.strategyMeta?.horizonId||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
-    exploration:['EXPLORATION','ABSTAIN_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
+    exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
     probeOnly:String(order.strategyMeta?.entryMode||'').toUpperCase()==='ABSTAIN_PROBE',
     probeAdmissionReasons:Array.isArray(order.strategyMeta?.probeAdmissionReasons)
       ?order.strategyMeta.probeAdmissionReasons.map(String).slice(0,12)
       :[],
+    coverageCurriculumVersion:String(order.strategyMeta?.coverageCurriculumVersion||''),
+    coverageKey:String(order.strategyMeta?.coverageKey||''),
+    coverageSlotStart:finite(order.strategyMeta?.coverageSlotStart),
+    coverageSlotEnd:finite(order.strategyMeta?.coverageSlotEnd),
+    coveragePurpose:String(order.strategyMeta?.coveragePurpose||''),
+    horizonOnlyExit:order.strategyMeta?.horizonOnlyExit===true,
     challengerRuleId:String(order.strategyMeta?.challengerRuleId||''),
     challengerDecisionKey:String(order.strategyMeta?.challengerDecisionKey||''),
     challengerEngineVersion:String(order.strategyMeta?.challengerEngineVersion||''),
@@ -231,9 +237,13 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
 
   let trigger=null;
   const ret=finite(exit.returnPct,0);
-  if(ret<=-Math.abs(Number(position.stopLossPct)||0)) trigger='STOP_LOSS';
-  else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
-  else if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+  if(position.horizonOnlyExit===true){
+    if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+  }else{
+    if(ret<=-Math.abs(Number(position.stopLossPct)||0)) trigger='STOP_LOSS';
+    else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
+    else if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+  }
   return {position:next,trigger,changed:true,exit};
 }
 
@@ -293,10 +303,10 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const known=new Set(base.positions.map(p=>String(p.entryOrderId)));
   let added=0;
   for(const order of Array.isArray(orders)?orders:[]){
-    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']})||known.has(String(order.id))) continue;
+    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']})||known.has(String(order.id))) continue;
     const p=shadowPositionFromEntryOrder(order,{
       openedAt:finite(order.updatedAt,finite(order.createdAt,now)),
-      acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']
+      acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']
     });
     base.positions.push(p);
     known.add(String(order.id));
@@ -351,7 +361,7 @@ export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
 
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const open=positions.filter(p=>p.status==='OPEN');
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
@@ -493,7 +503,7 @@ function tradeStats(rows){
 export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
   const window=periodWindow(period,asOf,timeZone);
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
   const base=tradeStats(closed);
