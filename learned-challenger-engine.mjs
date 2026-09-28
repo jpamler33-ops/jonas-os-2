@@ -190,7 +190,8 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
   assetClass='CORE',
   baseNotionalQuote=10,
   maxCandidates=2,
-  maxAgeMs=10*60_000
+  maxAgeMs=10*60_000,
+  regimeBrain=null
 }={}){
   const blocked=safeIssuance(issuance,Number(now),Math.max(1,Number(maxAgeMs)||1));
   if(blocked) return freeze({version:LEARNED_CHALLENGER_ENGINE_VERSION,candidates:[],reason:blocked,execution:'SHADOW_ONLY',canExecuteLive:false});
@@ -222,6 +223,10 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
     for(const rule of rules){
       if(JSON.stringify(rule.shape)!==JSON.stringify(shape)) continue;
       const statusMultiplier=rule.status==='QUALIFIED'?1:rule.status==='TRIAL'?.75:.5;
+      const regimeDecision=typeof regimeBrain?.decisionForRule==='function'
+        ?regimeBrain.decisionForRule(rule.ruleId)
+        :{status:'UNKNOWN',multiplier:.65,reason:'REGIME_BRAIN_UNAVAILABLE',samples:0};
+      if(Number(regimeDecision?.multiplier||0)<=0) continue;
       const core={
         issuanceId:String(issuance.issuanceId||''),
         forecastFingerprint:String(issuance.forecastFingerprint||issuance.forecast?.fingerprint||''),
@@ -243,7 +248,11 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
         sourceSamples:rule.discovery.samples,
         forwardSamples:rule.forward.n,
         why:rule.why,
-        notionalQuote:Math.max(1,Number(baseNotionalQuote)||10)*statusMultiplier,
+        regimeStatus:String(regimeDecision?.status||'UNKNOWN'),
+        regimeSamples:Number(regimeDecision?.samples||0),
+        regimeMultiplier:Number(regimeDecision?.multiplier||.65),
+        regimeReason:String(regimeDecision?.reason||'UNKNOWN'),
+        notionalQuote:Math.max(1,Number(baseNotionalQuote)||10)*statusMultiplier*Number(regimeDecision?.multiplier||.65),
         generatedAt:Number(issuance.generatedAt),
         admissionGate:String(issuance.admission?.gate||'').toUpperCase(),
         execution:'SHADOW_ONLY',
