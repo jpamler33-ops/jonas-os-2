@@ -116,7 +116,7 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
   candidates.sort((a,b)=>b.discoveryScore-a.discoveryScore||b.learned.learningValue-a.learned.learningValue);
   if(!candidates.length) return no('NO_SAFE_LEARNABLE_CANDIDATE',{admissionGate,ageMs,candidatesExamined:0});
   const c=candidates[0];
-  if(c.learned.learningValue<minLearningValue){
+  if(!abstainProbe&&c.learned.learningValue<minLearningValue){
     return no('LEARNING_VALUE_TOO_LOW',{admissionGate,ageMs,candidate:c});
   }
   const core={
