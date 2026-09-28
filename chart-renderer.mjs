@@ -131,7 +131,7 @@ function fmtCompact(n){
   return n.toFixed(2);
 }
 
-export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null}={}){
+export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null}={}){
   const candles=candlesInput.slice(-100);
   if(candles.length<2)throw new Error('Need at least 2 candles');
 
@@ -229,6 +229,19 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
       const x=left+(ri+0.5)*step;
       line(buf,width,height,x,priceTop,x,priceBottom,retestC);
       labelBox(buf,width,height,Math.min(width-right-34,Math.max(left,x-10)),priceTop+25,'RT',retestC,panel,2);
+    }
+  }
+
+  if(tradeReplay){
+    const marks=[['ENTRY',Number(tradeReplay.entryAt),Number(tradeReplay.entryPrice),supportC],['EXIT',Number(tradeReplay.exitAt),Number(tradeReplay.exitPrice),resistanceC]];
+    for(const [label,at,price,fg] of marks){
+      if(!Number.isFinite(at)||!Number.isFinite(price))continue;
+      const idx=candles.findIndex(x=>Number(x.openTime)<=at&&at<=Number(x.closeTime));
+      if(idx<0)continue;
+      const x=left+(idx+0.5)*step,y=yOf(price);
+      line(buf,width,height,x,priceTop,x,priceBottom,fg);
+      fillRect(buf,width,height,x-4,y-4,9,9,fg);
+      labelBox(buf,width,height,Math.min(width-right-58,Math.max(left,x-18)),label==='ENTRY'?priceTop+44:priceTop+62,label,fg,panel,2);
     }
   }
 
