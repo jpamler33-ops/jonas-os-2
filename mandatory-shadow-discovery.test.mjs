@@ -123,3 +123,34 @@ test('ABSTAIN probe still refuses degraded safety state',()=>{
   assert.equal(d.eligible,false);
   assert.equal(d.reason,'DATA_SAFETY_NOT_NORMAL');
 });
+
+
+test('forced ABSTAIN probe can label uncalibrated institutional uncertainty',()=>{
+  const x=issuance({
+    admission:{gate:'ABSTAIN',reasons:['SCIENCE_INSUFFICIENT']},
+    probabilityDisplayAllowed:false
+  });
+  x.forecast={horizons:[{
+    horizonId:'15m',
+    horizonMs:900000,
+    gate:'INSUFFICIENT',
+    direction:'UNKNOWN',
+    expectedReturn:.0002,
+    probabilities:{up:.42,down:.36,flat:.22},
+    calibration:{status:'INSUFFICIENT'},
+    display:{probabilityDisplayAllowed:false,probabilities:null}
+  }]};
+  const model=buildShadowTradeQualityModel({positions:[]},{asOf:2000});
+  const d=deriveMandatoryShadowDiscovery(x,model,{
+    now:2000,
+    assetClass:'CORE',
+    allowAbstainProbe:true,
+    abstainProbeNotionalQuote:5
+  });
+  assert.equal(d.eligible,true);
+  assert.equal(d.entryMode,'ABSTAIN_PROBE');
+  assert.equal(d.notionalQuote,5);
+  assert.equal(d.learning.calibrationStatus,'INSUFFICIENT');
+  assert.equal(d.learning.probeEvidenceClass,'UNCALIBRATED_DIAGNOSTIC_PROBE');
+  assert.equal(d.canExecuteLive,false);
+});
