@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, open as openFile } from 'node:fs/promises';
+import { mkdir, open as openFile, stat, truncate } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import readline from 'node:readline';
 import { canonicalJson, sha256 } from './institutional-kernel.mjs';
@@ -81,15 +81,23 @@ export async function openMarketDataFabric(filePath,{maxInMemoryEvents=12000}={}
   const keep=Math.max(1000,Math.floor(Number(maxInMemoryEvents)||12000));
   const ring=new Array(keep);
   let retainedCount=0,ringPos=0,total=0;
-  let prev=GENESIS,expectedSeq=1,healthy=true,error=null;
+  let prev=GENESIS,expectedSeq=1,healthy=true,error=null,lastValidByteOffset=0,byteOffset=0,recoveredTruncatedTail=false;
   try{
     const input=createReadStream(filePath,{encoding:'utf8'});
     const rl=readline.createInterface({input,crlfDelay:Infinity});
     for await(const line of rl){
-      if(!line.trim()) continue;
+      const lineBytes=Buffer.byteLength(line,'utf8')+1;
+      if(!line.trim()){byteOffset+=lineBytes;continue;}
       let event;
       try{event=JSON.parse(line);}
       catch(err){
+        const info=await stat(filePath);
+        const isTail=byteOffset+Buffer.byteLength(line,'utf8')>=info.size;
+        if(isTail&&lastValidByteOffset>0){
+          await truncate(filePath,lastValidByteOffset);
+          recoveredTruncatedTail=true;
+          break;
+        }
         healthy=false;
         error='FABRIC_PARSE_FAILURE:'+String(err instanceof Error?err.message:err);
         break;
@@ -113,6 +121,8 @@ export async function openMarketDataFabric(filePath,{maxInMemoryEvents=12000}={}
       prev=event.eventHash;
       expectedSeq++;
       total++;
+      byteOffset+=lineBytes;
+      lastValidByteOffset=byteOffset;
       if(retainedCount<keep){
         ring[retainedCount++]=event;
       }else{
@@ -136,13 +146,14 @@ export async function openMarketDataFabric(filePath,{maxInMemoryEvents=12000}={}
     filePath,
     healthy,
     verification:healthy
-      ?{ok:true,count:total,lastSeq:expectedSeq-1,tailHash:prev,retainedEvents:events.length}
+      ?{ok:true,count:total,lastSeq:expectedSeq-1,tailHash:prev,retainedEvents:events.length,recoveredTruncatedTail,lastValidByteOffset}
       :{ok:false,error:error||'FABRIC_READ_OR_PARSE_FAILURE'},
     seq:healthy?expectedSeq-1:0,
     tailHash:healthy?prev:GENESIS,
     totalEvents:healthy?total:0,
     maxInMemoryEvents:keep,
     events,
+    recoveredTruncatedTail,
     dedupe:new Set(events.map(dedupeKeyOf))
   };
 }
