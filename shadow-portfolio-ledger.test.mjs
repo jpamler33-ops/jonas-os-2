@@ -335,3 +335,39 @@ test('ABSTAIN probe is tracked separately from primary performance',()=>{
   assert.equal(probes.action,'ABSTAIN');
   assert.equal(probes.canExecuteLive,false);
 });
+
+
+test('coverage probe is horizon-only and excluded from primary performance',()=>{
+  const e=entry({
+    id:'sh_coverage_1',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'COVERAGE_PROBE_ENTRY',
+      entryMode:'COVERAGE_PROBE',
+      horizonMs:60_000,
+      horizonId:'1m',
+      coverageCurriculumVersion:'TCX_SHADOW_COVERAGE_CURRICULUM_V1',
+      coverageKey:'cc_test',
+      coverageSlotStart:0,
+      coverageSlotEnd:60_000,
+      coveragePurpose:'SYSTEMATIC_MARKET_STRUCTURE_AND_HORIZON_COVERAGE',
+      horizonOnlyExit:true
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  const p=l.positions[0];
+  assert.equal(p.entryMode,'COVERAGE_PROBE');
+  assert.equal(p.horizonOnlyExit,true);
+  assert.equal(p.coverageKey,'cc_test');
+
+  const early=markShadowPosition(p,book({bid:110}),{at:30_000,feeBps:0});
+  assert.equal(early.trigger,null);
+
+  const due=markShadowPosition(early.position,book({bid:110}),{at:61_000,feeBps:0});
+  assert.equal(due.trigger,'HORIZON_EXIT');
+  const closed=closeShadowPosition(due.position,{reason:due.trigger,at:61_000});
+  l=replaceShadowPortfolioPosition(l,closed);
+
+  assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
+  assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
+});
