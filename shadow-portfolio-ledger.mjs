@@ -89,6 +89,12 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     entryPrice:Number(order.avgFillPrice),
     entryQuote:Number(order.fillQuote),
     entryFeesQuote:Number(order.feesQuote||0),
+    leverage:Math.max(1,finite(order.strategyMeta?.leverage,1)),
+    marginQuote:Math.max(0,finite(order.strategyMeta?.marginQuote,order.fillQuote)),
+    leveragedExposureQuote:Math.max(0,finite(order.strategyMeta?.leveragedExposureQuote,order.fillQuote)),
+    leverageRiskVersion:String(order.strategyMeta?.leverageRiskVersion||''),
+    leverageRiskCap:Math.max(1,finite(order.strategyMeta?.leverageRiskCap,1)),
+    leverageRiskFingerprint:String(order.strategyMeta?.leverageRiskFingerprint||''),
     openedAt:openAt,
     horizonMs,
     plannedExitAt:openAt+horizonMs,
@@ -280,7 +286,7 @@ export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=D
     exitFeesQuote:exitFees,
     realizedGrossPnlQuote:gross,
     realizedNetPnlQuote:net,
-    realizedReturnPct:basis>0?net/basis:null,
+    realizedReturnPct:Math.max(0,Number(position.marginQuote||basis))>0?net/Math.max(0,Number(position.marginQuote||basis)):null,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
+import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
@@ -1333,6 +1334,22 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   if(opportunityAllocation.blocked){
     return {...decision,placed:false,reason:'FAILURE_MEMORY_AVOID',opportunityAllocation};
   }
+  const leverageRisk=evaluateShadowLeverageRisk({
+    requestedLeverage:isMeme?2:3,
+    assetClass,
+    volatilityPct:Math.max(.005,Math.abs(Number(decision.expectedReturn)||0)*2),
+    stopDistancePct:Math.max(.01,Math.abs(Number(decision.expectedReturn)||0)*1.5),
+    drawdownPct:Number(academy?.rolling?.maxDrawdownPct||training?.rolling?.maxDrawdownPct||0),
+    portfolioCorrelation:.5,
+    fundingRate8h:0,
+    expectedHoldingHours:Math.max(1,Number(decision.horizonMs||3600000)/3600000),
+    stressMovePct:isMeme?.10:.06
+  });
+  if(!leverageRisk.approved){
+    return {...decision,placed:false,reason:'LEVERAGE_RISK_BLOCK',opportunityAllocation,leverageRisk};
+  }
+  const marginQuote=opportunityAllocation.notionalQuote;
+  const leveragedExposureQuote=marginQuote*leverageRisk.allowedLeverage;
   if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy){
     return {...decision,placed:false,reason:'RUNTIME_AUDIT_OR_OMS_UNHEALTHY'};
   }
@@ -1372,10 +1389,16 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     symbol:decision.symbol,
     side:decision.side,
     type:'MARKET',
-    notionalQuote:opportunityAllocation.notionalQuote,
+    notionalQuote:leveragedExposureQuote,
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
       role:'ENTRY',
+      leverageRiskVersion:SHADOW_LEVERAGE_RISK_VERSION,
+      leverage:leverageRisk.allowedLeverage,
+      marginQuote,
+      leveragedExposureQuote,
+      leverageRiskCap:leverageRisk.riskCap,
+      leverageRiskFingerprint:leverageRisk.fingerprint,
       opportunityAllocatorVersion:OPPORTUNITY_ALLOCATOR_VERSION,
       opportunityScore:opportunityAllocation.score,
       opportunityMultiplier:opportunityAllocation.multiplier,
@@ -1412,7 +1435,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   console.log('auto shadow trade placed',JSON.stringify({
     symbol:decision.symbol,
     side:decision.side,
-    notionalQuote:opportunityAllocation.notionalQuote,
+    notionalQuote:leveragedExposureQuote,
+    marginQuote,
+    leverage:leverageRisk.allowedLeverage,
     opportunityScore:opportunityAllocation.score,
     opportunityMultiplier:opportunityAllocation.multiplier,
     failureMemoryScore:opportunityAllocation.failureScore,
@@ -1435,7 +1460,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     orderId:order.id,
     execution:'SHADOW_ONLY'
   }));
-  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation};
+  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,marginQuote,leveragedExposureQuote};
 }
 
 
