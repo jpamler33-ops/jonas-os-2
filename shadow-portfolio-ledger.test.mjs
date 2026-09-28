@@ -201,3 +201,28 @@ test('Berlin day statistics use local midnight across UTC offset',()=>{
   assert.equal(day.realizedPnlQuote,2);
   assert.equal(day.timeZone,'Europe/Berlin');
 });
+
+
+test('exploration entry is reconciled and preserves learning metadata',()=>{
+  const e=entry({
+    id:'sh_explore_1',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'EXPLORATION_ENTRY',
+      entryMode:'EXPLORATION',
+      entryQualityLearnerVersion:'TCX_SHADOW_TRADE_QUALITY_LEARNER_V1',
+      entryQualityLabel:'UNCERTAIN',
+      entryQualityScore:.48,
+      entryQualityConfidence:.1,
+      entryQualitySamples:2,
+      entryLearningValue:.9,
+      entryDiscoveryScore:.7
+    }
+  });
+  const x=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:2000});
+  assert.equal(x.added,1);
+  assert.equal(x.ledger.positions[0].exploration,true);
+  assert.equal(x.ledger.positions[0].entryMode,'EXPLORATION');
+  assert.equal(x.ledger.positions[0].entryQualityLabel,'UNCERTAIN');
+  assert.equal(x.ledger.positions[0].entryLearningValue,.9);
+});

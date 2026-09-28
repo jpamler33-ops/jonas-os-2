@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildShadowTradeQualityModel, scoreShadowTradeCandidate
+} from './shadow-trade-quality-learner.mjs';
+
+function closed(i,{pnl=2,assetClass='CORE',side='LONG',horizonMs=300000,prob=.62,edge=.16,ret=.004,exploration=false}={}){
+  return {
+    positionId:'p'+i,status:'CLOSED',closedAt:1000+i,
+    execution:'SHADOW_ONLY',canExecuteLive:false,
+    assetClass,side,horizonMs,
+    directionalProbability:prob,probabilityEdge:edge,expectedReturn:ret,
+    realizedNetPnlQuote:pnl,realizedReturnPct:pnl/1000,
+    exploration,entryMode:exploration?'EXPLORATION':'STANDARD'
+  };
+}
+
+test('learner shrinks tiny samples instead of declaring a winner',()=>{
+  const model=buildShadowTradeQualityModel({positions:[closed(1),closed(2)]});
+  const s=scoreShadowTradeCandidate(model,{
+    assetClass:'CORE',side:'LONG',horizonMs:300000,
+    directionalProbability:.62,probabilityEdge:.16,expectedReturn:.004
+  });
+  assert.equal(s.qualityLabel,'UNCERTAIN');
+  assert.ok(s.confidence<.5);
+  assert.ok(s.learningValue>.4);
+  assert.equal(s.canExecuteLive,false);
+});
+
+test('repeated positive outcomes become learned-good evidence',()=>{
+  const rows=Array.from({length:30},(_,i)=>closed(i,{pnl:i%6===0?-1:2}));
+  const model=buildShadowTradeQualityModel({positions:rows});
+  const s=scoreShadowTradeCandidate(model,{
+    assetClass:'CORE',side:'LONG',horizonMs:300000,
+    directionalProbability:.62,probabilityEdge:.16,expectedReturn:.004
+  });
+  assert.equal(s.qualityLabel,'LEARNED_GOOD');
+  assert.ok(s.samples>=30);
+  assert.ok(s.posteriorWinRate>.55);
+});
+
+test('repeated negative outcomes become learned-bad evidence',()=>{
+  const rows=Array.from({length:30},(_,i)=>closed(i,{pnl:i%6===0?1:-2}));
+  const model=buildShadowTradeQualityModel({positions:rows});
+  const s=scoreShadowTradeCandidate(model,{
+    assetClass:'CORE',side:'LONG',horizonMs:300000,
+    directionalProbability:.62,probabilityEdge:.16,expectedReturn:.004
+  });
+  assert.equal(s.qualityLabel,'LEARNED_BAD');
+  assert.ok(s.shrinkedMeanReturn<0);
+});
+
+test('exploration outcomes are counted separately but still teach the model',()=>{
+  const rows=Array.from({length:12},(_,i)=>closed(i,{pnl:2,exploration:i<5}));
+  const model=buildShadowTradeQualityModel({positions:rows});
+  assert.equal(model.samples,12);
+  assert.equal(model.explorationSamples,5);
+});
