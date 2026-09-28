@@ -8,7 +8,8 @@ export function buildStrategyEdgeDecayMap(ledger,{minTotal=24,recentTrades=12,di
  const rows=(ledger?.positions||[]).filter(p=>p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false&&p?.status==='CLOSED'&&!['COVERAGE_PROBE','ABSTAIN_PROBE','CHALLENGER'].includes(String(p.entryMode||'STANDARD').toUpperCase())&&Number.isFinite(Number(p.realizedNetPnlQuote))).sort((a,b)=>finite(a.closedAt)-finite(b.closedAt));
  const groups=new Map();for(const p of rows){const k=key(p),a=groups.get(k)||[];a.push(p);groups.set(k,a);}
  const cells=[];
- for(const [dna,r] of groups){const all=stats(r),recent=stats(r.slice(-recentTrades)),prior=stats(r.slice(0,Math.max(0,r.length-recentTrades)));
+ const recentWindow=Math.max(recentTrades,disableRecentTrades);
+ for(const [dna,r] of groups){const all=stats(r),recent=stats(r.slice(-recentWindow)),prior=stats(r.slice(0,Math.max(0,r.length-recentWindow)));
   const baseline=Math.max(1e-9,finite(prior.expectancyQuote,0));const drop=baseline>0?(baseline-finite(recent.expectancyQuote,0))/baseline:0;
   let status='LEARNING',blocked=false;
   if(r.length>=minTotal){if(recent.trades>=disableRecentTrades&&finite(recent.expectancyQuote)>=0) status='HEALTHY';else if(prior.trades&&finite(prior.expectancyQuote)>0&&recent.trades>=disableRecentTrades&&finite(recent.expectancyQuote)<0&&drop>=disableDropRatio){status='DISABLE';blocked=true;}else if(prior.trades&&finite(prior.expectancyQuote)>0&&finite(recent.expectancyQuote)<0){status='DECAYING';}else if(drop>=watchDropRatio)status='WATCH';else status='HEALTHY';}
