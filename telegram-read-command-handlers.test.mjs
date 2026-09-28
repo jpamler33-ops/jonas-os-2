@@ -22,6 +22,7 @@ function deps(overrides={}){
     showShadowTradeStats:async(...x)=>calls.push(["stats",...x]),
     showShadowCapitalAcademy:async(...x)=>calls.push(["academy",...x]),
     showShadowTrainingCoach:async(...x)=>calls.push(["coach",...x]),
+    showStrategyLeague:async(...x)=>calls.push(["league",...x]),
     showExecutionResearch:async(...x)=>calls.push(["erl",...x]),
     showVenueQuality:async(...x)=>calls.push(["vqm",...x]),
     showSorStatus:async(...x)=>calls.push(["sorstatus",...x]),
@@ -123,4 +124,13 @@ test("coach and training aliases open the adaptive training supervisor",async()=
   await h["/coach"]({chatId:11,args:[]});
   await h["/training"]({chatId:11,args:[]});
   assert.equal(calls.filter(x=>x[0]==="coach").length,2);
+});
+
+
+test("league and strategies aliases open the strategy league",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/league"]({chatId:13,args:[]});
+  await h["/strategies"]({chatId:13,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="league").length,2);
 });
