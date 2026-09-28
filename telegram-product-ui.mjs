@@ -171,7 +171,8 @@ export function parseProductCallback(data="") {
   if(p[0]==="confluence"&&p[1]) return {kind:"CONFLUENCE",symbol:p[1]};
   if(p[0]==="events"&&p[1]) return {kind:"STRUCTURE_EVENTS",symbol:p[1]};
   if(p[0]==="flow"&&p[1]) return {kind:"FLOW_RADAR",symbol:p[1]};
-  if(p[0]==="accuracy"&&p[1]) return {kind:"FORECAST_ACCURACY",symbol:p[1]};
+  if(p[0]==="accuracy"&&p[1]==="ALL") return {kind:"FORECAST_ACCURACY",symbol:null,scope:"ALL"};
+  if(p[0]==="accuracy"&&p[1]) return {kind:"FORECAST_ACCURACY",symbol:p[1],scope:"SYMBOL"};
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
