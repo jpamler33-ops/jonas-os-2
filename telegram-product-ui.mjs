@@ -167,6 +167,9 @@ export function homeKeyboard() {
       {text:"🧠 Training Coach",callback_data:"home:coach"}
     ],
     [
+      {text:"🏁 Strategy League",callback_data:"home:league"}
+    ],
+    [
       {text:"🖥 System",callback_data:"home:system"},
       {text:"⚙️ Alle Funktionen",callback_data:"commands"}
     ]

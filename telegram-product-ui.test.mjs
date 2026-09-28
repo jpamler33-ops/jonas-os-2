@@ -45,6 +45,7 @@ test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("home:stats_day"),{kind:"HOME_SECTION",section:"STATS_DAY"});
   assert.deepEqual(parseProductCallback("home:academy"),{kind:"HOME_SECTION",section:"ACADEMY"});
   assert.deepEqual(parseProductCallback("home:coach"),{kind:"HOME_SECTION",section:"COACH"});
+  assert.deepEqual(parseProductCallback("home:league"),{kind:"HOME_SECTION",section:"LEAGUE"});
   assert.deepEqual(parseProductCallback("forecast:BTCUSDT"),{kind:"FORECAST",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("why:BTCUSDT"),{kind:"WHY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("regime:BTCUSDT"),{kind:"REGIME",symbol:"BTCUSDT"});

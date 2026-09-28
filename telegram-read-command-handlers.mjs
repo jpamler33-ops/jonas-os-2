@@ -21,6 +21,7 @@ export function createReadCommandHandlers(deps={}){
     showShadowTradeStats,
     showShadowCapitalAcademy,
     showShadowTrainingCoach,
+    showStrategyLeague,
     showExecutionResearch,
     showVenueQuality,
     showSorStatus,
@@ -248,6 +249,23 @@ export function createReadCommandHandlers(deps={}){
         const msg=message(err);
         recordError(observability,{scope:"command.training",message:msg});
         await tg("sendMessage",{chat_id:chatId,text:"Training Coach gerade nicht verfügbar."});
+      }
+    },
+
+    "/league":async ({chatId})=>{
+      try{ await showStrategyLeague(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.league",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Strategy League gerade nicht verfügbar."});
+      }
+    },
+    "/strategies":async ({chatId})=>{
+      try{ await showStrategyLeague(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.strategies",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Strategy League gerade nicht verfügbar."});
       }
     },
 

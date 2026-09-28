@@ -69,3 +69,22 @@ test('safety invariants remain mandatory',()=>{
   assert.equal(d.eligible,false);
   assert.equal(d.reason,'ISSUANCE_SAFETY_INVARIANT_INVALID');
 });
+
+
+test('strategy horizon selection can prefer strongest edge or longest horizon',()=>{
+  const x=issuance();
+  x.forecast={horizons:[
+    {...x.forecast.horizons[0],horizonId:'15m',horizonMs:900_000,expectedReturn:0.004,
+      probabilities:{up:0.62,down:0.23,flat:0.15},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:0.62,down:0.23,flat:0.15}}
+    },
+    {...x.forecast.horizons[0],horizonId:'1h',horizonMs:3_600_000,expectedReturn:0.008,
+      probabilities:{up:0.74,down:0.14,flat:0.12},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:0.74,down:0.14,flat:0.12}}
+    }
+  ]};
+  const edge=deriveAutonomousShadowTrade(x,{now:1_030_000,horizonSelection:'MAX_EDGE'});
+  const longest=deriveAutonomousShadowTrade(x,{now:1_030_000,horizonSelection:'LONGEST'});
+  assert.equal(edge.horizonId,'1h');
+  assert.equal(longest.horizonId,'1h');
+});
