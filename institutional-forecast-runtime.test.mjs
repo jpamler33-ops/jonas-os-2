@@ -435,6 +435,44 @@ test('gzip snapshot migration loads legacy JSON, writes compressed target, and r
   assert.equal(reopened.engine.historySize(),original.engine.historySize());
 });
 
+test('gzip persistence externalizes engine learning memories and restores them losslessly',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-engine-store-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:40},(_,i)=>episode(i)));
+  const before={
+    history:r.engine.history.length,
+    calibration:r.engine.calibration.rows.length,
+    reliability:r.engine.reliability.rows.length,
+    modelPerformance:r.engine.modelPerformance.rows.length,
+    interval:r.engine.intervalCalibration.rows.length,
+    drift:r.engine.drift.rows.length
+  };
+  assert.ok(before.history>0);
+
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.ok(meta.engineStore);
+  assert.ok(meta.engineStore.logicalBytes>0);
+  assert.ok(meta.engineStore.storageBytes<meta.engineStore.logicalBytes);
+
+  const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
+  assert.ok(main.engineStore);
+  assert.deepEqual(Object.keys(main.engine).sort(),['config']);
+  assert.equal('history' in main.engine,false);
+
+  const reopened=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  assert.equal(reopened.engine.history.length,before.history);
+  assert.equal(reopened.engine.calibration.rows.length,before.calibration);
+  assert.equal(reopened.engine.reliability.rows.length,before.reliability);
+  assert.equal(reopened.engine.modelPerformance.rows.length,before.modelPerformance);
+  assert.equal(reopened.engine.intervalCalibration.rows.length,before.interval);
+  assert.equal(reopened.engine.drift.rows.length,before.drift);
+  assert.ok(['a','b'].includes(reopened.engineStoreSlot));
+});
+
 test('gzip persistence externalizes tracker issue-state and revision history losslessly',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-tracker-archive-'));
   const file=path.join(dir,'runtime.json.gz');
