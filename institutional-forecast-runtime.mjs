@@ -1,5 +1,10 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
+import { gzip as gzipCallback, gunzip as gunzipCallback } from 'node:zlib';
+
+const gzip=promisify(gzipCallback);
+const gunzip=promisify(gunzipCallback);
 
 import {
   ProbabilisticForecastEngine,
@@ -17,6 +22,10 @@ const DEFAULT_FORECAST_SNAPSHOT_BYTES=80*1024*1024;
 function snapshotByteLimit(value){
   const n=Number(value);
   return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_SNAPSHOT_BYTES);
+}
+
+function isGzipBuffer(value){
+  return Buffer.isBuffer(value)&&value.length>=2&&value[0]===0x1f&&value[1]===0x8b;
 }
 
 export const EPISODE_FORECAST_FEATURE_IDS=Object.freeze([
@@ -286,7 +295,12 @@ function createRuntimeState(filePath,config,opts={}){
     backupPath:null,
     lastError:null,
     maxSnapshotBytes:snapshotByteLimit(opts.maxSnapshotBytes),
+    snapshotCompression:opts.snapshotCompression==='gzip'?'gzip':'json',
+    snapshotEncoding:'unknown',
+    loadedFromPath:null,
+    migratedFromLegacyPath:null,
     lastPersistedBytes:null,
+    lastPersistedLogicalBytes:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
   };
 }
@@ -295,16 +309,34 @@ export async function openInstitutionalForecastRuntime(filePath,{
   config=DEFAULT_INSTITUTIONAL_FORECAST_CONFIG,
   maxHistoryRows=8_000,
   maxSnapshotBytes=80*1024*1024,
+  legacyFilePath=null,
+  snapshotCompression='json',
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes});
+  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes,snapshotCompression});
 
+  let sourcePath=filePath;
   try{
-    const snapshotStat=await stat(filePath);
+    let snapshotStat;
+    try{
+      snapshotStat=await stat(filePath);
+    }catch(err){
+      if(err?.code!=='ENOENT'||!legacyFilePath) throw err;
+      sourcePath=legacyFilePath;
+      snapshotStat=await stat(sourcePath);
+      runtime.migratedFromLegacyPath=sourcePath;
+    }
+    runtime.loadedFromPath=sourcePath;
     runtime.lastPersistedBytes=snapshotStat.size;
-    if(snapshotStat.size>runtime.maxSnapshotBytes) throw Object.assign(new Error('forecast runtime snapshot exceeds configured safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE',bytes:snapshotStat.size,maxSnapshotBytes:runtime.maxSnapshotBytes});
-    const raw=await readFile(filePath,'utf8');
+    if(snapshotStat.size>runtime.maxSnapshotBytes) throw Object.assign(new Error('forecast runtime snapshot exceeds configured storage safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE',bytes:snapshotStat.size,maxSnapshotBytes:runtime.maxSnapshotBytes});
+    const stored=await readFile(sourcePath);
+    const encodedAsGzip=isGzipBuffer(stored);
+    const logical=encodedAsGzip?await gunzip(stored):stored;
+    if(logical.length>runtime.maxSnapshotBytes) throw Object.assign(new Error('forecast runtime snapshot exceeds configured logical safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE',bytes:logical.length,maxSnapshotBytes:runtime.maxSnapshotBytes});
+    runtime.lastPersistedLogicalBytes=logical.length;
+    runtime.snapshotEncoding=encodedAsGzip?'gzip':'json';
+    const raw=logical.toString('utf8');
     const snapshot=JSON.parse(raw);
     if(snapshot?.version!==INSTITUTIONAL_FORECAST_RUNTIME_VERSION){
       throw new Error('unsupported institutional forecast runtime snapshot');
@@ -322,9 +354,9 @@ export async function openInstitutionalForecastRuntime(filePath,{
       runtime.recoveredFromCorrupt=!oversized;
       runtime.recoveredFromOversizedSnapshot=oversized;
       runtime.lastError=err instanceof Error?err.message:String(err);
-      const backup=filePath+(oversized?'.oversized-':'.corrupt-')+Date.now();
+      const backup=sourcePath+(oversized?'.oversized-':'.corrupt-')+Date.now();
       try{
-        await rename(filePath,backup);
+        await rename(sourcePath,backup);
         runtime.backupPath=backup;
       }catch{}
     }
@@ -360,12 +392,30 @@ export async function saveInstitutionalForecastRuntime(runtime){
         maxSnapshotBytes
       });
     }
-    await writeFile(tmp,serialized,{encoding:'utf8',mode:0o600});
+    let output=serialized;
+    let storageBytes=bytes;
+    let encoding='json';
+    if(runtime.snapshotCompression==='gzip'){
+      output=await gzip(Buffer.from(serialized,'utf8'),{level:1});
+      storageBytes=output.length;
+      encoding='gzip';
+    }
+    await writeFile(tmp,output,{encoding:typeof output==='string'?'utf8':undefined,mode:0o600});
     await rename(tmp,runtime.filePath);
     runtime.maxSnapshotBytes=maxSnapshotBytes;
-    runtime.lastPersistedBytes=bytes;
+    runtime.lastPersistedBytes=storageBytes;
+    runtime.lastPersistedLogicalBytes=bytes;
+    runtime.snapshotEncoding=encoding;
+    runtime.loadedFromPath=runtime.filePath;
+    runtime.migratedFromLegacyPath=null;
     runtime.lastError=null;
-    return {bytes,maxSnapshotBytes};
+    return {
+      bytes:storageBytes,
+      logicalBytes:bytes,
+      maxSnapshotBytes,
+      encoding,
+      compressionRatio:bytes>0?storageBytes/bytes:null
+    };
   }catch(err){
     await rm(tmp,{force:true}).catch(()=>{});
     runtime.healthy=false;
@@ -572,9 +622,16 @@ export function institutionalForecastRuntimeSummary(runtime){
     backupPath:runtime?.backupPath??null,
     lastError:runtime?.lastError??null,
     maxSnapshotBytes:runtime?.maxSnapshotBytes??null,
+    snapshotEncoding:runtime?.snapshotEncoding??'unknown',
+    loadedFromPath:runtime?.loadedFromPath??null,
+    migratedFromLegacyPath:runtime?.migratedFromLegacyPath??null,
     lastPersistedBytes:runtime?.lastPersistedBytes??null,
-    snapshotBudgetUtilization:Number(runtime?.maxSnapshotBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
-      ?Number(runtime.lastPersistedBytes)/Number(runtime.maxSnapshotBytes)
+    lastPersistedLogicalBytes:runtime?.lastPersistedLogicalBytes??null,
+    snapshotBudgetUtilization:Number(runtime?.maxSnapshotBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedLogicalBytes))
+      ?Number(runtime.lastPersistedLogicalBytes)/Number(runtime.maxSnapshotBytes)
+      :null,
+    snapshotCompressionRatio:Number(runtime?.lastPersistedLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
+      ?Number(runtime.lastPersistedBytes)/Number(runtime.lastPersistedLogicalBytes)
       :null,
     historyCases:runtime?.engine?.historySize?.()??0,
     journalEntries:runtime?.journal?.all?.().length??0,
