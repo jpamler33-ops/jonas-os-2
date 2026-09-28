@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
@@ -150,6 +150,7 @@ import {
 
 const persistenceDataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data';
 await cleanupOrphanedPersistenceArtifacts({dataDir:persistenceDataDir});
+await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
