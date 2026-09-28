@@ -9,6 +9,7 @@ import {
 import { verifyCanonicalForecastInput } from './forecast-input-adapter.mjs';
 import { createInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { createResearchTraceEvaluation } from './research-trace.mjs';
+import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
 
 export const INSTITUTIONAL_FORECAST_RUNTIME_VERSION='TCX_INSTITUTIONAL_FORECAST_RUNTIME_V1';
 
@@ -509,6 +510,7 @@ export function latestInstitutionalForecast(runtime,symbol){
 }
 
 export function institutionalForecastRuntimeSummary(runtime){
+  const probabilityCalibration=runtime?.journal?.all?evaluateProbabilityCalibrationGate(runtime.journal.all()):null;
   return {
     version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
     healthy:runtime?.healthy===true,
@@ -521,6 +523,7 @@ export function institutionalForecastRuntimeSummary(runtime){
     pendingOutcomes:runtime?.journal?.pending?.().length??0,
     issuedForecasts:runtime?.issuances?.length??0,
     trackedForecasts:runtime?.intelligence?.all?.().length??0,
+    probabilityCalibration,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
     canExecute:false
