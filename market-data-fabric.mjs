@@ -3,6 +3,7 @@ import { mkdir, open as openFile, stat, truncate } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import readline from 'node:readline';
 import { canonicalJson, sha256 } from './institutional-kernel.mjs';
+import { readMarketFabricCheckpoint } from './market-fabric-rotation.mjs';
 
 const GENESIS='0'.repeat(64);
 const SCHEMA_VERSION=1;
