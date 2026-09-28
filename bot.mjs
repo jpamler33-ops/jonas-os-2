@@ -7,6 +7,7 @@ import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shad
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
 import { buildPointInTimeCorrelation, PIT_CORRELATION_ENGINE_VERSION } from './pit-correlation-engine.mjs';
 import { buildLeverageCounterfactualLab, LEVERAGE_COUNTERFACTUAL_LAB_VERSION } from './leverage-counterfactual-lab.mjs';
+import { createFrozenShadowPolicy, SHADOW_POLICY_FREEZE_VERSION } from './shadow-policy-freeze.mjs';
 import { buildTcxProofReport, TCX_PROOF_SYSTEM_VERSION } from './tcx-proof-system.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
@@ -1396,6 +1397,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     return {...decision,placed:false,reason:'DAILY_SYMBOL_CAP'};
   }
 
+  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type}});
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
@@ -1404,6 +1406,11 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
       role:'ENTRY',
+      frozenPolicyFingerprint:frozenPolicy.fingerprint,
+      frozenPolicyVersion:frozenPolicy.policyVersion,
+      frozenPolicyFreezeVersion:SHADOW_POLICY_FREEZE_VERSION,
+      frozenPolicyFrozenAt:frozenPolicy.frozenAt,
+      frozenPolicyParameters:frozenPolicy.parameters,
       leverageRiskVersion:SHADOW_LEVERAGE_RISK_VERSION,
       leverageLabVersion:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,
       leverageLabEvidenceReady:leverageLab.evidenceReady,
