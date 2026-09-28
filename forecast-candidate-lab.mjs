@@ -424,8 +424,10 @@ export function evaluateForecastCandidateWalkForward({
     maturePending(pendingCand,candidateEngine,timestamp);
     maturePending(pendingInc,incumbentEngine,timestamp);
 
-    const trainCount=candidateEngine.historySnapshot(timestamp)
-      .filter(r=>Number(r.resolvedAt)<=timestamp).length;
+    // The walk-forward loader only adds rows once resolvedAt <= timestamp.
+    // historySize() is therefore semantically identical here and avoids cloning
+    // the full training history at every timestamp (O(n²) allocation pressure).
+    const trainCount=candidateEngine.historySize();
     const group=byTimestamp.get(timestamp)||[];
     if(trainCount<Math.max(1,Number(minimumTrainCases))){
       skippedWarmup+=group.length;
@@ -561,8 +563,10 @@ export function evaluateForecastFeatureExtensionWalkForward({
     maturePending(pendingCand,candidateEngine,timestamp);
     maturePending(pendingInc,incumbentEngine,timestamp);
 
-    const trainCount=candidateEngine.historySnapshot(timestamp)
-      .filter(r=>Number(r.resolvedAt)<=timestamp).length;
+    // The walk-forward loader only adds rows once resolvedAt <= timestamp.
+    // historySize() is therefore semantically identical here and avoids cloning
+    // the full training history at every timestamp (O(n²) allocation pressure).
+    const trainCount=candidateEngine.historySize();
     const group=byTimestamp.get(timestamp)||[];
     if(trainCount<Math.max(1,Number(minimumTrainCases))){
       skippedWarmup+=group.length;
