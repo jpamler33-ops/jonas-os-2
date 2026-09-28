@@ -21,6 +21,7 @@ import { buildStructureEventRadar, deriveStructureEvents, STRUCTURE_EVENT_RADAR_
 import { forecastIssuanceToChartOverlay, forecastOverlaySummary, FORECAST_CHART_OVERLAY_VERSION } from './forecast-chart-overlay.mjs';
 import { buildFlowRadar, FLOW_RADAR_VIEW_VERSION } from './flow-radar-view.mjs';
 import { buildForecastAccuracyView, FORECAST_ACCURACY_VIEW_VERSION } from './forecast-accuracy-view.mjs';
+import { buildSuperchartIntel, SUPERCHART_VERSION } from './superchart-intel.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -2233,6 +2234,33 @@ function chartKeyboard(symbol, interval, live=false) {
   ]};
 }
 
+function superchartKeyboard(symbol,mode='PRO',interval='5m',live=false){
+  const m=String(mode||'PRO').toUpperCase(),tf=String(interval||'5m').toLowerCase();
+  return {inline_keyboard:[
+    [
+      {text:m==='CLEAN'?'● CLEAN':'CLEAN',callback_data:`superchart:${symbol}:CLEAN:${tf}`},
+      {text:m==='PRO'?'● PRO':'PRO',callback_data:`superchart:${symbol}:PRO:${tf}`},
+      {text:m==='FULL'?'● FULL':'FULL',callback_data:`superchart:${symbol}:FULL:${tf}`}
+    ],
+    [
+      {text:tf==='1m'?'● 1M':'1M',callback_data:`superchart:${symbol}:${m}:1m`},
+      {text:tf==='5m'?'● 5M':'5M',callback_data:`superchart:${symbol}:${m}:5m`},
+      {text:tf==='15m'?'● 15M':'15M',callback_data:`superchart:${symbol}:${m}:15m`},
+      {text:tf==='1h'?'● 1H':'1H',callback_data:`superchart:${symbol}:${m}:1h`}
+    ],
+    [
+      {text:'↻ REFRESH',callback_data:`superchart:${symbol}:${m}:${tf}`},
+      {text:live?'⏸ AUTO AUS':'⚡ AUTO 10s',callback_data:`superlive:${symbol}:${m}:${tf}:${live?'off':'on'}`}
+    ],
+    [
+      {text:'⌁ FORECAST',callback_data:`forecast:${symbol}`},
+      {text:'🐋 FLOW',callback_data:`flow:${symbol}`},
+      {text:'📐 ACCURACY',callback_data:`accuracy:${symbol}`}
+    ],
+    [{text:'▦ MARKT',callback_data:`refresh:${symbol}`},{text:'🏠 Start',callback_data:'home'}]
+  ]};
+}
+
 function xrayKeyboard(symbol,live=false){
   return {inline_keyboard:[
     [
@@ -3640,6 +3668,61 @@ async function showMtfMatrix(chatId,messageId,symbol){
     text:view.text,
     reply_markup:mtfMatrixKeyboard(symbol)
   });
+}
+
+async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=null,edit=false,live=true}={}){
+  const state=await researchState(symbol,interval);
+  await captureEpisodeFromState(state,{persist:true});
+  const [book,derivatives,external,onchain,walletCohort]=await Promise.all([
+    fetchExecutionBook(symbol),
+    derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000}).catch(()=>null),
+    externalResearchProvider.fetchBundle(symbol).catch(()=>null),
+    onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000}).catch(()=>null),
+    walletCohortResearchProvider.configuredCohorts>0?walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:state.availableAt}).catch(()=>null):Promise.resolve(null)
+  ]);
+  let liquidation=null,entityFlow=null;
+  try{liquidation=liquidationResearchStream.snapshot(symbol,{asOf:state.availableAt,referencePrice:Number(state.market.price),clusterBinBps:25,maxClusters:12});}catch{}
+  if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
+    try{entityFlow=scoreEntityFlowSnapshot(await entityFlowResearchProvider.fetchSnapshot(),entityFlowMemory,{minBaselineSamples:20});}catch{}
+  }
+  const rawFeatures=[
+    ...derivativesSnapshotToExtraFeatures(derivatives),
+    ...liquidationSnapshotToExtraFeatures(liquidation),
+    ...coinMetricsSnapshotToExtraFeatures(external?.coinMetrics),
+    ...deribitOptionsSnapshotToExtraFeatures(external?.deribitOptions),
+    ...macroSnapshotToExtraFeatures(external?.macro),
+    ...predictionMarketSnapshotToExtraFeatures(external?.predictionMarket)
+  ];
+  const confluence=buildConfluenceMap({
+    symbol,currentPrice:Number(state.market.price),analysis:state.analysis,book,liquidation,
+    intelligenceFeatures:buildDerivedResearchIntelligenceFeatures(rawFeatures),mergeBps:20
+  });
+  const latestForecast=latestInstitutionalForecast(forecastRuntime,symbol);
+  const forecastOverlay=forecastIssuanceToChartOverlay(latestForecast,{now:state.availableAt,maxAgeMs:6*60*60_000});
+  const eventRadar=buildStructureEventRadar({
+    symbol,
+    analyses:{'1m':state.mtf?.analyses?.['1m'],'5m':state.mtf?.analyses?.['5m'],'15m':state.mtf?.analyses?.['15m'],'1h':state.mtf?.analyses?.['1h'],'4h':state.mtf?.analyses?.['4h']},
+    candlesByTf:state.byTf,now:state.availableAt
+  });
+  const accuracy=buildForecastAccuracyView(forecastRuntime?.journal?.all?.()??[],{symbol,minDisplaySamples:30,foldSize:50,highConfidenceThreshold:.65});
+  const intel=buildSuperchartIntel({mode,symbol,confluence,liquidation,entityFlow,walletCohort,onchain,accuracy,events:eventRadar,forecastOverlay});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1200,height:820,dashboard:state.dashboard,forecastOverlay,superchart:intel});
+  const caption=[
+    '🧠 TCX SUPERCHART · '+symbol.replace('USDT','/USDT')+' · '+String(interval).toUpperCase()+' · '+intel.mode,
+    'Struktur + Forecast + Confluence + Liquidationen'+(intel.mode==='FULL'?' + Flow + Accuracy + Chain':''),
+    forecastOverlay?'Forecast = probabilistische Modellpfade, keine garantierte Kursbahn.':'Kein frischer Forecast-Pfad verfügbar.',
+    'SHADOW_ONLY · canExecute:false'
+  ].join('\n').slice(0,1024);
+  const keyboard=superchartKeyboard(symbol,intel.mode,interval,live);
+  let sent;
+  if(edit&&messageId){
+    sent=await tgMultipart('editMessageMedia',{chat_id:String(chatId),message_id:String(messageId),media:{type:'photo',media:'attach://photo',caption},reply_markup:keyboard},'photo',`${symbol}-superchart-${interval}.png`,png,'image/png');
+  }else{
+    sent=await tgMultipart('sendPhoto',{chat_id:String(chatId),caption,reply_markup:keyboard},'photo',`${symbol}-superchart-${interval}.png`,png,'image/png');
+    messageId=sent?.message_id||messageId;
+  }
+  sessions.set(String(chatId),{chatId,messageId,symbol,live:Boolean(live),view:'SUPERCHART',interval,mode:intel.mode,lastRefresh:Date.now(),superchartVersion:SUPERCHART_VERSION});
+  return sent;
 }
 
 async function showChart(chatId, symbol, interval="5m",{messageId=null,edit=false,live=true}={}) {
@@ -5865,6 +5948,23 @@ async function handle(update) {
       await ack(q.id,"Trade Replay geladen");
       return;
     }
+    if (a.kind === 'SUPERCHART') {
+      const isPhoto=Array.isArray(q.message?.photo)&&q.message.photo.length>0;
+      const current=sessions.get(String(chatId));
+      const live=current?.view==='SUPERCHART'?current.live===true:true;
+      await showSuperchart(chatId,a.symbol,{mode:a.mode,interval:a.interval,messageId:isPhoto?messageId:null,edit:isPhoto,live});
+      await ack(q.id,'Superchart '+a.mode);
+      return;
+    }
+    if (String(data||'').startsWith('superlive:')) {
+      const p=String(data).split(':');
+      const symbol=p[1],mode=String(p[2]||'PRO').toUpperCase(),interval=String(p[3]||'5m').toLowerCase(),enabled=p[4]==='on';
+      const isPhoto=Array.isArray(q.message?.photo)&&q.message.photo.length>0;
+      await showSuperchart(chatId,symbol,{mode,interval,messageId:isPhoto?messageId:null,edit:isPhoto,live:enabled});
+      await ack(q.id,enabled?'Superchart Auto aktiviert':'Superchart Auto deaktiviert');
+      return;
+    }
+
     if (a.kind === "CHART") {
       const isPhoto=Array.isArray(q.message?.photo)&&q.message.photo.length>0;
       const current=sessions.get(String(chatId));
@@ -6001,6 +6101,7 @@ async function refresher() {
       if (!s.live || now - s.lastRefresh < refreshMs) continue;
       try {
         if (s.view === 'CHART') await showChart(s.chatId,s.symbol,s.interval || '5m',{messageId:s.messageId,edit:true,live:true});
+        else if (s.view === 'SUPERCHART') await showSuperchart(s.chatId,s.symbol,{mode:s.mode||'PRO',interval:s.interval||'5m',messageId:s.messageId,edit:true,live:true});
         else if (s.view === 'XRAY') await showXray(s.chatId,s.messageId,s.symbol,{live:true});
         else if (s.view === 'LIQ_MAP') await showLiquidationMap(s.chatId,s.messageId,s.symbol,{window:s.interval || '5m',live:true});
         else if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);

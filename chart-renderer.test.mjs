@@ -38,3 +38,16 @@ test('renders probabilistic forecast path overlay in a future panel',()=>{
   assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
   assert.ok(png.length>1000);
 });
+
+
+test('renders full superchart layers with forecast',()=>{
+  const candles=[];
+  for(let i=0;i<80;i++)candles.push({openTime:i,o:100,h:102,l:98,c:100+i*.02,v:10,closeTime:i+1,closed:true});
+  const png=renderCandlestickPng(candles,{support:99,resistance:103,classifiedPivots:[]},{
+    width:1000,height:650,
+    forecastOverlay:{anchorPrice:101,status:'ACTIVE',horizons:[{horizonId:'1h',horizonMs:3600000,lowerPrice:96,medianPrice:102,upperPrice:108}],scenarios:[{id:'BASE_PATH',points:[{horizonMs:3600000,targetPrice:102}]}]},
+    superchart:{mode:'FULL',badges:[{label:'ACC',value:'64%'}],panel:['ACC 64%','ECE 7%'],confluenceZones:[{price:100,score:88}],liquidationZones:[{price:101,longUsd:500,shortUsd:100}]}
+  });
+  assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+  assert.ok(png.length>1000);
+});
