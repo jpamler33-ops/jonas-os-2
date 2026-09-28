@@ -149,10 +149,14 @@ async function runtime(){
 
 test('episode memory seeds point-in-time forecast history',async()=>{
   const r=await runtime();
-  const seeded=seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const episodes=Array.from({length:30},(_,i)=>episode(i));
+  const seeded=seedInstitutionalForecastRuntimeFromEpisodes(r,episodes);
   assert.equal(seeded.addedRows,60);
   assert.equal(seeded.blockedFutureOutcome,0);
   assert.equal(r.engine.historySize(),60);
+  const repeated=seedInstitutionalForecastRuntimeFromEpisodes(r,episodes);
+  assert.equal(repeated.builtRows,0);
+  assert.equal(repeated.addedRows,0);
 });
 
 test('runtime issues immutable institutional forecast and persists restart state',async()=>{

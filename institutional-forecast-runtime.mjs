@@ -111,13 +111,16 @@ export function episodeVectorExtraFeatures(vector,availableAt){
 
 export function forecastHistoryFromEpisodes(episodes,{
   featureIds=EPISODE_FORECAST_FEATURE_IDS,
-  horizonMs=null
+  horizonMs=null,
+  hasRow=()=>false,
+  maxRows=Number.POSITIVE_INFINITY
 }={}){
   const wanted=new Set(featureIds);
   const allowedHorizons=Array.isArray(horizonMs)&&horizonMs.length
     ?new Set(horizonMs.map(Number).filter(Number.isFinite))
     :null;
   const rows=[];
+  const rowCap=Number.isFinite(Number(maxRows))?Math.max(1,Math.floor(Number(maxRows))):Number.POSITIVE_INFINITY;
   let rejected=0;
   let blockedFutureOutcome=0;
 
@@ -143,6 +146,8 @@ export function forecastHistoryFromEpisodes(episodes,{
 
     for(const [bars,horizon] of Object.entries(EPISODE_HORIZON_TO_MS)){
       if(allowedHorizons&&!allowedHorizons.has(horizon)) continue;
+      const id='episode:'+String(episode.id)+':'+bars;
+      if(hasRow(id)) continue;
       const horizonMs=horizon;
       const outcome=episode?.outcomes?.[bars];
       if(!outcome) continue;
@@ -159,7 +164,7 @@ export function forecastHistoryFromEpisodes(episodes,{
       }
 
       rows.push({
-        id:'episode:'+String(episode.id)+':'+bars,
+        id,
         symbol:String(episode.symbol),
         timestamp,
         availableAt,
@@ -173,10 +178,17 @@ export function forecastHistoryFromEpisodes(episodes,{
         realizedVolatility:finiteOrNull(outcome?.realizedRangePct)==null?undefined:Math.abs(Number(outcome.realizedRangePct))/100,
         quality:1
       });
+      // Keep the temporary seed buffer bounded even when an old episode file
+      // contains far more rows than the serving engine is allowed to retain.
+      if(rows.length>=rowCap*2){
+        rows.sort((a,b)=>a.timestamp-b.timestamp||a.horizonMs-b.horizonMs);
+        rows.splice(0,rows.length-rowCap);
+      }
     }
   }
 
   rows.sort((a,b)=>a.timestamp-b.timestamp||a.horizonMs-b.horizonMs);
+  if(rows.length>rowCap) rows.splice(0,rows.length-rowCap);
   return {rows,rejected,blockedFutureOutcome};
 }
 
@@ -295,7 +307,9 @@ export function seedInstitutionalForecastRuntimeFromEpisodes(runtime,episodes){
   const cfg=runtime.engine.configSnapshot();
   const built=forecastHistoryFromEpisodes(episodes,{
     featureIds:cfg.featureIds,
-    horizonMs:cfg.horizons.map(h=>h.horizonMs)
+    horizonMs:cfg.horizons.map(h=>h.horizonMs),
+    hasRow:id=>runtime.engine.hasHistory?.(id)===true,
+    maxRows:runtime.engine.maxHistoryRows??8_000
   });
   const before=runtime.engine.historySize();
   runtime.engine.addHistoryMany(built.rows);

@@ -235,7 +235,7 @@ export async function loadEpisodeMemory(filePath){
   }
 }
 
-export async function saveEpisodeMemory(filePath,episodes,{maxPerSymbol=2000}={}){
+export async function saveEpisodeMemory(filePath,episodes,{maxPerSymbol=2000,maxTotalEpisodes=6000}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
   const grouped=new Map();
   for(const e of episodes){
@@ -248,9 +248,11 @@ export async function saveEpisodeMemory(filePath,episodes,{maxPerSymbol=2000}={}
     trimmed.push(...xs.slice(-maxPerSymbol));
   }
   trimmed.sort((a,b)=>a.anchorCloseTime-b.anchorCloseTime);
+  const totalCap=Math.max(1,Math.floor(Number(maxTotalEpisodes)||6000));
+  if(trimmed.length>totalCap) trimmed.splice(0,trimmed.length-totalCap);
   const payload={schemaVersion:SCHEMA_VERSION,updatedAt:new Date().toISOString(),episodes:trimmed};
   const tmp=`${filePath}.tmp-${process.pid}`;
-  await writeFile(tmp,JSON.stringify(payload,null,2),{encoding:'utf8',mode:0o600});
+  await writeFile(tmp,JSON.stringify(payload),{encoding:'utf8',mode:0o600});
   await rename(tmp,filePath);
   return trimmed;
 }

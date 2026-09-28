@@ -5992,10 +5992,24 @@ async function autoLearnForecastWatcher() {
   await sleep(15000);
   while(running) {
     const started=Date.now();
-    let issued=0,skipped=0,failed=0;
+    let issued=0,skipped=0,failed=0,deferred=0;
     if(autoLearnEnabled&&forecastRuntime.healthy){
       for(const symbol of autoLearnSymbols){
         if(!running) break;
+        const memory=process.memoryUsage();
+        const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
+        const rssMb=Math.round(memory.rss/1024/1024);
+        // Each issuance may scan research history and write bounded state.
+        // Leave headroom for transient parsing/serialization instead of
+        // letting background learning consume the serving process heap.
+        if(heapUsedMb>=360||rssMb>=900){
+          deferred++;
+          console.warn('autolearn forecast deferred for memory headroom',JSON.stringify({
+            symbol,heapUsedMb,rssMb,historyRows:forecastRuntime.engine.historySize(),
+            threshold:{heapUsedMb:360,rssMb:900}
+          }));
+          break;
+        }
         try{
           const latest=latestInstitutionalForecast(forecastRuntime,symbol);
           const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
@@ -6068,9 +6082,9 @@ async function autoLearnForecastWatcher() {
       latencyMs:Date.now()-started,
       error:failed?failed+' symbol(s) failed':null
     });
-    if(issued||failed){
+    if(issued||failed||deferred){
       console.log('autolearn cycle',JSON.stringify({
-        issued,skipped,failed,
+        issued,skipped,failed,deferred,
         symbols:autoLearnSymbols.length,
         nextSweepMs:autoLearnSweepMs,
         forecastIntervalMs:autoLearnForecastMs,

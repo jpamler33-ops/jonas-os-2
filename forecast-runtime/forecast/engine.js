@@ -211,6 +211,7 @@ export class ProbabilisticForecastEngine {
         this.trimHistory();
     } }
     historySize() { return this.history.length; }
+    hasHistory(id) { return this.historyKeys.has(String(id)); }
     /** Point-in-time safe copy for diagnostics/intelligence layers. */
     historySnapshot(asOf = Number.POSITIVE_INFINITY, { limit = Number.POSITIVE_INFINITY } = {}) {
         const eligible = this.history.filter(r => r.timestamp <= asOf && r.availableAt <= asOf);
