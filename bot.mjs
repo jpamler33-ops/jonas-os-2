@@ -22,6 +22,7 @@ import { forecastIssuanceToChartOverlay, forecastOverlaySummary, FORECAST_CHART_
 import { buildFlowRadar, FLOW_RADAR_VIEW_VERSION } from './flow-radar-view.mjs';
 import { buildForecastAccuracyView, FORECAST_ACCURACY_VIEW_VERSION } from './forecast-accuracy-view.mjs';
 import { buildSuperchartIntel, SUPERCHART_VERSION } from './superchart-intel.mjs';
+import { buildSuperRadar, renderSuperRadar, buildSuperSetup, renderSuperSetup, buildSuperRisk, renderSuperRisk, buildSuperSignal, renderSuperSignal, INTELLIGENCE_TERMINAL_VERSION } from './intelligence-terminal.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -2986,7 +2987,47 @@ async function showDataStatus(chatId,messageId=null){
   });
 }
 
+function terminalKeyboard(symbol=null){
+ const rows=[];
+ if(symbol){
+  rows.push([{text:'🎯 SETUP',callback_data:`terminal:setup:${symbol}`},{text:'⚠️ RISK',callback_data:`terminal:risk:${symbol}`}]);
+  rows.push([{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:PRO:5m`},{text:'📡 SIGNAL',callback_data:`terminal:signal:${symbol}`}]);
+ }
+ rows.push([{text:'◉ SUPER RADAR',callback_data:'terminal:radar'},{text:'🏠 Home',callback_data:'home'}]);
+ return {inline_keyboard:rows};
+}
+async function terminalContext(symbol){
+ const state=await researchState(symbol,'5m');
+ const [book]=await Promise.all([fetchExecutionBook(symbol)]);
+ let liquidation=null;try{liquidation=liquidationResearchStream.snapshot(symbol,{asOf:state.availableAt,referencePrice:Number(state.market.price),clusterBinBps:25,maxClusters:12});}catch{}
+ const confluence=buildConfluenceMap({symbol,currentPrice:Number(state.market.price),analysis:state.analysis,book,liquidation,intelligenceFeatures:[],mergeBps:20});
+ const forecast=forecastIssuanceToChartOverlay(latestInstitutionalForecast(forecastRuntime,symbol),{now:state.availableAt,maxAgeMs:6*60*60_000});
+ const events=buildStructureEventRadar({symbol,analyses:{'1m':state.mtf?.analyses?.['1m'],'5m':state.mtf?.analyses?.['5m'],'15m':state.mtf?.analyses?.['15m'],'1h':state.mtf?.analyses?.['1h'],'4h':state.mtf?.analyses?.['4h']},candlesByTf:state.byTf,now:state.availableAt});
+ const accuracy=buildForecastAccuracyView(forecastRuntime?.journal?.all?.()??[],{symbol,minDisplaySamples:30,foldSize:50,highConfidenceThreshold:.65});
+ const setup=buildSuperSetup({symbol,state,forecast,events,confluence});
+ const risk=buildSuperRisk({symbol,state,liquidation,accuracy,confluence});
+ const signal=buildSuperSignal({symbol,setup,risk,forecast});
+ return {state,liquidation,confluence,forecast,events,accuracy,setup,risk,signal};
+}
+async function showSuperRadar(chatId,messageId){
+ const now=Date.now();
+ const rows=requestedSymbols.map(symbol=>{
+  const r=radarCache.get(symbol);
+  return {symbol,witnessAgreement:r?.witnessAgreement??0,support:r?.support??0,pressureScore:r?.pressureScore??0,eventCount:r?.eventCount??0,ageMs:r?.capturedAt?Math.max(0,now-r.capturedAt):null,status:r?.status||'ABSTAIN',regime:r?.regime||'UNKNOWN'};
+ });
+ const radar=buildSuperRadar(rows);
+ const buttons=radar.rows.slice(0,10).map(x=>[{text:String(x.symbol).replace('USDT','')+' · '+Math.round(x.evidence*100)+'/100',callback_data:`terminal:setup:${x.symbol}`}]);
+ buttons.push([{text:'↻ REFRESH',callback_data:'terminal:radar'},{text:'🏠 Home',callback_data:'home'}]);
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderSuperRadar(radar),reply_markup:{inline_keyboard:buttons}});
+}
+async function showTerminalView(chatId,messageId,symbol,view){
+ const x=await terminalContext(symbol);
+ const text=view==='RISK'?renderSuperRisk(x.risk):view==='SIGNAL'?renderSuperSignal(x.signal):renderSuperSetup(x.setup);
+ return deliverTelegramTextCard(tg,chatId,messageId,{text,reply_markup:terminalKeyboard(symbol)});
+}
+
 async function showHomeSection(chatId,messageId,section) {
+  if(section==='TERMINAL') return showSuperRadar(chatId,messageId);
   if(section==='DATA') return showDataStatus(chatId,messageId);
   if(section==='MARKETS') return showMarkets(chatId,messageId);
   if(section==='WATCHLIST') return showFavorites(chatId,messageId);
@@ -5727,6 +5768,17 @@ async function handle(update) {
       else if(a.command==='memory') await showMemory(chatId,a.symbol);
       else if(a.command==='engine') await showEngine(chatId,a.symbol);
       await ack(q.id); return;
+    }
+    if (a.kind === 'SUPER_RADAR') {
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showSuperRadar(chatId,textMessageId); await ack(q.id,'Super Radar geladen'); return;
+    }
+    if (a.kind === 'TERMINAL_VIEW') {
+      if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showTerminalView(chatId,textMessageId,a.symbol,a.view); await ack(q.id,'Terminal '+a.view); return;
     }
     if (a.kind === 'HOME') {
       stopLiveAnalysisAuto(chatId);
