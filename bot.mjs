@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
@@ -7296,8 +7297,35 @@ function currentOperationalReadiness(){
   });
 }
 
+function missionControlData(){
+ const health={
+  ok:true,
+  operationalReadiness:currentOperationalReadiness(),
+  institutionalKernel:{ledgerHealthy:auditLedger.healthy,execution:'SHADOW_ONLY',canExecute:false},
+  marketDataFabric:{healthy:marketFabric.healthy,events:marketFabric.events.length},
+  shadowOms:{healthy:shadowOmsHealthy,total:shadowOrders.length,active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,filled:shadowOrders.filter(o=>o.status==='FILLED').length},
+  institutionalForecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+  episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
+  evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
+  telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError}
+ };
+ const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
+ const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now:Date.now(),runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN'&&p.entryMode!=='EXPLORATION').length,openDiscoveryPositions:countOpenDiscoveryPositions(shadowPortfolioLedger?.positions||[])}});
+ return missionControlSnapshot({health,portfolio:{...portfolio,positions:(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN').slice(0,20)},discovery,storage:{persistentStorageMounted}});
+}
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
+  if (req.url === '/mission-control') {
+    const snapshot=missionControlData();
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"});
+    res.end(renderMissionControlHtml(snapshot));
+    return;
+  }
+  if (req.url === '/mission-control.json') {
+    res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});
+    res.end(JSON.stringify(missionControlData()));
+    return;
+  }
   if (req.url === '/ready') {
     const readiness=currentOperationalReadiness();
     res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
