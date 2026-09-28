@@ -2176,8 +2176,11 @@ function timeframeKeyboard(symbol) {
 function chartKeyboard(symbol, interval, live=false) {
   return { inline_keyboard:[
     [
+      { text:interval==='1m'?"● 1M":"1M", callback_data:`chart:${symbol}:1m` },
       { text:interval==='5m'?"● 5M":"5M", callback_data:`chart:${symbol}:5m` },
-      { text:interval==='15m'?"● 15M":"15M", callback_data:`chart:${symbol}:15m` },
+      { text:interval==='15m'?"● 15M":"15M", callback_data:`chart:${symbol}:15m` }
+    ],
+    [
       { text:interval==='1h'?"● 1H":"1H", callback_data:`chart:${symbol}:1h` },
       { text:interval==='4h'?"● 4H":"4H", callback_data:`chart:${symbol}:4h` }
     ],
@@ -3092,6 +3095,7 @@ function chartCaption(symbol, interval, state, live=false) {
     mtf:state.mtf,
     candles:state.byTf[interval],
     live,
+    refreshSeconds:Math.round(refreshMs/1000),
     now:state.availableAt
   }).caption;
 }
@@ -5041,6 +5045,14 @@ async function showResearchLineage(chatId,messageId,symbol){
   });
 }
 
+function stopChartAuto(chatId){
+  const key=String(chatId);
+  const current=sessions.get(key);
+  if(current?.view==='CHART'&&current.live===true){
+    sessions.set(key,{...current,live:false,lastRefresh:Date.now()});
+  }
+}
+
 function parseAction(data='') {
   const product=parseProductCallback(data);
   if(product.kind!=='UNKNOWN') return product;
@@ -5199,7 +5211,9 @@ async function handle(update) {
       await ack(q.id); return;
     }
     if (a.kind === 'HOME') {
-      await showStart(chatId,messageId);
+      stopChartAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showStart(chatId,textMessageId);
       await ack(q.id);
       return;
     }
@@ -5210,6 +5224,7 @@ async function handle(update) {
     }
     if (a.kind === 'WHY') {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      stopChartAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showWhy(chatId,textMessageId,a.symbol);
       await ack(q.id,'Evidence geladen');
@@ -5305,6 +5320,7 @@ async function handle(update) {
       return;
     }
     if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
+      stopChartAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showMarket(chatId,textMessageId,a.symbol,sessions.get(String(chatId))?.live === true);
       await ack(q.id);
@@ -5327,7 +5343,9 @@ async function handle(update) {
     }
     if (a.kind === "TRADE_REPLAY") {
       if(!symbolOk(a.symbol)){ await ack(q.id,"Unbekannter Markt"); return; }
-      await showTradeReplay(chatId,messageId,a.symbol);
+      stopChartAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showTradeReplay(chatId,textMessageId,a.symbol);
       await ack(q.id,"Trade Replay geladen");
       return;
     }
@@ -5353,6 +5371,7 @@ async function handle(update) {
       return;
     }
     if (a.kind === "STRUCTURE") {
+      stopChartAuto(chatId);
       await showStructure(chatId,a.symbol);
       await ack(q.id,"Struktur geladen");
       return;
@@ -5372,6 +5391,7 @@ async function handle(update) {
     }
 
     if (a.kind === "FORECAST") {
+      stopChartAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showForecast(chatId,a.symbol,textMessageId);
       await ack(q.id,"Forecast geladen");
