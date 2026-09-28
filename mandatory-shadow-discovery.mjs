@@ -56,27 +56,34 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
   const candidates=[];
   for(const h of Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[]){
     const horizonGate=String(h?.gate||'').toUpperCase();
-    const calibrated=String(h?.calibration?.status||'').toUpperCase()==='CALIBRATED';
-    const directional=['UP','DOWN'].includes(String(h?.direction||'').toUpperCase());
-    const normalEligible=
-      horizonGate==='PASS'&&
-      h?.display?.probabilityDisplayAllowed===true&&
-      calibrated&&directional;
-    const probeEligible=
-      abstainProbe&&
-      horizonGate!=='INSUFFICIENT'&&
-      calibrated&&directional;
-    if(!normalEligible&&!probeEligible) continue;
-    const direction=String(h.direction).toUpperCase();
+    const calibrationStatus=String(h?.calibration?.status||'INSUFFICIENT').toUpperCase();
+    const calibrated=calibrationStatus==='CALIBRATED';
     const p=h.probabilities||h.display?.probabilities||{};
     const pUp=finite(p.up),pDown=finite(p.down),pFlat=finite(p.flat);
     const expectedReturn=finite(h.expectedReturn);
     if([pUp,pDown,pFlat,expectedReturn].some(x=>x==null)) continue;
+
+    let direction=String(h?.direction||'').toUpperCase();
+    if(!['UP','DOWN'].includes(direction)){
+      if(Math.abs(expectedReturn)>1e-12) direction=expectedReturn>=0?'UP':'DOWN';
+      else direction=pUp>=pDown?'UP':'DOWN';
+    }
+    const directional=['UP','DOWN'].includes(direction);
+    const normalEligible=
+      horizonGate==='PASS'&&
+      h?.display?.probabilityDisplayAllowed===true&&
+      calibrated&&directional;
+    // ABSTAIN probes are deliberately broader than normal entries: they exist to
+    // collect outcome labels precisely where institutional admission is uncertain.
+    // They still require canonical finite forecast values, fresh data and NORMAL safety.
+    const probeEligible=abstainProbe&&directional;
+    if(!normalEligible&&!probeEligible) continue;
+
     const directionalProbability=direction==='UP'?pUp:pDown;
     const oppositeProbability=direction==='UP'?pDown:pUp;
     const probabilityEdge=directionalProbability-oppositeProbability;
-    const minProb=abstainProbe?0.50:minDirectionalProbability;
-    const minMove=abstainProbe?0.0001:minAbsoluteExpectedReturn;
+    const minProb=abstainProbe?0:minDirectionalProbability;
+    const minMove=abstainProbe?0:minAbsoluteExpectedReturn;
     if(directionalProbability<minProb) continue;
     if(Math.abs(expectedReturn)<minMove) continue;
     const side=direction==='UP'?'BUY':'SELL';
@@ -99,6 +106,10 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
       horizonId:String(h.horizonId||''),
       horizonMs:Number(h.horizonMs||0),
       side,direction,expectedReturn,directionalProbability,oppositeProbability,probabilityEdge,
+      horizonGate,calibrationStatus,
+      probeEvidenceClass:abstainProbe
+        ?(calibrated?'CALIBRATED_ABSTAIN_PROBE':'UNCALIBRATED_DIAGNOSTIC_PROBE')
+        :'NORMAL_ADMITTED_EXPLORATION',
       structuralScore,discoveryScore,learned
     });
   }
@@ -148,7 +159,10 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
       novelty:c.learned.novelty,
       uncertainty:c.learned.uncertainty,
       learningValue:c.learned.learningValue,
-      structuralScore:c.structuralScore
+      structuralScore:c.structuralScore,
+      horizonGate:c.horizonGate,
+      calibrationStatus:c.calibrationStatus,
+      probeEvidenceClass:c.probeEvidenceClass
     },
     candidatesExamined:candidates.length,
     execution:'SHADOW_ONLY',
