@@ -301,6 +301,8 @@ function createRuntimeState(filePath,config,opts={}){
     migratedFromLegacyPath:null,
     lastPersistedBytes:null,
     lastPersistedLogicalBytes:null,
+    snapshotProfilePending:true,
+    lastSnapshotProfile:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
   };
 }
@@ -376,6 +378,36 @@ export function institutionalForecastRuntimeSnapshot(runtime){
   };
 }
 
+function jsonBytes(value){
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+function snapshotComponentProfile(payload){
+  const engine=payload?.engine??{};
+  const intelligence=payload?.intelligence??{};
+  const profile={
+    engine:{
+      total:jsonBytes(engine),
+      config:jsonBytes(engine.config??null),
+      history:jsonBytes(engine.history??[]),
+      calibration:jsonBytes(engine.calibration??[]),
+      reliability:jsonBytes(engine.reliability??[]),
+      modelPerformance:jsonBytes(engine.modelPerformance??[]),
+      intervalCalibration:jsonBytes(engine.intervalCalibration??[]),
+      drift:jsonBytes(engine.drift??[])
+    },
+    journal:jsonBytes(payload?.journal??null),
+    intelligence:{
+      total:jsonBytes(intelligence),
+      tracker:jsonBytes(intelligence.tracker??null),
+      audit:jsonBytes(intelligence.audit??[])
+    },
+    issuances:jsonBytes(payload?.issuances??[])
+  };
+  const topLevel=profile.engine.total+profile.journal+profile.intelligence.total+profile.issuances;
+  return {...profile,topLevelBytes:topLevel};
+}
+
 export async function saveInstitutionalForecastRuntime(runtime){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
   await mkdir(path.dirname(runtime.filePath),{recursive:true});
@@ -409,12 +441,19 @@ export async function saveInstitutionalForecastRuntime(runtime){
     runtime.loadedFromPath=runtime.filePath;
     runtime.migratedFromLegacyPath=null;
     runtime.lastError=null;
+    let componentProfile=null;
+    if(runtime.snapshotProfilePending){
+      componentProfile=snapshotComponentProfile(payload);
+      runtime.snapshotProfilePending=false;
+      runtime.lastSnapshotProfile=componentProfile;
+    }
     return {
       bytes:storageBytes,
       logicalBytes:bytes,
       maxSnapshotBytes,
       encoding,
-      compressionRatio:bytes>0?storageBytes/bytes:null
+      compressionRatio:bytes>0?storageBytes/bytes:null,
+      componentProfile
     };
   }catch(err){
     await rm(tmp,{force:true}).catch(()=>{});
@@ -633,6 +672,7 @@ export function institutionalForecastRuntimeSummary(runtime){
     snapshotCompressionRatio:Number(runtime?.lastPersistedLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
       ?Number(runtime.lastPersistedBytes)/Number(runtime.lastPersistedLogicalBytes)
       :null,
+    snapshotProfile:runtime?.lastSnapshotProfile??null,
     historyCases:runtime?.engine?.historySize?.()??0,
     journalEntries:runtime?.journal?.all?.().length??0,
     pendingOutcomes:runtime?.journal?.pending?.().length??0,
