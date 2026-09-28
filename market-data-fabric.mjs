@@ -1,5 +1,7 @@
 import path from 'node:path';
-import { mkdir, open as openFile, readFile } from 'node:fs/promises';
+import { mkdir, open as openFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import readline from 'node:readline';
 import { canonicalJson, sha256 } from './institutional-kernel.mjs';
 
 const GENESIS='0'.repeat(64);
@@ -74,32 +76,72 @@ function dedupeKeyOf(event){
   });
 }
 
-export async function openMarketDataFabric(filePath){
+export async function openMarketDataFabric(filePath,{maxInMemoryEvents=12000}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  let events=[];
+  const keep=Math.max(1000,Math.floor(Number(maxInMemoryEvents)||12000));
+  const ring=new Array(keep);
+  let retainedCount=0,ringPos=0,total=0;
+  let prev=GENESIS,expectedSeq=1,healthy=true,error=null;
   try{
-    const raw=await readFile(filePath,'utf8');
-    const lines=raw.split(/\r?\n/).filter(Boolean);
-    events=lines.map((line,i)=>{
-      try{return JSON.parse(line);}
-      catch{throw new Error(`Invalid market-event JSON at line ${i+1}`);}
-    });
+    const input=createReadStream(filePath,{encoding:'utf8'});
+    const rl=readline.createInterface({input,crlfDelay:Infinity});
+    for await(const line of rl){
+      if(!line.trim()) continue;
+      let event;
+      try{event=JSON.parse(line);}
+      catch(err){
+        healthy=false;
+        error='FABRIC_PARSE_FAILURE:'+String(err instanceof Error?err.message:err);
+        break;
+      }
+      const shape=validateMarketEventShape(event);
+      if(!shape.ok){
+        healthy=false;
+        error='FABRIC_RECORD_INVALID:'+shape.errors.join(',');
+        break;
+      }
+      if(Number(event.seq)!==expectedSeq){
+        healthy=false;
+        error='FABRIC_SEQ_GAP:'+event.seq+':'+expectedSeq;
+        break;
+      }
+      if(event.prevHash!==prev){
+        healthy=false;
+        error='FABRIC_PREV_HASH_MISMATCH:'+event.seq;
+        break;
+      }
+      prev=event.eventHash;
+      expectedSeq++;
+      total++;
+      if(retainedCount<keep){
+        ring[retainedCount++]=event;
+      }else{
+        ring[ringPos]=event;
+        ringPos=(ringPos+1)%keep;
+      }
+    }
   }catch(err){
     if(err?.code!=='ENOENT'){
-      return {
-        filePath,healthy:false,
-        verification:{ok:false,error:'FABRIC_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
-        seq:0,tailHash:GENESIS,events:[],dedupe:new Set()
-      };
+      healthy=false;
+      error='FABRIC_READ_FAILURE:'+String(err instanceof Error?err.message:err);
     }
   }
-  const verification=verifyMarketEventChain(events);
+
+  let events=[];
+  if(healthy){
+    if(total<=keep) events=ring.slice(0,retainedCount);
+    else events=[...ring.slice(ringPos),...ring.slice(0,ringPos)];
+  }
   return {
     filePath,
-    healthy:verification.ok,
-    verification,
-    seq:verification.ok?verification.lastSeq:0,
-    tailHash:verification.ok?verification.tailHash:GENESIS,
+    healthy,
+    verification:healthy
+      ?{ok:true,count:total,lastSeq:expectedSeq-1,tailHash:prev,retainedEvents:events.length}
+      :{ok:false,error:error||'FABRIC_READ_OR_PARSE_FAILURE'},
+    seq:healthy?expectedSeq-1:0,
+    tailHash:healthy?prev:GENESIS,
+    totalEvents:healthy?total:0,
+    maxInMemoryEvents:keep,
     events,
     dedupe:new Set(events.map(dedupeKeyOf))
   };
@@ -173,6 +215,12 @@ export async function appendMarketEvents(fabric,inputs){
     fabric.dedupe.add(key);
     fabric.seq=event.seq;
     fabric.tailHash=event.eventHash;
+    fabric.totalEvents=Number(fabric.totalEvents||0)+1;
+    const keep=Math.max(1000,Number(fabric.maxInMemoryEvents||12000));
+    while(fabric.events.length>keep){
+      const removed=fabric.events.shift();
+      if(removed) fabric.dedupe.delete(dedupeKeyOf(removed));
+    }
   }
 
   return {appended:prepared.map(x=>x.event),duplicates};
@@ -186,6 +234,8 @@ export function marketFabricSummary(fabric){
     seq:Number(fabric?.seq||0),
     tailHash:String(fabric?.tailHash||GENESIS),
     eventCount:Array.isArray(fabric?.events)?fabric.events.length:0,
+    totalEvents:Number(fabric?.totalEvents||fabric?.seq||0),
+    maxInMemoryEvents:Number(fabric?.maxInMemoryEvents||0),
     counts,
     filePath:String(fabric?.filePath||'')
   };
