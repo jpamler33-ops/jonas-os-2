@@ -1656,7 +1656,7 @@ function helpText() {
     'PROFI-FUNKTIONEN',
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
-    '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy · /coach',
+    '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy · /coach · /league',
     '/oms · /sorstatus · /venuequality · /executionlab','',
     'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
   ].join('\n');
@@ -2097,6 +2097,7 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='PORTFOLIO') return showShadowPortfolio(chatId,messageId);
   if(section==='ACADEMY') return showShadowCapitalAcademy(chatId,messageId);
   if(section==='COACH') return showShadowTrainingCoach(chatId,messageId);
+  if(section==='LEAGUE') return showStrategyLeague(chatId,messageId);
   if(section==='STATS_DAY') return showShadowTradeStats(chatId,messageId,'DAY');
   if(section==='STATS_WEEK') return showShadowTradeStats(chatId,messageId,'WEEK');
   if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
@@ -2155,6 +2156,7 @@ async function showHomeSection(chatId,messageId,section) {
       `Shadow-Portfolio: ${shadowPortfolioHealthy?'🟢':'🟡'} · Equity ${fmt(shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}).equityQuote,2)} USDT`,
       `Capital Academy: ${evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).activeStage} · ${fmt(evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).stageProgress*100,1)}%`,
       `Training Coach: ${renderSupervisorCompact(evaluateShadowTrainingSupervisor(shadowPortfolioLedger,evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}),{asOf:Date.now()})).mission} · Risiko ${fmt(renderSupervisorCompact(evaluateShadowTrainingSupervisor(shadowPortfolioLedger,evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}),{asOf:Date.now()})).riskMultiplier,2)}×`,
+      `Strategy League: ${strategyLeagueEnabled?'🟢 aktiv':'⏸ aus'} · ${strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}).allocationMode} · ${strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}).eligibleStrategies} bewährt`,
       `Shadow-Wettbewerb: ${shadowCompetitionEnabled?'🟢 aktiv':'⏸ aus'} · ${shadowCompetitionState?.candidates?.length||0} Kandidaten`,
       `Experiment-Governor: ${experimentGovernorState?.status||'UNINITIALIZED'} · Generation ${experimentGovernorState?.generationNumber||'—'}`,
       `Feature-Research: ${featureResearchState?.status||'UNINITIALIZED'} · ${featureResearchState?.experiments?.length||0} Signale`,
@@ -2907,6 +2909,43 @@ async function showShadowCapitalAcademy(chatId,messageId=null){
   const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
     [{text:'🔄 Prüfen',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
     [{text:'🏆 Academy',callback_data:'home:academy'},{text:'💼 Portfolio',callback_data:'home:portfolio'}],
+    [{text:'🏠 Start',callback_data:'home'}]
+  ]}};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showStrategyLeague(chatId,messageId=null){
+  const x=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()});
+  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
+  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
+  const lines=[
+    '🏁 TCX STRATEGY LEAGUE','',
+    'Modus: '+x.allocationMode.replaceAll('_',' '),
+    'Strategien: '+x.strategyCount+' · allocation-berechtigt: '+x.eligibleStrategies,
+    'Virtuelles Startkapital je Strategie: '+fmt(x.initialEquityPerStrategy,0)+' USDT',
+    'Gesamtes virtuelles League-Kapital: '+fmt(x.totalInitialVirtualCapital,0)+' USDT','',
+    'RANGLISTE'
+  ];
+  x.strategies.forEach((r,i)=>{
+    const pf=r.account.profitFactor==null?'—':fmt(r.account.profitFactor,2);
+    lines.push(
+      (i+1)+'. '+r.label+' · '+r.status,
+      '   Gewicht '+pct(r.allocationWeight)+' · Equity '+fmt(r.account.equityQuote,2)+' · PnL '+money(r.account.netPnlQuote),
+      '   Trades '+r.account.closedTrades+' · PF '+pf+' · DD '+pct(r.account.maxDrawdownPct),
+      '   unabhängig '+r.independentDecisions+' · Tage '+r.tradingDays
+    );
+  });
+  lines.push(
+    '',
+    'Extra-Kapital wird erst evidenzgewichtet, wenn mindestens 2 Strategien jeweils ≥30 unabhängige Trades, ≥7 Handelstage und ≤60% Coin-Konzentration haben.',
+    'Bis dahin läuft die League mit gleicher Explorations-Allokation.',
+    '',
+    'Mode: SHADOW_ONLY · getrennte virtuelle Konten · echte Orders gesperrt.'
+  );
+  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
+    [{text:'🔄 Aktualisieren',callback_data:'home:league'},{text:'🧠 Coach',callback_data:'home:coach'}],
+    [{text:'🏆 Academy',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
     [{text:'🏠 Start',callback_data:'home'}]
   ]}};
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
@@ -4296,6 +4335,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showShadowTradeStats,
   showShadowCapitalAcademy,
   showShadowTrainingCoach,
+  showStrategyLeague,
   showExecutionResearch,
   showVenueQuality,
   showSorStatus,
@@ -4922,6 +4962,90 @@ async function shadowPortfolioWatcher(){
       recordError(observability,{scope:'shadow_portfolio.watch',message:msg});
       recordOperation(observability,{name:'shadow_portfolio_watch',ok:false,latencyMs:Date.now()-started,error:msg});
       console.error('shadow portfolio watcher error',msg);
+    }
+  }
+}
+
+async function strategyLeagueWatcher(){
+  while(running){
+    await sleep(strategyLeagueWatchMs);
+    if(!strategyLeagueEnabled||!strategyLeagueHealthy||!shadowOmsHealthy) continue;
+    const started=Date.now();
+    let changed=false,opened=0,closed=0;
+    try{
+      const reconciled=reconcileStrategyLeagueEntries(strategyLeagueLedger,shadowOrders,{now:Date.now()});
+      if(reconciled.changed){
+        strategyLeagueLedger=reconciled.ledger;
+        changed=true;
+        opened+=reconciled.added;
+      }
+
+      const openPositions=(strategyLeagueLedger.positions||[]).filter(p=>p.status==='OPEN');
+      const symbols=[...new Set(openPositions.map(p=>p.symbol))];
+      const books=new Map();
+      for(const symbol of symbols){
+        try{ books.set(symbol,await fetchExecutionBook(symbol)); }
+        catch(err){
+          recordError(observability,{scope:'strategy_league.book',message:err instanceof Error?err.message:String(err)});
+        }
+      }
+
+      for(const current of [...(strategyLeagueLedger.positions||[])]){
+        if(current.status!=='OPEN') continue;
+        const book=books.get(current.symbol);
+        if(!book) continue;
+        const marked=markStrategyLeaguePosition(current,book,{
+          at:Number(book.availableAt||Date.now()),
+          feeBps:shadowTakerFeeBps
+        });
+        if(marked.changed){
+          strategyLeagueLedger=replaceStrategyLeaguePosition(strategyLeagueLedger,marked.position);
+          changed=true;
+        }
+        if(marked.trigger){
+          const finished=closeStrategyLeaguePosition(marked.position,{
+            reason:marked.trigger,
+            at:Number(book.availableAt||Date.now())
+          });
+          strategyLeagueLedger=replaceStrategyLeaguePosition(strategyLeagueLedger,finished);
+          changed=true;closed++;
+          if(auditLedger.healthy){
+            await appendInstitutionalAudit('TCX_STRATEGY_LEAGUE_POSITION_CLOSED',{
+              version:SHADOW_STRATEGY_LEAGUE_VERSION,
+              at:finished.closedAt,
+              strategyId:finished.leagueStrategyId,
+              positionId:finished.positionId,
+              symbol:finished.symbol,
+              side:finished.side,
+              horizonId:finished.horizonId,
+              closeReason:finished.closeReason,
+              realizedNetPnlQuote:finished.realizedNetPnlQuote,
+              realizedReturnPct:finished.realizedReturnPct,
+              execution:'SHADOW_ONLY',
+              canExecuteLive:false
+            });
+          }
+        }
+      }
+
+      if(changed) await persistStrategyLeague('watcher');
+      const summary=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()});
+      recordOperation(observability,{name:'strategy_league_watch',ok:true,latencyMs:Date.now()-started,error:null});
+      if(opened||closed){
+        console.log('strategy league cycle',JSON.stringify({
+          opened,closed,
+          allocationMode:summary.allocationMode,
+          eligibleStrategies:summary.eligibleStrategies,
+          leader:summary.strategies[0]?.strategyId||null,
+          leaderWeight:summary.strategies[0]?.allocationWeight||0,
+          execution:'SHADOW_ONLY'
+        }));
+      }
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'strategy_league.watch',message:msg});
+      recordOperation(observability,{name:'strategy_league_watch',ok:false,latencyMs:Date.now()-started,error:msg});
+      console.error('strategy league watcher error',msg);
     }
   }
 }
@@ -5802,6 +5926,17 @@ console.log(JSON.stringify({
     summary:shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),
     capabilities:SHADOW_PORTFOLIO_CAPABILITIES
   },
+  strategyLeague:{
+    version:SHADOW_STRATEGY_LEAGUE_VERSION,
+    enabled:strategyLeagueEnabled,
+    file:strategyLeagueFile,
+    healthy:strategyLeagueHealthy,
+    loaded:(strategyLeagueLedger.positions||[]).length,
+    recoveredFromCorrupt:loadedStrategyLeague.recoveredFromCorrupt,
+    watchMs:strategyLeagueWatchMs,
+    summary:strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}),
+    canExecuteLive:false
+  },
   shadowSor:{
     version:SHADOW_SOR_VERSION,
     routeQuote:'USDT',
@@ -5854,4 +5989,4 @@ console.log(JSON.stringify({
 },null,2));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),venueQualityWatcher()]);
+await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher()]);
