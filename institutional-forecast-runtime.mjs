@@ -209,7 +209,8 @@ function createRuntimeState(filePath,config,opts={}){
     maxResolutionDelayRatio:opts.maxResolutionDelayRatio??.25
   });
   const intelligence=new ForecastIntelligenceService(engine,{
-    maxAuditEvents:opts.maxAuditEvents??5_000
+    maxAuditEvents:opts.maxAuditEvents??5_000,
+    maxTrackedForecasts:opts.maxTrackedForecasts??5_000
   });
   return {
     filePath,
