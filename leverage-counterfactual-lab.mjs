@@ -27,7 +27,7 @@ function simulate(rows,leverage,initial){
 }
 export function buildLeverageCounterfactualLab(ledger,{levels=[1,1.25,1.5,2,2.5,3],minTrades=100,maxDrawdownPct=.15}={}){
  const rows=eligible(ledger),initial=Math.max(1,finite(ledger?.initialEquityQuote,10_000));
- const normalized=[...new Set(levels.map(x=>Math.max(1,Math.min(3,finite(x,1))))].sort((a,b)=>a-b);
+ const normalized=[...new Set(levels.map(x=>Math.max(1,Math.min(3,finite(x,1)))))].sort((a,b)=>a-b);
  const scenarios=normalized.map(x=>simulate(rows,x,initial));
  const admissible=scenarios.filter(x=>x.trades>=minTrades&&finite(x.expectancyQuote,-1)>0&&x.maxDrawdownPct<=maxDrawdownPct);
  admissible.sort((a,b)=>(finite(b.expectancyQuote)/Math.max(.01,b.maxDrawdownPct+.01))-(finite(a.expectancyQuote)/Math.max(.01,a.maxDrawdownPct+.01)));
