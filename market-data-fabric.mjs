@@ -81,7 +81,8 @@ export async function openMarketDataFabric(filePath,{maxInMemoryEvents=12000}={}
   const keep=Math.max(1000,Math.floor(Number(maxInMemoryEvents)||12000));
   const ring=new Array(keep);
   let retainedCount=0,ringPos=0,total=0;
-  let prev=GENESIS,expectedSeq=1,healthy=true,error=null,lastValidByteOffset=0,byteOffset=0,recoveredTruncatedTail=false;
+  const checkpoint=await readMarketFabricCheckpoint(filePath);
+  let prev=checkpoint?.tailHash||GENESIS,expectedSeq=(checkpoint?.lastSeq||0)+1,healthy=true,error=null,lastValidByteOffset=0,byteOffset=0,recoveredTruncatedTail=false;
   try{
     const input=createReadStream(filePath,{encoding:'utf8'});
     const rl=readline.createInterface({input,crlfDelay:Infinity});
@@ -154,6 +155,7 @@ export async function openMarketDataFabric(filePath,{maxInMemoryEvents=12000}={}
     maxInMemoryEvents:keep,
     events,
     recoveredTruncatedTail,
+    checkpoint,
     dedupe:new Set(events.map(dedupeKeyOf))
   };
 }
