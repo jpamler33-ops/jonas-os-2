@@ -44,6 +44,13 @@ import {
   SHADOW_STRATEGY_LEAGUE_VERSION, SHADOW_STRATEGIES
 } from './shadow-strategy-league.mjs';
 import { STRATEGY_EVIDENCE_ENGINE_VERSION } from './strategy-evidence-engine.mjs';
+import {
+  buildShadowTradeQualityModel, qualityLearnerSummary,
+  SHADOW_TRADE_QUALITY_LEARNER_VERSION
+} from './shadow-trade-quality-learner.mjs';
+import {
+  deriveMandatoryShadowDiscovery, MANDATORY_SHADOW_DISCOVERY_VERSION
+} from './mandatory-shadow-discovery.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -144,6 +151,11 @@ const autoShadowMemecoinMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(p
 const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MIN_EXPECTED_RETURN || 0.002));
 const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
+const mandatoryShadowDiscoveryEnabled = String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
+const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 12));
+const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
+const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
+const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
 const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
 const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
 const shadowStatsTimeZone = String(process.env.TCX_STATS_TIMEZONE || 'Europe/Berlin');
@@ -448,6 +460,8 @@ try {
       shadowPortfolio:SHADOW_PORTFOLIO_LEDGER_VERSION,
       strategyLeague:SHADOW_STRATEGY_LEAGUE_VERSION,
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
+      shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
+      mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -1287,6 +1301,125 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     execution:'SHADOW_ONLY'
   }));
   return {...decision,placed:true,orderId:order.id,status:order.status};
+}
+
+
+async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,autoResult=null}={}){
+  const now=Date.now();
+  if(!mandatoryShadowDiscoveryEnabled){
+    return {placed:false,eligible:false,reason:'MANDATORY_DISCOVERY_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(autoResult?.placed===true){
+    return {placed:false,eligible:false,reason:'STANDARD_SHADOW_TRADE_ALREADY_PLACED',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const exploreAfter=new Set([
+    'EXPECTED_RETURN_TOO_SMALL',
+    'DIRECTIONAL_PROBABILITY_TOO_LOW',
+    'PROBABILITY_EDGE_TOO_LOW',
+    'NO_ADMITTED_DIRECTIONAL_HORIZON'
+  ]);
+  if(!exploreAfter.has(String(autoResult?.reason||''))){
+    return {
+      placed:false,eligible:false,
+      reason:'DISCOVERY_RESPECTS_STANDARD_BLOCK_'+String(autoResult?.reason||'UNKNOWN'),
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    };
+  }
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:false,eligible:false,reason:'DISCOVERY_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+  if(reconciled.changed){
+    shadowPortfolioLedger=reconciled.ledger;
+    await persistShadowPortfolio('pre-mandatory-discovery-reconcile');
+  }
+
+  const explorationOrders=shadowOrders
+    .filter(o=>
+      o?.strategyMeta?.strategy===AUTONOMOUS_SHADOW_TRADER_VERSION&&
+      String(o?.strategyMeta?.role||'').toUpperCase()==='EXPLORATION_ENTRY'
+    )
+    .sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
+  const symbol=String(issuance?.symbol||'').toUpperCase();
+  const symbolPrior=explorationOrders.filter(o=>o.symbol===symbol);
+  if(symbolPrior.length&&now-Number(symbolPrior[0].createdAt||0)<mandatoryShadowDiscoveryCooldownMs){
+    return {placed:false,eligible:false,reason:'DISCOVERY_SYMBOL_COOLDOWN',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const dayStart=new Date(now); dayStart.setUTCHours(0,0,0,0);
+  const todaySymbol=symbolPrior.filter(o=>Number(o.createdAt||0)>=dayStart.getTime()).length;
+  if(todaySymbol>=mandatoryShadowDiscoveryMaxPerSymbolDay){
+    return {placed:false,eligible:false,reason:'DISCOVERY_DAILY_SYMBOL_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const openExploration=(shadowPortfolioLedger.positions||[]).filter(p=>p.status==='OPEN'&&p.exploration===true);
+  if(openExploration.length>=mandatoryShadowDiscoveryMaxOpenTotal){
+    return {placed:false,eligible:false,reason:'DISCOVERY_GLOBAL_OPEN_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(openExploration.some(p=>p.symbol===symbol)){
+    return {placed:false,eligible:false,reason:'DISCOVERY_SYMBOL_OPEN_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
+  const assetClass=assetClassForSymbol(symbol);
+  const decision=deriveMandatoryShadowDiscovery(issuance,qualityModel,{
+    now,
+    assetClass,
+    notionalQuote:mandatoryShadowDiscoveryNotional
+  });
+  if(!decision.eligible) return {...decision,placed:false};
+  if(shadowOrders.some(o=>o?.strategyMeta?.discoveryDecisionKey===decision.decisionKey)){
+    return {...decision,placed:false,reason:'DISCOVERY_DECISION_ALREADY_TRADED'};
+  }
+
+  const order=await placeShadowOrder({
+    symbol:decision.symbol,
+    side:decision.side,
+    type:'MARKET',
+    notionalQuote:decision.notionalQuote,
+    strategyMeta:{
+      strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+      role:'EXPLORATION_ENTRY',
+      entryMode:'EXPLORATION',
+      assetClass,
+      strategyLane:['EXPLORE',decision.symbol,decision.horizonId,decision.side].join(':'),
+      discoveryVersion:MANDATORY_SHADOW_DISCOVERY_VERSION,
+      discoveryDecisionKey:decision.decisionKey,
+      discoveryScore:decision.discoveryScore,
+      entryQualityLearnerVersion:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
+      entryQualityLabel:decision.learning.qualityLabel,
+      entryQualityScore:decision.learning.qualityScore,
+      entryQualityConfidence:decision.learning.confidence,
+      entryQualitySamples:decision.learning.samples,
+      entryLearningValue:decision.learning.learningValue,
+      entryDiscoveryScore:decision.discoveryScore,
+      decisionKey:decision.decisionKey,
+      issuanceId:decision.issuanceId,
+      forecastFingerprint:decision.forecastFingerprint,
+      horizonId:decision.horizonId,
+      horizonMs:decision.horizonMs,
+      admissionGate:decision.admissionGate,
+      expectedReturn:decision.expectedReturn,
+      directionalProbability:decision.directionalProbability,
+      probabilityEdge:decision.probabilityEdge,
+      generatedAt:decision.generatedAt
+    }
+  });
+  recordOperation(observability,{name:'mandatory_shadow_discovery',ok:true,latencyMs:0,error:null});
+  console.log('mandatory shadow discovery trade placed',JSON.stringify({
+    symbol:decision.symbol,
+    side:decision.side,
+    horizonId:decision.horizonId,
+    notionalQuote:decision.notionalQuote,
+    qualityLabel:decision.learning.qualityLabel,
+    qualityScore:decision.learning.qualityScore,
+    learningValue:decision.learning.learningValue,
+    discoveryScore:decision.discoveryScore,
+    modelSamples:qualityModel.samples,
+    orderId:order.id,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  }));
+  return {...decision,placed:true,orderId:order.id,status:order.status,modelSamples:qualityModel.samples};
 }
 
 async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
@@ -2965,6 +3098,8 @@ async function showShadowTrainingCoach(chatId,messageId=null){
   const academy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
   const t=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,academy,{asOf:Date.now()});
   const x=renderSupervisorCompact(t);
+  const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:Date.now()});
+  const quality=qualityLearnerSummary(qualityModel);
   const pf=x.profitFactor==null?'—':Number.isFinite(x.profitFactor)?fmt(x.profitFactor,2):'∞';
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
@@ -2982,6 +3117,14 @@ async function showShadowTrainingCoach(chatId,messageId=null){
     'Drawdown: '+pct(x.drawdownPct),
     'Verlustserie: '+t.rolling.lossStreak,
     'Dominanter Coin: '+(topSymbol?topSymbol.key+' · '+fmt((topSymbol.trades/Math.max(1,t.samples.recent))*100,1)+'%':'—'),'',
+    'TRADE-QUALITY-LEARNER',
+    'Gelernte Outcomes: '+quality.samples+' · davon Exploration: '+quality.explorationSamples,
+    'Globaler posteriorer Trefferwert: '+(quality.global?fmt(quality.global.posteriorWinRate*100,1)+'%':'—'),
+    'Bester belastbarer Kontext: '+(quality.bestContexts?.[0]?quality.bestContexts[0].key+' · '+fmt(quality.bestContexts[0].qualityScore*100,0)+'/100':'noch zu wenig Daten'),
+    'Schwächster belastbarer Kontext: '+(quality.weakContexts?.[0]?quality.weakContexts[0].key+' · '+fmt(quality.weakContexts[0].qualityScore*100,0)+'/100':'noch zu wenig Daten'),'',
+    'MANDATORY DISCOVERY',
+    'Jeder Auto-Learn-Scan muss nach einem Lernkandidaten suchen, wenn kein normaler Entry die Qualitäts-Schwellen erreicht.',
+    'Exploration: max. '+mandatoryShadowDiscoveryMaxPerSymbolDay+' je Coin/Tag · '+fmt(mandatoryShadowDiscoveryNotional,0)+' USDT virtuell · max. '+mandatoryShadowDiscoveryMaxOpenTotal+' gleichzeitig.','',
     'AUTOMATISCHE RISIKOANPASSUNG',
     'Academy-Budget wird aktuell mit '+fmt(x.riskMultiplier,2)+'× skaliert.',
     'Status: '+(x.hold?'⛔ Trainingspause':'🟢 neue qualifizierte Shadow-Entries erlaubt'),
@@ -4174,6 +4317,20 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       console.error('auto shadow trade error',symbol,msg);
     }
   }
+  let mandatoryDiscoveryRun=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      mandatoryDiscoveryRun=await maybePlaceMandatoryShadowDiscovery(issuance,{
+        auditHealthy:auditHealthyAfter,
+        autoResult:autoShadowTrade
+      });
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      mandatoryDiscoveryRun={placed:false,eligible:false,reason:'MANDATORY_DISCOVERY_ERROR'};
+      recordError(observability,{scope:'mandatory_shadow_discovery',message:msg});
+      console.error('mandatory shadow discovery error',symbol,msg);
+    }
+  }
   let strategyLeagueRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
@@ -4239,6 +4396,12 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       autoShadowTradeReason:autoShadowTrade?.reason||null,
       autoShadowOrderId:autoShadowTrade?.orderId||null,
       autoShadowSide:autoShadowTrade?.side||null,
+      mandatoryDiscoveryPlaced:mandatoryDiscoveryRun?.placed===true,
+      mandatoryDiscoveryEligible:mandatoryDiscoveryRun?.eligible===true,
+      mandatoryDiscoveryReason:mandatoryDiscoveryRun?.reason||null,
+      mandatoryDiscoveryOrderId:mandatoryDiscoveryRun?.orderId||null,
+      mandatoryDiscoveryLearningValue:Number(mandatoryDiscoveryRun?.learning?.learningValue||0),
+      mandatoryDiscoveryQualityLabel:mandatoryDiscoveryRun?.learning?.qualityLabel||null,
       strategyLeaguePlaced:Number(strategyLeagueRun?.placed||0),
       strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
       strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null
