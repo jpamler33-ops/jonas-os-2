@@ -10,7 +10,7 @@ COPY research-data-plane.mjs research-data-plane-adapters.mjs research-feature-c
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime
 COPY expansion-runtime ./expansion-runtime
-COPY autonomous-shadow-trader.test.mjs shadow-portfolio-ledger.test.mjs shadow-capital-academy.test.mjs shadow-training-supervisor.test.mjs strategy-evidence-engine.test.mjs shadow-trade-quality-learner.test.mjs mandatory-shadow-discovery.test.mjs learned-challenger-engine.test.mjs shadow-regime-brain.test.mjs adversarial-stress-lab.test.mjs shadow-strategy-league.test.mjs shadow-oms.test.mjs portfolio-brain.test.mjs telegram-read-command-handlers.test.mjs telegram-update-dispatcher.test.mjs research-data-plane.test.mjs research-data-plane-adapters.test.mjs research-data-governance.test.mjs research-dependency-graph.test.mjs telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-shadow-evaluation-client.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs expansion-runtime/entity-flow-engine.test.mjs ./
+COPY market-data-fabric.test.mjs autonomous-shadow-trader.test.mjs shadow-portfolio-ledger.test.mjs shadow-capital-academy.test.mjs shadow-training-supervisor.test.mjs strategy-evidence-engine.test.mjs shadow-trade-quality-learner.test.mjs mandatory-shadow-discovery.test.mjs learned-challenger-engine.test.mjs shadow-regime-brain.test.mjs adversarial-stress-lab.test.mjs shadow-strategy-league.test.mjs shadow-oms.test.mjs portfolio-brain.test.mjs telegram-read-command-handlers.test.mjs telegram-update-dispatcher.test.mjs research-data-plane.test.mjs research-data-plane-adapters.test.mjs research-data-governance.test.mjs research-dependency-graph.test.mjs telegram-product-ui.test.mjs forecast-product.test.mjs telegram-ui-runtime.test.mjs institutional-forecast-runtime.test.mjs forecast-contract.test.mjs forecast-input-adapter.test.mjs forecast-learning-center.test.mjs scientific-validity.test.mjs forecast-candidate-lab.test.mjs forecast-hypothesis-generator.test.mjs forecast-shadow-competition.test.mjs forecast-shadow-evaluation-client.test.mjs forecast-experiment-governor.test.mjs forecast-feature-research.test.mjs expansion-runtime/derivatives-public-provider.test.mjs expansion-runtime/liquidation-public-stream.test.mjs expansion-runtime/onchain-research-provider.test.mjs expansion-runtime/wallet-cohort-public-provider.test.mjs expansion-runtime/verified-entity-registry.test.mjs expansion-runtime/entity-flow-engine.test.mjs ./
 
 RUN npm run check
 RUN npm run test:auto-shadow
@@ -22,6 +22,7 @@ RUN npm run test:discovery
 RUN npm run test:learning-v2
 RUN npm run test:learning-v3
 RUN npm run test:learning-v4
+RUN npm run test:stability
 RUN npm run test:telegram-resilience
 RUN npm run test:ui
 RUN npm run test:intel
