@@ -15,13 +15,26 @@ import { verifyCanonicalForecastInput } from './forecast-input-adapter.mjs';
 import { createInstitutionalForecastIssuance, verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { createResearchTraceEvaluation } from './research-trace.mjs';
 import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
+import { sha256 } from './institutional-kernel.mjs';
 
 export const INSTITUTIONAL_FORECAST_RUNTIME_VERSION='TCX_INSTITUTIONAL_FORECAST_RUNTIME_V1';
 
 const DEFAULT_FORECAST_SNAPSHOT_BYTES=80*1024*1024;
+const DEFAULT_FORECAST_ISSUANCE_STORE_BYTES=64*1024*1024;
+const FORECAST_ISSUANCE_STORE_VERSION='TCX_FORECAST_ISSUANCE_STORE_V1';
 function snapshotByteLimit(value){
   const n=Number(value);
   return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_SNAPSHOT_BYTES);
+}
+
+function issuanceStoreByteLimit(value){
+  const n=Number(value);
+  return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_ISSUANCE_STORE_BYTES);
+}
+
+function issuanceStorePath(filePath,slot){
+  if(slot!=='a'&&slot!=='b') throw new Error('invalid forecast issuance store slot');
+  return filePath+'.issuances.'+slot+'.json.gz';
 }
 
 function isGzipBuffer(value){
@@ -301,6 +314,12 @@ function createRuntimeState(filePath,config,opts={}){
     migratedFromLegacyPath:null,
     lastPersistedBytes:null,
     lastPersistedLogicalBytes:null,
+    maxIssuanceStoreBytes:issuanceStoreByteLimit(opts.maxIssuanceStoreBytes),
+    issuanceStoreSlot:null,
+    issuanceStoreHash:null,
+    issuanceStoreCount:0,
+    lastIssuanceStoreBytes:null,
+    lastIssuanceStoreLogicalBytes:null,
     snapshotProfilePending:true,
     lastSnapshotProfile:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
@@ -311,12 +330,13 @@ export async function openInstitutionalForecastRuntime(filePath,{
   config=DEFAULT_INSTITUTIONAL_FORECAST_CONFIG,
   maxHistoryRows=8_000,
   maxSnapshotBytes=80*1024*1024,
+  maxIssuanceStoreBytes=64*1024*1024,
   legacyFilePath=null,
   snapshotCompression='json',
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes,snapshotCompression});
+  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes,maxIssuanceStoreBytes,snapshotCompression});
 
   let sourcePath=filePath;
   try{
@@ -346,8 +366,48 @@ export async function openInstitutionalForecastRuntime(filePath,{
     restoreEngine(runtime.engine,snapshot.engine);
     if(snapshot.journal) runtime.journal.restore(snapshot.journal,{rehydrateLearningMemory:false});
     if(snapshot.intelligence) runtime.intelligence.restore(snapshot.intelligence,Date.now());
+    let persistedIssuances=Array.isArray(snapshot.issuances)?snapshot.issuances:[];
+    if(snapshot.issuanceStore){
+      const meta=snapshot.issuanceStore;
+      if(meta?.version!==FORECAST_ISSUANCE_STORE_VERSION||!['a','b'].includes(meta?.slot)||typeof meta?.sha256!=='string'){
+        throw new Error('invalid forecast issuance store reference');
+      }
+      const storePath=issuanceStorePath(sourcePath,meta.slot);
+      const storeStat=await stat(storePath);
+      if(storeStat.size>runtime.maxIssuanceStoreBytes){
+        throw Object.assign(new Error('forecast issuance store exceeds configured storage safety limit'),{
+          code:'TCX_ISSUANCE_STORE_TOO_LARGE',
+          bytes:storeStat.size,
+          maxIssuanceStoreBytes:runtime.maxIssuanceStoreBytes
+        });
+      }
+      const packed=await readFile(storePath);
+      const logical=await gunzip(packed);
+      if(logical.length>runtime.maxIssuanceStoreBytes){
+        throw Object.assign(new Error('forecast issuance store exceeds configured logical safety limit'),{
+          code:'TCX_ISSUANCE_STORE_TOO_LARGE',
+          bytes:logical.length,
+          maxIssuanceStoreBytes:runtime.maxIssuanceStoreBytes
+        });
+      }
+      const serializedStore=logical.toString('utf8');
+      if(sha256(serializedStore)!==meta.sha256) throw new Error('forecast issuance store hash mismatch');
+      const store=JSON.parse(serializedStore);
+      if(store?.version!==FORECAST_ISSUANCE_STORE_VERSION||!Array.isArray(store?.issuances)){
+        throw new Error('unsupported forecast issuance store');
+      }
+      if(Number.isFinite(Number(meta.count))&&store.issuances.length!==Number(meta.count)){
+        throw new Error('forecast issuance store count mismatch');
+      }
+      persistedIssuances=store.issuances;
+      runtime.issuanceStoreSlot=meta.slot;
+      runtime.issuanceStoreHash=meta.sha256;
+      runtime.issuanceStoreCount=store.issuances.length;
+      runtime.lastIssuanceStoreBytes=storeStat.size;
+      runtime.lastIssuanceStoreLogicalBytes=logical.length;
+    }
     runtime.issuances=trimIssuances(
-      (Array.isArray(snapshot.issuances)?snapshot.issuances:[]).map(issuanceFromPersistence),
+      persistedIssuances.map(issuanceFromPersistence),
       runtime.maxIssuances
     );
   }catch(err){
@@ -487,12 +547,59 @@ export async function saveInstitutionalForecastRuntime(runtime){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
   await mkdir(path.dirname(runtime.filePath),{recursive:true});
   const payload=institutionalForecastRuntimeSnapshot(runtime);
-  const persistencePayload={
+  let persistencePayload={
     ...payload,
     intelligence:intelligenceForPersistence(payload.intelligence)
   };
   const tmp=runtime.filePath+'.tmp-'+process.pid;
+  let issuanceStoreMeta=null;
   try{
+    if(runtime.snapshotCompression==='gzip'){
+      const storePayload={
+        version:FORECAST_ISSUANCE_STORE_VERSION,
+        issuances:payload.issuances
+      };
+      const storeSerialized=JSON.stringify(storePayload);
+      const storeLogicalBytes=Buffer.byteLength(storeSerialized);
+      const maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
+      if(storeLogicalBytes>maxIssuanceStoreBytes){
+        throw Object.assign(new Error('forecast issuance store exceeds configured persistence limit'),{
+          code:'TCX_ISSUANCE_STORE_TOO_LARGE_TO_PERSIST',
+          bytes:storeLogicalBytes,
+          maxIssuanceStoreBytes
+        });
+      }
+      const storeHash=sha256(storeSerialized);
+      let slot=runtime.issuanceStoreSlot;
+      let storeBytes=runtime.lastIssuanceStoreBytes;
+      if(!slot||runtime.issuanceStoreHash!==storeHash){
+        slot=runtime.issuanceStoreSlot==='a'?'b':'a';
+        const packed=await gzip(Buffer.from(storeSerialized,'utf8'),{level:1});
+        const storePath=issuanceStorePath(runtime.filePath,slot);
+        const storeTmp=storePath+'.tmp-'+process.pid;
+        try{
+          await writeFile(storeTmp,packed,{mode:0o600});
+          await rename(storeTmp,storePath);
+        }catch(err){
+          await rm(storeTmp,{force:true}).catch(()=>{});
+          throw err;
+        }
+        storeBytes=packed.length;
+      }
+      issuanceStoreMeta={
+        version:FORECAST_ISSUANCE_STORE_VERSION,
+        slot,
+        sha256:storeHash,
+        count:payload.issuances.length,
+        storageBytes:storeBytes,
+        logicalBytes:storeLogicalBytes
+      };
+      persistencePayload={
+        ...persistencePayload,
+        issuances:[],
+        issuanceStore:issuanceStoreMeta
+      };
+    }
     const serialized=JSON.stringify(persistencePayload);
     const bytes=Buffer.byteLength(serialized);
     const maxSnapshotBytes=snapshotByteLimit(runtime.maxSnapshotBytes);
@@ -519,6 +626,14 @@ export async function saveInstitutionalForecastRuntime(runtime){
     runtime.snapshotEncoding=encoding;
     runtime.loadedFromPath=runtime.filePath;
     runtime.migratedFromLegacyPath=null;
+    if(issuanceStoreMeta){
+      runtime.maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
+      runtime.issuanceStoreSlot=issuanceStoreMeta.slot;
+      runtime.issuanceStoreHash=issuanceStoreMeta.sha256;
+      runtime.issuanceStoreCount=issuanceStoreMeta.count;
+      runtime.lastIssuanceStoreBytes=issuanceStoreMeta.storageBytes;
+      runtime.lastIssuanceStoreLogicalBytes=issuanceStoreMeta.logicalBytes;
+    }
     runtime.lastError=null;
     let componentProfile=null;
     if(runtime.snapshotProfilePending){
@@ -532,6 +647,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       maxSnapshotBytes,
       encoding,
       compressionRatio:bytes>0?storageBytes/bytes:null,
+      issuanceStore:issuanceStoreMeta,
       componentProfile
     };
   }catch(err){
@@ -751,6 +867,17 @@ export function institutionalForecastRuntimeSummary(runtime){
     snapshotCompressionRatio:Number(runtime?.lastPersistedLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
       ?Number(runtime.lastPersistedBytes)/Number(runtime.lastPersistedLogicalBytes)
       :null,
+    issuanceStore:{
+      version:FORECAST_ISSUANCE_STORE_VERSION,
+      slot:runtime?.issuanceStoreSlot??null,
+      count:runtime?.issuanceStoreCount??0,
+      storageBytes:runtime?.lastIssuanceStoreBytes??null,
+      logicalBytes:runtime?.lastIssuanceStoreLogicalBytes??null,
+      maxLogicalBytes:runtime?.maxIssuanceStoreBytes??null,
+      compressionRatio:Number(runtime?.lastIssuanceStoreLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastIssuanceStoreBytes))
+        ?Number(runtime.lastIssuanceStoreBytes)/Number(runtime.lastIssuanceStoreLogicalBytes)
+        :null
+    },
     snapshotProfile:runtime?.lastSnapshotProfile??null,
     historyCases:runtime?.engine?.historySize?.()??0,
     journalEntries:runtime?.journal?.all?.().length??0,
