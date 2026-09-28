@@ -67,3 +67,36 @@ test('derivatives completeness records partial witness coverage',()=>{
   assert.equal(rows[0].quality.completeness,.5);
   assert.equal(rows[0].quality.status,'PARTIAL_SOURCE');
 });
+
+
+test('external data hub snapshots enter the governed research plane',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    externalSnapshot:{
+      coinMetrics:{
+        ok:true,source:'COINMETRICS_COMMUNITY_V4',eventTime:1_900_000,availableAt:1_999_900,
+        metrics:{activeAddresses:1000,previousActiveAddresses:900,newAddresses:200,txCount:500,mvrv:2.5,previousMvrv:2.4},
+        provenance:{communityApi:true}
+      },
+      deribitOptions:{
+        ok:true,source:'DERIBIT_PUBLIC_OPTIONS',eventTime:1_999_900,availableAt:1_999_900,
+        metrics:{weightedIvPct:60,putCallOiRatio:.7,totalOpenInterest:1000,totalVolumeUsd:200000,putCallIvSkewPct:4}
+      },
+      macro:{
+        ok:true,source:'FRED_REALTIME_V1',eventTime:1_999_900,availableAt:1_999_900,
+        metrics:{fedFundsPct:5,us10yPct:4,broadDollarIndex:120,fedAssets:7000},
+        quality:{completeness:1}
+      },
+      predictionMarket:{
+        ok:true,source:'POLYMARKET_GAMMA_CONFIGURED',eventTime:1_999_900,availableAt:1_999_900,slug:'btc-test',
+        metrics:{yesProbability:.63,liquidity:100000,volume24h:50000}
+      }
+    }
+  });
+  assert.deepEqual(rows.map(x=>x.domain),['NETWORK_METRICS','OPTIONS','MACRO','PREDICTION_MARKET']);
+  assert.ok(rows.find(x=>x.domain==='NETWORK_METRICS').features.some(x=>x.id==='research.coinmetrics.mvrv'&&x.value===2.5));
+  assert.ok(rows.find(x=>x.domain==='OPTIONS').features.some(x=>x.id==='research.options.putCallOiRatio'&&x.value===.7));
+  assert.ok(rows.find(x=>x.domain==='MACRO').features.some(x=>x.id==='research.macro.us10yMinusFedFundsPct'&&x.value===-1));
+  assert.ok(rows.find(x=>x.domain==='PREDICTION_MARKET').features.some(x=>x.id==='research.prediction.yesProbability'&&x.value===.63));
+});
