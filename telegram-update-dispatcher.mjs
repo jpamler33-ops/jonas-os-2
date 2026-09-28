@@ -18,7 +18,6 @@ async function withTimeout(promise,ms){
   let timer;
   const timeout=new Promise((_,reject)=>{
     timer=setTimeout(()=>reject(timeoutError(ms)),ms);
-    timer.unref?.();
   });
   try{return await Promise.race([promise,timeout]);}
   finally{clearTimeout(timer);}
