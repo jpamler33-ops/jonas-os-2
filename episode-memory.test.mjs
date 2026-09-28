@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { createEpisode, episodeDistance, findSimilarEpisodes, computeOutcome, matureEpisode, summarizeSimilar, saveEpisodeMemory, loadEpisodeMemory } from './episode-memory.mjs';
 
 function baseEpisode(overrides={}){
@@ -77,6 +77,19 @@ test('episode memory persists and reloads',async()=>{
   const loaded=await loadEpisodeMemory(file);
   assert.equal(loaded.episodes.length,1);
   assert.equal(loaded.episodes[0].symbol,'BTCUSDT');
+});
+
+test('episode persistence enforces a global cap with compact JSON',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-episodes-bounded-'));
+  const file=path.join(dir,'episodes.json');
+  const rows=Array.from({length:30},(_,i)=>baseEpisode({
+    symbol:i%2?'BTCUSDT':'ETHUSDT',anchorCloseTime:1_000_000+i,availableAt:1_000_100+i
+  }));
+  const saved=await saveEpisodeMemory(file,rows,{maxPerSymbol:30,maxTotalEpisodes:12});
+  const raw=await readFile(file,'utf8');
+  assert.equal(saved.length,12);
+  assert.equal(JSON.parse(raw).episodes.length,12);
+  assert.equal(raw.includes('\n  "episodes"'),false);
 });
 
 test('outcome remains unknown when immediate future bars are missing',()=>{
