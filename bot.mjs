@@ -2,6 +2,7 @@ import http from 'node:http';
 import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
+import { buildLeverageCounterfactualLab, LEVERAGE_COUNTERFACTUAL_LAB_VERSION } from './leverage-counterfactual-lab.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
@@ -1334,8 +1335,12 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
   if(opportunityAllocation.blocked){
     return {...decision,placed:false,reason:'FAILURE_MEMORY_AVOID',opportunityAllocation};
   }
+  const leverageLab=buildLeverageCounterfactualLab(shadowPortfolioLedger);
+  const requestedShadowLeverage=leverageLab.evidenceReady
+    ? Math.min(isMeme?2:3,leverageLab.suggestedShadowLeverage)
+    : 1;
   const leverageRisk=evaluateShadowLeverageRisk({
-    requestedLeverage:isMeme?2:3,
+    requestedLeverage:requestedShadowLeverage,
     assetClass,
     volatilityPct:Math.max(.005,Math.abs(Number(decision.expectedReturn)||0)*2),
     stopDistancePct:Math.max(.01,Math.abs(Number(decision.expectedReturn)||0)*1.5),
@@ -1394,6 +1399,10 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
       role:'ENTRY',
       leverageRiskVersion:SHADOW_LEVERAGE_RISK_VERSION,
+      leverageLabVersion:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,
+      leverageLabEvidenceReady:leverageLab.evidenceReady,
+      leverageLabSamples:leverageLab.samples,
+      leverageLabSuggested:leverageLab.suggestedShadowLeverage,
       leverage:leverageRisk.allowedLeverage,
       marginQuote,
       leveragedExposureQuote,
@@ -1460,7 +1469,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     orderId:order.id,
     execution:'SHADOW_ONLY'
   }));
-  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,marginQuote,leveragedExposureQuote};
+  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,leverageLab,marginQuote,leveragedExposureQuote};
 }
 
 
