@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
 
 import { sha256 } from './institutional-kernel.mjs';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
@@ -432,6 +433,57 @@ test('gzip snapshot migration loads legacy JSON, writes compressed target, and r
   assert.equal(reopened.issuances.length,1);
   assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
   assert.equal(reopened.engine.historySize(),original.engine.historySize());
+});
+
+test('gzip persistence externalizes tracker issue-state and revision history losslessly',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-tracker-archive-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  observeInstitutionalForecastRuntime(r,{
+    input:input(inp.asOf+60_000,inp.price*1.001),
+    quality:1
+  });
+  observeInstitutionalForecastRuntime(r,{
+    input:input(inp.asOf+120_000,inp.price*.999),
+    quality:1
+  });
+
+  const before=r.intelligence.get(issued.forecastId);
+  assert.equal(before.revisions.length,2);
+  assert.ok(before.issueState);
+
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.ok(meta.trackerArchive);
+  assert.equal(meta.trackerArchive.recordCount,1);
+  assert.equal(meta.trackerArchive.revisionCount,2);
+  assert.ok(meta.trackerArchive.storageBytes<meta.trackerArchive.logicalBytes);
+
+  const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
+  const persisted=main.intelligence.tracker.records[0];
+  assert.equal(persisted.issueState,null);
+  assert.deepEqual(persisted.revisions,[]);
+  assert.equal(main.trackerArchive.revisionCount,2);
+
+  const reopened=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  const restored=reopened.intelligence.get(issued.forecastId);
+  assert.equal(restored.revisions.length,2);
+  assert.equal(restored.issueState.inputFingerprint,before.issueState.inputFingerprint);
+  assert.deepEqual(restored.revisions,before.revisions);
+  const cf=reopened.intelligence.counterfactual(issued.forecastId,{maxFeatures:2});
+  assert.equal(cf.interpretation,'MODEL_SENSITIVITY_NOT_CAUSAL');
 });
 
 test('gzip persistence externalizes immutable issuances into an atomic A/B sidecar and restores them',async()=>{
