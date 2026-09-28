@@ -186,6 +186,16 @@ export function coverageCurriculumSummary(ledger,{symbols=[],horizons=DEFAULT_CO
     targetSymbols:symbols.length,
     byHorizon,
     bySymbol,
+    active:rows.filter(p=>p.status==='OPEN').slice(-12).map(p=>({
+      positionId:p.positionId,
+      symbol:p.symbol,
+      side:p.side,
+      horizonId:p.horizonId,
+      openedAt:p.openedAt,
+      plannedExitAt:p.plannedExitAt,
+      coverageKey:p.coverageKey,
+      unrealizedNetPnlQuote:finite(p.lastMark?.unrealizedNetPnlQuote)
+    })),
     execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false,
     meaning:'SYSTEMATIC_SHADOW_COVERAGE_EXCLUDED_FROM_PRIMARY_PERFORMANCE'
   };
