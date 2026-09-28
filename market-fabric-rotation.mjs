@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { stat, rename, writeFile, readFile } from 'node:fs/promises';
-import { sha256, stableStringify } from './institutional-kernel.mjs';
+import { sha256, canonicalJson } from './institutional-kernel.mjs';
 export const MARKET_FABRIC_ROTATION_VERSION='TCX_MARKET_FABRIC_ROTATION_V1';
 export async function rotateVerifiedMarketFabric({filePath,maxBytes=220*1024*1024,verification=null,now=Date.now()}={}){
  let meta;try{meta=await stat(filePath);}catch(e){if(e?.code==='ENOENT')return{rotated:false,reason:'MISSING'};throw e;}
@@ -11,7 +11,7 @@ export async function rotateVerifiedMarketFabric({filePath,maxBytes=220*1024*102
  const checkpoint={version:MARKET_FABRIC_ROTATION_VERSION,createdAt:now,archivedSegment:path.basename(segment),archivedBytes:meta.size,lastSeq:verification.lastSeq,tailHash:verification.tailHash};
  checkpoint.fingerprint=sha256(checkpoint);
  await rename(filePath,segment);
- try{await writeFile(checkpointPath,stableStringify(checkpoint)+'\n',{encoding:'utf8',flag:'wx'});}
+ try{await writeFile(checkpointPath,canonicalJson(checkpoint)+'\n',{encoding:'utf8',flag:'wx'});}
  catch(err){await rename(segment,filePath);throw err;}
  return{rotated:true,segment,checkpointPath,...checkpoint};
 }
