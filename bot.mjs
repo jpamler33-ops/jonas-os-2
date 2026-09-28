@@ -2140,7 +2140,7 @@ function chartKeyboard(symbol, interval) {
       { text:interval==='5m'?"● 5M":"5M", callback_data:`chart:${symbol}:5m` },
       { text:interval==='15m'?"● 15M":"15M", callback_data:`chart:${symbol}:15m` },
       { text:interval==='1h'?"● 1H":"1H", callback_data:`chart:${symbol}:1h` },
-      { text:interval==='3h'?"● 3H":"3H", callback_data:`chart:${symbol}:3h` }
+      { text:interval==='4h'?"● 4H":"4H", callback_data:`chart:${symbol}:4h` }
     ],
     [
       { text:"◇ STRUKTUR", callback_data:`structure:${symbol}` },
@@ -2987,7 +2987,7 @@ function chartCaption(symbol, interval, analysis, candles, availableAt, host, da
 }
 
 async function researchState(symbol,interval="5m") {
-  const frames=[...new Set(["4h","3h","1h","15m","5m",interval])];
+  const frames=[...new Set(["4h","1h","15m","5m",interval])];
   const [market,...fetched]=await Promise.all([
     snapshot(symbol),
     ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
