@@ -6,7 +6,7 @@ import { evaluateTailRiskBootstrap } from './tail-risk-bootstrap.mjs';
 import { auditTcxEvidence } from './independent-proof-auditor.mjs';
 import { evaluateRollingWalkForward } from './rolling-walk-forward.mjs';
 
-export const TCX_PROOF_SYSTEM_VERSION='TCX_PROOF_SYSTEM_V2';
+export const TCX_PROOF_SYSTEM_VERSION='TCX_PROOF_SYSTEM_V3';
 const finite=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
 const freeze=v=>{if(v&&typeof v==='object'&&!Object.isFrozen(v)){Object.freeze(v);for(const x of Object.values(v))freeze(x);}return v;};
 
@@ -35,7 +35,7 @@ export function buildTcxProofReport(ledger){
    tailRiskSurvival:Boolean(tailRisk.passed),
    independentAudit:Boolean(audit.passed),
    rollingWalkForward:Boolean(walkForward.passed),
-   frozenPolicyOos:walkForward.validationMode==='FROZEN_POLICY_OOS'&&Boolean(walkForward.checks?.frozenPolicyEvidence)
+   frozenPolicyOos:walkForward.validationMode==='VERIFIED_POST_FREEZE_OOS'&&Boolean(walkForward.checks?.verifiedPostFreezeOos)
  };
  const passed=Object.values(checks).filter(Boolean).length,total=Object.keys(checks).length;
  let status='UNPROVEN';
@@ -49,7 +49,7 @@ export function buildTcxProofReport(ledger){
    regimes:{samples:regimes.samples,distinct:regimeKeys.size,matureCells:matureRegimeCells.length,positiveMatureCells:positiveMature.length},
    tailRisk:{samples:tailRisk.samples,paths:tailRisk.paths,passed:tailRisk.passed,p95DrawdownPct:tailRisk.p95DrawdownPct,p99DrawdownPct:tailRisk.p99DrawdownPct,floorBreachRate:tailRisk.floorBreachRate,medianEndingEquity:tailRisk.medianEndingEquity,p05EndingEquity:tailRisk.p05EndingEquity},
    audit:{passed:audit.passed,findings:audit.findings,critical:audit.critical,warnings:audit.warnings,metrics:audit.metrics},
-   walkForward:{passed:walkForward.passed,replayPassed:walkForward.replayPassed,validationMode:walkForward.validationMode,frozenPolicyWindows:walkForward.frozenPolicyWindows,samples:walkForward.samples,windows:walkForward.windows.length,positiveWindows:walkForward.positiveWindows,positiveWindowRate:walkForward.positiveWindowRate,checks:walkForward.checks},
+   walkForward:{passed:walkForward.passed,replayPassed:walkForward.replayPassed,validationMode:walkForward.validationMode,verifiedOosWindows:walkForward.verifiedOosWindows,oosCohorts:walkForward.oosCohorts,samples:walkForward.samples,windows:walkForward.windows.length,positiveWindows:walkForward.positiveWindows,positiveWindowRate:walkForward.positiveWindowRate,checks:walkForward.checks},
    execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false,
    meaning:'EVIDENCE_STATUS_ONLY_NOT_PROFITABILITY_GUARANTEE_OR_LIVE_AUTHORIZATION'};
  return freeze({...core,fingerprint:sha256(core)});
