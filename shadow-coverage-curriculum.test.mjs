@@ -85,11 +85,18 @@ test('unsafe data cannot be forced into a coverage trade',()=>{
   assert.equal(out.reason,'DATA_SAFETY_NOT_NORMAL');
 });
 
-test('uncalibrated horizons are not forced',()=>{
+test('uncalibrated horizon is sampled only as a labelled bootstrap probe',()=>{
   const x=issuance();
   x.forecast.horizons[0].calibration={status:'UNCALIBRATED'};
+  x.forecast.horizons[0].gate='ABSTAIN';
   const out=deriveCoverageCurriculumCandidates(x,{now:301_000});
-  assert.equal(out.candidates.some(c=>c.horizonId==='5m'),false);
+  const row=out.candidates.find(c=>c.horizonId==='5m');
+  assert.ok(row);
+  assert.equal(row.coverageEvidenceTier,'BOOTSTRAP_RAW_FORECAST');
+  assert.equal(row.calibrationStatus,'UNCALIBRATED');
+  assert.equal(row.horizonGate,'ABSTAIN');
+  assert.equal(row.execution,'SHADOW_ONLY');
+  assert.equal(row.canExecuteLive,false);
 });
 
 test('summary reports symbol and horizon coverage',()=>{
