@@ -206,4 +206,4 @@ export function researchDependencyKeyboard(symbol){
   ]};
 }
 
-export function forecastKeyboard(symbol){const s=String(symbol||'').toUpperCase();return {inline_keyboard:[[{text:'🔄 Recalculate',callback_data:'forecast:'+s},{text:'📈 Chart',callback_data:'chart:'+s+':5m'}],[{text:'🔎 Why?',callback_data:'why:'+s},{text:'🔔 Alert',callback_data:'alerthelp:'+s}],[{text:'🧬 Datenweg',callback_data:'lineage:'+s},{text:'🧠 Evidence',callback_data:'evidence:'+s}],[{text:'🏠 Command Center',callback_data:'home'}]]};}
+export function forecastKeyboard(symbol){const s=String(symbol||'').toUpperCase();return {inline_keyboard:[[{text:'🔄 Recalculate',callback_data:'forecast:'+s},{text:'📈 Chart + Path',callback_data:'chart:'+s+':5m'}],[{text:'📐 Accuracy',callback_data:'accuracy:'+s},{text:'⚡ Events',callback_data:'events:'+s}],[{text:'🔎 Why?',callback_data:'why:'+s},{text:'🔔 Alert',callback_data:'alerthelp:'+s}],[{text:'🧬 Datenweg',callback_data:'lineage:'+s},{text:'🧠 Evidence',callback_data:'evidence:'+s}],[{text:'🏠 Command Center',callback_data:'home'}]]};}

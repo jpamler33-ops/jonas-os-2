@@ -19,6 +19,8 @@ import { buildMarketXray, buildMtfMatrix, MARKET_XRAY_VIEW_VERSION } from './mar
 import { buildObservedLiquidationHeatmap, buildConfluenceMap, LIQUIDATION_CONFLUENCE_VIEW_VERSION } from './liquidation-confluence-view.mjs';
 import { buildStructureEventRadar, deriveStructureEvents, STRUCTURE_EVENT_RADAR_VERSION } from './structure-event-radar.mjs';
 import { forecastIssuanceToChartOverlay, forecastOverlaySummary, FORECAST_CHART_OVERLAY_VERSION } from './forecast-chart-overlay.mjs';
+import { buildFlowRadar, FLOW_RADAR_VIEW_VERSION } from './flow-radar-view.mjs';
+import { buildForecastAccuracyView, FORECAST_ACCURACY_VIEW_VERSION } from './forecast-accuracy-view.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -2246,11 +2248,54 @@ function xrayKeyboard(symbol,live=false){
       {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`}
     ],
     [
+      {text:"🐋 FLOW",callback_data:`flow:${symbol}`},
+      {text:"📐 ACCURACY",callback_data:`accuracy:${symbol}`}
+    ],
+    [
       {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`},
       {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
     ],
     [{text:"🏠 Start",callback_data:"home"}]
   ]};
+}
+
+function flowRadarKeyboard(symbol){
+  return {inline_keyboard:[
+    [
+      {text:"↻ AKTUALISIEREN",callback_data:`flow:${symbol}`},
+      {text:"📐 ACCURACY",callback_data:`accuracy:${symbol}`}
+    ],
+    [
+      {text:"◫ X-RAY",callback_data:`xray:${symbol}`},
+      {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`}
+    ],
+    [
+      {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`},
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
+    ],
+    [{text:"🏠 Start",callback_data:"home"}]
+  ]};
+}
+
+function forecastAccuracyKeyboard(symbol=null){
+  const rows=[];
+  if(symbol){
+    rows.push([
+      {text:"↻ AKTUALISIEREN",callback_data:`accuracy:${symbol}`},
+      {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`}
+    ]);
+    rows.push([
+      {text:"🐋 FLOW",callback_data:`flow:${symbol}`},
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
+    ]);
+  }else{
+    rows.push([
+      {text:"↻ AKTUALISIEREN",callback_data:"accuracy:ALL"},
+      {text:"🧪 LEARNING",callback_data:"home:performance"}
+    ]);
+  }
+  rows.push([{text:"🏠 Start",callback_data:"home"}]);
+  return {inline_keyboard:rows};
 }
 
 function mtfMatrixKeyboard(symbol){
@@ -2307,6 +2352,10 @@ function confluenceKeyboard(symbol){
     [
       {text:"◫ X-RAY",callback_data:`xray:${symbol}`},
       {text:"▦ MTF MATRIX",callback_data:`mtf:${symbol}`}
+    ],
+    [
+      {text:"🐋 FLOW",callback_data:`flow:${symbol}`},
+      {text:"📐 ACCURACY",callback_data:`accuracy:${symbol}`}
     ],
     [
       {text:"▥ CHART",callback_data:`chart:${symbol}:5m`},
@@ -2827,8 +2876,8 @@ async function showLearningCenter(chatId,messageId=null){
   return deliverTelegramTextCard(tg,chatId,messageId,{
     text:renderLearningCenterText(),
     reply_markup:{inline_keyboard:[
-      [{text:'🔄 Aktualisieren',callback_data:'home:performance'},{text:'🖥 System',callback_data:'home:system'}],
-      [{text:'🏠 Start',callback_data:'home'}]
+      [{text:'📐 Forecast Accuracy',callback_data:'accuracy:ALL'},{text:'🔄 Aktualisieren',callback_data:'home:performance'}],
+      [{text:'🖥 System',callback_data:'home:system'},{text:'🏠 Start',callback_data:'home'}]
     ]}
   });
 }
@@ -3474,6 +3523,69 @@ async function showXray(chatId,messageId,symbol,{live=true}={}){
     xrayVersion:MARKET_XRAY_VIEW_VERSION
   });
   return sent;
+}
+
+async function showFlowRadar(chatId,messageId,symbol){
+  const [onchain,walletCohort]=await Promise.all([
+    onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000}).catch(()=>null),
+    walletCohortResearchProvider.configuredCohorts>0
+      ?walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:Date.now()}).catch(()=>null)
+      :Promise.resolve(null)
+  ]);
+
+  let entityFlow=null;
+  if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
+    try{
+      const raw=await entityFlowResearchProvider.fetchSnapshot();
+      entityFlow=scoreEntityFlowSnapshot(raw,entityFlowMemory,{minBaselineSamples:20});
+    }catch(err){
+      recordError(observability,{scope:'flow_radar.entity_flow',message:err instanceof Error?err.message:String(err)});
+    }
+  }
+
+  const view=buildFlowRadar({
+    symbol,
+    entityFlow,
+    walletCohort,
+    onchain,
+    registryAddressCount:entityFlowAddressIndex.addressCount,
+    registryEntityCount:entityFlowAddressIndex.entityCount,
+    generatedAt:Date.now()
+  });
+
+  recordOperation(observability,{
+    name:'flow_radar_view',
+    ok:Boolean(entityFlow?.ok||walletCohort?.ok||onchain?.ok),
+    latencyMs:0,
+    error:null
+  });
+
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:flowRadarKeyboard(symbol)
+  });
+}
+
+async function showForecastAccuracy(chatId,messageId,symbol=null){
+  const journal=forecastRuntime?.journal?.all?.()??[];
+  const view=buildForecastAccuracyView(journal,{
+    symbol:symbol||null,
+    minDisplaySamples:30,
+    foldSize:50,
+    highConfidenceThreshold:.65
+  });
+
+  recordOperation(observability,{
+    name:'forecast_accuracy_view',
+    ok:true,
+    latencyMs:0,
+    error:null
+  });
+
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:forecastAccuracyKeyboard(symbol)
+  });
 }
 
 async function showStructureEvents(chatId,messageId,symbol){
@@ -5664,6 +5776,21 @@ async function handle(update) {
       await ack(q.id);
       return;
     }
+    if (a.kind === 'FLOW_RADAR') {
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showFlowRadar(chatId,textMessageId,a.symbol);
+      await ack(q.id,'Flow Radar geladen');
+      return;
+    }
+    if (a.kind === 'FORECAST_ACCURACY') {
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showForecastAccuracy(chatId,textMessageId,a.scope==='ALL'?null:a.symbol);
+      await ack(q.id,'Forecast Accuracy geladen');
+      return;
+    }
+
     if (a.kind === 'STRUCTURE_EVENTS') {
       stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;

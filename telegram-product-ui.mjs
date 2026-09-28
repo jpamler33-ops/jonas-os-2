@@ -157,7 +157,7 @@ export function marketCardText(vm,{live=false,detailMode="SIMPLE"}={}) {
  lines.push("","TRACE","Market → Forecast → Why → Risk","",live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht","ABSTAIN / SHADOW_ONLY · REAL ORDERS BLOCKED");return lines.join("\n");
 }
 
-export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"⌁ FORECAST",callback_data:"forecast:"+s},{text:"▥ CHART",callback_data:"chart:"+s+":5m"}],[{text:"⚡ EVENTS",callback_data:"events:"+s},{text:"▦ MTF",callback_data:"mtf:"+s}],[{text:"🔥 LIQ MAP",callback_data:"liqmap:"+s+":5m"},{text:"◎ CONFLUENCE",callback_data:"confluence:"+s}],[{text:"◫ X-RAY",callback_data:"xray:"+s},{text:"◇ WHY",callback_data:"why:"+s}],[{text:"◉ ALERT",callback_data:"alerthelp:"+s},{text:isFavorite?"★ WATCHLIST":"☆ WATCHLIST",callback_data:"fav:"+s}],[{text:"↻ REFRESH",callback_data:"refresh:"+s},{text:"⌁ DETAILS",callback_data:"tcx:"+s}],[{text:"⌂ COMMAND",callback_data:"home"}]]};}
+export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"⌁ FORECAST",callback_data:"forecast:"+s},{text:"▥ CHART",callback_data:"chart:"+s+":5m"}],[{text:"⚡ EVENTS",callback_data:"events:"+s},{text:"▦ MTF",callback_data:"mtf:"+s}],[{text:"🐋 FLOW",callback_data:"flow:"+s},{text:"📐 ACCURACY",callback_data:"accuracy:"+s}],[{text:"🔥 LIQ MAP",callback_data:"liqmap:"+s+":5m"},{text:"◎ CONFLUENCE",callback_data:"confluence:"+s}],[{text:"◫ X-RAY",callback_data:"xray:"+s},{text:"◇ WHY",callback_data:"why:"+s}],[{text:"◉ ALERT",callback_data:"alerthelp:"+s},{text:isFavorite?"★ WATCHLIST":"☆ WATCHLIST",callback_data:"fav:"+s}],[{text:"↻ REFRESH",callback_data:"refresh:"+s},{text:"⌁ DETAILS",callback_data:"tcx:"+s}],[{text:"⌂ COMMAND",callback_data:"home"}]]};}
 
 export function parseProductCallback(data="") {
   const raw=String(data);
@@ -170,6 +170,9 @@ export function parseProductCallback(data="") {
   if(p[0]==="liqmap"&&p[1]) return {kind:"LIQ_MAP",symbol:p[1],window:p[2]||"5m"};
   if(p[0]==="confluence"&&p[1]) return {kind:"CONFLUENCE",symbol:p[1]};
   if(p[0]==="events"&&p[1]) return {kind:"STRUCTURE_EVENTS",symbol:p[1]};
+  if(p[0]==="flow"&&p[1]) return {kind:"FLOW_RADAR",symbol:p[1]};
+  if(p[0]==="accuracy"&&p[1]==="ALL") return {kind:"FORECAST_ACCURACY",symbol:null,scope:"ALL"};
+  if(p[0]==="accuracy"&&p[1]) return {kind:"FORECAST_ACCURACY",symbol:p[1],scope:"SYMBOL"};
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
