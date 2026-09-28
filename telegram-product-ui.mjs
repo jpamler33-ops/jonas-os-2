@@ -127,7 +127,7 @@ export function homeText({marketCount=0,systemStatus="ONLINE"}={}) {
   return ["TCX // COMMAND CENTER","━━━━━━━━━━━━━━━━━━━━","SYSTEM  "+(online?"● ONLINE":"◐ CHECK")+"   SHADOW  ● ACTIVE","MARKETS "+(Number(marketCount)||0)+" CONNECTED","","MARKET INTELLIGENCE · DECISION ENGINE","","Radar → Forecast → Why → Risk → Shadow → Learning","","REAL ORDERS BLOCKED"].join("\n");
 }
 
-export function homeKeyboard() {return {inline_keyboard:[[{text:"◉ LIVE RADAR",callback_data:"home:radar"},{text:"▦ MÄRKTE",callback_data:"home:markets"}],[{text:"▤ PORTFOLIO",callback_data:"home:portfolio"},{text:"⌁ STATISTIK",callback_data:"home:stats_day"}],[{text:"☆ WATCHLIST",callback_data:"home:watchlist"},{text:"◇ ALERTS",callback_data:"home:alerts"}],[{text:"⌁ FORECAST",callback_data:"cmd:forecast"},{text:"☰ MEHR",callback_data:"home:more"}]]};}
+export function homeKeyboard() {return {inline_keyboard:[[{text:"🧠 INTELLIGENCE TERMINAL",callback_data:"home:terminal"}],[{text:"◉ LIVE RADAR",callback_data:"home:radar"},{text:"▦ MÄRKTE",callback_data:"home:markets"}],[{text:"▤ PORTFOLIO",callback_data:"home:portfolio"},{text:"⌁ STATISTIK",callback_data:"home:stats_day"}],[{text:"☆ WATCHLIST",callback_data:"home:watchlist"},{text:"◇ ALERTS",callback_data:"home:alerts"}],[{text:"⌁ FORECAST",callback_data:"cmd:forecast"},{text:"☰ MEHR",callback_data:"home:more"}]]};}
 
 export function marketsKeyboard(markets=[],favoritesCount=0) {
   const rows=[];
@@ -174,6 +174,8 @@ export function parseProductCallback(data="") {
   if(p[0]==="accuracy"&&p[1]==="ALL") return {kind:"FORECAST_ACCURACY",symbol:null,scope:"ALL"};
   if(p[0]==="accuracy"&&p[1]) return {kind:"FORECAST_ACCURACY",symbol:p[1],scope:"SYMBOL"};
   if(p[0]==="superchart"&&p[1]) return {kind:"SUPERCHART",symbol:p[1],mode:String(p[2]||"PRO").toUpperCase(),interval:String(p[3]||"5m").toLowerCase()};
+  if(p[0]==="terminal"&&p[1]==="radar") return {kind:"SUPER_RADAR"};
+  if(p[0]==="terminal"&&["setup","risk","signal"].includes(p[1])&&p[2]) return {kind:"TERMINAL_VIEW",view:p[1].toUpperCase(),symbol:p[2]};
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};
