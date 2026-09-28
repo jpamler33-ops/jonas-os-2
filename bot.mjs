@@ -2082,7 +2082,7 @@ function marketKeyboard(chatId, symbol, live) {
       { text:'1h', callback_data:`tf:${symbol}:1h` }
     ],
     [
-      { text:'📈 Chart', callback_data:`chart:${symbol}:5m` },
+      { text:'▥ CHART LAB', callback_data:`chart:${symbol}:5m` },
       { text:'🧭 Struktur', callback_data:`structure:${symbol}` },
       { text:'🧬 Memory', callback_data:`memory:${symbol}` }
     ],
@@ -2137,19 +2137,18 @@ function timeframeKeyboard(symbol) {
 function chartKeyboard(symbol, interval) {
   return { inline_keyboard:[
     [
-      { text:"1m", callback_data:`chart:${symbol}:1m` },
-      { text:"5m", callback_data:`chart:${symbol}:5m` },
-      { text:"15m", callback_data:`chart:${symbol}:15m` },
-      { text:"1h", callback_data:`chart:${symbol}:1h` },
-      { text:"4h", callback_data:`chart:${symbol}:4h` }
+      { text:interval==='5m'?"● 5M":"5M", callback_data:`chart:${symbol}:5m` },
+      { text:interval==='15m'?"● 15M":"15M", callback_data:`chart:${symbol}:15m` },
+      { text:interval==='1h'?"● 1H":"1H", callback_data:`chart:${symbol}:1h` },
+      { text:interval==='3h'?"● 3H":"3H", callback_data:`chart:${symbol}:3h` }
     ],
     [
-      { text:"🧭 Marktstruktur", callback_data:`structure:${symbol}` },
-      { text:"🔮 Prognose", callback_data:`forecast:${symbol}` }
+      { text:"◇ STRUKTUR", callback_data:`structure:${symbol}` },
+      { text:"⌁ FORECAST", callback_data:`forecast:${symbol}` }
     ],
     [
-      { text:"🔎 Warum?", callback_data:`why:${symbol}` },
-      { text:"📊 Übersicht", callback_data:`refresh:${symbol}` }
+      { text:"◇ WHY", callback_data:`why:${symbol}` },
+      { text:"▦ MARKT", callback_data:`refresh:${symbol}` }
     ],
     [{ text:"🏠 Start", callback_data:"home" }]
   ]};
@@ -2963,29 +2962,32 @@ function priceText(v) {
 }
 
 function chartCaption(symbol, interval, analysis, candles, availableAt, host, dashboard) {
-  const trend=v=>{
-    const x=String(v||'').toUpperCase();
-    if(x.includes('BULL')||x.includes('UP')) return '🟢 eher steigend';
-    if(x.includes('BEAR')||x.includes('DOWN')) return '🔴 eher fallend';
-    return '🟡 unklar';
-  };
   const activeVisible=candles.some(c=>c.closed===false);
+  const piv=(analysis?.classifiedPivots||[]).slice(-6).map(p=>p.label).join(' → ')||'noch nicht genug Swings';
+  const vol=Number(dashboard?.realizedVolPct)||0,atr=Number(dashboard?.atrPct)||0,vr=Number(dashboard?.volumeRatio)||0;
+  const volBand=vol>=1?'HIGH':vol>=.45?'MEDIUM':'LOW';
+  const trend=String(analysis?.trend||'UNKNOWN');
   return [
-    `📈 ${symbol.replace("USDT","/USDT")} · ${interval} CHART`,'',
-    `Gesamttrend: ${trend(dashboard.bias)}`,
-    `Marktphase: ${String(dashboard.regime||'unklar').replaceAll('_',' ')}`,
-    `Marktdruck: ${Math.round(dashboard.pressureScore)}/100`,
-    `Unterstützung: ${priceText(analysis.support)}`,
-    `Widerstand: ${priceText(analysis.resistance)}`,'',
-    activeVisible?'Die letzte Kerze läuft noch; die Trendstruktur nutzt nur abgeschlossene Kerzen.':'Alle dargestellten Kerzen sind abgeschlossen.',
-    'Unterstützung = Bereich, an dem Käufer zuletzt stärker wurden.',
-    'Widerstand = Bereich, an dem Verkäufer zuletzt stärker wurden.','',
-    'Systemmodus: ABSTAIN / SHADOW_ONLY'
-  ].join("\n").slice(0,1024);
+    'TCX // CHART LAB · '+symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━',
+    interval.toUpperCase()+' · LIVE STRUCTURE','',
+    'STRUCTURE',piv,
+    'Trend        '+trend,
+    'Support      '+priceText(analysis?.support),
+    'Resistance   '+priceText(analysis?.resistance),'',
+    'MARKET PULSE',
+    'Volatilität  '+volBand+' · '+fmt(vol,3)+'% σ',
+    'ATR/Range    '+fmt(atr,3)+'%',
+    'Volumen      '+fmt(vr,2)+'× Median',
+    'Liquidität   '+String(dashboard?.liquidity||'UNKNOWN')+' · '+fmt(dashboard?.spreadBps,2)+' bps',
+    'Flow         '+String(dashboard?.flow||'UNKNOWN'),
+    'Pressure     '+Math.round(Number(dashboard?.pressureScore)||0)+'/100 · '+String(dashboard?.pressureBand||'UNKNOWN'),'',
+    activeVisible?'Letzte Kerze läuft · Struktur nur aus abgeschlossenen Kerzen.':'Alle dargestellten Kerzen abgeschlossen.',
+    'HH/HL/LH/LL = DERIVED STRUCTURE · OHLCV = OBSERVED','ABSTAIN / SHADOW_ONLY'
+  ].join('\n').slice(0,1024);
 }
 
 async function researchState(symbol,interval="5m") {
-  const frames=[...new Set(["4h","1h","15m","5m",interval])];
+  const frames=[...new Set(["4h","3h","1h","15m","5m",interval])];
   const [market,...fetched]=await Promise.all([
     snapshot(symbol),
     ...frames.map(tf=>fetchKlines(symbol,tf,tf==="5m"?500:180))
