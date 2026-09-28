@@ -6732,6 +6732,8 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   releaseId:runtimeManifest?.releaseId||null,
   operationalReadiness:startupReadiness.state,
   operationalReadinessReasons:{hard:startupReadiness.hardReasons,warnings:startupReadiness.warningReasons},
+  releaseRegistryVerification:releaseRegistry.verification,
+  runtimeReleaseRegistered:Boolean(runtimeReleaseRecord),
   persistenceHealthy,
   shadowOmsHealthy,
   shadowPortfolioHealthy,
