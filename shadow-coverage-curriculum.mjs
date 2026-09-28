@@ -93,8 +93,8 @@ export function deriveCoverageCurriculumCandidates(issuance,{
   for(const policy of horizons){
     const h=byHorizon.get(policy.id);
     if(!h) continue;
-    if(String(h?.calibration?.status||'').toUpperCase()!=='CALIBRATED') continue;
-    if(String(h?.gate||'').toUpperCase()==='INSUFFICIENT') continue;
+    const calibrationStatus=String(h?.calibration?.status||'UNKNOWN').toUpperCase();
+    const horizonGate=String(h?.gate||'UNKNOWN').toUpperCase();
     const p=normalizeProbabilities(h);
     const expectedReturn=finite(h?.expectedReturn);
     if(!p||expectedReturn==null) continue;
@@ -124,7 +124,12 @@ export function deriveCoverageCurriculumCandidates(issuance,{
       directionalProbability,
       probabilityEdge:directionalProbability-oppositeProbability,
       admissionGate:String(issuance.admission?.gate||'ABSTAIN').toUpperCase(),
-      horizonGate:String(h?.gate||'UNKNOWN').toUpperCase(),
+      horizonGate,
+      calibrationStatus,
+      coverageEvidenceTier:
+        calibrationStatus==='CALIBRATED'&&['PASS','CAUTION'].includes(horizonGate)
+          ?'CALIBRATED'
+          :'BOOTSTRAP_RAW_FORECAST',
       assetClass:String(assetClass||'CORE').toUpperCase(),
       issuanceId:String(issuance.issuanceId||''),
       forecastFingerprint:String(issuance.forecastFingerprint||issuance.forecast?.fingerprint||''),
