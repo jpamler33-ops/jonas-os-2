@@ -100,3 +100,23 @@ test('external data hub snapshots enter the governed research plane',()=>{
   assert.ok(rows.find(x=>x.domain==='MACRO').features.some(x=>x.id==='research.macro.us10yMinusFedFundsPct'&&x.value===-1));
   assert.ok(rows.find(x=>x.domain==='PREDICTION_MARKET').features.some(x=>x.id==='research.prediction.yesProbability'&&x.value===.63));
 });
+
+
+test('FRED CSV fallback preserves source lineage in the research plane',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    externalSnapshot:{
+      macro:{
+        ok:true,source:'FRED_GRAPH_CSV_CURRENT',eventTime:1_900_000,availableAt:1_999_900,
+        metrics:{fedFundsPct:5,us10yPct:4,broadDollarIndex:120,fedAssets:7000},
+        quality:{completeness:1},
+        provenance:{transport:'FRED_GRAPH_CSV',historicalVintageGuarantee:false}
+      }
+    }
+  });
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].domain,'MACRO');
+  assert.equal(rows[0].source,'FRED_GRAPH_CSV_CURRENT');
+  assert.equal(rows[0].quality.status,'CURRENT_SERIES_CAPTURE');
+});
