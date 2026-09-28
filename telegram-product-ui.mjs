@@ -157,7 +157,7 @@ export function marketCardText(vm,{live=false,detailMode="SIMPLE"}={}) {
  lines.push("","TRACE","Market → Forecast → Why → Risk","",live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht","ABSTAIN / SHADOW_ONLY · REAL ORDERS BLOCKED");return lines.join("\n");
 }
 
-export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"⌁ FORECAST",callback_data:"forecast:"+s},{text:"▥ CHART",callback_data:"chart:"+s+":5m"}],[{text:"◇ WHY",callback_data:"why:"+s},{text:"◉ ALERT",callback_data:"alerthelp:"+s}],[{text:isFavorite?"★ WATCHLIST":"☆ WATCHLIST",callback_data:"fav:"+s},{text:"↻ REFRESH",callback_data:"refresh:"+s}],[{text:"⌁ DETAILS",callback_data:"tcx:"+s},{text:"⌂ COMMAND",callback_data:"home"}]]};}
+export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"⌁ FORECAST",callback_data:"forecast:"+s},{text:"▥ CHART",callback_data:"chart:"+s+":5m"}],[{text:"◫ X-RAY",callback_data:"xray:"+s},{text:"▦ MTF",callback_data:"mtf:"+s}],[{text:"◇ WHY",callback_data:"why:"+s},{text:"◉ ALERT",callback_data:"alerthelp:"+s}],[{text:isFavorite?"★ WATCHLIST":"☆ WATCHLIST",callback_data:"fav:"+s},{text:"↻ REFRESH",callback_data:"refresh:"+s}],[{text:"⌁ DETAILS",callback_data:"tcx:"+s},{text:"⌂ COMMAND",callback_data:"home"}]]};}
 
 export function parseProductCallback(data="") {
   const raw=String(data);
@@ -165,6 +165,8 @@ export function parseProductCallback(data="") {
   if(raw.startsWith("home:")) return {kind:"HOME_SECTION",section:raw.slice(5).toUpperCase()};
   const p=raw.split(":");
   if(p[0]==="forecast"&&p[1]) return {kind:"FORECAST",symbol:p[1]};
+  if(p[0]==="xray"&&p[1]) return {kind:"XRAY",symbol:p[1]};
+  if(p[0]==="mtf"&&p[1]) return {kind:"MTF_MATRIX",symbol:p[1]};
   if(p[0]==="why"&&p[1]) return {kind:"WHY",symbol:p[1]};
   if(p[0]==="regime"&&p[1]) return {kind:"REGIME",symbol:p[1]};
   if(p[0]==="oms"&&p[1]) return {kind:"OMS",symbol:p[1]};

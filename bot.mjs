@@ -15,6 +15,7 @@ import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
 import { buildChartIntelligence, CHART_INTELLIGENCE_VERSION } from './chart-intelligence.mjs';
+import { buildMarketXray, buildMtfMatrix, MARKET_XRAY_VIEW_VERSION } from './market-xray-view.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -2192,6 +2193,10 @@ function chartKeyboard(symbol, interval, live=false) {
       { text:live?"⏸ AUTO AUS":"⚡ AUTO 10s", callback_data:`chartlive:${symbol}:${interval}:${live?'off':'on'}` }
     ],
     [
+      { text:"◫ X-RAY", callback_data:`xray:${symbol}` },
+      { text:"▦ MTF", callback_data:`mtf:${symbol}` }
+    ],
+    [
       { text:"◇ STRUKTUR", callback_data:`structure:${symbol}` },
       { text:"⌁ FORECAST", callback_data:`forecast:${symbol}` }
     ],
@@ -2203,6 +2208,42 @@ function chartKeyboard(symbol, interval, live=false) {
       { text:"▦ MARKT", callback_data:`refresh:${symbol}` },
       { text:"🏠 Start", callback_data:"home" }
     ]
+  ]};
+}
+
+function xrayKeyboard(symbol,live=false){
+  return {inline_keyboard:[
+    [
+      {text:"↻ AKTUALISIEREN",callback_data:`xrayrefresh:${symbol}`},
+      {text:live?"⏸ AUTO AUS":"⚡ AUTO 10s",callback_data:`xraylive:${symbol}:${live?'off':'on'}`}
+    ],
+    [
+      {text:"▦ MTF MATRIX",callback_data:`mtf:${symbol}`},
+      {text:"▥ CHART",callback_data:`chart:${symbol}:5m`}
+    ],
+    [
+      {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`},
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
+    ],
+    [{text:"🏠 Start",callback_data:"home"}]
+  ]};
+}
+
+function mtfMatrixKeyboard(symbol){
+  return {inline_keyboard:[
+    [
+      {text:"↻ AKTUALISIEREN",callback_data:`mtf:${symbol}`},
+      {text:"◫ X-RAY",callback_data:`xray:${symbol}`}
+    ],
+    [
+      {text:"▥ 5m CHART",callback_data:`chart:${symbol}:5m`},
+      {text:"▥ 1h CHART",callback_data:`chart:${symbol}:1h`}
+    ],
+    [
+      {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`},
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
+    ],
+    [{text:"🏠 Start",callback_data:"home"}]
   ]};
 }
 
@@ -3218,6 +3259,71 @@ async function showMemory(chatId,symbol) {
     'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
   return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showXray(chatId,messageId,symbol,{live=true}={}){
+  const [book,market]=await Promise.all([
+    fetchExecutionBook(symbol),
+    snapshot(symbol)
+  ]);
+  let liquidation=null;
+  try{liquidation=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});}catch{}
+  const totalBook=(book.bids||[]).slice(0,50).reduce((s,[p,q])=>s+Number(p)*Number(q),0)+(book.asks||[]).slice(0,50).reduce((s,[p,q])=>s+Number(p)*Number(q),0);
+  const bidBook=(book.bids||[]).slice(0,50).reduce((s,[p,q])=>s+Number(p)*Number(q),0);
+  const visibleImbalance=totalBook>0?(2*bidBook/totalBook-1):0;
+  const dashboard={
+    flow:visibleImbalance>.08?'BUY':visibleImbalance<-.08?'SELL':'BALANCED',
+    pressureScore:Math.min(100,Math.round(Math.abs(visibleImbalance)*100))
+  };
+  const view=buildMarketXray({
+    symbol,book,liquidation,market,dashboard,live,
+    refreshSeconds:Math.round(refreshMs/1000),
+    now:Date.now()
+  });
+  const sent=await deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:xrayKeyboard(symbol,live)
+  });
+  const effectiveMessageId=sent?.message_id||messageId;
+  sessions.set(String(chatId),{
+    chatId,
+    messageId:effectiveMessageId,
+    symbol,
+    live:Boolean(live),
+    view:'XRAY',
+    lastRefresh:Date.now(),
+    xrayVersion:MARKET_XRAY_VIEW_VERSION
+  });
+  return sent;
+}
+
+async function showMtfMatrix(chatId,messageId,symbol){
+  const state=await researchState(symbol,'1m');
+  const analyses={
+    '1m':state.analysis,
+    '5m':state.mtf?.analyses?.['5m'],
+    '15m':state.mtf?.analyses?.['15m'],
+    '1h':state.mtf?.analyses?.['1h'],
+    '4h':state.mtf?.analyses?.['4h']
+  };
+  const view=buildMtfMatrix({
+    symbol,
+    analyses,
+    dashboard:state.memoryDashboard,
+    availableAt:state.availableAt
+  });
+  sessions.set(String(chatId),{
+    chatId,
+    messageId,
+    symbol,
+    live:false,
+    view:'MTF_MATRIX',
+    lastRefresh:Date.now()
+  });
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:mtfMatrixKeyboard(symbol)
+  });
 }
 
 async function showChart(chatId, symbol, interval="5m",{messageId=null,edit=false,live=true}={}) {
@@ -5048,10 +5154,10 @@ async function showResearchLineage(chatId,messageId,symbol){
   });
 }
 
-function stopChartAuto(chatId){
+function stopLiveAnalysisAuto(chatId){
   const key=String(chatId);
   const current=sessions.get(key);
-  if(current?.view==='CHART'&&current.live===true){
+  if(['CHART','XRAY'].includes(String(current?.view||''))&&current?.live===true){
     sessions.set(key,{...current,live:false,lastRefresh:Date.now()});
   }
 }
@@ -5077,6 +5183,8 @@ function parseAction(data='') {
   if (p[0] === 'chart' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART', symbol:p[1], interval:p[2] };
   if (p[0] === 'chartrefresh' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2])) return { kind:'CHART_REFRESH', symbol:p[1], interval:p[2] };
   if (p[0] === 'chartlive' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2]) && (p[3]==='on'||p[3]==='off')) return { kind:'CHART_LIVE', symbol:p[1], interval:p[2], enabled:p[3]==='on' };
+  if (p[0] === 'xrayrefresh' && p[1]) return { kind:'XRAY_REFRESH', symbol:p[1] };
+  if (p[0] === 'xraylive' && p[1] && (p[2]==='on'||p[2]==='off')) return { kind:'XRAY_LIVE', symbol:p[1], enabled:p[2]==='on' };
   if (p[0] === 'tradereplay' && p[1]) return { kind:'TRADE_REPLAY', symbol:p[1] };
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
@@ -5214,7 +5322,7 @@ async function handle(update) {
       await ack(q.id); return;
     }
     if (a.kind === 'HOME') {
-      stopChartAuto(chatId);
+      stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showStart(chatId,textMessageId);
       await ack(q.id);
@@ -5227,7 +5335,7 @@ async function handle(update) {
     }
     if (a.kind === 'WHY') {
       if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
-      stopChartAuto(chatId);
+      stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showWhy(chatId,textMessageId,a.symbol);
       await ack(q.id,'Evidence geladen');
@@ -5323,7 +5431,7 @@ async function handle(update) {
       return;
     }
     if (a.kind === 'MARKET' || a.kind === 'REFRESH') {
-      stopChartAuto(chatId);
+      stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showMarket(chatId,textMessageId,a.symbol,sessions.get(String(chatId))?.live === true);
       await ack(q.id);
@@ -5344,9 +5452,38 @@ async function handle(update) {
       await ack(q.id);
       return;
     }
+    if (a.kind === 'XRAY') {
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      const current=sessions.get(String(chatId));
+      const live=current?.view==='XRAY'?current.live===true:true;
+      await showXray(chatId,textMessageId,a.symbol,{live});
+      await ack(q.id,'Market X-Ray geladen');
+      return;
+    }
+    if (a.kind === 'XRAY_REFRESH') {
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      const live=sessions.get(String(chatId))?.view==='XRAY'&&sessions.get(String(chatId))?.live===true;
+      await showXray(chatId,textMessageId,a.symbol,{live});
+      await ack(q.id,'X-Ray aktualisiert');
+      return;
+    }
+    if (a.kind === 'XRAY_LIVE') {
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showXray(chatId,textMessageId,a.symbol,{live:a.enabled});
+      await ack(q.id,a.enabled?'X-Ray Auto aktiviert':'X-Ray Auto deaktiviert');
+      return;
+    }
+    if (a.kind === 'MTF_MATRIX') {
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showMtfMatrix(chatId,textMessageId,a.symbol);
+      await ack(q.id,'MTF Matrix geladen');
+      return;
+    }
+
     if (a.kind === "TRADE_REPLAY") {
       if(!symbolOk(a.symbol)){ await ack(q.id,"Unbekannter Markt"); return; }
-      stopChartAuto(chatId);
+      stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showTradeReplay(chatId,textMessageId,a.symbol);
       await ack(q.id,"Trade Replay geladen");
@@ -5374,7 +5511,7 @@ async function handle(update) {
       return;
     }
     if (a.kind === "STRUCTURE") {
-      stopChartAuto(chatId);
+      stopLiveAnalysisAuto(chatId);
       await showStructure(chatId,a.symbol);
       await ack(q.id,"Struktur geladen");
       return;
@@ -5394,7 +5531,7 @@ async function handle(update) {
     }
 
     if (a.kind === "FORECAST") {
-      stopChartAuto(chatId);
+      stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showForecast(chatId,a.symbol,textMessageId);
       await ack(q.id,"Forecast geladen");
@@ -5488,6 +5625,7 @@ async function refresher() {
       if (!s.live || now - s.lastRefresh < refreshMs) continue;
       try {
         if (s.view === 'CHART') await showChart(s.chatId,s.symbol,s.interval || '5m',{messageId:s.messageId,edit:true,live:true});
+        else if (s.view === 'XRAY') await showXray(s.chatId,s.messageId,s.symbol,{live:true});
         else if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
         else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
         else await showMarket(s.chatId,s.messageId,s.symbol,true);
