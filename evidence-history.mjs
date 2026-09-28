@@ -1,11 +1,39 @@
 import path from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import { gzip as gzipCallback, gunzip as gunzipCallback } from "node:zlib";
+
+const gzip=promisify(gzipCallback);
+const gunzip=promisify(gunzipCallback);
 import { createStateFingerprint, validateStateFingerprint } from "./state-validity.mjs";
 
 export const EVIDENCE_HISTORY_VERSION="TCX_EVIDENCE_HISTORY_V2";
 export const EVIDENCE_HISTORY_SCHEMA_VERSION=1;
 const SCHEMA_VERSION=EVIDENCE_HISTORY_SCHEMA_VERSION;
 const SYMBOL_RE=/^[A-Z0-9]{2,18}USDT$/;
+const DEFAULT_MAX_LOGICAL_BYTES=128*1024*1024;
+
+function isGzipBuffer(value){
+  return Buffer.isBuffer(value)&&value.length>=2&&value[0]===0x1f&&value[1]===0x8b;
+}
+
+function normalizedEvidenceRecords(records,{maxPerSymbol=500}={}){
+  const grouped=new Map();
+  for(const r of Array.isArray(records)?records:[]){
+    const x=sanitizeRecord(r);
+    if(!x) continue;
+    if(!grouped.has(x.symbol)) grouped.set(x.symbol,[]);
+    grouped.get(x.symbol).push(x);
+  }
+  const clean=[];
+  const cap=Math.max(1,Math.floor(Number(maxPerSymbol)||500));
+  for(const rows of grouped.values()){
+    rows.sort((a,b)=>a.capturedAt-b.capturedAt);
+    clean.push(...rows.slice(-cap));
+  }
+  clean.sort((a,b)=>a.capturedAt-b.capturedAt);
+  return clean;
+}
 
 function clamp(x,a=0,b=1){
   const n=Number(x);
@@ -204,37 +232,47 @@ function sanitizeRecord(r){
   };
 }
 
-export async function loadEvidenceHistory(filePath){
+export async function loadEvidenceHistory(filePath,{maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
   try{
-    const parsed=JSON.parse(await readFile(filePath,"utf8"));
+    const stored=await readFile(filePath);
+    const encoding=isGzipBuffer(stored)?"gzip":"json";
+    const logical=encoding==="gzip"?await gunzip(stored):stored;
+    if(logical.length>Math.max(1024,Number(maxLogicalBytes)||DEFAULT_MAX_LOGICAL_BYTES)){
+      throw new Error("evidence history exceeds configured logical safety limit");
+    }
+    const parsed=JSON.parse(logical.toString("utf8"));
     if(parsed?.schemaVersion!==SCHEMA_VERSION) throw new Error("unsupported evidence history schema");
     return {
       records:(Array.isArray(parsed.records)?parsed.records:[]).map(sanitizeRecord).filter(Boolean),
-      recoveredFromCorrupt:false
+      recoveredFromCorrupt:false,
+      storageEncoding:encoding,
+      storageBytes:stored.length,
+      logicalBytes:logical.length
     };
   }catch(err){
-    if(err?.code==="ENOENT") return {records:[],recoveredFromCorrupt:false};
+    if(err?.code==="ENOENT") return {records:[],recoveredFromCorrupt:false,storageEncoding:null,storageBytes:0,logicalBytes:0};
     try{await rename(filePath,filePath+".corrupt-"+Date.now());}catch{}
-    return {records:[],recoveredFromCorrupt:true};
+    return {records:[],recoveredFromCorrupt:true,storageEncoding:null,storageBytes:0,logicalBytes:0};
   }
 }
 
-export async function saveEvidenceHistory(filePath,records,{maxPerSymbol=500}={}){
+export async function saveEvidenceHistory(filePath,records,{maxPerSymbol=500,maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  let clean=[];
-  for(const r of Array.isArray(records)?records:[]){
-    const x=sanitizeRecord(r);
-    if(x) clean=appendEvidenceRecord(clean,x,{maxPerSymbol});
-  }
+  const clean=normalizedEvidenceRecords(records,{maxPerSymbol});
   const payload={
     schemaVersion:SCHEMA_VERSION,
     version:EVIDENCE_HISTORY_VERSION,
     updatedAt:new Date().toISOString(),
     records:clean
   };
+  const serialized=JSON.stringify(payload);
+  const logicalBytes=Buffer.byteLength(serialized);
+  const maxBytes=Math.max(1024,Number(maxLogicalBytes)||DEFAULT_MAX_LOGICAL_BYTES);
+  if(logicalBytes>maxBytes) throw new Error("evidence history exceeds configured persistence safety limit");
+  const compressed=await gzip(Buffer.from(serialized,"utf8"),{level:1});
   const tmp=filePath+".tmp-"+process.pid;
-  await writeFile(tmp,JSON.stringify(payload,null,2),{encoding:"utf8",mode:0o600});
+  await writeFile(tmp,compressed,{mode:0o600});
   await rename(tmp,filePath);
   return clean;
 }
