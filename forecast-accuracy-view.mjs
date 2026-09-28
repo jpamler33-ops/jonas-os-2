@@ -20,10 +20,6 @@ function bar(v,width=10){
   const k=Math.round(n*width);
   return '█'.repeat(k)+'░'.repeat(width-k);
 }
-function horizonOrder(a,b){
-  return Number(a?.[1]?.count?0:0)-Number(b?.[1]?.count?0);
-}
-
 export function buildForecastAccuracyView(entries,{
   symbol=null,
   minDisplaySamples=30,
