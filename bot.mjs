@@ -2550,7 +2550,65 @@ function learningPct01(v,d=1){
   return Number.isFinite(n)?(n*100).toFixed(d)+'%':'—';
 }
 
-function renderLearningCenterText(){const s=buildForecastLearningSummary(forecastRuntime,{minDisplaySamples:30,autoLearnEnabled,autoLearnSymbols,autoLearnForecastMs,now:Date.now()}),comp=shadowCompetitionSummary(shadowCompetitionState||{}),fr=featureResearchSummary(featureResearchState||{}),gov=experimentGovernorSummary(experimentGovernorState||{}),phase={COLD_START:'⚪ Startphase',LEARNING:'🟡 Lernphase',MEASURING:'🟢 Messphase',CANDIDATE_READY:'🧪 Kandidatenprüfung'}[s.phase]||s.phase;const lines=['🧪 TCX LEARNING LAB','','STATUS       '+phase,'AUTOLEARN    '+(s.autoLearn.enabled?'🟢 aktiv':'⏸ aus'),'MÄRKTE       '+s.autoLearn.symbols.length,'FORECASTS    '+s.issuedForecasts,'AUSGEWERTET  '+s.resolvedOutcomes,'OFFEN        '+s.pendingOutcomes,'','FORTSCHRITT'];for(const h of s.horizons.slice(0,4))lines.push(h.horizonId.toUpperCase()+'   '+h.resolved+' fertig · '+h.pending+' offen'+(h.metricsReady?' · Treffer '+learningPct01(h.metrics.directionalAccuracy,0):''));lines.push('','RESEARCH','Modellwettbewerb  '+(comp.status==='ACTIVE'?'🟢 aktiv':'🟡 '+String(comp.status||'wartet').replaceAll('_',' ').toLowerCase())+' · '+comp.candidates.length+' Kandidaten','Feature Research   '+(fr.status==='ACTIVE'?'🟢 aktiv':'⚪ '+String(fr.status||'wartet').replaceAll('_',' ').toLowerCase())+' · '+fr.experiments.length+' Tests','Experiment Gate    '+String(gov.status||'UNINITIALIZED').replaceAll('_',' ')+' · Gen '+(gov.generationNumber||'—'),'','PROMOTION','Fälle '+s.promotion.resolvedCases+'/'+s.promotion.requiredCases+' · Episoden '+s.promotion.independentEpisodes+'/'+s.promotion.requiredIndependentEpisodes,'Gate '+(s.promotion.dataReady?'🟢 Datenbasis bereit':'🟡 sammelt Evidenz'),'','Produktionsmodell wird niemals automatisch durch einen Kandidaten ersetzt.','ABSTAIN / SHADOW_ONLY'];return lines.join('\n').slice(0,4096);}
+function renderLearningCenterText(){
+  const summary=buildForecastLearningSummary(forecastRuntime,{
+    minDisplaySamples:30,
+    autoLearnEnabled,
+    autoLearnSymbols,
+    autoLearnForecastMs,
+    now:Date.now()
+  });
+  const competition=shadowCompetitionSummary(shadowCompetitionState||{});
+  const research=featureResearchSummary(featureResearchState||{});
+  const governor=experimentGovernorSummary(experimentGovernorState||{});
+  const phaseLabel={
+    COLD_START:'⚪ Startphase',
+    LEARNING:'🟡 Lernphase',
+    MEASURING:'🟢 Messphase',
+    CANDIDATE_READY:'🧪 Kandidatenprüfung'
+  }[summary.phase]||summary.phase;
+
+  const lines=[
+    '🧪 TCX LEARNING LAB','',
+    'STATUS       '+phaseLabel,
+    'AUTOLEARN    '+(summary.autoLearn.enabled?'🟢 aktiv':'⏸ aus'),
+    'MÄRKTE       '+summary.autoLearn.symbols.length,
+    'FORECASTS    '+summary.issuedForecasts,
+    'AUSGEWERTET  '+summary.resolvedOutcomes,
+    'OFFEN        '+summary.pendingOutcomes,'',
+    'FORTSCHRITT'
+  ];
+
+  for(const horizon of summary.horizons.slice(0,4)){
+    let row=horizon.horizonId.toUpperCase()+'   '+horizon.resolved+' fertig · '+horizon.pending+' offen';
+    if(horizon.metricsReady) row+=' · Treffer '+learningPct01(horizon.metrics.directionalAccuracy,0);
+    lines.push(row);
+  }
+
+  const competitionState=competition.status==='ACTIVE'
+    ?'🟢 aktiv'
+    :'🟡 '+String(competition.status||'wartet').replaceAll('_',' ').toLowerCase();
+  const researchState=research.status==='ACTIVE'
+    ?'🟢 aktiv'
+    :'⚪ '+String(research.status||'wartet').replaceAll('_',' ').toLowerCase();
+
+  lines.push(
+    '',
+    'RESEARCH',
+    'Modellwettbewerb  '+competitionState+' · '+competition.candidates.length+' Kandidaten',
+    'Feature Research   '+researchState+' · '+research.experiments.length+' Tests',
+    'Experiment Gate    '+String(governor.status||'UNINITIALIZED').replaceAll('_',' ')+' · Gen '+(governor.generationNumber||'—'),
+    '',
+    'PROMOTION',
+    'Fälle '+summary.promotion.resolvedCases+'/'+summary.promotion.requiredCases+
+      ' · Episoden '+summary.promotion.independentEpisodes+'/'+summary.promotion.requiredIndependentEpisodes,
+    'Gate '+(summary.promotion.dataReady?'🟢 Datenbasis bereit':'🟡 sammelt Evidenz'),
+    '',
+    'Produktionsmodell wird niemals automatisch durch einen Kandidaten ersetzt.',
+    'ABSTAIN / SHADOW_ONLY'
+  );
+  return lines.join('\n').slice(0,4096);
+}
 
 async function showLearningCenter(chatId,messageId=null){
   return deliverTelegramTextCard(tg,chatId,messageId,{
