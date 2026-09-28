@@ -782,12 +782,12 @@ export async function saveInstitutionalForecastRuntime(runtime){
         });
       }
       const journalHash=sha256(journalSerialized);
-      let slot=runtime.journalStoreSlot;
+      let journalSlot=runtime.journalStoreSlot;
       let journalBytes=runtime.lastJournalStoreBytes;
-      if(!slot||runtime.journalStoreHash!==journalHash){
-        slot=runtime.journalStoreSlot==='a'?'b':'a';
+      if(!journalSlot||runtime.journalStoreHash!==journalHash){
+        journalSlot=runtime.journalStoreSlot==='a'?'b':'a';
         const packed=await gzip(Buffer.from(journalSerialized,'utf8'),{level:1});
-        const storePath=journalStorePath(runtime.filePath,slot);
+        const storePath=journalStorePath(runtime.filePath,journalSlot);
         const storeTmp=storePath+'.tmp-'+process.pid;
         try{
           await writeFile(storeTmp,packed,{mode:0o600});
@@ -800,7 +800,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       }
       journalStoreMeta={
         version:FORECAST_JOURNAL_STORE_VERSION,
-        slot,
+        slot:journalSlot,
         sha256:journalHash,
         count:Array.isArray(payload?.journal?.entries)?payload.journal.entries.length:0,
         storageBytes:journalBytes,
@@ -827,12 +827,12 @@ export async function saveInstitutionalForecastRuntime(runtime){
         });
       }
       const engineHash=sha256(engineSerialized);
-      let slot=runtime.engineStoreSlot;
+      let engineSlot=runtime.engineStoreSlot;
       let engineBytes=runtime.lastEngineStoreBytes;
-      if(!slot||runtime.engineStoreHash!==engineHash){
-        slot=runtime.engineStoreSlot==='a'?'b':'a';
+      if(!engineSlot||runtime.engineStoreHash!==engineHash){
+        engineSlot=runtime.engineStoreSlot==='a'?'b':'a';
         const packed=await gzip(Buffer.from(engineSerialized,'utf8'),{level:1});
-        const storePath=engineStorePath(runtime.filePath,slot);
+        const storePath=engineStorePath(runtime.filePath,engineSlot);
         const storeTmp=storePath+'.tmp-'+process.pid;
         try{
           await writeFile(storeTmp,packed,{mode:0o600});
@@ -845,7 +845,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       }
       engineStoreMeta={
         version:FORECAST_ENGINE_STORE_VERSION,
-        slot,
+        slot:engineSlot,
         sha256:engineHash,
         storageBytes:engineBytes,
         logicalBytes:engineLogicalBytes
