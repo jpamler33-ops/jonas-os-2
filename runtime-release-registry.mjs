@@ -26,6 +26,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-portfolio-ledger.mjs',
   'shadow-capital-academy.mjs',
   'shadow-training-supervisor.mjs',
+  'strategy-evidence-engine.mjs',
   'shadow-strategy-league.mjs',
   'multi-venue-shadow-sor.mjs',
   'venue-quality-memory.mjs',
