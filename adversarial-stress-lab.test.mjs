@@ -20,7 +20,7 @@ function row(i,{ruleId='lc_a',pnl=2,ret=null,symbol=null,regime=null}={}){
     entryRegimeKey:regime||['RISK_ON','TREND','CHOP'][i%3],
     closedAt:1000+i,
     realizedNetPnlQuote:pnl,
-    realizedReturnPct:ret==null?pnl/100:pnl
+    realizedReturnPct:ret==null?pnl/100:ret
   };
 }
 
