@@ -56,3 +56,15 @@ test('exploration outcomes are counted separately but still teach the model',()=
   assert.equal(model.samples,12);
   assert.equal(model.explorationSamples,5);
 });
+
+
+test('challenger outcomes do not self-reinforce the discovery model',()=>{
+  const standard=Array.from({length:10},(_,i)=>closed(i,{pnl:2}));
+  const challenger=Array.from({length:10},(_,i)=>({
+    ...closed(100+i,{pnl:10}),
+    entryMode:'CHALLENGER',
+    challengerRuleId:'lc_test'
+  }));
+  const model=buildShadowTradeQualityModel({positions:[...standard,...challenger]});
+  assert.equal(model.samples,10);
+});
