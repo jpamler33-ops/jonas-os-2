@@ -7,6 +7,7 @@ import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shad
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
 import { buildPointInTimeCorrelation, PIT_CORRELATION_ENGINE_VERSION } from './pit-correlation-engine.mjs';
 import { buildLeverageCounterfactualLab, LEVERAGE_COUNTERFACTUAL_LAB_VERSION } from './leverage-counterfactual-lab.mjs';
+import { buildTcxProofReport, TCX_PROOF_SYSTEM_VERSION } from './tcx-proof-system.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
@@ -2621,7 +2622,7 @@ async function showLearningCenter(chatId,messageId=null){
 }
 
 async function showPremiumMore(chatId,messageId){
-  const payload={chat_id:chatId,text:['☰ TCX · MEHR','','Lernen & Entwicklung','Strategien testen, Qualität prüfen und Fortschritt verfolgen.','','System & Tools','Technische Diagnose und erweiterte Funktionen.'].join('\n'),reply_markup:{inline_keyboard:[[{text:'🧪 Lernzentrum',callback_data:'home:performance'},{text:'🏆 Academy',callback_data:'home:academy'}],[{text:'🧠 Coach',callback_data:'home:coach'},{text:'🏁 Strategy League',callback_data:'home:league'}],[{text:'🧭 Trends',callback_data:'home:trends'},{text:'🐸 Memecoins',callback_data:'home:memecoins'}],[{text:'🖥 System',callback_data:'home:system'},{text:'⚙️ Tools',callback_data:'commands'}],[{text:'🏠 Command Center',callback_data:'home'}]]}};
+  const payload={chat_id:chatId,text:['☰ TCX · MEHR','','Lernen & Entwicklung','Strategien testen, Qualität prüfen und Fortschritt verfolgen.','','System & Tools','Technische Diagnose und erweiterte Funktionen.'].join('\n'),reply_markup:{inline_keyboard:[[{text:'🧪 Lernzentrum',callback_data:'home:performance'},{text:'🏆 Academy',callback_data:'home:academy'}],[{text:'🧠 Coach',callback_data:'home:coach'},{text:'🏁 Strategy League',callback_data:'home:league'}],[{text:'🧭 Trends',callback_data:'home:trends'},{text:'🐸 Memecoins',callback_data:'home:memecoins'}],[{text:'🧾 Proof',callback_data:'home:proof'},{text:'🖥 System',callback_data:'home:system'}],[{text:'⚙️ Tools',callback_data:'commands'}],[{text:'🏠 Command Center',callback_data:'home'}]]}};
   if(messageId)return tg('editMessageText',{...payload,message_id:messageId});return tg('sendMessage',payload);
 }
 
@@ -2640,6 +2641,7 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
   if(section==='STATS_ALL') return showShadowTradeStats(chatId,messageId,'ALL');
   if(section==='MORE') return showPremiumMore(chatId,messageId);
+  if(section==='PROOF') { const p=buildTcxProofReport(shadowPortfolioLedger), icon=p.status==='ROBUST'?'🟢':p.status==='EMERGING'?'🟡':'⚪', wf=p.walkForward.validationMode==='FROZEN_POLICY_OOS'?'🟢 Frozen OOS':'🟡 Replay only'; const body=['🧾 TCX PROOF CENTER','',icon+' EVIDENZSTATUS   '+p.status,'PRÜFUNGEN       '+p.passedChecks+'/'+p.totalChecks,'TRADES          '+p.evidence.trades,'FORWARD TRADES  '+p.evidence.forwardTrades,'','VALIDIERUNG','Walk-Forward     '+wf,'Tail Risk        '+(p.tailRisk.passed?'🟢 bestanden':'🟡 nicht bestanden'),'Independent Audit '+(p.audit.passed?'🟢 bestanden':'🟡 nicht bestanden'),'Regime-Breite   '+p.regimes.distinct+' Regimes · '+p.regimes.matureCells+' reif','','RISIKO','Max Drawdown     '+(Number.isFinite(p.evidence.maxDrawdownPct)?fmt(p.evidence.maxDrawdownPct*100,1)+'%':'—'),'Stress p95 DD    '+(Number.isFinite(p.tailRisk.p95DrawdownPct)?fmt(p.tailRisk.p95DrawdownPct*100,1)+'%':'—'),'','ROBUST verlangt echte eingefrorene Out-of-Sample-Policy-Evidenz.','Status ist kein Profitversprechen und keine Live-Freigabe.','ABSTAIN / SHADOW_ONLY']; return deliverTelegramTextCard(tg,chatId,messageId,{text:body.join('\n'),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:proof'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],[{text:'🏠 Command Center',callback_data:'home'}]]}}); }
 
   let text='';
   if(section==='ALERTS') {
