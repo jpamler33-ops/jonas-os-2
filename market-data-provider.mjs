@@ -211,14 +211,15 @@ export function createMarketDataProvider({
     throw new Error("All Binance market-data endpoints failed: "+errors.join(" | "));
   }
 
-  async function fetchKlines(symbol,interval,limit=30){
+  async function fetchKlines(symbol,interval,limit=30,{endTime=null}={}){
     const allowed=new Set(["1m","5m","15m","1h","4h"]);
     if(!allowed.has(interval)) throw new Error("Unsupported interval");
     const encoded=encodeURIComponent(symbol);
     const errors=[];
     for(const base of binance){
       try{
-        const rows=await fetchJson(base+"/api/v3/klines?symbol="+encoded+"&interval="+interval+"&limit="+limit);
+        const end=Number.isFinite(Number(endTime))?"&endTime="+Math.floor(Number(endTime)):"";
+        const rows=await fetchJson(base+"/api/v3/klines?symbol="+encoded+"&interval="+interval+"&limit="+limit+end);
         if(!Array.isArray(rows)||rows.length<2) throw new Error("Insufficient kline data");
         return {rows,base};
       }catch(err){
