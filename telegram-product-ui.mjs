@@ -154,7 +154,7 @@ export function marketCardText(vm,{live=false,detailMode="SIMPLE"}={}) {
  const risk=vm.safety.status==="VALID"?"NORMAL":vm.safety.status==="CAUTION"?"CAUTION":"RESTRICTED";
  const lines=["TCX // "+vm.symbol.replace("USDT","/USDT"),"━━━━━━━━━━━━━━━━━━━━","MARKET SNAPSHOT · "+(live?"LIVE":"NOW"),"","$ "+fmt(p.price,p.price!=null&&Math.abs(p.price)<1?6:2)+"   ·   24H "+(chg==null?"—":sign+fmt(chg,2)+"%"),"","DECISION STATE","Direction   "+direction,"Regime      "+phase,"Flow        "+pressure,"Evidence    "+ev,"Risk        "+risk];
  if(detailMode!=="SIMPLE")lines.push("","MARKET DATA","Spread "+fmt(p.spreadBps,3)+" bps","Memory "+(vm.evidence.memorySupport??"—"),"Source "+vm.provenance.source);
- lines.push("","TRACE","Market → Forecast → Why → Risk","","SHADOW ONLY · REAL ORDERS BLOCKED");return lines.join("\n");
+ lines.push("","TRACE","Market → Forecast → Why → Risk","",live?"⚡ Live-Aktualisierung aktiv":"⏸ Einmalige Ansicht","ABSTAIN / SHADOW_ONLY · REAL ORDERS BLOCKED");return lines.join("\n");
 }
 
 export function marketProductKeyboard(symbol,{live=false,isFavorite=false}={}) {const s=String(symbol||"").toUpperCase();return {inline_keyboard:[[{text:"⌁ FORECAST",callback_data:"forecast:"+s},{text:"▥ CHART",callback_data:"chart:"+s+":5m"}],[{text:"◇ WHY",callback_data:"why:"+s},{text:"◉ ALERT",callback_data:"alerthelp:"+s}],[{text:isFavorite?"★ WATCHLIST":"☆ WATCHLIST",callback_data:"fav:"+s},{text:"↻ REFRESH",callback_data:"refresh:"+s}],[{text:"⌁ DETAILS",callback_data:"tcx:"+s},{text:"⌂ COMMAND",callback_data:"home"}]]};}
