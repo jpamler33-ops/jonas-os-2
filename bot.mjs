@@ -16,6 +16,7 @@ import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimefra
 import { renderCandlestickPng } from './chart-renderer.mjs';
 import { buildChartIntelligence, CHART_INTELLIGENCE_VERSION } from './chart-intelligence.mjs';
 import { buildMarketXray, buildMtfMatrix, MARKET_XRAY_VIEW_VERSION } from './market-xray-view.mjs';
+import { buildObservedLiquidationHeatmap, buildConfluenceMap, LIQUIDATION_CONFLUENCE_VIEW_VERSION } from './liquidation-confluence-view.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -109,7 +110,7 @@ import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './f
 import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } from './expansion-runtime/institutional-expansion.mjs';
 import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/dexscreener-public-provider.mjs';
 import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
-import { createExternalResearchProvider, EXTERNAL_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/external-research-provider.mjs';
+import { createExternalResearchProvider, coinMetricsSnapshotToExtraFeatures, deribitOptionsSnapshotToExtraFeatures, macroSnapshotToExtraFeatures, predictionMarketSnapshotToExtraFeatures, EXTERNAL_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/external-research-provider.mjs';
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
@@ -2197,6 +2198,10 @@ function chartKeyboard(symbol, interval, live=false) {
       { text:"▦ MTF", callback_data:`mtf:${symbol}` }
     ],
     [
+      { text:"🔥 LIQ MAP", callback_data:`liqmap:${symbol}:5m` },
+      { text:"◎ CONFLUENCE", callback_data:`confluence:${symbol}` }
+    ],
+    [
       { text:"◇ STRUKTUR", callback_data:`structure:${symbol}` },
       { text:"⌁ FORECAST", callback_data:`forecast:${symbol}` }
     ],
@@ -2222,6 +2227,10 @@ function xrayKeyboard(symbol,live=false){
       {text:"▥ CHART",callback_data:`chart:${symbol}:5m`}
     ],
     [
+      {text:"🔥 LIQ MAP",callback_data:`liqmap:${symbol}:5m`},
+      {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`}
+    ],
+    [
       {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`},
       {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
     ],
@@ -2236,6 +2245,10 @@ function mtfMatrixKeyboard(symbol){
       {text:"◫ X-RAY",callback_data:`xray:${symbol}`}
     ],
     [
+      {text:"🔥 LIQ MAP",callback_data:`liqmap:${symbol}:5m`},
+      {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`}
+    ],
+    [
       {text:"▥ 5m CHART",callback_data:`chart:${symbol}:5m`},
       {text:"▥ 1h CHART",callback_data:`chart:${symbol}:1h`}
     ],
@@ -2244,6 +2257,50 @@ function mtfMatrixKeyboard(symbol){
       {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
     ],
     [{text:"🏠 Start",callback_data:"home"}]
+  ]};
+}
+
+function liquidationMapKeyboard(symbol,window='5m',live=false){
+  const w=String(window).toLowerCase()==='15m'?'15m':'5m';
+  return {inline_keyboard:[
+    [
+      {text:w==='5m'?'● 5M':'5M',callback_data:`liqmap:${symbol}:5m`},
+      {text:w==='15m'?'● 15M':'15M',callback_data:`liqmap:${symbol}:15m`}
+    ],
+    [
+      {text:"↻ AKTUALISIEREN",callback_data:`liqrefresh:${symbol}:${w}`},
+      {text:live?"⏸ AUTO AUS":"⚡ AUTO 10s",callback_data:`liqlive:${symbol}:${w}:${live?'off':'on'}`}
+    ],
+    [
+      {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`},
+      {text:"◫ X-RAY",callback_data:`xray:${symbol}`}
+    ],
+    [
+      {text:"▥ CHART",callback_data:`chart:${symbol}:5m`},
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
+    ],
+    [{text:"🏠 Start",callback_data:"home"}]
+  ]};
+}
+
+function confluenceKeyboard(symbol){
+  return {inline_keyboard:[
+    [
+      {text:"↻ AKTUALISIEREN",callback_data:`confluence:${symbol}`},
+      {text:"🔥 LIQ MAP",callback_data:`liqmap:${symbol}:5m`}
+    ],
+    [
+      {text:"◫ X-RAY",callback_data:`xray:${symbol}`},
+      {text:"▦ MTF MATRIX",callback_data:`mtf:${symbol}`}
+    ],
+    [
+      {text:"▥ CHART",callback_data:`chart:${symbol}:5m`},
+      {text:"⌁ FORECAST",callback_data:`forecast:${symbol}`}
+    ],
+    [
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`},
+      {text:"🏠 Start",callback_data:"home"}
+    ]
   ]};
 }
 
@@ -3259,6 +3316,92 @@ async function showMemory(chatId,symbol) {
     'Keine Trefferquote und kein Trade-Signal.','Systemmodus: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
   return tg("sendMessage",{chat_id:chatId,text:text.slice(0,4096),reply_markup:memoryKeyboard(symbol)});
+}
+
+async function showLiquidationMap(chatId,messageId,symbol,{window='5m',live=true}={}){
+  const market=await snapshot(symbol);
+  let liquidation=null;
+  try{
+    liquidation=liquidationResearchStream.snapshot(symbol,{
+      asOf:Date.now(),
+      referencePrice:Number(market.price),
+      clusterBinBps:25,
+      maxClusters:12
+    });
+  }catch{}
+  const view=buildObservedLiquidationHeatmap({
+    symbol,
+    liquidation,
+    referencePrice:Number(market.price),
+    window,
+    live,
+    refreshSeconds:Math.round(refreshMs/1000)
+  });
+  const sent=await deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:liquidationMapKeyboard(symbol,window,live)
+  });
+  const effectiveMessageId=sent?.message_id||messageId;
+  sessions.set(String(chatId),{
+    chatId,
+    messageId:effectiveMessageId,
+    symbol,
+    live:Boolean(live),
+    view:'LIQ_MAP',
+    interval:String(window).toLowerCase()==='15m'?'15m':'5m',
+    lastRefresh:Date.now(),
+    liquidationConfluenceVersion:LIQUIDATION_CONFLUENCE_VIEW_VERSION
+  });
+  return sent;
+}
+
+async function showConfluenceMap(chatId,messageId,symbol){
+  const [state,book,derivatives,external]=await Promise.all([
+    researchState(symbol,'5m'),
+    fetchExecutionBook(symbol),
+    derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000}).catch(()=>null),
+    externalResearchProvider.fetchBundle(symbol).catch(()=>null)
+  ]);
+  let liquidation=null;
+  try{
+    liquidation=liquidationResearchStream.snapshot(symbol,{
+      asOf:Date.now(),
+      referencePrice:Number(state.market.price),
+      clusterBinBps:25,
+      maxClusters:12
+    });
+  }catch{}
+  const rawFeatures=[
+    ...derivativesSnapshotToExtraFeatures(derivatives),
+    ...liquidationSnapshotToExtraFeatures(liquidation),
+    ...coinMetricsSnapshotToExtraFeatures(external?.coinMetrics),
+    ...deribitOptionsSnapshotToExtraFeatures(external?.deribitOptions),
+    ...macroSnapshotToExtraFeatures(external?.macro),
+    ...predictionMarketSnapshotToExtraFeatures(external?.predictionMarket)
+  ];
+  const intelligenceFeatures=buildDerivedResearchIntelligenceFeatures(rawFeatures);
+  const view=buildConfluenceMap({
+    symbol,
+    currentPrice:Number(state.market.price),
+    analysis:state.analysis,
+    book,
+    liquidation,
+    intelligenceFeatures,
+    mergeBps:20
+  });
+  sessions.set(String(chatId),{
+    chatId,
+    messageId,
+    symbol,
+    live:false,
+    view:'CONFLUENCE',
+    lastRefresh:Date.now(),
+    liquidationConfluenceVersion:LIQUIDATION_CONFLUENCE_VIEW_VERSION
+  });
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:confluenceKeyboard(symbol)
+  });
 }
 
 async function showXray(chatId,messageId,symbol,{live=true}={}){
@@ -5157,7 +5300,7 @@ async function showResearchLineage(chatId,messageId,symbol){
 function stopLiveAnalysisAuto(chatId){
   const key=String(chatId);
   const current=sessions.get(key);
-  if(['CHART','XRAY'].includes(String(current?.view||''))&&current?.live===true){
+  if(['CHART','XRAY','LIQ_MAP'].includes(String(current?.view||''))&&current?.live===true){
     sessions.set(key,{...current,live:false,lastRefresh:Date.now()});
   }
 }
@@ -5185,6 +5328,8 @@ function parseAction(data='') {
   if (p[0] === 'chartlive' && p[1] && ['1m','5m','15m','1h','4h'].includes(p[2]) && (p[3]==='on'||p[3]==='off')) return { kind:'CHART_LIVE', symbol:p[1], interval:p[2], enabled:p[3]==='on' };
   if (p[0] === 'xrayrefresh' && p[1]) return { kind:'XRAY_REFRESH', symbol:p[1] };
   if (p[0] === 'xraylive' && p[1] && (p[2]==='on'||p[2]==='off')) return { kind:'XRAY_LIVE', symbol:p[1], enabled:p[2]==='on' };
+  if (p[0] === 'liqrefresh' && p[1] && ['5m','15m'].includes(p[2])) return { kind:'LIQ_MAP_REFRESH', symbol:p[1], window:p[2] };
+  if (p[0] === 'liqlive' && p[1] && ['5m','15m'].includes(p[2]) && (p[3]==='on'||p[3]==='off')) return { kind:'LIQ_MAP_LIVE', symbol:p[1], window:p[2], enabled:p[3]==='on' };
   if (p[0] === 'tradereplay' && p[1]) return { kind:'TRADE_REPLAY', symbol:p[1] };
   if (p[0] === 'structure' && p[1]) return { kind:'STRUCTURE', symbol:p[1] };
   if (p[0] === 'memory' && p[1]) return { kind:'MEMORY', symbol:p[1] };
@@ -5452,6 +5597,35 @@ async function handle(update) {
       await ack(q.id);
       return;
     }
+    if (a.kind === 'LIQ_MAP') {
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      const current=sessions.get(String(chatId));
+      const live=current?.view==='LIQ_MAP'?current.live===true:true;
+      await showLiquidationMap(chatId,textMessageId,a.symbol,{window:a.window||'5m',live});
+      await ack(q.id,'Liquidation Heatmap geladen');
+      return;
+    }
+    if (a.kind === 'LIQ_MAP_REFRESH') {
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      const live=sessions.get(String(chatId))?.view==='LIQ_MAP'&&sessions.get(String(chatId))?.live===true;
+      await showLiquidationMap(chatId,textMessageId,a.symbol,{window:a.window||'5m',live});
+      await ack(q.id,'Heatmap aktualisiert');
+      return;
+    }
+    if (a.kind === 'LIQ_MAP_LIVE') {
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showLiquidationMap(chatId,textMessageId,a.symbol,{window:a.window||'5m',live:a.enabled});
+      await ack(q.id,a.enabled?'Heatmap Auto aktiviert':'Heatmap Auto deaktiviert');
+      return;
+    }
+    if (a.kind === 'CONFLUENCE') {
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showConfluenceMap(chatId,textMessageId,a.symbol);
+      await ack(q.id,'Confluence Map geladen');
+      return;
+    }
+
     if (a.kind === 'XRAY') {
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       const current=sessions.get(String(chatId));
@@ -5626,6 +5800,7 @@ async function refresher() {
       try {
         if (s.view === 'CHART') await showChart(s.chatId,s.symbol,s.interval || '5m',{messageId:s.messageId,edit:true,live:true});
         else if (s.view === 'XRAY') await showXray(s.chatId,s.messageId,s.symbol,{live:true});
+        else if (s.view === 'LIQ_MAP') await showLiquidationMap(s.chatId,s.messageId,s.symbol,{window:s.interval || '5m',live:true});
         else if (s.view === 'TCX') await showTcx(s.chatId,s.messageId,s.symbol);
         else if (s.view === 'TIMEFRAME') await showTimeframe(s.chatId,s.messageId,s.symbol,s.interval || '5m');
         else await showMarket(s.chatId,s.messageId,s.symbol,true);
