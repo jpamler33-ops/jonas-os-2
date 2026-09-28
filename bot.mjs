@@ -3032,7 +3032,6 @@ async function showSuperRadar(chatId,messageId){
 async function finalFoundationContext(symbol){
  const world=await worldModelContext(symbol);
  const science=await scientificBrainContext(symbol);
- const leadLag=discoverLeadLag(Object.fromEntries((world.graph?.nodes||[]).map(n=>[n.symbol,[]])),{asOf:world.state.availableAt});
  // Re-fetch bounded PIT series because graph intentionally stores summaries, not raw candles.
  const symbols=[...new Set([symbol,...requestedSymbols])].slice(0,12),series={};
  const fetched=await Promise.allSettled(symbols.map(async s=>({symbol:s,rows:(await fetchKlines(s,'5m',130)).rows})));
