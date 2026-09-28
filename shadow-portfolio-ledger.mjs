@@ -268,7 +268,10 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   let added=0;
   for(const order of Array.isArray(orders)?orders:[]){
     if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY']})||known.has(String(order.id))) continue;
-    const p=shadowPositionFromEntryOrder(order,{openedAt:finite(order.updatedAt,finite(order.createdAt,now))});
+    const p=shadowPositionFromEntryOrder(order,{
+      openedAt:finite(order.updatedAt,finite(order.createdAt,now)),
+      acceptedRoles:['ENTRY','EXPLORATION_ENTRY']
+    });
     base.positions.push(p);
     known.add(String(order.id));
     added++;
