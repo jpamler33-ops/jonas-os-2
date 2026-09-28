@@ -2686,7 +2686,79 @@ async function showPremiumMore(chatId,messageId){
   if(messageId)return tg('editMessageText',{...payload,message_id:messageId});return tg('sendMessage',payload);
 }
 
+function dataStatusIcon(snapshot,{optional=false}={}){
+  if(snapshot?.ok===true) return '🟢 LIVE';
+  const reason=String(snapshot?.reason||'').toUpperCase();
+  if(optional&&(reason.includes('NOT_CONFIGURED')||reason.includes('UNSUPPORTED'))) return '⚪ OPTIONAL';
+  return '🔴 DOWN';
+}
+function dataAge(ms){
+  const n=Number(ms);
+  if(!Number.isFinite(n)) return '—';
+  const age=Math.max(0,Date.now()-n);
+  if(age<60_000) return Math.round(age/1000)+'s';
+  if(age<3_600_000) return Math.round(age/60_000)+'m';
+  return Math.round(age/3_600_000)+'h';
+}
+async function showDataStatus(chatId,messageId=null){
+  const [venues,derivatives,external,btc,eth,sol]=await Promise.all([
+    fetchSorVenueBooks('BTCUSDT').catch(error=>({books:[],errors:[{venue:'ALL',error:error instanceof Error?error.message:String(error)}],capturedAt:Date.now()})),
+    derivativesResearchProvider.fetchSnapshot('BTCUSDT',{cacheMs:0}).catch(error=>({ok:false,reason:error instanceof Error?error.message:String(error),availableAt:Date.now()})),
+    externalResearchProvider.fetchBundle('BTCUSDT',{force:true}).catch(error=>({
+      coinMetrics:{ok:false,reason:error instanceof Error?error.message:String(error)},
+      deribitOptions:{ok:false,reason:error instanceof Error?error.message:String(error)},
+      macro:{ok:false,reason:error instanceof Error?error.message:String(error)},
+      predictionMarket:{ok:false,reason:error instanceof Error?error.message:String(error)}
+    })),
+    onchainResearchProvider.fetchAssetSnapshot('BTCUSDT',{cacheMs:0}).catch(error=>({ok:false,reason:error instanceof Error?error.message:String(error)})),
+    onchainResearchProvider.fetchAssetSnapshot('ETHUSDT',{cacheMs:0}).catch(error=>({ok:false,reason:error instanceof Error?error.message:String(error)})),
+    onchainResearchProvider.fetchAssetSnapshot('SOLUSDT',{cacheMs:0}).catch(error=>({ok:false,reason:error instanceof Error?error.message:String(error)}))
+  ]);
+  const venueSet=new Set((venues?.books||[]).map(x=>String(x?.venue||'').toUpperCase()));
+  const venueLine=name=>(venueSet.has(name)?'🟢 LIVE':'🔴 DOWN');
+  const liq=liquidationResearchStream.health();
+  const gov=researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()});
+  const macroTransport=external?.macro?.provenance?.transport==='FRED_API'?'API + Vintage':external?.macro?.provenance?.transport==='FRED_GRAPH_CSV'?'Public CSV + PIT Capture':'—';
+  const macroAge=dataAge(external?.macro?.availableAt);
+  const cmAge=dataAge(external?.coinMetrics?.availableAt);
+  const deribitAge=dataAge(external?.deribitOptions?.availableAt);
+  const text=[
+    '📡 TCX // DATA STATUS',
+    '━━━━━━━━━━━━━━━━━━━━','',
+    'MARKET FEEDS',
+    'Binance      '+venueLine('BINANCE'),
+    'OKX          '+venueLine('OKX'),
+    'Kraken       '+venueLine('KRAKEN'),
+    'Derivatives  '+(derivatives?.ok===true?'🟢 LIVE':'🔴 DOWN'),
+    'Liquidation  '+(liq?.connected===true?'🟢 LIVE':'🟡 CONNECTING'),'',
+    'ON-CHAIN',
+    'Bitcoin      '+dataStatusIcon(btc),
+    'Ethereum     '+dataStatusIcon(eth),
+    'Solana       '+dataStatusIcon(sol),
+    'Coin Metrics '+dataStatusIcon(external?.coinMetrics)+' · '+cmAge+' alt','',
+    'OPTIONS + MACRO',
+    'Deribit      '+dataStatusIcon(external?.deribitOptions)+' · '+deribitAge+' alt',
+    'FRED         '+dataStatusIcon(external?.macro)+' · '+macroTransport+' · '+macroAge+' alt',
+    'Polymarket   '+dataStatusIcon(external?.predictionMarket,{optional:true}),'',
+    'DATA GOVERNANCE',
+    'Research Plane '+(researchDataPlane.healthy?'🟢 HEALTHY':'🔴 ERROR')+' · '+researchDataPlane.totalRecords+' Snapshots',
+    'Governance     '+(researchGovernanceHealthy?'🟢 HEALTHY':'🟡 CHECK')+' · '+gov.featureCatalog.featureCount+' Features',
+    'Quarantined    '+Number(gov.statuses?.QUARANTINED||0),'',
+    'Polymarket bleibt OPTIONAL, bis ein Markt eindeutig einem TCX-Symbol zugeordnet ist.',
+    'FRED ohne API-Key nutzt den öffentlichen CSV-Feed und archiviert Abrufe Point-in-Time.','',
+    'SHADOW_ONLY · REAL ORDERS BLOCKED'
+  ].join('\n').slice(0,4096);
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text,
+    reply_markup:{inline_keyboard:[
+      [{text:'🔄 Neu prüfen',callback_data:'home:data'},{text:'🖥 System',callback_data:'home:system'}],
+      [{text:'🏠 Command Center',callback_data:'home'}]
+    ]}
+  });
+}
+
 async function showHomeSection(chatId,messageId,section) {
+  if(section==='DATA') return showDataStatus(chatId,messageId);
   if(section==='MARKETS') return showMarkets(chatId,messageId);
   if(section==='WATCHLIST') return showFavorites(chatId,messageId);
   if(section==='MEMECOINS') return showMemecoinRadar(chatId,messageId);
@@ -2765,7 +2837,11 @@ async function showHomeSection(chatId,messageId,section) {
     text='Dieser Bereich ist noch nicht verfügbar.';
   }
 
-  const sectionKb=section==='RADAR'?{inline_keyboard:[[{text:'📊 Märkte öffnen',callback_data:'home:markets'},{text:'🔄 Radar',callback_data:'home:radar'}],[{text:'⭐ Watchlist',callback_data:'home:watchlist'},{text:'🏠 Command Center',callback_data:'home'}]]}:homeBackKeyboard();
+  const sectionKb=section==='RADAR'
+    ?{inline_keyboard:[[{text:'📊 Märkte öffnen',callback_data:'home:markets'},{text:'🔄 Radar',callback_data:'home:radar'}],[{text:'⭐ Watchlist',callback_data:'home:watchlist'},{text:'🏠 Command Center',callback_data:'home'}]]}
+    :section==='SYSTEM'
+      ?{inline_keyboard:[[{text:'📡 Data Status',callback_data:'home:data'},{text:'🔄 System',callback_data:'home:system'}],[{text:'🏠 Command Center',callback_data:'home'}]]}
+      :homeBackKeyboard();
   const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:sectionKb};
   if(messageId) await tg('editMessageText',{...payload,message_id:messageId});
   else await tg('sendMessage',payload);
@@ -5008,6 +5084,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showEvidence,
   showEvidenceHistory,
   showValidity,
+  showDataStatus,
   recordError,
   recordOperation,
   observability
