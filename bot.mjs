@@ -73,6 +73,7 @@ import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market
 import { createTelegramCommandRouter, TELEGRAM_COMMAND_ROUTER_VERSION } from './telegram-command-router.mjs';
 import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './telegram-read-command-handlers.mjs';
 import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } from './telegram-mutation-command-handlers.mjs';
+import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } from './telegram-update-dispatcher.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
 import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESEARCH_CAPABILITIES } from './execution-research-lab.mjs';
@@ -123,6 +124,9 @@ const okxBase = (process.env.TCX_OKX_REST_BASE || 'https://www.okx.com').replace
 const krakenBase = (process.env.TCX_KRAKEN_REST_BASE || 'https://api.kraken.com').replace(/\/+$/,'');
 
 const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 10000));
+const telegramApiTimeoutMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_API_TIMEOUT_MS || 12000));
+const telegramLongPollTimeoutMs = Math.max(30000, Number(process.env.TCX_TELEGRAM_LONG_POLL_TIMEOUT_MS || 35000));
+const telegramUpdateTimeoutMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_UPDATE_TIMEOUT_MS || 20000));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
 const researchAlertCheckMs = Math.max(30000, Number(process.env.TCX_RESEARCH_ALERT_CHECK_MS || 60000));
 const researchValidityStaleMs = Math.max(60000, Number(process.env.TCX_RESEARCH_VALIDITY_STALE_MS || 600000));
@@ -1711,10 +1715,12 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
 }
 
 async function tg(method, body) {
+  const timeoutMs=method==='getUpdates'?telegramLongPollTimeoutMs:telegramApiTimeoutMs;
   const res = await fetch(`${telegramApi}/${method}`, {
     method:'POST',
     headers:{'content-type':'application/json'},
-    body:JSON.stringify(body)
+    body:JSON.stringify(body),
+    signal:AbortSignal.timeout(timeoutMs)
   });
   const data = await res.json().catch(() => ({ ok:false, description:`HTTP ${res.status}` }));
   if (!res.ok || !data.ok) {
@@ -5056,6 +5062,22 @@ async function handle(update) {
   }
 }
 
+const telegramUpdateDispatcher=createTelegramUpdateDispatcher({
+  handle,
+  timeoutMs:telegramUpdateTimeoutMs,
+  onError:(err,update)=>{
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'telegram.dispatch',message:msg});
+    console.error('telegram dispatch error',JSON.stringify({
+      updateId:update?.update_id??null,
+      chatId:update?.message?.chat?.id??update?.callback_query?.message?.chat?.id??null,
+      error:msg
+    }));
+  }
+});
+let telegramLastPollAt=null;
+let telegramLastPollError=null;
+
 async function poll() {
   while (running) {
     try {
@@ -5064,12 +5086,13 @@ async function poll() {
         timeout:25,
         allowed_updates:['message','callback_query']
       }) || [];
-      for (const u of updates) {
-        offset = Math.max(offset,Number(u.update_id)+1);
-        await handle(u);
-      }
+      telegramLastPollAt=Date.now();
+      telegramLastPollError=null;
+      for (const u of updates) offset = Math.max(offset,Number(u.update_id)+1);
+      await telegramUpdateDispatcher.dispatchBatch(updates);
     } catch (err) {
-      console.error('poll error', err instanceof Error ? err.message : String(err));
+      telegramLastPollError=err instanceof Error?err.message:String(err);
+      console.error('poll error', telegramLastPollError);
       await sleep(1500);
     }
   }
@@ -6079,6 +6102,13 @@ const server = http.createServer((req,res) => {
       sessions:sessions.size,
       favorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
       alerts:activeAlerts,
+      telegramPolling:{
+        dispatcher:telegramUpdateDispatcher.snapshot(),
+        lastPollAt:telegramLastPollAt,
+        lastPollError:telegramLastPollError,
+        apiTimeoutMs:telegramApiTimeoutMs,
+        longPollTimeoutMs:telegramLongPollTimeoutMs
+      },
       alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
       institutionalKernel:{
         version:INSTITUTIONAL_KERNEL_VERSION,
@@ -6269,144 +6299,20 @@ await syncFeatureResearch('startup');
 const me = await tg('getMe',{});
 const persistenceSmoke=runPersistenceSmokeTest();
 console.log('[TCX_PERSISTENCE_SMOKE]',JSON.stringify(persistenceSmoke));
-console.log(JSON.stringify({
+console.log('[TCX_STARTUP_READY]',JSON.stringify({
   service:'TCX Telegram UI',
-  botUsername:me?.username || 'UNKNOWN',
-  markets:markets.map(x=>x.symbol),
-  refreshMs,
-  alertCheckMs,
-  researchAlertCheckMs,
-  episodeSweepMs,
-  forecastOutcomeCheckMs,
-  autoLearn:{enabled:autoLearnEnabled,symbols:autoLearnSymbols,forecastIntervalMs:autoLearnForecastMs,sweepMs:autoLearnSweepMs,version:FORECAST_LEARNING_CENTER_VERSION},
-  shadowCompetition:{enabled:shadowCompetitionEnabled,evaluationMs:shadowCompetitionEvalMs,minSeedRows:shadowCompetitionMinSeedRows,minTrainCases:shadowCompetitionMinTrainCases,version:FORECAST_SHADOW_COMPETITION_VERSION,status:shadowCompetitionState?.status||'UNINITIALIZED'},
-  experimentGovernor:{version:FORECAST_EXPERIMENT_GOVERNOR_VERSION,file:experimentGovernorFile,status:experimentGovernorState?.status||'UNINITIALIZED',generationNumber:experimentGovernorState?.generationNumber||0},
-  featureResearch:{version:FORECAST_FEATURE_RESEARCH_VERSION,file:featureResearchFile,status:featureResearchState?.status||'UNINITIALIZED',generationNumber:featureResearchState?.generationNumber||0,provider:DERIVATIVES_PUBLIC_PROVIDER_VERSION},
-  liquidationResearch:{version:LIQUIDATION_PUBLIC_STREAM_VERSION,health:liquidationResearchStream.health()},
-  onchainResearch:{version:ONCHAIN_RESEARCH_PROVIDER_VERSION,assets:['BTCUSDT','ETHUSDT','SOLUSDT']},
-  walletCohortResearch:{version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:walletCohortResearchProvider.configuredCohorts,mode:'MANUAL_PUBLIC_COHORTS_ONLY'},
-  entityRegistry:{version:VERIFIED_ENTITY_REGISTRY_VERSION,file:entityRegistryFile,summary:entityRegistrySummary(entityRegistry||{}),refreshError:entityRegistryRefreshError,source:okxPorSource},
-  entityFlowResearch:{version:ENTITY_FLOW_ENGINE_VERSION,file:entityFlowMemoryFile,addressCount:entityFlowAddressIndex.addressCount,entityCount:entityFlowAddressIndex.entityCount,memory:entityFlowMemorySummary(entityFlowMemory),finality:'FINALIZED',assetScope:'NATIVE_ETH',coverage:'BOUNDED_VERIFIED_ADDRESS_SAMPLE'},
-  researchDataPlane:{version:RESEARCH_DATA_PLANE_VERSION,adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,...researchDataPlaneSummary(researchDataPlane)},
-  researchDataGovernance:{version:RESEARCH_DATA_GOVERNANCE_VERSION,file:researchGovernanceFile,healthy:researchGovernanceHealthy,lastError:researchGovernanceLastError,...researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()})},
-  institutionalForecastRuntime:{
-    ...institutionalForecastRuntimeSummary(forecastRuntime),
-    file:forecastRuntimeFile
-  },
-  forecastProduct:FORECAST_PRODUCT_VERSION,
-  forecastScienceAdapter:FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION,
-  institutionalKernel:INSTITUTIONAL_KERNEL_VERSION,
-  auditLedger:{file:auditFile,healthy:auditLedger.healthy,seq:auditLedger.seq,tailHash:auditLedger.tailHash},
-  releaseRegistry:{
-    version:RELEASE_REGISTRY_VERSION,
-    file:releaseRegistryFile,
-    healthy:releaseRegistry.healthy,
-    seq:releaseRegistry.seq,
-    tailHash:releaseRegistry.tailHash,
-    currentReleaseId:runtimeManifest?.releaseId||null,
-    currentRegistrySeq:runtimeReleaseRecord?.seq??null
-  },
-  marketDataFabric:{
-    version:MARKET_DATA_FABRIC_VERSION,
-    file:marketFabricFile,
-    healthy:marketFabric.healthy,
-    seq:marketFabric.seq,
-    tailHash:marketFabric.tailHash
-  },
-  deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
-  observability:OBSERVABILITY_VERSION,
-  operationalReadiness:currentOperationalReadiness(),
-  persistenceContracts:currentPersistenceCompatibility(),
-  chaosEngineering:CHAOS_ENGINEERING_VERSION,
-  alertEngine:ALERT_ENGINE_VERSION,
-  stateValidity:{
-    version:STATE_VALIDITY_VERSION,
-    staleAfterMs:researchValidityStaleMs,
-    expireAfterMs:researchValidityExpireMs,
-    driftThreshold:researchValidityDriftThreshold
-  },
-  researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
-  shadowOms:{
-    version:SHADOW_OMS_VERSION,
-    file:shadowOmsFile,
-    healthy:shadowOmsHealthy,
-    loaded:shadowOrders.length,
-    recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
-    watchMs:shadowWatchMs,
-    capabilities:SHADOW_OMS_CAPABILITIES
-  },
-  shadowPortfolio:{
-    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
-    file:shadowPortfolioFile,
-    healthy:shadowPortfolioHealthy,
-    loaded:(shadowPortfolioLedger.positions||[]).length,
-    recoveredFromCorrupt:loadedShadowPortfolio.recoveredFromCorrupt,
-    watchMs:shadowPortfolioWatchMs,
-    initialEquityQuote:shadowPortfolioInitialEquity,
-    summary:shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),
-    capabilities:SHADOW_PORTFOLIO_CAPABILITIES
-  },
-  strategyLeague:{
-    version:SHADOW_STRATEGY_LEAGUE_VERSION,
-    enabled:strategyLeagueEnabled,
-    file:strategyLeagueFile,
-    healthy:strategyLeagueHealthy,
-    loaded:(strategyLeagueLedger.positions||[]).length,
-    recoveredFromCorrupt:loadedStrategyLeague.recoveredFromCorrupt,
-    watchMs:strategyLeagueWatchMs,
-    summary:strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()}),
-    canExecuteLive:false
-  },
-  shadowSor:{
-    version:SHADOW_SOR_VERSION,
-    routeQuote:'USDT',
-    maxBookAgeMs:sorMaxBookAgeMs,
-    feeAssumptionsBps:{
-      BINANCE:sorBinanceFeeBps,
-      OKX:sorOkxFeeBps,
-      KRAKEN:sorKrakenFeeBps
-    },
-    capabilities:SHADOW_SOR_CAPABILITIES
-  },
-  venueQualityMemory:{
-    version:VENUE_QUALITY_MEMORY_VERSION,
-    file:venueQualityFile,
-    healthy:venueQualityHealthy,
-    loaded:venueQualityRecords.length,
-    recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
-    watchMs:vqmWatchMs,
-    markoutMaxLagMs:vqmMarkoutMaxLagMs,
-    minSamples:vqmMinSamples,
-    minToxicitySamples:vqmMinToxicitySamples,
-    halfLifeDays:vqmHalfLifeDays,
-    capabilities:VENUE_QUALITY_MEMORY_CAPABILITIES
-  },
-  executionResearchLab:{
-    version:EXECUTION_RESEARCH_LAB_VERSION,
-    capabilities:EXECUTION_RESEARCH_CAPABILITIES
-  },
+  botUsername:me?.username||'UNKNOWN',
+  markets:markets.length,
+  releaseId:runtimeManifest?.releaseId||null,
+  operationalReadiness:currentOperationalReadiness().state,
+  persistenceHealthy,
+  shadowOmsHealthy,
+  shadowPortfolioHealthy,
+  strategyLeagueHealthy,
+  telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   execution:'SHADOW_ONLY',
-  allowedChats:allowedChats.size || 'ALL',
-  recommendedReplicas:1,
-  configuredReplicaCount,
-  marketDataHosts:binanceBases.map(x => new URL(x).host),
-  witnessProviders:{
-    okx:new URL(okxBase).host,
-    kraken:new URL(krakenBase).host
-  },
-  persistence:{
-    file:stateFile,
-    healthy:persistenceHealthy,
-    recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
-    loadedFavorites:[...favorites.values()].reduce((n,x) => n+x.size,0),
-    loadedAlerts:[...alerts.values()].reduce((n,x) => n+x.length,0)
-  },
-  episodeMemory:{
-    file:episodeFile,
-    loaded:episodes.length,
-    recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
-  }
-},null,2));
+  canExecute:false
+}));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
 await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher()]);
