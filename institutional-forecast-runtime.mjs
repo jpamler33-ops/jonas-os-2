@@ -28,6 +28,7 @@ const DEFAULT_FORECAST_ENGINE_STORE_BYTES=64*1024*1024;
 const FORECAST_ENGINE_STORE_VERSION='TCX_FORECAST_ENGINE_STORE_V1';
 const DEFAULT_FORECAST_JOURNAL_STORE_BYTES=64*1024*1024;
 const FORECAST_JOURNAL_STORE_VERSION='TCX_FORECAST_JOURNAL_STORE_V1';
+const FORECAST_PERSISTENCE_MANIFEST_VERSION='TCX_FORECAST_PERSISTENCE_MANIFEST_V1';
 function snapshotByteLimit(value){
   const n=Number(value);
   return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_SNAPSHOT_BYTES);
@@ -75,6 +76,71 @@ function journalStorePath(filePath,slot){
 
 function isGzipBuffer(value){
   return Buffer.isBuffer(value)&&value.length>=2&&value[0]===0x1f&&value[1]===0x8b;
+}
+
+function manifestComponentsFromSnapshot(snapshot){
+  return {
+    issuanceStore:snapshot?.issuanceStore??null,
+    trackerArchive:snapshot?.trackerArchive??null,
+    engineStore:snapshot?.engineStore??null,
+    journalStore:snapshot?.journalStore??null
+  };
+}
+
+function hotSnapshotForManifest(snapshot){
+  return {
+    version:snapshot?.version,
+    savedAt:snapshot?.savedAt,
+    engine:snapshot?.engine??null,
+    journal:snapshot?.journal??null,
+    intelligence:snapshot?.intelligence??null,
+    issuances:Array.isArray(snapshot?.issuances)?snapshot.issuances:[]
+  };
+}
+
+function buildPersistenceManifest(snapshot){
+  const core={
+    version:FORECAST_PERSISTENCE_MANIFEST_VERSION,
+    snapshotVersion:snapshot?.version??null,
+    savedAt:snapshot?.savedAt??null,
+    hotHash:sha256(hotSnapshotForManifest(snapshot)),
+    components:manifestComponentsFromSnapshot(snapshot)
+  };
+  return {...core,generationId:sha256(core)};
+}
+
+function verifyPersistenceManifest(snapshot){
+  const manifest=snapshot?.persistenceManifest;
+  if(!manifest){
+    return {status:'LEGACY_UNBOUND',generationId:null,hotHash:null};
+  }
+  if(manifest?.version!==FORECAST_PERSISTENCE_MANIFEST_VERSION){
+    throw new Error('unsupported forecast persistence manifest');
+  }
+  const {generationId,...core}=manifest;
+  if(typeof generationId!=='string'||sha256(core)!==generationId){
+    throw new Error('forecast persistence manifest hash mismatch');
+  }
+  if(core.snapshotVersion!==snapshot.version||core.savedAt!==snapshot.savedAt){
+    throw new Error('forecast persistence manifest snapshot identity mismatch');
+  }
+  const hotHash=sha256(hotSnapshotForManifest(snapshot));
+  if(core.hotHash!==hotHash){
+    throw new Error('forecast persistence manifest hot snapshot mismatch');
+  }
+  if(sha256(core.components)!==sha256(manifestComponentsFromSnapshot(snapshot))){
+    throw new Error('forecast persistence manifest component reference mismatch');
+  }
+  return {status:'VERIFIED',generationId,hotHash};
+}
+
+function verifyStoredLengths(meta,storageBytes,logicalBytes,label){
+  if(Number.isFinite(Number(meta?.storageBytes))&&Number(meta.storageBytes)!==storageBytes){
+    throw new Error(label+' storage byte count mismatch');
+  }
+  if(Number.isFinite(Number(meta?.logicalBytes))&&Number(meta.logicalBytes)!==logicalBytes){
+    throw new Error(label+' logical byte count mismatch');
+  }
 }
 
 export const EPISODE_FORECAST_FEATURE_IDS=Object.freeze([
@@ -374,6 +440,9 @@ function createRuntimeState(filePath,config,opts={}){
     journalStoreCount:0,
     lastJournalStoreBytes:null,
     lastJournalStoreLogicalBytes:null,
+    persistenceManifestStatus:'UNINITIALIZED',
+    persistenceGenerationId:null,
+    persistenceManifestHotHash:null,
     snapshotProfilePending:true,
     lastSnapshotProfile:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
@@ -420,6 +489,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
     if(snapshot?.version!==INSTITUTIONAL_FORECAST_RUNTIME_VERSION){
       throw new Error('unsupported institutional forecast runtime snapshot');
     }
+    const persistenceManifestVerification=verifyPersistenceManifest(snapshot);
     let engineState=snapshot.engine;
     if(snapshot.engineStore){
       const meta=snapshot.engineStore;
@@ -444,6 +514,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
           maxEngineStoreBytes:runtime.maxEngineStoreBytes
         });
       }
+      verifyStoredLengths(meta,storeStat.size,engineLogical.length,'forecast engine store');
       const serializedEngine=engineLogical.toString('utf8');
       if(sha256(serializedEngine)!==meta.sha256) throw new Error('forecast engine store hash mismatch');
       const store=JSON.parse(serializedEngine);
@@ -489,6 +560,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
           maxJournalStoreBytes:runtime.maxJournalStoreBytes
         });
       }
+      verifyStoredLengths(meta,storeStat.size,journalLogical.length,'forecast journal store');
       const serializedJournal=journalLogical.toString('utf8');
       if(sha256(serializedJournal)!==meta.sha256) throw new Error('forecast journal store hash mismatch');
       const store=JSON.parse(serializedJournal);
@@ -530,6 +602,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
           maxTrackerArchiveBytes:runtime.maxTrackerArchiveBytes
         });
       }
+      verifyStoredLengths(meta,archiveStat.size,logical.length,'forecast tracker archive');
       const serializedArchive=logical.toString('utf8');
       if(sha256(serializedArchive)!==meta.sha256) throw new Error('forecast tracker archive hash mismatch');
       const archive=JSON.parse(serializedArchive);
@@ -585,6 +658,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
           maxIssuanceStoreBytes:runtime.maxIssuanceStoreBytes
         });
       }
+      verifyStoredLengths(meta,storeStat.size,logical.length,'forecast issuance store');
       const serializedStore=logical.toString('utf8');
       if(sha256(serializedStore)!==meta.sha256) throw new Error('forecast issuance store hash mismatch');
       const store=JSON.parse(serializedStore);
@@ -605,6 +679,9 @@ export async function openInstitutionalForecastRuntime(filePath,{
       persistedIssuances.map(issuanceFromPersistence),
       runtime.maxIssuances
     );
+    runtime.persistenceManifestStatus=persistenceManifestVerification.status;
+    runtime.persistenceGenerationId=persistenceManifestVerification.generationId;
+    runtime.persistenceManifestHotHash=persistenceManifestVerification.hotHash;
   }catch(err){
     if(err?.code!=='ENOENT'){
       const oversized=err?.code==='TCX_RUNTIME_SNAPSHOT_TOO_LARGE';
@@ -946,6 +1023,11 @@ export async function saveInstitutionalForecastRuntime(runtime){
         issuanceStore:issuanceStoreMeta
       };
     }
+    const persistenceManifest=buildPersistenceManifest(persistencePayload);
+    persistencePayload={
+      ...persistencePayload,
+      persistenceManifest
+    };
     const serialized=JSON.stringify(persistencePayload);
     const bytes=Buffer.byteLength(serialized);
     const maxSnapshotBytes=snapshotByteLimit(runtime.maxSnapshotBytes);
@@ -972,6 +1054,9 @@ export async function saveInstitutionalForecastRuntime(runtime){
     runtime.snapshotEncoding=encoding;
     runtime.loadedFromPath=runtime.filePath;
     runtime.migratedFromLegacyPath=null;
+    runtime.persistenceManifestStatus='VERIFIED';
+    runtime.persistenceGenerationId=persistencePayload.persistenceManifest.generationId;
+    runtime.persistenceManifestHotHash=persistencePayload.persistenceManifest.hotHash;
     if(issuanceStoreMeta){
       runtime.maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
       runtime.issuanceStoreSlot=issuanceStoreMeta.slot;
@@ -1021,6 +1106,11 @@ export async function saveInstitutionalForecastRuntime(runtime){
       trackerArchive:trackerArchiveMeta,
       engineStore:engineStoreMeta,
       journalStore:journalStoreMeta,
+      persistenceManifest:{
+        status:'VERIFIED',
+        generationId:persistencePayload.persistenceManifest.generationId,
+        hotHash:persistencePayload.persistenceManifest.hotHash
+      },
       componentProfile
     };
   }catch(err){
@@ -1240,6 +1330,12 @@ export function institutionalForecastRuntimeSummary(runtime){
     snapshotCompressionRatio:Number(runtime?.lastPersistedLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
       ?Number(runtime.lastPersistedBytes)/Number(runtime.lastPersistedLogicalBytes)
       :null,
+    persistenceManifest:{
+      version:FORECAST_PERSISTENCE_MANIFEST_VERSION,
+      status:runtime?.persistenceManifestStatus??'UNINITIALIZED',
+      generationId:runtime?.persistenceGenerationId??null,
+      hotHash:runtime?.persistenceManifestHotHash??null
+    },
     journalStore:{
       version:FORECAST_JOURNAL_STORE_VERSION,
       slot:runtime?.journalStoreSlot??null,
