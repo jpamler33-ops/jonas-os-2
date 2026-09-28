@@ -110,3 +110,17 @@ test('stress stage asks for meme discipline when other weaknesses are absent',()
   assert.equal(s.mission.type,'MEME_DISCIPLINE');
   assert.equal(s.mission.current,10);
 });
+
+
+test('ABSTAIN probes do not alter training risk samples',()=>{
+  const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
+  l.positions=Array.from({length:30},(_,i)=>({
+    ...closed(i,{pnl:-5}),
+    entryMode:'ABSTAIN_PROBE',
+    probeOnly:true
+  }));
+  const s=evaluateShadowTrainingSupervisor(l,academy(),{asOf:Date.UTC(2026,8,10)});
+  assert.equal(s.samples.all,0);
+  assert.equal(s.risk.hold,false);
+  assert.equal(s.mission.type,'SAMPLE_BUILDING');
+});
