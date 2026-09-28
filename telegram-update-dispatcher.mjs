@@ -42,7 +42,7 @@ export function createTelegramUpdateDispatcher({
   async function run(update){
     state.inFlight++;
     try{
-      await withTimeout(Promise.resolve().then(()=>handle(update)),Math.max(1000,Number(timeoutMs)||20_000));
+      await withTimeout(Promise.resolve().then(()=>handle(update)),Math.max(10,Number(timeoutMs)||20_000));
       state.completed++;
       state.lastCompleteAt=now();
       return {ok:true};
@@ -86,7 +86,7 @@ export function createTelegramUpdateDispatcher({
       version:TELEGRAM_UPDATE_DISPATCHER_VERSION,
       ...state,
       activeChatQueues:queues.size,
-      timeoutMs:Math.max(1000,Number(timeoutMs)||20_000),
+      timeoutMs:Math.max(10,Number(timeoutMs)||20_000),
       priorityCommands:[...priority]
     });
   }
