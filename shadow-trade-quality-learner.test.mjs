@@ -68,3 +68,17 @@ test('challenger outcomes do not self-reinforce the discovery model',()=>{
   const model=buildShadowTradeQualityModel({positions:[...standard,...challenger]});
   assert.equal(model.samples,10);
 });
+
+
+test('ABSTAIN probes teach the learner as exploration samples',()=>{
+  const standard=Array.from({length:5},(_,i)=>closed(i,{pnl:2}));
+  const probes=Array.from({length:5},(_,i)=>({
+    ...closed(100+i,{pnl:i%2?2:-1}),
+    entryMode:'ABSTAIN_PROBE',
+    exploration:true,
+    probeOnly:true
+  }));
+  const model=buildShadowTradeQualityModel({positions:[...standard,...probes]});
+  assert.equal(model.samples,10);
+  assert.equal(model.explorationSamples,5);
+});
