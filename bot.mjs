@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
@@ -124,6 +125,9 @@ import {
   appendInstitutionalForecastIssuanceAudit,
   appendResearchTraceEvaluationAudit
 } from './institutional-audit-binding.mjs';
+
+const persistenceDataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data';
+await cleanupOrphanedPersistenceArtifacts({dataDir:persistenceDataDir});
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
