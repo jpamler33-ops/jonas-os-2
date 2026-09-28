@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 
 import { sha256 } from './institutional-kernel.mjs';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
@@ -312,6 +312,22 @@ test('online forecast memories accept explicit bounded row caps',async()=>{
   assert.equal(r.engine.modelPerformance.maxRows,703);
   assert.equal(r.engine.intervalCalibration.maxRows,704);
   assert.equal(r.engine.drift.maxRows,705);
+});
+
+test('snapshot writer enforces the same byte ceiling as reload and preserves the last valid file',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-contract-'));
+  const file=path.join(dir,'runtime.json');
+  const r=await openInstitutionalForecastRuntime(file,{maxSnapshotBytes:64*1024});
+  const first=await saveInstitutionalForecastRuntime(r);
+  assert.ok(first.bytes<64*1024);
+  const baseline=await readFile(file,'utf8');
+  r.issuances=[{issuanceId:'oversize-test',payload:'x'.repeat(128*1024)}];
+  await assert.rejects(
+    ()=>saveInstitutionalForecastRuntime(r),
+    err=>err?.code==='TCX_RUNTIME_SNAPSHOT_TOO_LARGE_TO_PERSIST'&&err.bytes>err.maxSnapshotBytes
+  );
+  assert.equal(await readFile(file,'utf8'),baseline);
+  assert.equal(r.healthy,false);
 });
 
 test('oversized legacy snapshot recovery is distinguished from corruption and written forward',async()=>{
