@@ -297,3 +297,19 @@ test('only matured raw horizon coverage outcomes feed the bootstrap calibrator',
   assert.equal(recordCoverageProbeCalibration(r,{position:{...position,closeReason:'STOP_LOSS'},closeReason:'STOP_LOSS',resolvedPrice:101}).reason,'NOT_HORIZON_RESOLVED');
   assert.equal(recordCoverageProbeCalibration(r,{position:{...position,coverageEvidenceTier:'CALIBRATED'},closeReason:'HORIZON_EXIT',resolvedPrice:101}).reason,'NOT_RAW_BOOTSTRAP_EVIDENCE');
 });
+
+test('online forecast memories accept explicit bounded row caps',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-caps-'));
+  const r=await openInstitutionalForecastRuntime(path.join(dir,'runtime.json'),{
+    maxHistoryRows:700,maxJournalEntries:900,maxCalibrationRows:701,
+    maxReliabilityRows:702,maxModelPerformanceRows:703,
+    maxIntervalCalibrationRows:704,maxDriftRows:705
+  });
+  assert.equal(r.engine.maxHistoryRows,700);
+  assert.equal(r.journal.maxEntries,900);
+  assert.equal(r.engine.calibration.maxRows,701);
+  assert.equal(r.engine.reliability.maxRows,702);
+  assert.equal(r.engine.modelPerformance.maxRows,703);
+  assert.equal(r.engine.intervalCalibration.maxRows,704);
+  assert.equal(r.engine.drift.maxRows,705);
+});

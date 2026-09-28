@@ -1,31 +1,37 @@
 export const TRADE_DISCOVERY_DIAGNOSTICS_VERSION='TCX_TRADE_DISCOVERY_DIAGNOSTICS_V1';
 
 const REASON_TEXT={
-  ADMISSION_ABSTAIN:'Forecast has not passed the admission gate',
-  ADMISSION_CAUTION:'Admission is cautious; the normal entry thresholds are stricter',
-  NO_ADMITTED_DIRECTIONAL_HORIZON:'No calibrated directional horizon passed its forecast gate',
-  DATA_SAFETY_NOT_NORMAL:'Data safety is not NORMAL',
-  EXPECTED_RETURN_TOO_SMALL:'Expected return is below the normal threshold',
-  DIRECTIONAL_PROBABILITY_TOO_LOW:'Directional probability is below the normal threshold',
-  PROBABILITY_EDGE_TOO_LOW:'The probability edge is below the normal threshold',
-  ACADEMY_RISK_HOLD:'Capital Academy currently holds core entries',
-  ACADEMY_MEME_HOLD:'Capital Academy currently holds memecoin entries',
-  TRAINING_SUPERVISOR_HOLD:'Training Supervisor has paused entries',
-  DISCOVERY_GLOBAL_OPEN_CAP:'The exploration trade limit is full',
-  DISCOVERY_SYMBOL_OPEN_CAP:'An exploration trade for this coin is already open',
-  DISCOVERY_SYMBOL_COOLDOWN:'This coin is inside its exploration cooldown',
-  DISCOVERY_DAILY_SYMBOL_CAP:'This coin reached its daily exploration limit',
-  DISCOVERY_RUNTIME_UNHEALTHY:'Audit, OMS, or portfolio health is blocking entries',
-  RUNTIME_AUDIT_OR_OMS_UNHEALTHY:'Audit or OMS health is blocking standard entries',
-  PROBABILITY_NOT_ADMITTED:'Probability display is not admitted',
-  FORECAST_STALE:'The forecast is too old to use',
-  MANDATORY_DISCOVERY_DISABLED:'Mandatory Discovery is disabled',
-  DATA_SAFETY_NOT_NORMAL:'Data safety is not NORMAL',
-  COVERAGE_SLOTS_PLACED:'Only isolated coverage probes were placed',
-  NO_SAFE_LEARNABLE_CANDIDATE:'No calibrated, directionally usable exploration candidate was found',
-  LEARNING_VALUE_TOO_LOW:'The candidate does not add enough learning value',
-  DISCOVERY_RESPECTS_STANDARD_BLOCK_ADMISSION_ABSTAIN:'Discovery correctly respects the ABSTAIN admission block',
-  DISCOVERY_RESPECTS_STANDARD_BLOCK_NO_ADMITTED_DIRECTIONAL_HORIZON:'Discovery correctly respects the missing admitted horizon'
+  ADMISSION_ABSTAIN:'Die Prognose hat keine Einstiegsfreigabe erhalten',
+  ADMISSION_CAUTION:'Die Freigabe ist vorsichtig; strengere Einstiegsschwellen gelten',
+  NO_ADMITTED_DIRECTIONAL_HORIZON:'Kein kalibrierter Richtungs-Horizont ist zugelassen',
+  DATA_SAFETY_NOT_NORMAL:'Die Datensicherheit steht nicht auf NORMAL',
+  EXPECTED_RETURN_TOO_SMALL:'Die erwartete Rendite liegt unter der Einstiegsschwelle',
+  DIRECTIONAL_PROBABILITY_TOO_LOW:'Die Richtungswahrscheinlichkeit liegt unter der Schwelle',
+  PROBABILITY_EDGE_TOO_LOW:'Der Wahrscheinlichkeitsvorsprung liegt unter der Schwelle',
+  STRATEGY_LANE_COOLDOWN:'Für diese Coin-, Richtung- und Horizont-Kombination läuft noch die Abkühlzeit',
+  DAILY_SYMBOL_CAP:'Der Tageshöchstwert für normale Einstiege dieses Coins ist erreicht',
+  ACADEMY_GLOBAL_OPEN_CAP:'Das von der Academy erlaubte Gesamtlimit offener Positionen ist erreicht',
+  ACADEMY_SYMBOL_OPEN_CAP:'Das von der Academy erlaubte Coin-Limit offener Positionen ist erreicht',
+  ACADEMY_RISK_HOLD:'Capital Academy hält Core-Einstiege zurück',
+  ACADEMY_MEME_HOLD:'Capital Academy hält Memecoin-Einstiege zurück',
+  TRAINING_SUPERVISOR_HOLD:'Training Supervisor hat Einstiege pausiert',
+  DISCOVERY_GLOBAL_OPEN_CAP:'Das Limit offener Exploration-Trades ist erreicht',
+  DISCOVERY_SYMBOL_OPEN_CAP:'Für diesen Coin ist bereits ein Exploration-Trade offen',
+  DISCOVERY_SYMBOL_COOLDOWN:'Für diesen Coin läuft noch die Exploration-Abkühlzeit',
+  DISCOVERY_DAILY_SYMBOL_CAP:'Der Tageshöchstwert für diesen Coin ist erreicht',
+  DISCOVERY_RUNTIME_UNHEALTHY:'Audit, OMS oder Portfolio blockiert neue Einstiege',
+  RUNTIME_AUDIT_OR_OMS_UNHEALTHY:'Audit oder OMS blockiert normale Einstiege',
+  PROBABILITY_NOT_ADMITTED:'Wahrscheinlichkeiten sind nicht zur Nutzung freigegeben',
+  FORECAST_STALE:'Die Prognose ist zu alt für einen Einstieg',
+  MANDATORY_DISCOVERY_DISABLED:'Mandatory Discovery ist ausgeschaltet',
+  COVERAGE_SLOTS_PLACED:'Es wurden nur getrennte Coverage-Probes angelegt',
+  NO_SAFE_LEARNABLE_CANDIDATE:'Kein kalibrierter und gerichteter Exploration-Kandidat ist sicher genug',
+  LEARNING_VALUE_TOO_LOW:'Der Kandidat bringt zu wenig zusätzlichen Lernwert',
+  DISCOVERY_RESPECTS_STANDARD_BLOCK_ADMISSION_ABSTAIN:'Discovery respektiert die ABSTAIN-Sperre',
+  DISCOVERY_RESPECTS_STANDARD_BLOCK_NO_ADMITTED_DIRECTIONAL_HORIZON:'Discovery respektiert den fehlenden freigegebenen Horizont',
+  FORECAST_ALL_HORIZONS_ABSTAIN:'Alle Prognose-Horizonte sind gesperrt; es gibt kein freigegebenes Einstiegssignal',
+  NO_CALIBRATED_HORIZONS:'Noch fehlen genügend aufgelöste Ergebnisse zur Horizont-Kalibrierung',
+  RESEARCH_DEPENDENCY_ABSTAIN:'Die Prüfung der Forschungsdaten blockiert die Prognosefreigabe'
 };
 
 export function createTradeDiscoveryDiagnostics({maxSymbols=32}={}){
@@ -70,8 +76,13 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
       .filter(Boolean)
       .filter(x=>!['STANDARD_SHADOW_TRADE_ALREADY_PLACED','COVERAGE_SLOTS_PLACED','NO_SAFE_DUE_COVERAGE_SLOT'].includes(String(x))));
     for(const reason of reasons) increment(blockers,String(reason));
+    if(String(row.admissionGate||'').toUpperCase()==='ABSTAIN') increment(blockers,'ADMISSION_ABSTAIN');
+    if(String(row.researchDependencyGate||'').toUpperCase()==='ABSTAIN') increment(blockers,'RESEARCH_DEPENDENCY_ABSTAIN');
+    const hs=Array.isArray(row.horizons)?row.horizons:[];
+    if(hs.length&&hs.every(x=>String(x.gate||'').toUpperCase()==='ABSTAIN')) increment(blockers,'FORECAST_ALL_HORIZONS_ABSTAIN');
+    if(hs.length&&!hs.some(x=>String(x.calibration||'').toUpperCase()==='CALIBRATED')) increment(blockers,'NO_CALIBRATED_HORIZONS');
   }
-  const topBlockers=[...blockers.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4).map(([reason,count])=>({reason,count,text:humanReason(reason)}));
+  const topBlockers=[...blockers.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([reason,count])=>({reason,count,text:humanReason(reason)}));
   const horizonRows=rows.flatMap(x=>Array.isArray(x.horizons)?x.horizons:[]);
   const stateSafety=count(x=>String(x.dataSafety||'UNKNOWN').toUpperCase()==='NORMAL');
   const admitted=count(x=>['PASS','CAUTION'].includes(String(x.admissionGate||'').toUpperCase()));
@@ -97,6 +108,7 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
     coverageProbes:rows.reduce((s,x)=>s+Number(x.coverageCurriculumPlaced||0),0),
     abstainForecasts:count(x=>String(x.forecastGate||'').toUpperCase()==='ABSTAIN'),
     admittedForecasts:admitted,
+    researchDependencyAbstain:count(x=>String(x.researchDependencyGate||'').toUpperCase()==='ABSTAIN'),
     probabilityDisplayAllowed:displayAllowed,
     normalDataSafety:stateSafety,
     totalCalibratedHorizons:horizonRows.filter(x=>String(x.calibration||'').toUpperCase()==='CALIBRATED').length,
@@ -107,6 +119,14 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
     probabilityEdgePasses:horizonRows.filter(x=>x.probabilityEdgePass===true).length,
     topBlockers,
     latest,
+    latestHorizonDetails:(latest?.horizons||[]).map(h=>({
+      horizonId:String(h.horizonId||'unknown'),gate:String(h.gate||'UNKNOWN'),
+      calibration:String(h.calibration||'UNKNOWN'),direction:String(h.direction||'NEUTRAL'),
+      expectedReturn:h.expectedReturn,directionalProbability:h.directionalProbability,
+      probabilityEdge:h.probabilityEdge,expectedReturnThreshold:h.expectedReturnThreshold,
+      directionThreshold:h.directionThreshold,edgeThreshold:h.edgeThreshold,
+      reasons:Array.isArray(h.reasons)?h.reasons.slice(0,2):[]
+    })),
     nextStep,
     runtime:{...runtime,execution:'SHADOW_ONLY',canExecuteLive:false},
     execution:'SHADOW_ONLY',canExecuteLive:false,
@@ -125,6 +145,13 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
   const latestText=latest
     ?`Letzter Coin: ${latest.symbol} · Forecast ${latest.forecastGate||'unbekannt'} · Admission ${latest.admissionGate||'unbekannt'} · Datensicherheit ${latest.dataSafety||'unbekannt'}\nKalibrierung: ${latest.horizons?.filter(x=>x.calibration==='CALIBRATED').length||0}/${latest.horizons?.length||0} Horizonte · letzter Grund: ${humanReason(latest.mandatoryDiscoveryReason||latest.autoShadowTradeReason||latest.coverageCurriculumReason)}`
     :'AutoLearn hat noch keinen vollständigen Scan erfasst.';
+  const horizonText=(s.latestHorizonDetails||[]).map(h=>{
+    const vals=[`${h.horizonId}: ${h.gate}/${h.calibration}`,h.direction&&h.direction!=='NEUTRAL'?h.direction:null,
+      h.expectedReturn!=null&&Number.isFinite(Number(h.expectedReturn))?`Rendite ${(Number(h.expectedReturn)*100).toFixed(2)}% (Schwelle ${(Number(h.expectedReturnThreshold)*100).toFixed(2)}%)`:null,
+      h.directionalProbability!=null&&Number.isFinite(Number(h.directionalProbability))?`Richtung ${(Number(h.directionalProbability)*100).toFixed(0)}% (Schwelle ${(Number(h.directionThreshold)*100).toFixed(0)}%)`:null,
+      h.probabilityEdge!=null&&Number.isFinite(Number(h.probabilityEdge))?`Vorsprung ${(Number(h.probabilityEdge)*100).toFixed(0)}pp (Schwelle ${(Number(h.edgeThreshold)*100).toFixed(0)}pp)`:null].filter(Boolean);
+    return '• '+vals.join(' · ')+(h.reasons.length?' — '+h.reasons.join('; '):'');
+  }).join('\n');
   return [
     '🔎 WARUM KEIN SHADOW-TRADE?',
     '',
@@ -135,6 +162,7 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
     '',
     'GATES',
     `Forecast ABSTAIN: ${s.abstainForecasts}/${s.checkedCoins} · Admission PASS/CAUTION: ${s.admittedForecasts}/${s.checkedCoins}`,
+    `Research Dependency ABSTAIN: ${s.researchDependencyAbstain}/${s.checkedCoins}`,
     `Wahrscheinlichkeiten freigegeben: ${s.probabilityDisplayAllowed}/${s.checkedCoins} · Datensicherheit NORMAL: ${s.normalDataSafety}/${s.checkedCoins}`,
     `Kalibrierte Horizonte: ${s.totalCalibratedHorizons}/${s.totalHorizons} · Horizon PASS: ${s.horizonPasses}`,
     `Schwellen erfüllt: Return ${s.expectedReturnPasses} · Richtung ${s.directionProbabilityPasses} · Edge ${s.probabilityEdgePasses}`,
@@ -143,9 +171,12 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
     blockerText,
     '',
     latestText,
+    ...(horizonText?['Horizont-Details',horizonText]:[]),
     '',
     `OMS: ${s.runtime.omsStatus||'unbekannt'} · gefüllt ${s.runtime.omsFilled??'unbekannt'} · aktiv ${s.runtime.omsActive??'unbekannt'}`,
-    `Offene normale Positionen: ${s.runtime.openStandardPositions??'unbekannt'} · offene Discovery: ${s.runtime.openDiscoveryPositions??'unbekannt'}/${s.runtime.discoveryOpenCap??'?'}`,
+    `Academy: ${s.runtime.academyStage||'unbekannt'} · Core ${s.runtime.academyCoreAllowed===true?'freigegeben':s.runtime.academyCoreAllowed===false?'gehalten':'unbekannt'} · Meme ${s.runtime.academyMemeAllowed===true?'freigegeben':s.runtime.academyMemeAllowed===false?'gehalten':'unbekannt'}`,
+    `Training Supervisor: ${s.runtime.trainingHold===true?'HOLD':s.runtime.trainingHold===false?'freigegeben':'unbekannt'} · Mission ${s.runtime.trainingMission||'unbekannt'}`,
+    `Offene normale Positionen: ${s.runtime.openStandardPositions??'unbekannt'}/${s.runtime.standardOpenCap??'?'} · offene Discovery: ${s.runtime.openDiscoveryPositions??'unbekannt'}/${s.runtime.discoveryOpenCap??'?'}`,
     `Reconciliation: ${s.runtime.reconciliation||'unbekannt'} · zuletzt geprüft ${fmtTime(s.runtime.reconciledAt)}`,
     '',
     'Nächster Lernschritt: '+s.nextStep,

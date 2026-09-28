@@ -184,6 +184,14 @@ export class ProbabilisticForecastEngine {
             pathMinCompleteTrajectories: config.pathMinCompleteTrajectories ?? 20, pathMinEffectiveSamples: config.pathMinEffectiveSamples ?? 8, pathTopK: config.pathTopK ?? 180, pathMinSimilarity: config.pathMinSimilarity ?? .08, pathMarginalConflictWarn: config.pathMarginalConflictWarn ?? .20, pathMarginalConflictHard: config.pathMarginalConflictHard ?? .35
         };
         this.maxHistoryRows = Math.max(500, Math.floor(Number(opts.maxHistoryRows) || 12_000));
+        // Every resolved-memory table is part of the persistent snapshot. Keep
+        // their aggregate size bounded instead of relying on generous defaults
+        // intended for offline batch runs.
+        this.calibration = new ProbabilityCalibrationMemory(opts.maxCalibrationRows ?? 2_000);
+        this.reliability = new ForecastReliabilityMemory(opts.maxReliabilityRows ?? 2_000);
+        this.modelPerformance = new ForecastModelPerformanceMemory(opts.maxModelPerformanceRows ?? 8_000);
+        this.intervalCalibration = new ForecastIntervalCalibrationMemory(opts.maxIntervalCalibrationRows ?? 2_000);
+        this.drift = new ForecastDriftMemory(opts.maxDriftRows ?? 2_000);
     }
     trimHistory() {
         if (this.history.length <= this.maxHistoryRows)

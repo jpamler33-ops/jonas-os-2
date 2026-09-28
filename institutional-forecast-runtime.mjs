@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 
 import {
   ProbabilisticForecastEngine,
@@ -195,29 +195,40 @@ export function forecastHistoryFromEpisodes(episodes,{
 function engineSnapshot(engine){
   return {
     config:engine.configSnapshot(),
-    history:engine.historySnapshot(Number.POSITIVE_INFINITY),
-    calibration:engine.calibration.all(),
-    reliability:engine.reliability.all(),
-    modelPerformance:engine.modelPerformance.all(),
-    intervalCalibration:engine.intervalCalibration.all(),
-    drift:engine.drift.all()
+    // JSON serialization below is synchronous, so these live arrays cannot be
+    // mutated while written. Avoid cloning every cache row into a second full
+    // copy of the runtime before producing the snapshot string.
+    history:engine.history,
+    calibration:engine.calibration.rows,
+    reliability:engine.reliability.rows,
+    modelPerformance:engine.modelPerformance.rows,
+    intervalCalibration:engine.intervalCalibration.rows,
+    drift:engine.drift.rows
   };
 }
 
 function restoreEngine(engine,snapshot){
   if(!snapshot) return;
-  engine.addHistoryMany(Array.isArray(snapshot.history)?snapshot.history:[]);
-  engine.calibration.addMany(Array.isArray(snapshot.calibration)?snapshot.calibration:[]);
-  engine.reliability.addMany(Array.isArray(snapshot.reliability)?snapshot.reliability:[]);
-  engine.modelPerformance.addMany(Array.isArray(snapshot.modelPerformance)?snapshot.modelPerformance:[]);
-  engine.intervalCalibration.addMany(Array.isArray(snapshot.intervalCalibration)?snapshot.intervalCalibration:[]);
-  engine.drift.addMany(Array.isArray(snapshot.drift)?snapshot.drift:[]);
+  const tail=(rows,cap)=>Array.isArray(rows)?rows.slice(-Math.max(1,cap)):[];
+  engine.addHistoryMany(tail(snapshot.history,engine.maxHistoryRows));
+  engine.calibration.addMany(tail(snapshot.calibration,engine.calibration.maxRows));
+  engine.reliability.addMany(tail(snapshot.reliability,engine.reliability.maxRows));
+  engine.modelPerformance.addMany(tail(snapshot.modelPerformance,engine.modelPerformance.maxRows));
+  engine.intervalCalibration.addMany(tail(snapshot.intervalCalibration,engine.intervalCalibration.maxRows));
+  engine.drift.addMany(tail(snapshot.drift,engine.drift.maxRows));
 }
 
 function createRuntimeState(filePath,config,opts={}){
-  const engine=new ProbabilisticForecastEngine(config,{maxHistoryRows:opts.maxHistoryRows??8_000});
+  const engine=new ProbabilisticForecastEngine(config,{
+    maxHistoryRows:opts.maxHistoryRows??2_000,
+    maxCalibrationRows:opts.maxCalibrationRows??2_000,
+    maxReliabilityRows:opts.maxReliabilityRows??2_000,
+    maxModelPerformanceRows:opts.maxModelPerformanceRows??8_000,
+    maxIntervalCalibrationRows:opts.maxIntervalCalibrationRows??2_000,
+    maxDriftRows:opts.maxDriftRows??2_000
+  });
   const journal=new ForecastLearningJournal(engine,{
-    maxEntries:opts.maxJournalEntries??100_000,
+    maxEntries:opts.maxJournalEntries??1_500,
     maxResolutionDelayRatio:opts.maxResolutionDelayRatio??.25
   });
   const intelligence=new ForecastIntelligenceService(engine,{
@@ -247,6 +258,8 @@ export async function openInstitutionalForecastRuntime(filePath,{
   const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows});
 
   try{
+    const snapshotStat=await stat(filePath);
+    if(snapshotStat.size>48*1024*1024) throw Object.assign(new Error('forecast runtime snapshot exceeds 48 MiB safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE'});
     const raw=await readFile(filePath,'utf8');
     const snapshot=JSON.parse(raw);
     if(snapshot?.version!==INSTITUTIONAL_FORECAST_RUNTIME_VERSION){
@@ -279,7 +292,7 @@ export function institutionalForecastRuntimeSnapshot(runtime){
     version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
     savedAt:Date.now(),
     engine:engineSnapshot(runtime.engine),
-    journal:runtime.journal.snapshot(),
+    journal:{version:3,entries:runtime.journal.entries},
     intelligence:runtime.intelligence.snapshot(),
     issuances:trimIssuances(runtime.issuances,runtime.maxIssuances)
   };
@@ -291,10 +304,11 @@ export async function saveInstitutionalForecastRuntime(runtime){
   const payload=institutionalForecastRuntimeSnapshot(runtime);
   const tmp=runtime.filePath+'.tmp-'+process.pid;
   try{
-    await writeFile(tmp,JSON.stringify(payload),{encoding:'utf8',mode:0o600});
+    const serialized=JSON.stringify(payload);
+    await writeFile(tmp,serialized,{encoding:'utf8',mode:0o600});
     await rename(tmp,runtime.filePath);
     runtime.lastError=null;
-    return payload;
+    return {bytes:Buffer.byteLength(serialized)};
   }catch(err){
     runtime.healthy=false;
     runtime.lastError=err instanceof Error?err.message:String(err);

@@ -193,7 +193,7 @@ const coverageCurriculumEnabled = String(process.env.TCX_COVERAGE_CURRICULUM_ENA
 const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 2));
 const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
 const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
-const forecastJournalMaxEntries = Math.max(1000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 5000) || 5000));
+const forecastJournalMaxEntries = Math.max(1000, Math.min(3000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 1500) || 1500)));
 const forecastAuditMaxEvents = Math.max(200, Math.floor(Number(process.env.TCX_FORECAST_AUDIT_MAX_EVENTS || 1000) || 1000));
 const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_ISSUANCES || 1500) || 1500));
 const forecastMaxTracked = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_TRACKED || 1200) || 1200));
@@ -416,7 +416,6 @@ let strategyLeagueLastError = loadedStrategyLeague.error || null;
 let strategyLeaguePersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
-let forecastRuntimePersistenceQueue = Promise.resolve();
 let researchDataPlaneAppendQueue=Promise.resolve();
 let activeBackgroundResearchJob=null;
 const institutionalConfig = Object.freeze({
@@ -565,6 +564,65 @@ let evidenceHistoryQueue = Promise.resolve();
 let persistenceHealthy = true;
 let persistenceLastError = null;
 let persistenceQueue = Promise.resolve();
+let forecastRuntimePersistTimer=null;
+let forecastRuntimePersistRunning=null;
+let forecastRuntimePersistDirty=false;
+let forecastRuntimePersistLastAt=0;
+let forecastRuntimePersistReason='mutation';
+
+function scheduleForecastRuntimePersist(delayMs){
+  if(forecastRuntimePersistTimer) return;
+  forecastRuntimePersistTimer=setTimeout(()=>{
+    forecastRuntimePersistTimer=null;
+    void flushForecastRuntimePersistence();
+  },Math.max(0,delayMs));
+  forecastRuntimePersistTimer.unref?.();
+}
+
+async function flushForecastRuntimePersistence(force=false){
+  if(forecastRuntimePersistRunning) return forecastRuntimePersistRunning;
+  if(!forecastRuntimePersistDirty||!forecastRuntime.healthy) return false;
+  const beforeHeapMb=Math.round(process.memoryUsage().heapUsed/1024/1024);
+  if(!force&&beforeHeapMb>=340){
+    scheduleForecastRuntimePersist(15000);
+    return false;
+  }
+  const waitMs=force?0:Math.max(0,30000-(Date.now()-forecastRuntimePersistLastAt));
+  if(waitMs>0){scheduleForecastRuntimePersist(waitMs);return false;}
+  forecastRuntimePersistDirty=false;
+  const reason=forecastRuntimePersistReason;
+  forecastRuntimePersistRunning=(async()=>{
+    const started=Date.now();
+    try{
+      const snapshotMeta=await saveInstitutionalForecastRuntime(forecastRuntime);
+      forecastRuntime.lastError=null;
+      forecastRuntimePersistLastAt=Date.now();
+      const m=process.memoryUsage();
+      console.log('forecast runtime snapshot persisted',JSON.stringify({
+        reason,durationMs:Date.now()-started,
+        bytes:snapshotMeta?.bytes||null,
+        heapUsedMb:Math.round(m.heapUsed/1024/1024),
+        historyRows:forecastRuntime.engine.historySize(),
+        journalRows:forecastRuntime.journal.entries.length,
+        cacheRows:{calibration:forecastRuntime.engine.calibration.rows.length,reliability:forecastRuntime.engine.reliability.rows.length,modelPerformance:forecastRuntime.engine.modelPerformance.rows.length,interval:forecastRuntime.engine.intervalCalibration.rows.length,drift:forecastRuntime.engine.drift.rows.length}
+      }));
+      return true;
+    }catch(err){
+      forecastRuntime.healthy=false;
+      forecastRuntime.lastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'forecast_runtime.persistence',message:forecastRuntime.lastError});
+      console.error('forecast runtime persistence error',reason,forecastRuntime.lastError);
+      return false;
+    }finally{
+      forecastRuntimePersistRunning=null;
+      if(forecastRuntimePersistDirty){
+        const remaining=Math.max(0,30000-(Date.now()-forecastRuntimePersistLastAt));
+        scheduleForecastRuntimePersist(remaining);
+      }
+    }
+  })();
+  return forecastRuntimePersistRunning;
+}
 
 async function persistVenueQualityMemory(reason='mutation') {
   venueQualityPersistenceQueue = venueQualityPersistenceQueue.then(async()=>{
@@ -687,26 +745,22 @@ async function persistEvidenceHistory(reason='mutation') {
   return evidenceHistoryHealthy;
 }
 
-async function persistForecastRuntime(reason='mutation') {
-  forecastRuntimePersistenceQueue = forecastRuntimePersistenceQueue.then(async()=>{
-    if(!forecastRuntime.healthy) return false;
-    try {
-      await saveInstitutionalForecastRuntime(forecastRuntime);
-      forecastRuntime.lastError=null;
-      return true;
-    } catch(err) {
-      forecastRuntime.healthy=false;
-      forecastRuntime.lastError=err instanceof Error?err.message:String(err);
-      recordError(observability,{scope:'forecast_runtime.persistence',message:forecastRuntime.lastError});
-      console.error('forecast runtime persistence error',reason,forecastRuntime.lastError);
-      return false;
-    }
-  });
-  return forecastRuntimePersistenceQueue;
+async function persistForecastRuntime(reason='mutation',{force=false}={}) {
+  forecastRuntimePersistDirty=true;
+  forecastRuntimePersistReason=reason;
+  if(force){
+    if(forecastRuntimePersistTimer){clearTimeout(forecastRuntimePersistTimer);forecastRuntimePersistTimer=null;}
+    if(forecastRuntimePersistRunning) await forecastRuntimePersistRunning;
+    return flushForecastRuntimePersistence(true);
+  }
+  if(forecastRuntimePersistRunning) return forecastRuntimePersistRunning;
+  if(Date.now()-forecastRuntimePersistLastAt>=30000) return flushForecastRuntimePersistence();
+  scheduleForecastRuntimePersist(30000-(Date.now()-forecastRuntimePersistLastAt));
+  return true;
 }
 
 if(forecastSeedAtBoot.addedRows>0 && forecastRuntime.healthy){
-  await persistForecastRuntime('boot-episode-seed');
+  await persistForecastRuntime('boot-episode-seed',{force:true});
 }
 
 function latestEvidenceRecord(symbol) {
@@ -3661,13 +3715,23 @@ async function showTradeDiscoveryDiagnostics(chatId,messageId=null){
   const now=Date.now();
   const positions=shadowPortfolioLedger.positions||[];
   const openStandardPositions=positions.filter(p=>p.status==='OPEN'&&!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())).length;
+  const academy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:now,timeZone:shadowStatsTimeZone});
+  const training=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,academy,{asOf:now});
   const runtime={
     omsStatus:shadowOmsHealthy?'HEALTHY':'UNHEALTHY',
     omsFilled:shadowOrders.filter(o=>o.status==='FILLED').length,
     omsActive:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
     openStandardPositions,
+    standardOpenCap:autoShadowMaxOpenTotal,
     openDiscoveryPositions:countOpenDiscoveryPositions(positions),
     discoveryOpenCap:mandatoryShadowDiscoveryMaxOpenTotal,
+    academyStage:academy.activeStage,
+    academyCoreAllowed:academy.guard.coreAllowed===true,
+    academyMemeAllowed:academy.guard.memeAllowed===true,
+    academyBlockers:academy.guard.blockers||[],
+    trainingHold:training.risk.hold===true,
+    trainingMission:training.mission.type,
+    trainingHoldUntil:training.risk.holdUntil||null,
     reconciliation:shadowPortfolioHealthy
       ?(reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now}).changed?'pending correction':'in sync')
       :'unhealthy',
@@ -4918,11 +4982,15 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         calibration:String(h?.calibration?.status||'UNKNOWN').toUpperCase(),
         direction,
         expectedReturn:Number.isFinite(expectedReturn)?expectedReturn:null,
+        expectedReturnThreshold:expectedThreshold,
         directionalProbability:Number.isFinite(directional)?directional:null,
+        directionThreshold,
         probabilityEdge:Number.isFinite(directional)&&Number.isFinite(opposite)?directional-opposite:null,
+        edgeThreshold,
         expectedReturnPass:Number.isFinite(expectedReturn)&&Math.abs(expectedReturn)>=expectedThreshold,
         directionProbabilityPass:Number.isFinite(directional)&&directional>=directionThreshold,
-        probabilityEdgePass:Number.isFinite(directional)&&Number.isFinite(opposite)&&directional-opposite>=edgeThreshold
+        probabilityEdgePass:Number.isFinite(directional)&&Number.isFinite(opposite)&&directional-opposite>=edgeThreshold,
+        reasons:(Array.isArray(h?.reasons)?h.reasons:[]).slice(0,3).map(x=>String(x).slice(0,160))
       };
     });
     recordTradeDiscoveryScan(tradeDiscoveryDiagnostics,{
@@ -4930,6 +4998,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       forecastGate:String(issuance.gate||'UNKNOWN').toUpperCase(),
       admissionGate,
       probabilityDisplayAllowed:issuance.probabilityDisplayAllowed===true,
+      researchDependencyGate:String(researchDependencyGraph?.gate||'UNAVAILABLE').toUpperCase(),
       dataSafety:String(issuance.trace?.safety?.state||'UNKNOWN').toUpperCase(),
       autoShadowTradePlaced:silentResult.autoShadowTradePlaced,
       autoShadowTradeEligible:silentResult.autoShadowTradeEligible,
@@ -6028,6 +6097,15 @@ async function autoLearnForecastWatcher() {
             console.log('autolearn forecast issued',JSON.stringify({
               symbol,
               gate:result.issuance?.gate||'UNKNOWN',
+              admissionReasons:(result.issuance?.admission?.reasons||[]).slice(0,6),
+              safetyState:result.issuance?.trace?.safety?.state||'UNKNOWN',
+              safetyReasons:(result.issuance?.trace?.safety?.reasons||[]).slice(0,4),
+              probabilityDisplayAllowed:result.issuance?.probabilityDisplayAllowed===true,
+              horizonGates:(result.issuance?.forecast?.horizons||[]).map(h=>({
+                id:h.horizonId,gate:h.gate,calibration:h.calibration?.status||'UNKNOWN',
+                direction:h.direction,expectedReturn:h.expectedReturn,
+                reasons:(h.reasons||[]).slice(0,3)
+              })),
               dataQuality:result.dataQuality,
               derivativesFeatures:result.derivativesFeatureCount||0,
               derivativesSources:result.derivativesSourceCount||0,
@@ -6628,7 +6706,7 @@ async function gracefulShutdown(signal) {
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
-  await persistForecastRuntime(`shutdown:${signal}`);
+  await persistForecastRuntime(`shutdown:${signal}`,{force:true});
   await researchDataPlaneAppendQueue.catch(()=>{});
   await saveResearchDataGovernance(researchGovernanceFile,researchDataGovernance).catch(()=>{});
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
@@ -6668,7 +6746,12 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     audit:forecastAuditMaxEvents,
     issuances:forecastMaxIssuances,
     tracked:forecastMaxTracked,
-    researchPlane:researchPlaneMaxMemoryRecords
+    researchPlane:researchPlaneMaxMemoryRecords,
+    calibration:forecastRuntime.engine.calibration.maxRows,
+    reliability:forecastRuntime.engine.reliability.maxRows,
+    modelPerformance:forecastRuntime.engine.modelPerformance.maxRows,
+    interval:forecastRuntime.engine.intervalCalibration.maxRows,
+    drift:forecastRuntime.engine.drift.maxRows
   },
   execution:'SHADOW_ONLY',
   canExecute:false
