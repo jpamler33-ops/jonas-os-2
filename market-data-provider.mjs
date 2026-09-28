@@ -218,7 +218,7 @@ export function createMarketDataProvider({
     const errors=[];
     for(const base of binance){
       try{
-        const end=Number.isFinite(Number(endTime))?"&endTime="+Math.floor(Number(endTime)):"";
+        const end=endTime!=null&&endTime!==""&&Number.isFinite(Number(endTime))?"&endTime="+Math.floor(Number(endTime)):"";
         const rows=await fetchJson(base+"/api/v3/klines?symbol="+encoded+"&interval="+interval+"&limit="+limit+end);
         if(!Array.isArray(rows)||rows.length<2) throw new Error("Insufficient kline data");
         return {rows,base};
