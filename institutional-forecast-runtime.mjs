@@ -205,11 +205,12 @@ function restoreEngine(engine,snapshot){
 function createRuntimeState(filePath,config,opts={}){
   const engine=new ProbabilisticForecastEngine(config);
   const journal=new ForecastLearningJournal(engine,{
-    maxEntries:opts.maxJournalEntries??100_000,
+    maxEntries:opts.maxJournalEntries??5_000,
     maxResolutionDelayRatio:opts.maxResolutionDelayRatio??.25
   });
   const intelligence=new ForecastIntelligenceService(engine,{
-    maxAuditEvents:opts.maxAuditEvents??5_000
+    maxAuditEvents:opts.maxAuditEvents??1_000,
+    maxTrackerRecords:opts.maxTrackerRecords??1_200
   });
   return {
     filePath,
@@ -221,7 +222,7 @@ function createRuntimeState(filePath,config,opts={}){
     recoveredFromCorrupt:false,
     backupPath:null,
     lastError:null,
-    maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
+    maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??1_200))
   };
 }
 
