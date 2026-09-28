@@ -59,6 +59,18 @@ test("klines reject unsupported intervals before network",async()=>{
   assert.equal(calls,0);
 });
 
+test("klines omit endTime when not provided and include it when explicit",async()=>{
+  const seen=[];
+  const p=provider(async url=>{
+    seen.push(url);
+    return response(200,[[1,"1","1","1","1","1",2],[3,"1","1","1","1","1",4]]);
+  });
+  await p.fetchKlines("BTCUSDT","5m",30);
+  assert.equal(new URL(seen[0]).searchParams.has("endTime"),false);
+  await p.fetchKlines("BTCUSDT","5m",30,{endTime:123456});
+  assert.equal(new URL(seen[1]).searchParams.get("endTime"),"123456");
+});
+
 test("execution book is normalized with provenance",async()=>{
   const p=provider(async url=>{
     if(url.includes("a.binance.test")) return response(200,{lastUpdateId:42,bids:[["99","2"]],asks:[["101","3"]]});
