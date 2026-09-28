@@ -147,7 +147,8 @@ test("league and strategies aliases open the strategy league",async()=>{
 
 
 test("data command opens data status dashboard",async()=>{
-  const {handlers,calls}=harness();
-  await handlers["/data"]({chatId:7,args:[]});
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/data"]({chatId:7,args:[]});
   assert.deepEqual(calls[0],["data",7,null]);
 });
