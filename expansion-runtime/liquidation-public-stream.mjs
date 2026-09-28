@@ -52,6 +52,47 @@ function aggregate(events,from,to){
   });
 }
 
+function liquidationClusters(events,from,to,{referencePrice=null,binBps=25,maxClusters=12}={}){
+  const xs=(events||[]).filter(e=>e.eventTime>=from&&e.eventTime<=to&&Number(e.price)>0&&Number(e.usdNotional)>0);
+  if(!xs.length) return Object.freeze([]);
+  const ref=Number(referencePrice)>0
+    ?Number(referencePrice)
+    :xs.reduce((s,e)=>s+Number(e.price)*Number(e.usdNotional),0)/xs.reduce((s,e)=>s+Number(e.usdNotional),0);
+  if(!(ref>0)) return Object.freeze([]);
+  const step=Math.max(ref*Math.max(1,Number(binBps)||25)/10000,ref*1e-8);
+  const bins=new Map();
+  for(const e of xs){
+    const idx=Math.round((Number(e.price)-ref)/step);
+    const key=String(idx);
+    const cur=bins.get(key)||{index:idx,longUsd:0,shortUsd:0,totalUsd:0,count:0,largestUsd:0,weightedPrice:0};
+    const usd=Math.max(0,Number(e.usdNotional)||0);
+    cur.totalUsd+=usd;
+    cur.weightedPrice+=Number(e.price)*usd;
+    cur.count++;
+    cur.largestUsd=Math.max(cur.largestUsd,usd);
+    if(e.positionSide==='LONG') cur.longUsd+=usd;
+    else if(e.positionSide==='SHORT') cur.shortUsd+=usd;
+    bins.set(key,cur);
+  }
+  const out=[...bins.values()].map(x=>{
+    const clusterPrice=x.totalUsd>0?x.weightedPrice/x.totalUsd:(ref+x.index*step);
+    return Object.freeze({
+      price:clusterPrice,
+      distanceBps:(clusterPrice-ref)/ref*10000,
+      totalUsd:x.totalUsd,
+      longUsd:x.longUsd,
+      shortUsd:x.shortUsd,
+      longShare:x.totalUsd>0?x.longUsd/x.totalUsd:.5,
+      count:x.count,
+      largestShare:x.totalUsd>0?x.largestUsd/x.totalUsd:0,
+      evidenceType:'OBSERVED_LIQUIDATION_EVENTS',
+      source:'BYBIT_PUBLIC_ALL_LIQUIDATION'
+    });
+  });
+  out.sort((a,b)=>b.totalUsd-a.totalUsd||Math.abs(a.distanceBps)-Math.abs(b.distanceBps));
+  return Object.freeze(out.slice(0,Math.max(1,Number(maxClusters)||12)));
+}
+
 export function createLiquidationPublicStream({
   symbols=[],
   WebSocketImpl=globalThis.WebSocket,
@@ -235,7 +276,7 @@ export function createLiquidationPublicStream({
     ws=null;
   }
 
-  function snapshot(symbol,{asOf=now()}={}){
+  function snapshot(symbol,{asOf=now(),referencePrice=null,clusterBinBps=25,maxClusters=12}={}){
     const s=String(symbol||'').toUpperCase();
     const t=finite(asOf);
     if(t==null) throw new Error('asOf must be finite');
@@ -254,12 +295,18 @@ export function createLiquidationPublicStream({
       ready15m,
       window5m:ready5m?aggregate(xs,t-5*60_000,t):null,
       window15m:ready15m?aggregate(xs,t-15*60_000,t):null,
+      clusters5m:ready5m?liquidationClusters(xs,t-5*60_000,t,{referencePrice,binBps:clusterBinBps,maxClusters}):Object.freeze([]),
+      clusters15m:ready15m?liquidationClusters(xs,t-15*60_000,t,{referencePrice,binBps:clusterBinBps,maxClusters}):Object.freeze([]),
+      clusterReferencePrice:Number(referencePrice)>0?Number(referencePrice):null,
+      clusterBinBps:Math.max(1,Number(clusterBinBps)||25),
       lastMessageAt,
       bufferedEvents:xs.length,
       restrictions:Object.freeze({
         researchOnly:true,
         mayExecute:false,
-        mayMutateProductionForecast:false
+        mayMutateProductionForecast:false,
+        clustersAreObservedPastEvents:true,
+        futureLiquidationLevels:false
       })
     });
   }
