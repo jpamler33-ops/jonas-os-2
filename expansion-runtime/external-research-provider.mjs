@@ -104,6 +104,7 @@ export function createExternalResearchProvider({
   coinMetricsBase='https://community-api.coinmetrics.io/v4',
   deribitBase='https://www.deribit.com/api/v2',
   fredBase='https://api.stlouisfed.org/fred',
+  fredGraphBase='https://fred.stlouisfed.org/graph/fredgraph.csv',
   fredApiKey='',
   polymarketBase='https://gamma-api.polymarket.com',
   polymarketMarkets={},
@@ -114,18 +115,27 @@ export function createExternalResearchProvider({
   const cmBase=String(coinMetricsBase).replace(/\/+$/,'');
   const dBase=String(deribitBase).replace(/\/+$/,'');
   const fBase=String(fredBase).replace(/\/+$/,'');
+  const fGraphBase=String(fredGraphBase);
   const pBase=String(polymarketBase).replace(/\/+$/,'');
   const polyConfig=parseMaybeJson(polymarketMarkets,{});
   const cache=new Map();
 
-  async function fetchJson(url){
+  async function fetchResponse(url,accept='application/json'){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||8000));
     try{
-      const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'TCX/2.6 SHADOW_ONLY research'},signal:controller.signal});
+      const res=await fetchImpl(url,{headers:{accept,'user-agent':'TCX/2.6 SHADOW_ONLY research'},signal:controller.signal});
       if(!res?.ok) throw new Error('HTTP_'+String(res?.status??'UNKNOWN')+':'+new URL(url).host);
-      return await res.json();
+      return res;
     }finally{clearTimeout(timer);}
+  }
+  async function fetchJson(url){
+    const res=await fetchResponse(url,'application/json');
+    return await res.json();
+  }
+  async function fetchText(url){
+    const res=await fetchResponse(url,'text/csv,text/plain;q=0.9,*/*;q=0.1');
+    return await res.text();
   }
   async function cached(key,ttlMs,fn,{force=false}={}){
     const t=now();
@@ -189,31 +199,68 @@ export function createExternalResearchProvider({
     },{force});
   }
 
-  async function fetchFredSeries(seriesId){
+  async function fetchFredApiSeries(seriesId){
     const key=String(fredApiKey||'').trim();
     if(!key) return null;
     const day=isoDay(now());
     const url=fBase+'/series/observations?series_id='+encodeURIComponent(seriesId)+'&api_key='+encodeURIComponent(key)+'&file_type=json&sort_order=desc&limit=2&realtime_start='+day+'&realtime_end='+day;
     const body=await fetchJson(url);
     const rows=(Array.isArray(body?.observations)?body.observations:[]).filter(r=>finite(r?.value)!=null);
-    return {seriesId,current:finite(rows[0]?.value),previous:finite(rows[1]?.value),date:rows[0]?.date||null,realtimeStart:rows[0]?.realtime_start||body?.realtime_start||day,realtimeEnd:rows[0]?.realtime_end||body?.realtime_end||day};
+    return {seriesId,current:finite(rows[0]?.value),previous:finite(rows[1]?.value),date:rows[0]?.date||null,realtimeStart:rows[0]?.realtime_start||body?.realtime_start||day,realtimeEnd:rows[0]?.realtime_end||body?.realtime_end||day,transport:'FRED_API'};
+  }
+
+  function parseFredCsv(text,seriesId){
+    const rows=String(text||'').trim().split(/\r?\n/).slice(1);
+    const parsed=[];
+    for(const line of rows){
+      const comma=line.indexOf(',');
+      if(comma<1) continue;
+      const date=line.slice(0,comma).replace(/^"|"$/g,'').trim();
+      const raw=line.slice(comma+1).replace(/^"|"$/g,'').trim();
+      const value=finite(raw);
+      if(!date||value==null) continue;
+      parsed.push({date,value});
+    }
+    parsed.sort((a,b)=>a.date.localeCompare(b.date));
+    const current=parsed.at(-1)||null,previous=parsed.at(-2)||null;
+    if(!current) return null;
+    return {seriesId,current:current.value,previous:previous?.value??null,date:current.date,realtimeStart:null,realtimeEnd:null,transport:'FRED_GRAPH_CSV'};
+  }
+
+  async function fetchFredCsvSeries(seriesId){
+    const end=isoDay(now());
+    const start=isoDay(now()-400*24*60*60_000);
+    const join=fGraphBase.includes('?')?'&':'?';
+    const url=fGraphBase+join+'id='+encodeURIComponent(seriesId)+'&cosd='+encodeURIComponent(start)+'&coed='+encodeURIComponent(end);
+    return parseFredCsv(await fetchText(url),seriesId);
   }
 
   async function fetchMacroSnapshot({force=false}={}){
-    if(!String(fredApiKey||'').trim()) return freeze({ok:false,source:'FRED_REALTIME_V1',reason:'FRED_API_KEY_NOT_CONFIGURED',availableAt:now()});
     return cached('fred:macro',15*60_000,async()=>{
       const seriesIds=['DFF','DGS10','DTWEXBGS','WALCL'];
-      const settled=await Promise.allSettled(seriesIds.map(fetchFredSeries));
+      const hasApiKey=Boolean(String(fredApiKey||'').trim());
+      const loader=hasApiKey?fetchFredApiSeries:fetchFredCsvSeries;
+      const settled=await Promise.allSettled(seriesIds.map(loader));
       const byId={};
       const errors=[];
       settled.forEach((r,i)=>{if(r.status==='fulfilled'&&r.value) byId[seriesIds[i]]=r.value; else if(r.status==='rejected') errors.push({seriesId:seriesIds[i],error:r.reason instanceof Error?r.reason.message:String(r.reason)});});
       const availableAt=now();
       const metrics={fedFundsPct:byId.DFF?.current??null,us10yPct:byId.DGS10?.current??null,broadDollarIndex:byId.DTWEXBGS?.current??null,fedAssets:byId.WALCL?.current??null};
       const availableCount=Object.values(metrics).filter(v=>finite(v)!=null).length;
+      const source=hasApiKey?'FRED_REALTIME_V1':'FRED_GRAPH_CSV_CURRENT';
+      const eventDates=Object.values(byId).map(x=>Date.parse(String(x?.date||''))).filter(Number.isFinite);
+      const eventTime=eventDates.length?Math.max(...eventDates):availableAt;
       return freeze({
-        version:EXTERNAL_RESEARCH_PROVIDER_VERSION,ok:availableCount>0,source:'FRED_REALTIME_V1',eventTime:availableAt,availableAt,metrics,
+        version:EXTERNAL_RESEARCH_PROVIDER_VERSION,ok:availableCount>0,source,eventTime,availableAt,metrics,
         series:byId,errors,quality:{availableCount,expectedCount:4,completeness:availableCount/4},
-        provenance:{realtimeMode:'CURRENT_VINTAGE_CAPTURE',pointInTimeArchiveRequired:true,seriesIds,researchOnly:true}
+        provenance:{
+          realtimeMode:hasApiKey?'CURRENT_VINTAGE_CAPTURE':'CURRENT_SERIES_CAPTURE',
+          transport:hasApiKey?'FRED_API':'FRED_GRAPH_CSV',
+          apiKeyConfigured:hasApiKey,
+          pointInTimeArchiveRequired:true,
+          historicalVintageGuarantee:hasApiKey,
+          seriesIds,researchOnly:true
+        }
       });
     },{force});
   }
@@ -246,7 +293,7 @@ export function createExternalResearchProvider({
     const [coinMetrics,deribitOptions,macro,predictionMarket]=await Promise.all([
       fetchCoinMetricsSnapshot(symbol,{force}).catch(error=>({ok:false,source:'COINMETRICS_COMMUNITY_V4',reason:error instanceof Error?error.message:String(error),availableAt:now()})),
       fetchDeribitOptionsSnapshot(symbol,{force}).catch(error=>({ok:false,source:'DERIBIT_PUBLIC_OPTIONS',reason:error instanceof Error?error.message:String(error),availableAt:now()})),
-      fetchMacroSnapshot({force}).catch(error=>({ok:false,source:'FRED_REALTIME_V1',reason:error instanceof Error?error.message:String(error),availableAt:now()})),
+      fetchMacroSnapshot({force}).catch(error=>({ok:false,source:String(fredApiKey||'').trim()?'FRED_REALTIME_V1':'FRED_GRAPH_CSV_CURRENT',reason:error instanceof Error?error.message:String(error),availableAt:now()})),
       fetchPredictionMarketSnapshot(symbol,{force}).catch(error=>({ok:false,source:'POLYMARKET_GAMMA_CONFIGURED',reason:error instanceof Error?error.message:String(error),availableAt:now()}))
     ]);
     const availableAt=now();
