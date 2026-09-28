@@ -341,6 +341,19 @@ test('online forecast memories accept explicit bounded row caps',async()=>{
   assert.equal(r.engine.drift.maxRows,705);
 });
 
+test('first persistence reports one-shot snapshot component byte profile',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:12},(_,i)=>episode(i)));
+  const first=await saveInstitutionalForecastRuntime(r);
+  assert.ok(first.componentProfile);
+  assert.ok(first.componentProfile.engine.history>0);
+  assert.ok(first.componentProfile.journal>0);
+  assert.ok(first.componentProfile.intelligence.total>0);
+  assert.ok(first.componentProfile.issuances>0);
+  const second=await saveInstitutionalForecastRuntime(r);
+  assert.equal(second.componentProfile,null);
+});
+
 test('gzip snapshot migration loads legacy JSON, writes compressed target, and restores full state',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-gzip-'));
   const legacy=path.join(dir,'runtime.json');
