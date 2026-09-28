@@ -104,6 +104,13 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
     exploration:String(order.strategyMeta?.entryMode||'').toUpperCase()==='EXPLORATION',
+    challengerRuleId:String(order.strategyMeta?.challengerRuleId||''),
+    challengerDecisionKey:String(order.strategyMeta?.challengerDecisionKey||''),
+    challengerEngineVersion:String(order.strategyMeta?.challengerEngineVersion||''),
+    challengerRuleStatus:String(order.strategyMeta?.challengerRuleStatus||''),
+    challengerDiscoveryStrength:finite(order.strategyMeta?.challengerDiscoveryStrength),
+    challengerSourceSamples:finite(order.strategyMeta?.challengerSourceSamples),
+    challengerForwardSamples:finite(order.strategyMeta?.challengerForwardSamples),
     entryQualityLearnerVersion:String(order.strategyMeta?.entryQualityLearnerVersion||''),
     entryQualityLabel:String(order.strategyMeta?.entryQualityLabel||'UNKNOWN'),
     entryQualityScore:finite(order.strategyMeta?.entryQualityScore),
@@ -267,10 +274,10 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const known=new Set(base.positions.map(p=>String(p.entryOrderId)));
   let added=0;
   for(const order of Array.isArray(orders)?orders:[]){
-    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY']})||known.has(String(order.id))) continue;
+    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY','LEARNED_CHALLENGER_ENTRY']})||known.has(String(order.id))) continue;
     const p=shadowPositionFromEntryOrder(order,{
       openedAt:finite(order.updatedAt,finite(order.createdAt,now)),
-      acceptedRoles:['ENTRY','EXPLORATION_ENTRY']
+      acceptedRoles:['ENTRY','EXPLORATION_ENTRY','LEARNED_CHALLENGER_ENTRY']
     });
     base.positions.push(p);
     known.add(String(order.id));
@@ -290,7 +297,8 @@ export function replaceShadowPortfolioPosition(ledger,position){
 }
 
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
-  const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean);
+  const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
+    .filter(p=>String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER');
   const open=positions.filter(p=>p.status==='OPEN');
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
@@ -431,7 +439,8 @@ function tradeStats(rows){
 
 export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
   const window=periodWindow(period,asOf,timeZone);
-  const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean);
+  const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
+    .filter(p=>String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER');
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
   const base=tradeStats(closed);
