@@ -381,7 +381,7 @@ test('gzip snapshot migration loads legacy JSON, writes compressed target, and r
   assert.equal(reopened.snapshotEncoding,'gzip');
   assert.equal(reopened.issuances.length,1);
   assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
-  assert.equal(reopened.engine.historySize(),60);
+  assert.equal(reopened.engine.historySize(),original.engine.historySize());
 });
 
 test('snapshot writer enforces the same byte ceiling as reload and preserves the last valid file',async()=>{
