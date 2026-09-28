@@ -3,7 +3,7 @@ import { readdir,readFile,writeFile,stat,unlink,rename,open } from 'node:fs/prom
 import { createReadStream,createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
 import { createHash } from 'node:crypto';
-import { createBrotliCompress,createGunzip,createGzip,constants as zlibConstants } from 'node:zlib';
+import { createBrotliCompress,createBrotliDecompress,createGunzip,createGzip,constants as zlibConstants } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { canonicalJson,sha256 } from './institutional-kernel.mjs';
 
@@ -112,6 +112,14 @@ async function durableBrotliCandidateFromGzip({gzipFile,tmp}){
   return audit.finish();
 }
 
+async function durableBrotliCandidateFromBrotli({brotliFile,tmp}){
+  const audit=rawAuditTransform();
+  await pipeline(createReadStream(brotliFile),createBrotliDecompress(),audit.stream,brotliCandidate(),createWriteStream(tmp,{flags:'wx'}));
+  const fh=await open(tmp,'r');
+  try{await fh.sync();}finally{await fh.close();}
+  return audit.finish();
+}
+
 function codecOf(item){
   if(item?.codec) return item.codec;
   if(String(item?.name||'').endsWith('.br')) return 'brotli';
@@ -193,6 +201,87 @@ async function tryMigrateOneGzipSegment({dir,manifest,manifestPath}){
   };
 }
 
+
+async function tryRecompressOneLegacyBrotliSegment({dir,manifest,manifestPath}){
+  const legacy=manifest.segments.find(x=>
+    codecOf(x)==='brotli'&&
+    Number(x?.migrationQuality||0)<BROTLI_QUALITY&&
+    !x.brotli11CandidateRejectedAt
+  );
+  if(!legacy) return {manifest,attempted:null};
+  const source=path.join(dir,legacy.name);
+  const sourceMeta=await stat(source);
+  const destName=legacy.sourceName+'.q11.br';
+  const dest=path.join(dir,destName);
+  const tmp=dest+'.tmp';
+  await unlink(tmp).catch(e=>{if(e?.code!=='ENOENT')throw e;});
+
+  const audit=await durableBrotliCandidateFromBrotli({brotliFile:source,tmp});
+  if(legacy.rawSha256&&audit.sha256!==legacy.rawSha256){
+    await unlink(tmp).catch(()=>{});
+    throw new Error('MARKET_FABRIC_ARCHIVE_REPACK_RAW_HASH_MISMATCH');
+  }
+  if(Number.isFinite(Number(legacy.rawBytes))&&audit.bytes!==Number(legacy.rawBytes)){
+    await unlink(tmp).catch(()=>{});
+    throw new Error('MARKET_FABRIC_ARCHIVE_REPACK_RAW_BYTES_MISMATCH');
+  }
+
+  const candidateBytes=(await stat(tmp)).size;
+  const requiredMax=Math.floor(sourceMeta.size*(1-BROTLI_MIN_SAVINGS_RATIO));
+  if(candidateBytes>=requiredMax){
+    await unlink(tmp).catch(()=>{});
+    const rejected={
+      ...legacy,
+      brotli11CandidateRejectedAt:Date.now(),
+      brotli11CandidateBytes:candidateBytes,
+      brotli11CandidateQuality:BROTLI_QUALITY
+    };
+    const next=manifestValue(manifest.segments.map(x=>x.sourceName===legacy.sourceName?rejected:x));
+    await atomicManifest(manifestPath,next);
+    return {
+      manifest:next,
+      attempted:{
+        kind:'BROTLI_REPACK',
+        accepted:false,
+        sourceName:legacy.sourceName,
+        fromBytes:sourceMeta.size,
+        candidateBytes,
+        reclaimedBytes:0
+      }
+    };
+  }
+
+  const compressedSha256=await hashFile(tmp);
+  await rename(tmp,dest);
+  const nextItem={
+    ...legacy,
+    name:destName,
+    codec:'brotli',
+    compressedBytes:candidateBytes,
+    compressedSha256,
+    recompressedAt:Date.now(),
+    recompressionSourceBytes:sourceMeta.size,
+    migrationQuality:BROTLI_QUALITY
+  };
+  delete nextItem.brotli11CandidateRejectedAt;
+  delete nextItem.brotli11CandidateBytes;
+  delete nextItem.brotli11CandidateQuality;
+  const next=manifestValue(manifest.segments.map(x=>x.sourceName===legacy.sourceName?nextItem:x));
+  await atomicManifest(manifestPath,next);
+  await unlink(source).catch(e=>{if(e?.code!=='ENOENT')throw e;});
+  return {
+    manifest:next,
+    attempted:{
+      kind:'BROTLI_REPACK',
+      accepted:true,
+      sourceName:legacy.sourceName,
+      fromBytes:sourceMeta.size,
+      candidateBytes,
+      reclaimedBytes:sourceMeta.size-candidateBytes
+    }
+  };
+}
+
 export async function archiveMarketFabricSegments({
   filePath,
   maxArchivedBytes=120*1024*1024,
@@ -258,19 +347,22 @@ export async function archiveMarketFabricSegments({
     await unlink(raw);
   }
 
-  let migrationAttempts=0,migratedSegments=0,migrationRejected=0,reclaimedBytes=0;
+  let migrationAttempts=0,migratedSegments=0,recompressedSegments=0,migrationRejected=0,recompressionRejected=0,reclaimedBytes=0;
   if(migrateExisting){
     const max=Math.max(0,Math.floor(Number(maxMigrationsPerRun)||0));
     for(let i=0;i<max;i++){
-      const result=await tryMigrateOneGzipSegment({dir,manifest,manifestPath});
+      let result=await tryMigrateOneGzipSegment({dir,manifest,manifestPath});
+      if(!result.attempted) result=await tryRecompressOneLegacyBrotliSegment({dir,manifest,manifestPath});
       manifest=result.manifest;
       if(!result.attempted) break;
       migrationAttempts++;
       if(result.attempted.accepted){
-        migratedSegments++;
         reclaimedBytes+=result.attempted.reclaimedBytes;
+        if(result.attempted.kind==='BROTLI_REPACK') recompressedSegments++;
+        else migratedSegments++;
       }else{
-        migrationRejected++;
+        if(result.attempted.kind==='BROTLI_REPACK') recompressionRejected++;
+        else migrationRejected++;
       }
     }
   }
@@ -305,7 +397,9 @@ export async function archiveMarketFabricSegments({
     minCandidateSavingsRatio:BROTLI_MIN_SAVINGS_RATIO,
     migrationAttempts,
     migratedSegments,
+    recompressedSegments,
     migrationRejected,
+    recompressionRejected,
     reclaimedBytes,
     codecBreakdown
   };
