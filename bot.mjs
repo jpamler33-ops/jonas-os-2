@@ -36,6 +36,13 @@ import {
   evaluateShadowTrainingSupervisor, supervisedShadowBudget, renderSupervisorCompact,
   SHADOW_TRAINING_SUPERVISOR_VERSION
 } from './shadow-training-supervisor.mjs';
+import {
+  loadStrategyLeagueLedger, saveStrategyLeagueLedger,
+  reconcileStrategyLeagueEntries, replaceStrategyLeaguePosition,
+  markStrategyLeaguePosition, closeStrategyLeaguePosition,
+  strategyLeagueSummary, deriveStrategyLeagueCandidates,
+  SHADOW_STRATEGY_LEAGUE_VERSION, SHADOW_STRATEGIES
+} from './shadow-strategy-league.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
@@ -139,6 +146,12 @@ const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.e
 const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
 const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
 const shadowStatsTimeZone = String(process.env.TCX_STATS_TIMEZONE || 'Europe/Berlin');
+const strategyLeagueEnabled = String(process.env.TCX_STRATEGY_LEAGUE_ENABLED || '1') !== '0';
+const strategyLeagueWatchMs = Math.max(5000, Number(process.env.TCX_STRATEGY_LEAGUE_WATCH_MS || 10000));
+const strategyLeagueBaseNotionalQuote = Math.max(1, Number(process.env.TCX_STRATEGY_LEAGUE_BASE_NOTIONAL || 50));
+const strategyLeagueInitialEquity = Math.max(100, Number(process.env.TCX_STRATEGY_LEAGUE_INITIAL_EQUITY || 5000));
+const strategyLeagueMaxOpenPerStrategy = Math.max(1, Math.floor(Number(process.env.TCX_STRATEGY_LEAGUE_MAX_OPEN_PER_STRATEGY || 4) || 4));
+const strategyLeagueMaxOpenPerStrategySymbol = Math.max(1, Math.floor(Number(process.env.TCX_STRATEGY_LEAGUE_MAX_OPEN_PER_STRATEGY_SYMBOL || 1) || 1));
 const sorMaxBookAgeMs = Math.max(1000, Number(process.env.TCX_SOR_MAX_BOOK_AGE_MS || 15000));
 const sorBinanceFeeBps = Math.max(0, Number(process.env.TCX_SOR_BINANCE_FEE_BPS || shadowTakerFeeBps));
 const sorOkxFeeBps = Math.max(0, Number(process.env.TCX_SOR_OKX_FEE_BPS || shadowTakerFeeBps));
@@ -313,6 +326,8 @@ const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.j
 const loadedShadowOms = await loadShadowOms(shadowOmsFile);
 const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-shadow-portfolio.json';
 const loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
+const strategyLeagueFile = process.env.TCX_STRATEGY_LEAGUE_FILE || '/data/tcx-strategy-league.json';
+const loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
 const loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
 let venueQualityRecords = loadedVenueQuality.records;
@@ -327,6 +342,10 @@ let shadowPortfolioLedger = loadedShadowPortfolio.ledger;
 let shadowPortfolioHealthy = loadedShadowPortfolio.healthy;
 let shadowPortfolioLastError = loadedShadowPortfolio.error || null;
 let shadowPortfolioPersistenceQueue = Promise.resolve();
+let strategyLeagueLedger = loadedStrategyLeague.ledger;
+let strategyLeagueHealthy = loadedStrategyLeague.healthy;
+let strategyLeagueLastError = loadedStrategyLeague.error || null;
+let strategyLeaguePersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let auditAppendQueue = Promise.resolve();
 let forecastRuntimePersistenceQueue = Promise.resolve();
@@ -353,6 +372,15 @@ const institutionalConfig = Object.freeze({
     initialEquityQuote:shadowPortfolioInitialEquity,
     watchMs:shadowPortfolioWatchMs,
     objective:'MEASURE_AUTONOMOUS_SHADOW_STRATEGY_PNL_AND_DRAWDOWN'
+  },
+  strategyLeague:{
+    version:SHADOW_STRATEGY_LEAGUE_VERSION,
+    canExecuteLive:false,
+    enabled:strategyLeagueEnabled,
+    strategies:SHADOW_STRATEGIES.map(x=>x.id),
+    initialEquityPerStrategy:strategyLeagueInitialEquity,
+    watchMs:strategyLeagueWatchMs,
+    objective:'INDEPENDENT_VIRTUAL_STRATEGY_COMPETITION_AND_EVIDENCE_WEIGHTED_ALLOCATION'
   },
   shadowSor:{
     version:SHADOW_SOR_VERSION,
@@ -416,6 +444,7 @@ try {
       chaosEngineering:CHAOS_ENGINEERING_VERSION,
       shadowOms:SHADOW_OMS_VERSION,
       shadowPortfolio:SHADOW_PORTFOLIO_LEDGER_VERSION,
+      strategyLeague:SHADOW_STRATEGY_LEAGUE_VERSION,
       alertEngine:ALERT_ENGINE_VERSION,
       evidenceHistory:EVIDENCE_HISTORY_VERSION,
       stateValidity:STATE_VALIDITY_VERSION,
@@ -512,6 +541,24 @@ async function persistShadowPortfolio(reason='mutation') {
     }
   });
   return shadowPortfolioPersistenceQueue;
+}
+
+async function persistStrategyLeague(reason='mutation'){
+  strategyLeaguePersistenceQueue = strategyLeaguePersistenceQueue.then(async()=>{
+    if(!strategyLeagueHealthy) return false;
+    try{
+      strategyLeagueLedger = await saveStrategyLeagueLedger(strategyLeagueFile,strategyLeagueLedger,{maxPositions:20000});
+      strategyLeagueLastError=null;
+      return true;
+    }catch(err){
+      strategyLeagueHealthy=false;
+      strategyLeagueLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'strategy_league.persistence',message:strategyLeagueLastError});
+      console.error('strategy league persistence error',reason,strategyLeagueLastError);
+      return false;
+    }
+  });
+  return strategyLeaguePersistenceQueue;
 }
 
 async function persistState(reason='mutation') {
@@ -1237,6 +1284,117 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     execution:'SHADOW_ONLY'
   }));
   return {...decision,placed:true,orderId:order.id,status:order.status};
+}
+
+async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
+  const now=Date.now();
+  if(!strategyLeagueEnabled){
+    return {placed:0,eligible:0,reason:'STRATEGY_LEAGUE_DISABLED',execution:'SHADOW_ONLY'};
+  }
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!strategyLeagueHealthy){
+    return {placed:0,eligible:0,reason:'LEAGUE_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY'};
+  }
+
+  const reconciled=reconcileStrategyLeagueEntries(strategyLeagueLedger,shadowOrders,{now});
+  if(reconciled.changed){
+    strategyLeagueLedger=reconciled.ledger;
+    await persistStrategyLeague('pre-league-trade-reconcile');
+  }
+
+  const assetClass=assetClassForSymbol(issuance?.symbol);
+  const derived=deriveStrategyLeagueCandidates(issuance,strategyLeagueLedger,{
+    now,
+    assetClass,
+    baseNotionalQuote:strategyLeagueBaseNotionalQuote,
+    memeMinExpectedReturn:autoShadowMemecoinMinExpectedReturn,
+    memeMinDirectionalProbability:autoShadowMemecoinMinDirectionalProbability,
+    memeMinProbabilityEdge:autoShadowMemecoinMinProbabilityEdge
+  });
+
+  let placed=0;
+  const results=[];
+  for(const candidate of derived.candidates){
+    if(shadowOrders.some(o=>o?.strategyMeta?.leagueDecisionKey===candidate.leagueDecisionKey)){
+      results.push({strategyId:candidate.leagueStrategyId,placed:false,reason:'LEAGUE_DECISION_ALREADY_TRADED'});
+      continue;
+    }
+    const open=(strategyLeagueLedger.positions||[]).filter(p=>
+      p.status==='OPEN'&&p.leagueStrategyId===candidate.leagueStrategyId
+    );
+    if(open.length>=strategyLeagueMaxOpenPerStrategy){
+      results.push({strategyId:candidate.leagueStrategyId,placed:false,reason:'LEAGUE_STRATEGY_OPEN_CAP'});
+      continue;
+    }
+    const sameSymbol=open.filter(p=>p.symbol===candidate.symbol);
+    if(sameSymbol.length>=strategyLeagueMaxOpenPerStrategySymbol){
+      results.push({strategyId:candidate.leagueStrategyId,placed:false,reason:'LEAGUE_STRATEGY_SYMBOL_CAP'});
+      continue;
+    }
+
+    const order=await placeShadowOrder({
+      symbol:candidate.symbol,
+      side:candidate.side,
+      type:'MARKET',
+      notionalQuote:candidate.notionalQuote,
+      strategyMeta:{
+        strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+        role:'LEAGUE_ENTRY',
+        assetClass,
+        strategyLane:[
+          'LEAGUE',candidate.leagueStrategyId,candidate.symbol,candidate.horizonId,candidate.side
+        ].join(':'),
+        leagueVersion:SHADOW_STRATEGY_LEAGUE_VERSION,
+        leagueStrategyId:candidate.leagueStrategyId,
+        leagueStrategyLabel:candidate.leagueStrategyLabel,
+        leagueDecisionKey:candidate.leagueDecisionKey,
+        leagueAllocationWeight:candidate.leagueAllocationWeight,
+        leagueNotionalMultiplier:candidate.leagueNotionalMultiplier,
+        leaguePerformanceScore:candidate.leaguePerformanceScore,
+        leagueStatus:candidate.leagueStatus,
+        decisionKey:candidate.leagueDecisionKey,
+        issuanceId:candidate.issuanceId,
+        forecastFingerprint:candidate.forecastFingerprint,
+        horizonId:candidate.horizonId,
+        horizonMs:candidate.horizonMs,
+        horizonSelection:candidate.horizonSelection,
+        admissionGate:candidate.admissionGate,
+        expectedReturn:candidate.expectedReturn,
+        directionalProbability:candidate.directionalProbability,
+        probabilityEdge:candidate.probabilityEdge,
+        generatedAt:candidate.generatedAt
+      }
+    });
+    placed++;
+    results.push({
+      strategyId:candidate.leagueStrategyId,
+      placed:true,
+      orderId:order.id,
+      side:candidate.side,
+      horizonId:candidate.horizonId,
+      notionalQuote:candidate.notionalQuote
+    });
+  }
+
+  if(placed){
+    recordOperation(observability,{name:'strategy_league_entries',ok:true,latencyMs:0,error:null});
+    console.log('strategy league entries placed',JSON.stringify({
+      symbol:String(issuance?.symbol||''),
+      assetClass,
+      eligible:derived.candidates.length,
+      placed,
+      allocationMode:derived.summary.allocationMode,
+      results,
+      execution:'SHADOW_ONLY'
+    }));
+  }
+  return {
+    placed,
+    eligible:derived.candidates.length,
+    allocationMode:derived.summary.allocationMode,
+    results,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
 }
 
 async function tg(method, body) {
@@ -3968,6 +4126,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       console.error('auto shadow trade error',symbol,msg);
     }
   }
+  let strategyLeagueRun=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      strategyLeagueRun=await maybePlaceStrategyLeagueTrades(issuance,{auditHealthy:auditHealthyAfter});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      strategyLeagueRun={placed:0,eligible:0,reason:'STRATEGY_LEAGUE_ERROR'};
+      recordError(observability,{scope:'strategy_league.entry',message:msg});
+      console.error('strategy league entry error',symbol,msg);
+    }
+  }
   const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
   const scienceGuardLines=Object.entries(scienceAdapter.profile)
     .filter(([,cfg])=>cfg.required===true)
@@ -4021,7 +4190,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       autoShadowTradeEligible:autoShadowTrade?.eligible===true,
       autoShadowTradeReason:autoShadowTrade?.reason||null,
       autoShadowOrderId:autoShadowTrade?.orderId||null,
-      autoShadowSide:autoShadowTrade?.side||null
+      autoShadowSide:autoShadowTrade?.side||null,
+      strategyLeaguePlaced:Number(strategyLeagueRun?.placed||0),
+      strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
+      strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null
     };
   }
 
@@ -5000,6 +5172,9 @@ async function autoLearnForecastWatcher() {
               autoShadowTradeReason:result.autoShadowTradeReason||null,
               autoShadowOrderId:result.autoShadowOrderId||null,
               autoShadowSide:result.autoShadowSide||null,
+              strategyLeaguePlaced:result.strategyLeaguePlaced||0,
+              strategyLeagueEligible:result.strategyLeagueEligible||0,
+              strategyLeagueAllocationMode:result.strategyLeagueAllocationMode||null,
               duplicate:result.duplicate===true
             }));
           }else{
