@@ -435,6 +435,54 @@ test('gzip snapshot migration loads legacy JSON, writes compressed target, and r
   assert.equal(reopened.engine.historySize(),original.engine.historySize());
 });
 
+test('gzip persistence externalizes learning journal and restores entries without replaying memory',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-journal-store-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  assert.ok(r.journal.entries.length>0);
+  const before=JSON.parse(JSON.stringify(r.journal.entries));
+  const engineRowsBefore={
+    calibration:r.engine.calibration.rows.length,
+    reliability:r.engine.reliability.rows.length,
+    modelPerformance:r.engine.modelPerformance.rows.length,
+    interval:r.engine.intervalCalibration.rows.length,
+    drift:r.engine.drift.rows.length
+  };
+
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.ok(meta.journalStore);
+  assert.equal(meta.journalStore.count,before.length);
+  assert.ok(meta.journalStore.storageBytes<meta.journalStore.logicalBytes);
+
+  const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
+  assert.deepEqual(main.journal.entries,[]);
+  assert.equal(main.journalStore.count,before.length);
+
+  const reopened=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(reopened.journal.entries)),before);
+  assert.equal(reopened.journalStoreCount,before.length);
+  assert.deepEqual({
+    calibration:reopened.engine.calibration.rows.length,
+    reliability:reopened.engine.reliability.rows.length,
+    modelPerformance:reopened.engine.modelPerformance.rows.length,
+    interval:reopened.engine.intervalCalibration.rows.length,
+    drift:reopened.engine.drift.rows.length
+  },engineRowsBefore);
+});
+
 test('gzip persistence externalizes engine learning memories and restores them losslessly',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-engine-store-'));
   const file=path.join(dir,'runtime.json.gz');
