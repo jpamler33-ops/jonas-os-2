@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
 import {
   deriveDisagreementMap,
   deriveEvidenceIndex,
@@ -71,11 +72,45 @@ test("persistent evidence history round-trips",async()=>{
   records=appendEvidenceRecord(records,one);
   records=appendEvidenceRecord(records,createEvidenceRecord("BTCUSDT",{...ctx(),capturedAt:2000},one));
   await saveEvidenceHistory(file,records);
+  const stored=await readFile(file);
+  assert.equal(stored[0],0x1f);
+  assert.equal(stored[1],0x8b);
+  const parsed=JSON.parse(gunzipSync(stored).toString("utf8"));
+  assert.equal(parsed.records.length,2);
   const loaded=await loadEvidenceHistory(file);
   assert.equal(evidenceHistoryFor(loaded.records,"BTCUSDT").length,2);
   assert.equal(loaded.recoveredFromCorrupt,false);
+  assert.equal(loaded.storageEncoding,"gzip");
+  assert.ok(loaded.storageBytes<loaded.logicalBytes);
 });
 
+
+test("legacy plain JSON evidence history remains readable and migrates to gzip on next save",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-legacy-"));
+  const file=path.join(dir,"history.json");
+  const one=createEvidenceRecord("BTCUSDT",ctx(),null);
+  const legacy={schemaVersion:1,version:"TCX_EVIDENCE_HISTORY_V2",updatedAt:new Date().toISOString(),records:[one]};
+  await writeFile(file,JSON.stringify(legacy,null,2),"utf8");
+  const loaded=await loadEvidenceHistory(file);
+  assert.equal(loaded.recoveredFromCorrupt,false);
+  assert.equal(loaded.storageEncoding,"json");
+  assert.equal(loaded.records.length,1);
+  await saveEvidenceHistory(file,loaded.records);
+  const migrated=await readFile(file);
+  assert.equal(migrated[0],0x1f);
+  assert.equal(migrated[1],0x8b);
+});
+
+test("bulk save trims per symbol without quadratic append replay",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-trim-"));
+  const file=path.join(dir,"history.json");
+  const rows=[];
+  for(let i=0;i<50;i++) rows.push(createEvidenceRecord("BTCUSDT",{...ctx(),capturedAt:1000+i},null));
+  const saved=await saveEvidenceHistory(file,rows,{maxPerSymbol:7});
+  assert.equal(saved.length,7);
+  assert.equal(saved[0].capturedAt,1043);
+  assert.equal(saved.at(-1).capturedAt,1049);
+});
 
 test("evidence snapshots persist state fingerprints and lifecycle metadata",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-"));
