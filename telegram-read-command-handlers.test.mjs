@@ -38,6 +38,7 @@ function deps(overrides={}){
     showEvidence:async(...x)=>calls.push(["evidence",...x]),
     showEvidenceHistory:async(...x)=>calls.push(["history",...x]),
     showValidity:async(...x)=>calls.push(["validity",...x]),
+    showDataStatus:async(...x)=>calls.push(["data",...x]),
     recordError:()=>{},
     recordOperation:()=>{},
     observability:{},
@@ -142,4 +143,12 @@ test("league and strategies aliases open the strategy league",async()=>{
   await h["/league"]({chatId:13,args:[]});
   await h["/strategies"]({chatId:13,args:[]});
   assert.equal(calls.filter(x=>x[0]==="league").length,2);
+});
+
+
+test("data command opens data status dashboard",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/data"]({chatId:7,args:[]});
+  assert.deepEqual(calls[0],["data",7,null]);
 });
