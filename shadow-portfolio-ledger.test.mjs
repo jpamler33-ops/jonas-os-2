@@ -371,3 +371,5 @@ test('coverage probe is horizon-only and excluded from primary performance',()=>
   assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
   assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
 });
+
+test('leveraged positions expose price return and margin ROE separately',()=>{const p={execution:'SHADOW_ONLY',canExecuteLive:false,status:'OPEN',side:'LONG',qtyBase:1,entryQuote:100,entryFeesQuote:0,marginQuote:50,leverage:2,plannedExitAt:999999,stopLossPct:1,takeProfitPct:1};const book={bids:[[110,2]],asks:[[111,2]],source:'TEST',availableAt:2};const m=markShadowPosition(p,book,{at:2,feeBps:0});assert.equal(m.exit.priceReturnPct,.1);assert.equal(m.exit.marginRoePct,.2);const closed=closeShadowPosition(m.position,{at:3});assert.equal(closed.realizedPriceReturnPct,.1);assert.equal(closed.realizedMarginRoePct,.2);assert.equal(closed.realizedReturnPct,.2);});
