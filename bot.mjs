@@ -375,7 +375,12 @@ const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFi
   maxJournalEntries:forecastJournalMaxEntries,
   maxAuditEvents:forecastAuditMaxEvents,
   maxIssuances:forecastMaxIssuances,
-  maxTrackedForecasts:forecastMaxTracked
+  maxTrackedForecasts:forecastMaxTracked,
+  maxCalibrationRows:Math.max(300,Math.floor(Number(process.env.TCX_FORECAST_MAX_CALIBRATION_ROWS||1200))),
+  maxReliabilityRows:Math.max(300,Math.floor(Number(process.env.TCX_FORECAST_MAX_RELIABILITY_ROWS||1200))),
+  maxModelPerformanceRows:Math.max(1000,Math.floor(Number(process.env.TCX_FORECAST_MAX_MODEL_PERFORMANCE_ROWS||4000))),
+  maxIntervalCalibrationRows:Math.max(300,Math.floor(Number(process.env.TCX_FORECAST_MAX_INTERVAL_ROWS||1200))),
+  maxDriftRows:Math.max(500,Math.floor(Number(process.env.TCX_FORECAST_MAX_DRIFT_ROWS||1500)))
 });
 const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
