@@ -7,6 +7,7 @@ import {
   evaluateForecastCandidateWalkForward,
   evaluateForecastFeatureExtensionWalkForward
 } from './forecast-candidate-lab.mjs';
+import { ProbabilisticForecastEngine } from './forecast-runtime/forecast/index.js';
 
 const baseConfig={
   featureIds:['x','y'],
@@ -169,4 +170,35 @@ test('feature extension walk-forward compares augmented model on identical PIT r
   assert.deepEqual(result.addedFeatureIds,['z']);
   assert.equal(result.diagnostics.productionMutationAllowed,false);
   assert.equal(result.canExecute,false);
+});
+
+
+test('walk-forward training count does not clone full history snapshots',()=>{
+  const history=rows(120);
+  const cutoff=history[50].timestamp;
+  const candidate=buildForecastCandidateArtifact({
+    historyRows:history,
+    incumbentConfig:baseConfig,
+    candidateConfig:{...baseConfig,ridgeLambda:1.5},
+    dataCutoffAt:cutoff,
+    createdAt:cutoff+1,
+    parentReleaseId:'release-a'
+  });
+  const original=ProbabilisticForecastEngine.prototype.historySnapshot;
+  ProbabilisticForecastEngine.prototype.historySnapshot=function(){
+    throw new Error('historySnapshot should not be used for train-count checks');
+  };
+  try{
+    const result=evaluateForecastCandidateWalkForward({
+      historyRows:history,
+      incumbentConfig:baseConfig,
+      candidate,
+      asOf:history[110].resolvedAt,
+      minimumTrainCases:30
+    });
+    assert.ok(result.evaluation.cases>0);
+    assert.equal(result.diagnostics.pitViolations,0);
+  }finally{
+    ProbabilisticForecastEngine.prototype.historySnapshot=original;
+  }
 });
