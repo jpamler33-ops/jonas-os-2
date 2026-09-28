@@ -10,7 +10,21 @@ const DEFAULT_CANONICAL_FILES = Object.freeze([
   'tcx-release-registry.jsonl'
 ]);
 
-const ARTIFACT_MARKERS = Object.freeze(['.tmp-', '.corrupt-', '.truncated-tail-']);
+const ARTIFACT_MARKERS = Object.freeze(['.tmp-', '.corrupt-', '.truncated-tail-', '.oversized-']);
+const GENERIC_TEMP_PATTERNS = Object.freeze([/\.tmp$/,/\.tmp-\d+$/]);
+
+function storageCategory(name) {
+  if (name==='tcx-market-events.jsonl') return 'marketFabricActive';
+  if (name.startsWith('tcx-market-events.jsonl.segment-')) return 'marketFabricArchive';
+  if (name.startsWith('tcx-market-events.jsonl.')) return 'marketFabricMetadata';
+  if (name.startsWith('tcx-forecast-runtime')) return 'forecastPersistence';
+  if (name.startsWith('tcx-research-data-plane')) return 'researchDataPlane';
+  if (name.startsWith('tcx-episodes')) return 'episodeMemory';
+  if (name.startsWith('tcx-shadow-')) return 'shadowState';
+  if (name.startsWith('tcx-evidence-history')) return 'evidenceHistory';
+  if (name.startsWith('tcx-release-registry')) return 'releaseRegistry';
+  return 'other';
+}
 
 async function exists(filePath) {
   try { await access(filePath); return true; } catch { return false; }
@@ -43,14 +57,17 @@ export async function cleanupOrphanedPersistenceArtifacts({
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const canonical=artifactOwner(entry.name,canonicalFiles);
-    if (!canonical) continue;
+    const genericTemp=GENERIC_TEMP_PATTERNS.some(re=>re.test(entry.name));
+    if (!canonical&&!genericTemp) continue;
     result.scanned++;
     const artifactPath=path.join(dataDir,entry.name);
-    const canonicalPath=path.join(dataDir,canonical);
     try {
-      if (!(await exists(canonicalPath))) {
-        result.skipped.push({file:entry.name,reason:'CANONICAL_MISSING'});
-        continue;
+      if (canonical) {
+        const canonicalPath=path.join(dataDir,canonical);
+        if (!(await exists(canonicalPath))) {
+          result.skipped.push({file:entry.name,reason:'CANONICAL_MISSING'});
+          continue;
+        }
       }
       const meta=await stat(artifactPath);
       const ageMs=Math.max(0,Number(now)-Number(meta.mtimeMs));
@@ -77,4 +94,49 @@ export async function cleanupOrphanedPersistenceArtifacts({
   return result;
 }
 
-export const STORAGE_MAINTENANCE_VERSION='TCX_STORAGE_MAINTENANCE_V1';
+export async function inspectPersistenceStorage({
+  dataDir='/data',
+  topN=20,
+  logger=console
+}={}) {
+  const result={
+    dataDir,
+    totalBytes:0,
+    fileCount:0,
+    categories:{},
+    topFiles:[],
+    errors:[]
+  };
+  let entries;
+  try { entries=await readdir(dataDir,{withFileTypes:true}); }
+  catch(err) {
+    result.errors.push({file:dataDir,error:err instanceof Error?err.message:String(err)});
+    return result;
+  }
+  const files=[];
+  for(const entry of entries) {
+    if(!entry.isFile()) continue;
+    try{
+      const meta=await stat(path.join(dataDir,entry.name));
+      const bytes=Number(meta.size)||0;
+      const category=storageCategory(entry.name);
+      result.totalBytes+=bytes;
+      result.fileCount++;
+      result.categories[category]=(result.categories[category]||0)+bytes;
+      files.push({file:entry.name,bytes,category,mtimeMs:Number(meta.mtimeMs)||null});
+    }catch(err){
+      result.errors.push({file:entry.name,error:err instanceof Error?err.message:String(err)});
+    }
+  }
+  result.topFiles=files.sort((a,b)=>b.bytes-a.bytes).slice(0,Math.max(1,Math.floor(Number(topN)||20)));
+  logger.info?.('[TCX_STORAGE_INVENTORY]',JSON.stringify({
+    totalBytes:result.totalBytes,
+    fileCount:result.fileCount,
+    categories:result.categories,
+    topFiles:result.topFiles,
+    errors:result.errors
+  }));
+  return result;
+}
+
+export const STORAGE_MAINTENANCE_VERSION='TCX_STORAGE_MAINTENANCE_V2';
