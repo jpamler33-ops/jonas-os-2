@@ -404,6 +404,40 @@ function snapshotComponentProfile(payload){
     },
     issuances:jsonBytes(payload?.issuances??[])
   };
+  const trackerRecords=Array.isArray(intelligence?.tracker?.records)?intelligence.tracker.records:[];
+  const trackerFieldBytes={
+    records:trackerRecords.length,
+    revisions:trackerRecords.reduce((s,r)=>s+(Array.isArray(r?.revisions)?r.revisions.length:0),0),
+    report:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.report??null),0),
+    issueState:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.issueState??null),0),
+    transitionAtIssue:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.transitionAtIssue??null),0),
+    revisionsBytes:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.revisions??[]),0),
+    metadata:trackerRecords.reduce((s,r)=>{
+      const x={...r};
+      delete x.report;
+      delete x.issueState;
+      delete x.transitionAtIssue;
+      delete x.revisions;
+      return s+jsonBytes(x);
+    },0)
+  };
+  profile.intelligence.trackerFields=trackerFieldBytes;
+  const issuanceRows=Array.isArray(payload?.issuances)?payload.issuances:[];
+  profile.issuanceFields={
+    rows:issuanceRows.length,
+    forecast:issuanceRows.reduce((s,r)=>s+jsonBytes(r?.forecast??null),0),
+    scientificValidity:issuanceRows.reduce((s,r)=>s+jsonBytes(r?.scientificValidity??null),0),
+    admission:issuanceRows.reduce((s,r)=>s+jsonBytes(r?.admission??null),0),
+    trace:issuanceRows.reduce((s,r)=>s+jsonBytes(r?.trace??null),0),
+    metadata:issuanceRows.reduce((s,r)=>{
+      const x={...r};
+      delete x.forecast;
+      delete x.scientificValidity;
+      delete x.admission;
+      delete x.trace;
+      return s+jsonBytes(x);
+    },0)
+  };
   const topLevel=profile.engine.total+profile.journal+profile.intelligence.total+profile.issuances;
   return {...profile,topLevelBytes:topLevel};
 }

@@ -349,7 +349,10 @@ test('first persistence reports one-shot snapshot component byte profile',async(
   assert.ok(first.componentProfile.engine.history>0);
   assert.ok(first.componentProfile.journal>0);
   assert.ok(first.componentProfile.intelligence.total>0);
+  assert.ok(first.componentProfile.intelligence.trackerFields);
+  assert.ok(Number.isInteger(first.componentProfile.intelligence.trackerFields.records));
   assert.ok(first.componentProfile.issuances>0);
+  assert.ok(first.componentProfile.issuanceFields);
   const second=await saveInstitutionalForecastRuntime(r);
   assert.equal(second.componentProfile,null);
 });
