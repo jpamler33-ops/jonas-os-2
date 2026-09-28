@@ -225,7 +225,7 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
       const statusMultiplier=rule.status==='QUALIFIED'?1:rule.status==='TRIAL'?.75:.5;
       const regimeDecision=typeof regimeBrain?.decisionForRule==='function'
         ?regimeBrain.decisionForRule(rule.ruleId)
-        :{status:'UNKNOWN',multiplier:.65,reason:'REGIME_BRAIN_UNAVAILABLE',samples:0};
+        :{status:'NOT_APPLIED',multiplier:1,reason:'REGIME_BRAIN_NOT_REQUESTED',samples:0};
       if(Number(regimeDecision?.multiplier||0)<=0) continue;
       const core={
         issuanceId:String(issuance.issuanceId||''),
