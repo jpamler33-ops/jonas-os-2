@@ -13,6 +13,7 @@ import {
   issueInstitutionalForecast,
   observeInstitutionalForecastRuntime,
   observeInstitutionalForecastOutcomePoint,
+  recordCoverageProbeCalibration,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
   EPISODE_FORECAST_FEATURE_IDS
@@ -271,4 +272,24 @@ test('cold-start issuance remains serializable and fail-closed',async()=>{
   assert.doesNotThrow(()=>JSON.stringify(out.issuance));
   const serialized=JSON.stringify(out.issuance);
   assert.doesNotMatch(serialized,/Infinity|NaN/);
+});
+
+test('only matured raw horizon coverage outcomes feed the bootstrap calibrator',async()=>{
+  const r=await runtime();
+  const position={
+    entryMode:'COVERAGE_PROBE',coverageEvidenceTier:'BOOTSTRAP_RAW_FORECAST',coverageDataSafety:'NORMAL',horizonOnlyExit:true,
+    coverageHorizonGate:'ABSTAIN',coverageKey:'coverage-1',symbol:'BTCUSDT',
+    status:'CLOSED',closeReason:'HORIZON_EXIT',execution:'SHADOW_ONLY',canExecuteLive:false,
+    coverageProbabilityVector:{up:.50,down:.30,flat:.20},coverageFlatThreshold:.001,
+    coverageForecastAsOf:1000,coverageRegimeId:'UNKNOWN',horizonMs:300_000,
+    coverageReferencePrice:100,entryPrice:100,exitPrice:101,closedAt:301_000
+  };
+  const learned=recordCoverageProbeCalibration(r,{position,closeReason:'HORIZON_EXIT',resolvedPrice:101});
+  assert.equal(learned.recorded,true);
+  assert.equal(r.engine.calibration.rows.length,1);
+  assert.ok(Math.abs(r.engine.calibration.rows[0].actualReturn-.01)<1e-12);
+  assert.equal(r.engine.calibration.rows[0].quality,.5);
+  assert.equal(recordCoverageProbeCalibration(r,{position,closeReason:'HORIZON_EXIT',resolvedPrice:101}).reason,'DUPLICATE_OUTCOME');
+  assert.equal(recordCoverageProbeCalibration(r,{position:{...position,closeReason:'STOP_LOSS'},closeReason:'STOP_LOSS',resolvedPrice:101}).reason,'NOT_HORIZON_RESOLVED');
+  assert.equal(recordCoverageProbeCalibration(r,{position:{...position,coverageEvidenceTier:'CALIBRATED'},closeReason:'HORIZON_EXIT',resolvedPrice:101}).reason,'NOT_RAW_BOOTSTRAP_EVIDENCE');
 });

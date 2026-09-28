@@ -2,6 +2,21 @@ import { Worker } from 'node:worker_threads';
 
 export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1';
 
+export function forecastHistoryProgressAt(historyRows){
+  let latest=0;
+  for(const row of Array.isArray(historyRows)?historyRows:[]){
+    for(const value of [row?.timestamp,row?.availableAt,row?.resolvedAt]){
+      const n=Number(value);
+      if(Number.isFinite(n)&&n>latest) latest=n;
+    }
+  }
+  return latest;
+}
+
+export function forecastHistoryHasAdvanced(historyRows,previousProgressAt=0){
+  return forecastHistoryProgressAt(historyRows)>Math.max(0,Number(previousProgressAt)||0);
+}
+
 export function runForecastShadowEvaluationWorker(payload,{
   timeoutMs=8*60_000,
   maxOldGenerationSizeMb=256

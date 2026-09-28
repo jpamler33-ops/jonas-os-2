@@ -203,7 +203,7 @@ function restoreEngine(engine,snapshot){
 }
 
 function createRuntimeState(filePath,config,opts={}){
-  const engine=new ProbabilisticForecastEngine(config);
+  const engine=new ProbabilisticForecastEngine(config,{maxHistoryRows:opts.maxHistoryRows??8_000});
   const journal=new ForecastLearningJournal(engine,{
     maxEntries:opts.maxJournalEntries??100_000,
     maxResolutionDelayRatio:opts.maxResolutionDelayRatio??.25
@@ -228,10 +228,11 @@ function createRuntimeState(filePath,config,opts={}){
 
 export async function openInstitutionalForecastRuntime(filePath,{
   config=DEFAULT_INSTITUTIONAL_FORECAST_CONFIG,
+  maxHistoryRows=8_000,
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},opts);
+  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows});
 
   try{
     const raw=await readFile(filePath,'utf8');
@@ -306,6 +307,47 @@ export function seedInstitutionalForecastRuntimeFromEpisodes(runtime,episodes){
     blockedFutureOutcome:built.blockedFutureOutcome,
     historySize:after
   };
+}
+
+/**
+ * Feed a matured, horizon-only raw coverage probe into probability calibration.
+ * These rows are isolated from portfolio performance and are admitted only when
+ * the entry was a point-in-time NORMAL-safety bootstrap probe and actually
+ * exited at its stated horizon.
+ */
+export function recordCoverageProbeCalibration(runtime,{position,closeReason,resolvedPrice}={}){
+  const no=(reason)=>({recorded:false,reason,execution:'SHADOW_ONLY',canExecuteLive:false});
+  if(!runtime?.healthy||!runtime?.engine?.calibration) return no('RUNTIME_UNHEALTHY');
+  if(String(position?.entryMode||'').toUpperCase()!=='COVERAGE_PROBE') return no('NOT_COVERAGE_PROBE');
+  if(String(position?.coverageEvidenceTier||'').toUpperCase()!=='BOOTSTRAP_RAW_FORECAST') return no('NOT_RAW_BOOTSTRAP_EVIDENCE');
+  if(String(position?.coverageDataSafety||'').toUpperCase()!=='NORMAL') return no('DATA_SAFETY_NOT_NORMAL');
+  if(position?.horizonOnlyExit!==true) return no('NOT_HORIZON_ONLY');
+  if(String(position?.coverageHorizonGate||'').toUpperCase()==='INSUFFICIENT') return no('HORIZON_INSUFFICIENT');
+  if(String(position?.status||'').toUpperCase()!=='CLOSED'||String(closeReason||position?.closeReason||'').toUpperCase()!=='HORIZON_EXIT') return no('NOT_HORIZON_RESOLVED');
+  if(String(position?.execution||'')!=='SHADOW_ONLY'||position?.canExecuteLive!==false) return no('EXECUTION_INVARIANT_INVALID');
+  const p=position?.coverageProbabilityVector||{};
+  const up=finiteOrNull(p.up),down=finiteOrNull(p.down),flat=finiteOrNull(p.flat);
+  const sum=Number(up)+Number(down)+Number(flat);
+  const referencePrice=finiteOrNull(position?.coverageReferencePrice),observedPrice=finiteOrNull(resolvedPrice);
+  const asOf=finiteOrNull(position?.coverageForecastAsOf),resolvedAt=finiteOrNull(position?.closedAt);
+  const horizonMs=finiteOrNull(position?.horizonMs),threshold=finiteOrNull(position?.coverageFlatThreshold);
+  if([up,down,flat,referencePrice,observedPrice,asOf,resolvedAt,horizonMs,threshold].some(x=>x==null)||up<0||down<0||flat<0||Math.abs(sum-1)>.001||referencePrice<=0||observedPrice<=0||resolvedAt<asOf+horizonMs) return no('OUTCOME_OR_PROBABILITY_INVALID');
+  const id='coverage-bootstrap:'+String(position.coverageKey||position.entryOrderId||position.positionId||'');
+  if(id.endsWith(':')) return no('COVERAGE_ID_MISSING');
+  if(runtime.engine.calibration.keys?.has(id)) return no('DUPLICATE_OUTCOME');
+  runtime.engine.calibration.add({
+    id,
+    symbol:String(position.symbol||'').toUpperCase(),
+    horizonMs,
+    regimeId:String(position.coverageRegimeId||'UNKNOWN'),
+    predictedUp:up,predictedDown:down,predictedFlat:flat,
+    actualReturn:observedPrice/referencePrice-1,
+    flatThreshold:threshold,
+    resolvedAt,
+    quality:.5,
+    source:'SHADOW_COVERAGE_RAW_BOOTSTRAP'
+  });
+  return {recorded:true,id,quality:.5,evidenceTier:'BOOTSTRAP_RAW_FORECAST',execution:'SHADOW_ONLY',canExecuteLive:false};
 }
 
 export function issueInstitutionalForecast(runtime,{

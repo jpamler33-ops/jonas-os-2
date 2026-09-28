@@ -123,16 +123,21 @@ export function deriveCoverageCurriculumCandidates(issuance,{
       expectedReturn,
       directionalProbability,
       probabilityEdge:directionalProbability-oppositeProbability,
+      probabilityVector:p,
+      flatThreshold:finite(h?.flatThreshold),
       admissionGate:String(issuance.admission?.gate||'ABSTAIN').toUpperCase(),
       horizonGate,
       calibrationStatus,
+      regimeId:String(issuance?.trace?.regimeId||issuance?.regimeId||'UNKNOWN'),
       coverageEvidenceTier:
         calibrationStatus==='CALIBRATED'&&['PASS','CAUTION'].includes(horizonGate)
           ?'CALIBRATED'
           :'BOOTSTRAP_RAW_FORECAST',
       assetClass:String(assetClass||'CORE').toUpperCase(),
+      dataSafety:safety,
       issuanceId:String(issuance.issuanceId||''),
       forecastFingerprint:String(issuance.forecastFingerprint||issuance.forecast?.fingerprint||''),
+      referencePrice:finite(issuance.price),
       generatedAt
     };
     candidates.push(freeze({

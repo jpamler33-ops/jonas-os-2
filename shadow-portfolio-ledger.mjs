@@ -114,8 +114,16 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     coverageSlotEnd:finite(order.strategyMeta?.coverageSlotEnd),
     coveragePurpose:String(order.strategyMeta?.coveragePurpose||''),
     coverageEvidenceTier:String(order.strategyMeta?.coverageEvidenceTier||''),
+    coverageDataSafety:String(order.strategyMeta?.coverageDataSafety||'UNKNOWN'),
     coverageCalibrationStatus:String(order.strategyMeta?.coverageCalibrationStatus||''),
     coverageHorizonGate:String(order.strategyMeta?.coverageHorizonGate||''),
+    coverageProbabilityVector:order.strategyMeta?.coverageProbabilityVector&&typeof order.strategyMeta.coverageProbabilityVector==='object'
+      ?{up:finite(order.strategyMeta.coverageProbabilityVector.up),down:finite(order.strategyMeta.coverageProbabilityVector.down),flat:finite(order.strategyMeta.coverageProbabilityVector.flat)}
+      :null,
+    coverageFlatThreshold:finite(order.strategyMeta?.coverageFlatThreshold),
+    coverageForecastAsOf:finite(order.strategyMeta?.coverageForecastAsOf),
+    coverageReferencePrice:finite(order.strategyMeta?.coverageReferencePrice),
+    coverageRegimeId:String(order.strategyMeta?.coverageRegimeId||'UNKNOWN'),
     horizonOnlyExit:order.strategyMeta?.horizonOnlyExit===true,
     challengerRuleId:String(order.strategyMeta?.challengerRuleId||''),
     challengerDecisionKey:String(order.strategyMeta?.challengerDecisionKey||''),

@@ -52,6 +52,11 @@ import {
   deriveMandatoryShadowDiscovery, MANDATORY_SHADOW_DISCOVERY_VERSION
 } from './mandatory-shadow-discovery.mjs';
 import {
+  createTradeDiscoveryDiagnostics, recordTradeDiscoveryScan, summarizeTradeDiscovery,
+  renderTradeDiscoveryDiagnostics, countOpenDiscoveryPositions,
+  isMandatoryDiscoveryFallbackReasonAllowed
+} from './trade-discovery-diagnostics.mjs';
+import {
   deriveCoverageCurriculumCandidates, coverageCurriculumSummary,
   SHADOW_COVERAGE_CURRICULUM_VERSION, DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
@@ -108,6 +113,7 @@ import {
   seedInstitutionalForecastRuntimeFromEpisodes,
   issueInstitutionalForecast,
   observeInstitutionalForecastRuntime,
+  recordCoverageProbeCalibration,
   observeInstitutionalForecastOutcomePoint,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
@@ -156,7 +162,7 @@ const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADO
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
 const shadowCompetitionWorkerTimeoutMs = Math.max(60_000, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_TIMEOUT_MS || 8*60_000));
-const shadowCompetitionWorkerHeapMb = Math.max(128, Math.min(384, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_HEAP_MB || 256)));
+const shadowCompetitionWorkerHeapMb = Math.max(128, Math.min(192, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_HEAP_MB || 160)));
 const shadowCompetitionServingWorkerEnabled = String(process.env.TCX_SHADOW_COMPETITION_SERVING_WORKER_ENABLED || '0') === '1';
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
@@ -180,7 +186,6 @@ const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
 const mandatoryShadowDiscoveryEnabled = String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
 const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 12));
-const mandatoryAbstainProbeNotional = Math.max(1, Number(process.env.TCX_MANDATORY_ABSTAIN_PROBE_NOTIONAL || 5));
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
 const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
 const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
@@ -247,6 +252,7 @@ const witnessCache = new Map();
 const radarCache = new Map();
 const researchAlertContextCache = new Map();
 const observability = createObservability({sampleLimit:500});
+const tradeDiscoveryDiagnostics=createTradeDiscoveryDiagnostics({maxSymbols:32});
 const marketDataProvider=createMarketDataProvider({
   binanceBases,
   okxBase,
@@ -350,6 +356,7 @@ const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
 const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
 const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile,{
+  maxHistoryRows:Math.max(2000,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||8000)))),
   maxJournalEntries:forecastJournalMaxEntries,
   maxAuditEvents:forecastAuditMaxEvents,
   maxIssuances:forecastMaxIssuances,
@@ -1364,14 +1371,7 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
   if(autoResult?.placed===true){
     return {placed:false,eligible:false,reason:'STANDARD_SHADOW_TRADE_ALREADY_PLACED',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
-  const exploreAfter=new Set([
-    'EXPECTED_RETURN_TOO_SMALL',
-    'DIRECTIONAL_PROBABILITY_TOO_LOW',
-    'PROBABILITY_EDGE_TOO_LOW',
-    'NO_ADMITTED_DIRECTIONAL_HORIZON',
-    'ADMISSION_ABSTAIN'
-  ]);
-  if(!exploreAfter.has(String(autoResult?.reason||''))){
+  if(!isMandatoryDiscoveryFallbackReasonAllowed(autoResult?.reason)){
     return {
       placed:false,eligible:false,
       reason:'DISCOVERY_RESPECTS_STANDARD_BLOCK_'+String(autoResult?.reason||'UNKNOWN'),
@@ -1404,8 +1404,13 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
   if(todaySymbol>=mandatoryShadowDiscoveryMaxPerSymbolDay){
     return {placed:false,eligible:false,reason:'DISCOVERY_DAILY_SYMBOL_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
-  const openExploration=(shadowPortfolioLedger.positions||[]).filter(p=>p.status==='OPEN'&&p.exploration===true);
-  if(openExploration.length>=mandatoryShadowDiscoveryMaxOpenTotal){
+  // Coverage probes are a separate curriculum and do not consume the smaller
+  // mandatory-discovery allocation. The legacy flag includes both categories.
+  const openExplorationCount=countOpenDiscoveryPositions(shadowPortfolioLedger.positions||[]);
+  const openExploration=(shadowPortfolioLedger.positions||[]).filter(p=>
+    p.status==='OPEN'&&['EXPLORATION','ABSTAIN_PROBE'].includes(String(p.entryMode||'').toUpperCase())
+  );
+  if(openExplorationCount>=mandatoryShadowDiscoveryMaxOpenTotal){
     return {placed:false,eligible:false,reason:'DISCOVERY_GLOBAL_OPEN_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
   if(openExploration.some(p=>p.symbol===symbol)){
@@ -1414,20 +1419,16 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
 
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const assetClass=assetClassForSymbol(symbol);
-  const abstainProbe=String(autoResult?.reason||'')==='ADMISSION_ABSTAIN';
   const decision=deriveMandatoryShadowDiscovery(issuance,qualityModel,{
     now,
     assetClass,
-    notionalQuote:mandatoryShadowDiscoveryNotional,
-    allowAbstainProbe:abstainProbe,
-    abstainProbeNotionalQuote:mandatoryAbstainProbeNotional
+    notionalQuote:mandatoryShadowDiscoveryNotional
   });
   if(!decision.eligible) return {...decision,placed:false};
   if(shadowOrders.some(o=>o?.strategyMeta?.discoveryDecisionKey===decision.decisionKey)){
     return {...decision,placed:false,reason:'DISCOVERY_DECISION_ALREADY_TRADED'};
   }
 
-  const probeMode=decision.entryMode==='ABSTAIN_PROBE';
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
@@ -1435,10 +1436,10 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     notionalQuote:decision.notionalQuote,
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
-      role:probeMode?'ABSTAIN_PROBE_ENTRY':'EXPLORATION_ENTRY',
+      role:'EXPLORATION_ENTRY',
       entryMode:decision.entryMode,
       assetClass,
-      strategyLane:[probeMode?'ABSTAIN_PROBE':'EXPLORE',decision.symbol,decision.horizonId,decision.side].join(':'),
+      strategyLane:['EXPLORE',decision.symbol,decision.horizonId,decision.side].join(':'),
       discoveryVersion:MANDATORY_SHADOW_DISCOVERY_VERSION,
       discoveryDecisionKey:decision.decisionKey,
       discoveryScore:decision.discoveryScore,
@@ -1554,8 +1555,14 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false}={}){
         coverageSlotEnd:candidate.slotEnd,
         coveragePurpose:candidate.purpose,
         coverageEvidenceTier:candidate.coverageEvidenceTier,
+        coverageDataSafety:candidate.dataSafety,
         coverageCalibrationStatus:candidate.calibrationStatus,
         coverageHorizonGate:candidate.horizonGate,
+        coverageProbabilityVector:candidate.probabilityVector,
+        coverageFlatThreshold:candidate.flatThreshold,
+        coverageForecastAsOf:candidate.generatedAt,
+        coverageReferencePrice:candidate.referencePrice,
+        coverageRegimeId:candidate.regimeId,
         horizonOnlyExit:true,
         decisionKey:candidate.decisionKey,
         issuanceId:candidate.issuanceId,
@@ -2126,6 +2133,7 @@ function helpText() {
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
     '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy · /coach · /league',
+    '/why_not_trade · zeigt die letzten Discovery-Gates und Blocker',
     '/oms · /sorstatus · /venuequality · /executionlab','',
     'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
   ].join('\n');
@@ -3640,7 +3648,35 @@ async function showShadowPortfolio(chatId,messageId=null){
   );
   const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
     [{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
+    [{text:'🔎 Warum kein Trade?',callback_data:'cmdrun:why_not_trade'}],
     [{text:'🏆 Capital Academy',callback_data:'home:academy'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],
+    [{text:'🏠 Start',callback_data:'home'}]
+  ]}};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
+async function showTradeDiscoveryDiagnostics(chatId,messageId=null){
+  const now=Date.now();
+  const positions=shadowPortfolioLedger.positions||[];
+  const openStandardPositions=positions.filter(p=>p.status==='OPEN'&&!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())).length;
+  const runtime={
+    omsStatus:shadowOmsHealthy?'HEALTHY':'UNHEALTHY',
+    omsFilled:shadowOrders.filter(o=>o.status==='FILLED').length,
+    omsActive:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
+    openStandardPositions,
+    openDiscoveryPositions:countOpenDiscoveryPositions(positions),
+    discoveryOpenCap:mandatoryShadowDiscoveryMaxOpenTotal,
+    reconciliation:shadowPortfolioHealthy
+      ?(reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now}).changed?'pending correction':'in sync')
+      :'unhealthy',
+    reconciledAt:shadowPortfolioLedger.updatedAt||now
+  };
+  const summary=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now,runtime});
+  const text=renderTradeDiscoveryDiagnostics(summary);
+  const payload={chat_id:chatId,text,reply_markup:{inline_keyboard:[
+    [{text:'🔄 Aktualisieren',callback_data:'cmdrun:why_not_trade'}],
+    [{text:'💼 Shadow-Portfolio',callback_data:'home:portfolio'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],
     [{text:'🏠 Start',callback_data:'home'}]
   ]}};
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
@@ -4801,7 +4837,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   });
 
   if(silent){
-    return {
+    const silentResult={
       ok:true,
       skipped:false,
       duplicate:issued.duplicate,
@@ -4858,6 +4894,55 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
       strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null
     };
+    const admissionGate=String(issuance.admission?.gate||'ABSTAIN').toUpperCase();
+    const isMeme=assetClassForSymbol(symbol)==='MEME';
+    const expectedThreshold=admissionGate==='CAUTION'
+      ?Math.max(isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn,.0035)
+      :(isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn);
+    const directionThreshold=admissionGate==='CAUTION'
+      ?Math.max(isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability,.62)
+      :(isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability);
+    const edgeThreshold=admissionGate==='CAUTION'
+      ?Math.max(isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge,.15)
+      :(isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge);
+    const horizons=(issuance.forecast?.horizons||[]).map(h=>{
+      const direction=String(h?.direction||'').toUpperCase();
+      const probabilities=h?.display?.probabilities||h?.probabilities||{};
+      const directional=direction==='UP'?Number(probabilities.up):direction==='DOWN'?Number(probabilities.down):NaN;
+      const opposite=direction==='UP'?Number(probabilities.down):direction==='DOWN'?Number(probabilities.up):NaN;
+      const expectedReturn=Number(h?.expectedReturn);
+      return {
+        horizonId:String(h?.horizonId||''),
+        gate:String(h?.gate||'UNKNOWN').toUpperCase(),
+        calibration:String(h?.calibration?.status||'UNKNOWN').toUpperCase(),
+        direction,
+        expectedReturn:Number.isFinite(expectedReturn)?expectedReturn:null,
+        directionalProbability:Number.isFinite(directional)?directional:null,
+        probabilityEdge:Number.isFinite(directional)&&Number.isFinite(opposite)?directional-opposite:null,
+        expectedReturnPass:Number.isFinite(expectedReturn)&&Math.abs(expectedReturn)>=expectedThreshold,
+        directionProbabilityPass:Number.isFinite(directional)&&directional>=directionThreshold,
+        probabilityEdgePass:Number.isFinite(directional)&&Number.isFinite(opposite)&&directional-opposite>=edgeThreshold
+      };
+    });
+    recordTradeDiscoveryScan(tradeDiscoveryDiagnostics,{
+      symbol,scannedAt:Date.now(),forecastAvailable:true,
+      forecastGate:String(issuance.gate||'UNKNOWN').toUpperCase(),
+      admissionGate,
+      probabilityDisplayAllowed:issuance.probabilityDisplayAllowed===true,
+      dataSafety:String(issuance.trace?.safety?.state||'UNKNOWN').toUpperCase(),
+      autoShadowTradePlaced:silentResult.autoShadowTradePlaced,
+      autoShadowTradeEligible:silentResult.autoShadowTradeEligible,
+      autoShadowTradeReason:silentResult.autoShadowTradeReason,
+      autoShadowOrderStatus:autoShadowTrade?.status||null,
+      coverageCurriculumPlaced:silentResult.coverageCurriculumPlaced,
+      coverageCurriculumReason:silentResult.coverageCurriculumReason,
+      mandatoryDiscoveryPlaced:silentResult.mandatoryDiscoveryPlaced,
+      mandatoryDiscoveryEligible:silentResult.mandatoryDiscoveryEligible,
+      mandatoryDiscoveryReason:silentResult.mandatoryDiscoveryReason,
+      mandatoryDiscoveryOrderStatus:mandatoryDiscoveryRun?.status||null,
+      horizons
+    });
+    return silentResult;
   }
 
   const payload={text,reply_markup:forecastProductKeyboard(symbol)};
@@ -4956,6 +5041,7 @@ const readCommandHandlers=createReadCommandHandlers({
   showChaos,
   showOms,
   showShadowPortfolio,
+  showTradeDiscoveryDiagnostics,
   showShadowTradeStats,
   showShadowCapitalAcademy,
   showShadowTrainingCoach,
@@ -5052,6 +5138,7 @@ async function handle(update) {
       await showCommandMarkets(chatId,messageId,a.command); await ack(q.id); return;
     }
     if (a.kind === 'COMMAND_RUN') {
+      if(a.command==='why_not_trade') { await showTradeDiscoveryDiagnostics(chatId,messageId); await ack(q.id); return; }
       if(!symbolOk(a.symbol)){ await ack(q.id,'Unbekannter Markt'); return; }
       if(a.command==='forecast') await showForecast(chatId,a.symbol,messageId);
       else if(a.command==='intelligence') { await showIntelligence(chatId,a.symbol); }
@@ -5539,6 +5626,18 @@ async function shadowPortfolioWatcher(){
           const closedPosition=closeShadowPosition(marked.position,{reason:marked.trigger,at:Number(book.availableAt||Date.now())});
           shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,closedPosition);
           changed=true;closed++;
+          if(String(closedPosition.entryMode||'').toUpperCase()==='COVERAGE_PROBE'){
+            const bootstrap=recordCoverageProbeCalibration(forecastRuntime,{position:closedPosition,closeReason:marked.trigger,resolvedPrice:Number(book.mid)});
+            if(bootstrap.recorded){
+              await persistForecastRuntime('coverage-bootstrap-calibration');
+              console.log('coverage bootstrap outcome learned',JSON.stringify({
+                symbol:closedPosition.symbol,horizonId:closedPosition.horizonId,
+                calibrationId:bootstrap.id,quality:bootstrap.quality,
+                historyRows:forecastRuntime.engine.calibration.rows.length,
+                execution:'SHADOW_ONLY',canExecuteLive:false
+              }));
+            }
+          }
           const academyAfter=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Number(closedPosition.closedAt||Date.now()),timeZone:shadowStatsTimeZone});
           if(auditLedger.healthy&&academyAfter.achievedLevel!==academyBefore.achievedLevel){
             await appendInstitutionalAudit('TCX_SHADOW_ACADEMY_STAGE_CHANGE',{
@@ -5974,7 +6073,15 @@ async function autoLearnForecastWatcher() {
         issued,skipped,failed,
         symbols:autoLearnSymbols.length,
         nextSweepMs:autoLearnSweepMs,
-        forecastIntervalMs:autoLearnForecastMs
+        forecastIntervalMs:autoLearnForecastMs,
+        memory:(()=>{const m=process.memoryUsage();return {
+          heapUsedMb:Math.round(m.heapUsed/1024/1024),
+          heapTotalMb:Math.round(m.heapTotal/1024/1024),
+          rssMb:Math.round(m.rss/1024/1024),
+          externalMb:Math.round(m.external/1024/1024),
+          forecastHistoryRows:forecastRuntime.engine.historySize(),
+          forecastJournalRows:forecastRuntime.journal.entries.length
+        };})()
       }));
     }
     await sleep(autoLearnSweepMs);
@@ -6027,7 +6134,21 @@ async function shadowCompetitionWatcher(){
     const started=Date.now();
     try{
       if(shadowCompetitionEnabled&&shadowCompetitionServingWorkerEnabled&&forecastRuntime.healthy){
-        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY);
+        const memory=process.memoryUsage();
+        const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
+        const rssMb=Math.round(memory.rss/1024/1024);
+        // Worker input is structured-cloned by Node. Keep it small and defer
+        // heavy evaluation while the Telegram serving process has low headroom.
+        if(heapUsedMb>=300||rssMb>=900){
+          console.warn('shadow competition deferred for memory headroom',JSON.stringify({
+            heapUsedMb,rssMb,historyRows:forecastRuntime.engine.historySize(),
+            threshold:{heapUsedMb:300,rssMb:900}
+          }));
+          recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'DEFERRED_MEMORY_PRESSURE'});
+          await sleep(shadowCompetitionEvalMs);
+          continue;
+        }
+        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY,{limit:2000});
         const cfg=forecastRuntime.engine.configSnapshot();
         const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
         const heapBefore=Math.round(process.memoryUsage().heapUsed/1024/1024);
@@ -6290,7 +6411,14 @@ const server = http.createServer((req,res) => {
         state:shadowCompetitionServingWorkerEnabled?'ENABLED':'PAUSED_FOR_SERVING_STABILITY',
         timeoutMs:shadowCompetitionWorkerTimeoutMs,
         maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb,
-        mainHeapUsedMb:Math.round(process.memoryUsage().heapUsed/1024/1024)
+        memory:(()=>{const m=process.memoryUsage();return {
+          heapUsedMb:Math.round(m.heapUsed/1024/1024),
+          heapTotalMb:Math.round(m.heapTotal/1024/1024),
+          rssMb:Math.round(m.rss/1024/1024),
+          externalMb:Math.round(m.external/1024/1024),
+          forecastHistoryRows:forecastRuntime.engine.historySize(),
+          forecastJournalRows:forecastRuntime.journal.entries.length
+        };})()
       },
       telegramPolling:{
         dispatcher:telegramUpdateDispatcher.snapshot(),

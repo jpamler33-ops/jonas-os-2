@@ -11,6 +11,7 @@ import {
   experimentGovernorSummary
 } from './forecast-experiment-governor.mjs';
 import { sha256 } from './institutional-kernel.mjs';
+import { forecastHistoryProgressAt, forecastHistoryHasAdvanced } from './forecast-shadow-evaluation-client.mjs';
 
 function run(input){
   const {
@@ -56,10 +57,11 @@ function run(input){
     competition=next;
   }
 
-  const previousRows=Number(competition?.evaluatedHistoryRows??initialCompetition?.evaluatedHistoryRows??0);
+  const previousProgressAt=Number(competition?.evaluatedHistoryThroughAt??initialCompetition?.evaluatedHistoryThroughAt??0);
+  const historyProgressAt=forecastHistoryProgressAt(history);
   if(
     competition?.status==='ACTIVE'&&
-    history.length>previousRows
+    forecastHistoryHasAdvanced(history,previousProgressAt)
   ){
     competition=evaluateShadowCompetition(competition,{
       historyRows:history,
@@ -70,7 +72,7 @@ function run(input){
     evaluated=true;
   }
 
-  competition={...competition,evaluatedHistoryRows:history.length};
+  competition={...competition,evaluatedHistoryRows:history.length,evaluatedHistoryThroughAt:historyProgressAt};
 
   if(!governor&&competition?.status==='ACTIVE'){
     governor=createExperimentGovernor({
