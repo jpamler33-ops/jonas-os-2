@@ -72,7 +72,10 @@ function add(map,key,row){
   if(Number(row.realizedNetPnlQuote||0)>0) x.wins++;
   x.returns.push(Number(row.realizedReturnPct||0));
   x.pnls.push(Number(row.realizedNetPnlQuote||0));
-  if(row.exploration===true||String(row.entryMode||'').toUpperCase()==='EXPLORATION') x.explorationTrades++;
+  if(
+    row.exploration===true||
+    ['EXPLORATION','ABSTAIN_PROBE'].includes(String(row.entryMode||'').toUpperCase())
+  ) x.explorationTrades++;
   map.set(key,x);
 }
 function summarize(raw,{priorWinRate=.5,priorStrength=12,returnPriorStrength=10}={}){
@@ -134,7 +137,10 @@ export function buildShadowTradeQualityModel(ledger,{
     version:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
     asOf:Number(asOf),
     samples:closed.length,
-    explorationSamples:closed.filter(p=>p.exploration===true||String(p.entryMode||'').toUpperCase()==='EXPLORATION').length,
+    explorationSamples:closed.filter(p=>
+      p.exploration===true||
+      ['EXPLORATION','ABSTAIN_PROBE'].includes(String(p.entryMode||'').toUpperCase())
+    ).length,
     groups,
     global,
     execution:'SHADOW_ONLY',
