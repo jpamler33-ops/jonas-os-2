@@ -634,6 +634,8 @@ async function flushForecastRuntimePersistence(force=false){
       console.log('forecast runtime snapshot persisted',JSON.stringify({
         reason,durationMs:Date.now()-started,
         bytes:snapshotMeta?.bytes||null,
+        maxSnapshotBytes:snapshotMeta?.maxSnapshotBytes||forecastRuntime.maxSnapshotBytes||null,
+        snapshotBudgetUtilization:snapshotMeta?.bytes&&forecastRuntime.maxSnapshotBytes?snapshotMeta.bytes/forecastRuntime.maxSnapshotBytes:null,
         heapUsedMb:Math.round(m.heapUsed/1024/1024),
         historyRows:forecastRuntime.engine.historySize(),
         journalRows:forecastRuntime.journal.entries.length,
@@ -6611,6 +6613,11 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   coverageCurriculum:coverageCurriculumEnabled?'ENABLED':'DISABLED',
   coverageHorizons:DEFAULT_COVERAGE_HORIZONS.map(x=>x.id),
   autoLearnSymbols:autoLearnSymbols.length,
+  forecastSnapshotPersistence:{
+    lastBytes:forecastRuntime.lastPersistedBytes??null,
+    maxBytes:forecastRuntime.maxSnapshotBytes??null,
+    utilization:forecastRuntime.maxSnapshotBytes&&forecastRuntime.lastPersistedBytes!=null?forecastRuntime.lastPersistedBytes/forecastRuntime.maxSnapshotBytes:null
+  },
   forecastMemoryCaps:{
     history:forecastRuntime.engine.maxHistoryRows,
     journal:forecastJournalMaxEntries,
