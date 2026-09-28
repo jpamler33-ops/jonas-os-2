@@ -22,6 +22,8 @@ export const INSTITUTIONAL_FORECAST_RUNTIME_VERSION='TCX_INSTITUTIONAL_FORECAST_
 const DEFAULT_FORECAST_SNAPSHOT_BYTES=80*1024*1024;
 const DEFAULT_FORECAST_ISSUANCE_STORE_BYTES=64*1024*1024;
 const FORECAST_ISSUANCE_STORE_VERSION='TCX_FORECAST_ISSUANCE_STORE_V1';
+const DEFAULT_FORECAST_TRACKER_ARCHIVE_BYTES=64*1024*1024;
+const FORECAST_TRACKER_ARCHIVE_VERSION='TCX_FORECAST_TRACKER_ARCHIVE_V1';
 function snapshotByteLimit(value){
   const n=Number(value);
   return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_SNAPSHOT_BYTES);
@@ -35,6 +37,16 @@ function issuanceStoreByteLimit(value){
 function issuanceStorePath(filePath,slot){
   if(slot!=='a'&&slot!=='b') throw new Error('invalid forecast issuance store slot');
   return filePath+'.issuances.'+slot+'.json.gz';
+}
+
+function trackerArchiveByteLimit(value){
+  const n=Number(value);
+  return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_TRACKER_ARCHIVE_BYTES);
+}
+
+function trackerArchivePath(filePath,slot){
+  if(slot!=='a'&&slot!=='b') throw new Error('invalid forecast tracker archive slot');
+  return filePath+'.tracker.'+slot+'.json.gz';
 }
 
 function isGzipBuffer(value){
@@ -320,6 +332,13 @@ function createRuntimeState(filePath,config,opts={}){
     issuanceStoreCount:0,
     lastIssuanceStoreBytes:null,
     lastIssuanceStoreLogicalBytes:null,
+    maxTrackerArchiveBytes:trackerArchiveByteLimit(opts.maxTrackerArchiveBytes),
+    trackerArchiveSlot:null,
+    trackerArchiveHash:null,
+    trackerArchiveRecordCount:0,
+    trackerArchiveRevisionCount:0,
+    lastTrackerArchiveBytes:null,
+    lastTrackerArchiveLogicalBytes:null,
     snapshotProfilePending:true,
     lastSnapshotProfile:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
@@ -331,12 +350,13 @@ export async function openInstitutionalForecastRuntime(filePath,{
   maxHistoryRows=8_000,
   maxSnapshotBytes=80*1024*1024,
   maxIssuanceStoreBytes=64*1024*1024,
+  maxTrackerArchiveBytes=64*1024*1024,
   legacyFilePath=null,
   snapshotCompression='json',
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes,maxIssuanceStoreBytes,snapshotCompression});
+  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes,maxIssuanceStoreBytes,maxTrackerArchiveBytes,snapshotCompression});
 
   let sourcePath=filePath;
   try{
@@ -365,7 +385,61 @@ export async function openInstitutionalForecastRuntime(filePath,{
     }
     restoreEngine(runtime.engine,snapshot.engine);
     if(snapshot.journal) runtime.journal.restore(snapshot.journal,{rehydrateLearningMemory:false});
-    if(snapshot.intelligence) runtime.intelligence.restore(snapshot.intelligence,Date.now());
+    let intelligenceSnapshot=snapshot.intelligence?clone(snapshot.intelligence):null;
+    if(snapshot.trackerArchive){
+      const meta=snapshot.trackerArchive;
+      if(meta?.version!==FORECAST_TRACKER_ARCHIVE_VERSION||!['a','b'].includes(meta?.slot)||typeof meta?.sha256!=='string'){
+        throw new Error('invalid forecast tracker archive reference');
+      }
+      const archivePath=trackerArchivePath(sourcePath,meta.slot);
+      const archiveStat=await stat(archivePath);
+      if(archiveStat.size>runtime.maxTrackerArchiveBytes){
+        throw Object.assign(new Error('forecast tracker archive exceeds configured storage safety limit'),{
+          code:'TCX_TRACKER_ARCHIVE_TOO_LARGE',
+          bytes:archiveStat.size,
+          maxTrackerArchiveBytes:runtime.maxTrackerArchiveBytes
+        });
+      }
+      const packed=await readFile(archivePath);
+      const logical=await gunzip(packed);
+      if(logical.length>runtime.maxTrackerArchiveBytes){
+        throw Object.assign(new Error('forecast tracker archive exceeds configured logical safety limit'),{
+          code:'TCX_TRACKER_ARCHIVE_TOO_LARGE',
+          bytes:logical.length,
+          maxTrackerArchiveBytes:runtime.maxTrackerArchiveBytes
+        });
+      }
+      const serializedArchive=logical.toString('utf8');
+      if(sha256(serializedArchive)!==meta.sha256) throw new Error('forecast tracker archive hash mismatch');
+      const archive=JSON.parse(serializedArchive);
+      if(archive?.version!==FORECAST_TRACKER_ARCHIVE_VERSION||!Array.isArray(archive?.records)){
+        throw new Error('unsupported forecast tracker archive');
+      }
+      if(Number.isFinite(Number(meta.recordCount))&&archive.records.length!==Number(meta.recordCount)){
+        throw new Error('forecast tracker archive record count mismatch');
+      }
+      const archiveById=new Map(archive.records.map(row=>[row.id,row]));
+      const trackerRecords=intelligenceSnapshot?.tracker?.records;
+      if(!Array.isArray(trackerRecords)) throw new Error('forecast tracker archive missing tracker records');
+      let restoredRevisionCount=0;
+      for(const record of trackerRecords){
+        const archived=archiveById.get(record.id);
+        if(!archived) throw new Error('forecast tracker archive record missing: '+record.id);
+        record.issueState=clone(archived.issueState);
+        record.revisions=clone(Array.isArray(archived.revisions)?archived.revisions:[]);
+        restoredRevisionCount+=record.revisions.length;
+      }
+      if(Number.isFinite(Number(meta.revisionCount))&&restoredRevisionCount!==Number(meta.revisionCount)){
+        throw new Error('forecast tracker archive revision count mismatch');
+      }
+      runtime.trackerArchiveSlot=meta.slot;
+      runtime.trackerArchiveHash=meta.sha256;
+      runtime.trackerArchiveRecordCount=archive.records.length;
+      runtime.trackerArchiveRevisionCount=restoredRevisionCount;
+      runtime.lastTrackerArchiveBytes=archiveStat.size;
+      runtime.lastTrackerArchiveLogicalBytes=logical.length;
+    }
+    if(intelligenceSnapshot) runtime.intelligence.restore(intelligenceSnapshot,Date.now());
     let persistedIssuances=Array.isArray(snapshot.issuances)?snapshot.issuances:[];
     if(snapshot.issuanceStore){
       const meta=snapshot.issuanceStore;
@@ -529,7 +603,7 @@ function trackerReportForPersistence(report){
   };
 }
 
-function intelligenceForPersistence(snapshot){
+function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={}){
   if(!snapshot?.tracker||!Array.isArray(snapshot.tracker.records)) return snapshot;
   return {
     ...snapshot,
@@ -537,9 +611,22 @@ function intelligenceForPersistence(snapshot){
       ...snapshot.tracker,
       records:snapshot.tracker.records.map(record=>({
         ...record,
-        report:trackerReportForPersistence(record.report)
+        report:trackerReportForPersistence(record.report),
+        ...(externalizeTrackerArchive?{issueState:null,revisions:[]}:null)
       }))
     }
+  };
+}
+
+function trackerArchiveForPersistence(snapshot){
+  const records=Array.isArray(snapshot?.tracker?.records)?snapshot.tracker.records:[];
+  return {
+    version:FORECAST_TRACKER_ARCHIVE_VERSION,
+    records:records.map(record=>({
+      id:record.id,
+      issueState:clone(record.issueState),
+      revisions:clone(Array.isArray(record.revisions)?record.revisions:[])
+    }))
   };
 }
 
@@ -547,14 +634,60 @@ export async function saveInstitutionalForecastRuntime(runtime){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
   await mkdir(path.dirname(runtime.filePath),{recursive:true});
   const payload=institutionalForecastRuntimeSnapshot(runtime);
+  const externalizeArchives=runtime.snapshotCompression==='gzip';
   let persistencePayload={
     ...payload,
-    intelligence:intelligenceForPersistence(payload.intelligence)
+    intelligence:intelligenceForPersistence(payload.intelligence,{externalizeTrackerArchive:externalizeArchives})
   };
   const tmp=runtime.filePath+'.tmp-'+process.pid;
   let issuanceStoreMeta=null;
+  let trackerArchiveMeta=null;
   try{
-    if(runtime.snapshotCompression==='gzip'){
+    if(externalizeArchives){
+      const trackerArchive=trackerArchiveForPersistence(payload.intelligence);
+      const archiveSerialized=JSON.stringify(trackerArchive);
+      const archiveLogicalBytes=Buffer.byteLength(archiveSerialized);
+      const maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
+      if(archiveLogicalBytes>maxTrackerArchiveBytes){
+        throw Object.assign(new Error('forecast tracker archive exceeds configured persistence limit'),{
+          code:'TCX_TRACKER_ARCHIVE_TOO_LARGE_TO_PERSIST',
+          bytes:archiveLogicalBytes,
+          maxTrackerArchiveBytes
+        });
+      }
+      const archiveHash=sha256(archiveSerialized);
+      let slot=runtime.trackerArchiveSlot;
+      let archiveBytes=runtime.lastTrackerArchiveBytes;
+      if(!slot||runtime.trackerArchiveHash!==archiveHash){
+        slot=runtime.trackerArchiveSlot==='a'?'b':'a';
+        const packed=await gzip(Buffer.from(archiveSerialized,'utf8'),{level:1});
+        const archivePath=trackerArchivePath(runtime.filePath,slot);
+        const archiveTmp=archivePath+'.tmp-'+process.pid;
+        try{
+          await writeFile(archiveTmp,packed,{mode:0o600});
+          await rename(archiveTmp,archivePath);
+        }catch(err){
+          await rm(archiveTmp,{force:true}).catch(()=>{});
+          throw err;
+        }
+        archiveBytes=packed.length;
+      }
+      const revisionCount=trackerArchive.records.reduce((n,row)=>n+row.revisions.length,0);
+      trackerArchiveMeta={
+        version:FORECAST_TRACKER_ARCHIVE_VERSION,
+        slot,
+        sha256:archiveHash,
+        recordCount:trackerArchive.records.length,
+        revisionCount,
+        storageBytes:archiveBytes,
+        logicalBytes:archiveLogicalBytes
+      };
+      persistencePayload={
+        ...persistencePayload,
+        trackerArchive:trackerArchiveMeta
+      };
+    }
+    if(externalizeArchives){
       const storePayload={
         version:FORECAST_ISSUANCE_STORE_VERSION,
         issuances:payload.issuances
@@ -634,6 +767,15 @@ export async function saveInstitutionalForecastRuntime(runtime){
       runtime.lastIssuanceStoreBytes=issuanceStoreMeta.storageBytes;
       runtime.lastIssuanceStoreLogicalBytes=issuanceStoreMeta.logicalBytes;
     }
+    if(trackerArchiveMeta){
+      runtime.maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
+      runtime.trackerArchiveSlot=trackerArchiveMeta.slot;
+      runtime.trackerArchiveHash=trackerArchiveMeta.sha256;
+      runtime.trackerArchiveRecordCount=trackerArchiveMeta.recordCount;
+      runtime.trackerArchiveRevisionCount=trackerArchiveMeta.revisionCount;
+      runtime.lastTrackerArchiveBytes=trackerArchiveMeta.storageBytes;
+      runtime.lastTrackerArchiveLogicalBytes=trackerArchiveMeta.logicalBytes;
+    }
     runtime.lastError=null;
     let componentProfile=null;
     if(runtime.snapshotProfilePending){
@@ -648,6 +790,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       encoding,
       compressionRatio:bytes>0?storageBytes/bytes:null,
       issuanceStore:issuanceStoreMeta,
+      trackerArchive:trackerArchiveMeta,
       componentProfile
     };
   }catch(err){
@@ -867,6 +1010,18 @@ export function institutionalForecastRuntimeSummary(runtime){
     snapshotCompressionRatio:Number(runtime?.lastPersistedLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
       ?Number(runtime.lastPersistedBytes)/Number(runtime.lastPersistedLogicalBytes)
       :null,
+    trackerArchive:{
+      version:FORECAST_TRACKER_ARCHIVE_VERSION,
+      slot:runtime?.trackerArchiveSlot??null,
+      recordCount:runtime?.trackerArchiveRecordCount??0,
+      revisionCount:runtime?.trackerArchiveRevisionCount??0,
+      storageBytes:runtime?.lastTrackerArchiveBytes??null,
+      logicalBytes:runtime?.lastTrackerArchiveLogicalBytes??null,
+      maxLogicalBytes:runtime?.maxTrackerArchiveBytes??null,
+      compressionRatio:Number(runtime?.lastTrackerArchiveLogicalBytes)>0&&Number.isFinite(Number(runtime?.lastTrackerArchiveBytes))
+        ?Number(runtime.lastTrackerArchiveBytes)/Number(runtime.lastTrackerArchiveLogicalBytes)
+        :null
+    },
     issuanceStore:{
       version:FORECAST_ISSUANCE_STORE_VERSION,
       slot:runtime?.issuanceStoreSlot??null,
