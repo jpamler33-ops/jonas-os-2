@@ -103,7 +103,11 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     horizonId:String(order.strategyMeta?.horizonId||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
-    exploration:String(order.strategyMeta?.entryMode||'').toUpperCase()==='EXPLORATION',
+    exploration:['EXPLORATION','ABSTAIN_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
+    probeOnly:String(order.strategyMeta?.entryMode||'').toUpperCase()==='ABSTAIN_PROBE',
+    probeAdmissionReasons:Array.isArray(order.strategyMeta?.probeAdmissionReasons)
+      ?order.strategyMeta.probeAdmissionReasons.map(String).slice(0,12)
+      :[],
     challengerRuleId:String(order.strategyMeta?.challengerRuleId||''),
     challengerDecisionKey:String(order.strategyMeta?.challengerDecisionKey||''),
     challengerEngineVersion:String(order.strategyMeta?.challengerEngineVersion||''),
@@ -289,10 +293,10 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const known=new Set(base.positions.map(p=>String(p.entryOrderId)));
   let added=0;
   for(const order of Array.isArray(orders)?orders:[]){
-    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY','LEARNED_CHALLENGER_ENTRY']})||known.has(String(order.id))) continue;
+    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']})||known.has(String(order.id))) continue;
     const p=shadowPositionFromEntryOrder(order,{
       openedAt:finite(order.updatedAt,finite(order.createdAt,now)),
-      acceptedRoles:['ENTRY','EXPLORATION_ENTRY','LEARNED_CHALLENGER_ENTRY']
+      acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']
     });
     base.positions.push(p);
     known.add(String(order.id));
@@ -311,9 +315,43 @@ export function replaceShadowPortfolioPosition(ledger,position){
   return next;
 }
 
+export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
+  const rows=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
+    .filter(p=>String(p.entryMode||'').toUpperCase()==='ABSTAIN_PROBE');
+  const open=rows.filter(p=>p.status==='OPEN');
+  const closed=rows.filter(p=>p.status==='CLOSED');
+  const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
+  const unrealized=open.reduce((s,p)=>s+Number(p.lastMark?.unrealizedNetPnlQuote||0),0);
+  const wins=closed.filter(p=>Number(p.realizedNetPnlQuote||0)>0).length;
+  const losses=closed.filter(p=>Number(p.realizedNetPnlQuote||0)<0).length;
+  const core={
+    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+    asOf:Number(asOf),
+    openPositions:open.length,
+    closedTrades:closed.length,
+    wins,losses,
+    winRate:closed.length?wins/closed.length:null,
+    realizedPnlQuote:realized,
+    unrealizedPnlQuote:unrealized,
+    netPnlQuote:realized+unrealized,
+    active:open.map(p=>({
+      positionId:p.positionId,symbol:p.symbol,side:p.side,entryPrice:p.entryPrice,
+      horizonId:p.horizonId,openedAt:p.openedAt,plannedExitAt:p.plannedExitAt,
+      unrealizedNetPnlQuote:finite(p.lastMark?.unrealizedNetPnlQuote),
+      admissionGate:p.admissionGate,
+      probeAdmissionReasons:p.probeAdmissionReasons||[]
+    })),
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecuteLive:false,
+    meaning:'ABSTAIN_PROBE_LEARNING_ONLY_EXCLUDED_FROM_PRIMARY_PERFORMANCE'
+  };
+  return deepFreeze({...core,fingerprint:sha256(core)});
+}
+
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER');
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const open=positions.filter(p=>p.status==='OPEN');
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
@@ -455,7 +493,7 @@ function tradeStats(rows){
 export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
   const window=periodWindow(period,asOf,timeZone);
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER');
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
   const base=tradeStats(closed);

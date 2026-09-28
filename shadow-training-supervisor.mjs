@@ -179,7 +179,10 @@ export function evaluateShadowTrainingSupervisor(ledger,academy,{
   rollingTrades=100
 }={}){
   const positions=(ledger?.positions||[])
-    .filter(p=>p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED')
+    .filter(p=>
+      p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED'&&
+      !['CHALLENGER','ABSTAIN_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())
+    )
     .sort((a,b)=>Number(a.closedAt||0)-Number(b.closedAt||0));
   const n=Math.max(20,Math.floor(Number(rollingTrades)||100));
   const recent=positions.slice(-n);

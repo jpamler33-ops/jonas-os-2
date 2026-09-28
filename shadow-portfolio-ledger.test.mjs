@@ -13,6 +13,7 @@ import {
   reconcileShadowPortfolioEntries,
   replaceShadowPortfolioPosition,
   shadowPortfolioSummary,
+  shadowResearchProbeSummary,
   shadowPortfolioPeriodStats,
   shadowPortfolioStatistics,
   verifyShadowPortfolioSummary,
@@ -299,4 +300,38 @@ test('portfolio freezes adversarial stress metadata from challenger entry',()=>{
   assert.equal(p.entryStressSamples,20);
   assert.equal(p.entryStressMultiplier,.5);
   assert.deepEqual(p.entryStressFailedChecks,['severeCostPositive']);
+});
+
+
+test('ABSTAIN probe is tracked separately from primary performance',()=>{
+  const e=entry({
+    id:'sh_probe_1',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'ABSTAIN_PROBE_ENTRY',
+      entryMode:'ABSTAIN_PROBE',
+      admissionGate:'ABSTAIN',
+      probeAdmissionReasons:['RESEARCH_VALIDITY_ABSTAIN']
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  assert.equal(l.positions.length,1);
+  assert.equal(l.positions[0].probeOnly,true);
+  assert.equal(l.positions[0].exploration,true);
+  assert.deepEqual(l.positions[0].probeAdmissionReasons,['RESEARCH_VALIDITY_ABSTAIN']);
+
+  let p=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0}).position;
+  p=closeShadowPosition(p,{reason:'TAKE_PROFIT',at:61_000});
+  l=replaceShadowPortfolioPosition(l,p);
+
+  const primary=shadowPortfolioSummary(l,{asOf:70_000});
+  const stats=shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000});
+  const probes=shadowResearchProbeSummary(l,{asOf:70_000});
+  assert.equal(primary.closedTrades,0);
+  assert.equal(stats.trades,0);
+  assert.equal(probes.closedTrades,1);
+  assert.equal(probes.wins,1);
+  assert.ok(probes.realizedPnlQuote>0);
+  assert.equal(probes.action,'ABSTAIN');
+  assert.equal(probes.canExecuteLive,false);
 });

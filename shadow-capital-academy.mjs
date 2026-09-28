@@ -146,7 +146,7 @@ export function evaluateShadowCapitalAcademy(ledger,{asOf=Date.now(),timeZone='E
   const summary=shadowPortfolioSummary(ledger,{asOf});
   const positions=(ledger?.positions||[]).filter(p=>
     p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&
-    String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER'
+    !['CHALLENGER','ABSTAIN_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())
   );
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const open=positions.filter(p=>p.status==='OPEN');

@@ -24,7 +24,7 @@ import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from '.
 import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
-  markShadowPosition, closeShadowPosition, shadowPortfolioSummary,
+  markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary,
   shadowPortfolioPeriodStats, shadowPortfolioStatistics,
   SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
 } from './shadow-portfolio-ledger.mjs';
@@ -176,6 +176,7 @@ const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
 const mandatoryShadowDiscoveryEnabled = String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
 const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 12));
+const mandatoryAbstainProbeNotional = Math.max(1, Number(process.env.TCX_MANDATORY_ABSTAIN_PROBE_NOTIONAL || 5));
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
 const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
 const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
@@ -1348,7 +1349,8 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     'EXPECTED_RETURN_TOO_SMALL',
     'DIRECTIONAL_PROBABILITY_TOO_LOW',
     'PROBABILITY_EDGE_TOO_LOW',
-    'NO_ADMITTED_DIRECTIONAL_HORIZON'
+    'NO_ADMITTED_DIRECTIONAL_HORIZON',
+    'ADMISSION_ABSTAIN'
   ]);
   if(!exploreAfter.has(String(autoResult?.reason||''))){
     return {
@@ -1370,7 +1372,7 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
   const explorationOrders=shadowOrders
     .filter(o=>
       o?.strategyMeta?.strategy===AUTONOMOUS_SHADOW_TRADER_VERSION&&
-      String(o?.strategyMeta?.role||'').toUpperCase()==='EXPLORATION_ENTRY'
+      ['EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY'].includes(String(o?.strategyMeta?.role||'').toUpperCase())
     )
     .sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0));
   const symbol=String(issuance?.symbol||'').toUpperCase();
@@ -1393,16 +1395,20 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
 
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const assetClass=assetClassForSymbol(symbol);
+  const abstainProbe=String(autoResult?.reason||'')==='ADMISSION_ABSTAIN';
   const decision=deriveMandatoryShadowDiscovery(issuance,qualityModel,{
     now,
     assetClass,
-    notionalQuote:mandatoryShadowDiscoveryNotional
+    notionalQuote:mandatoryShadowDiscoveryNotional,
+    allowAbstainProbe:abstainProbe,
+    abstainProbeNotionalQuote:mandatoryAbstainProbeNotional
   });
   if(!decision.eligible) return {...decision,placed:false};
   if(shadowOrders.some(o=>o?.strategyMeta?.discoveryDecisionKey===decision.decisionKey)){
     return {...decision,placed:false,reason:'DISCOVERY_DECISION_ALREADY_TRADED'};
   }
 
+  const probeMode=decision.entryMode==='ABSTAIN_PROBE';
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
@@ -1410,10 +1416,10 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     notionalQuote:decision.notionalQuote,
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
-      role:'EXPLORATION_ENTRY',
-      entryMode:'EXPLORATION',
+      role:probeMode?'ABSTAIN_PROBE_ENTRY':'EXPLORATION_ENTRY',
+      entryMode:decision.entryMode,
       assetClass,
-      strategyLane:['EXPLORE',decision.symbol,decision.horizonId,decision.side].join(':'),
+      strategyLane:[probeMode?'ABSTAIN_PROBE':'EXPLORE',decision.symbol,decision.horizonId,decision.side].join(':'),
       discoveryVersion:MANDATORY_SHADOW_DISCOVERY_VERSION,
       discoveryDecisionKey:decision.decisionKey,
       discoveryScore:decision.discoveryScore,
@@ -1447,6 +1453,8 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     learningValue:decision.learning.learningValue,
     discoveryScore:decision.discoveryScore,
     modelSamples:qualityModel.samples,
+    entryMode:decision.entryMode,
+    admissionGate:decision.admissionGate,
     orderId:order.id,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
@@ -3423,6 +3431,7 @@ async function showShadowPortfolio(chatId,messageId=null){
     await persistShadowPortfolio('ui-reconcile');
   }
   const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
+  const probes=shadowResearchProbeSummary(shadowPortfolioLedger,{asOf:Date.now()});
   const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
   const pctv=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v)*100,2)+'%':'—');
   const lines=[
@@ -3441,6 +3450,10 @@ async function showShadowPortfolio(chatId,messageId=null){
     'Profit Factor: '+(x.profitFactor==null?'noch nicht messbar':fmt(x.profitFactor,2)),
     'Ø PnL je Trade: '+(x.expectancyQuote==null?'—':money(x.expectancyQuote)),
     'Max. Drawdown: '+fmt(x.maxDrawdownQuote,2)+' USDT · '+fmt(x.maxDrawdownPct*100,2)+'%','',
+    'LERN-PROBES (ABSTAIN)',
+    'Offen: '+probes.openPositions+' · abgeschlossen: '+probes.closedTrades+
+      ' · PnL '+money(probes.netPnlQuote),
+    'Diese Probes zählen nicht zur normalen Performance oder Capital Academy.','',
     'AKTIVE TRADES'
   ];
   if(x.active.length){
@@ -3453,7 +3466,18 @@ async function showShadowPortfolio(chatId,messageId=null){
         ' · TP '+fmt(Number(p.takeProfitPct||0)*100,2)+'%'
       );
     }
-  }else lines.push('• aktuell keine offene Position');
+  }else lines.push('• aktuell keine normale offene Position');
+  if(probes.active.length){
+    lines.push('','AKTIVE LERN-PROBES');
+    for(const p of probes.active.slice(0,6)){
+      lines.push(
+        '• '+p.symbol.replace('USDT','/')+' · '+p.side+
+        ' · Entry '+priceText(p.entryPrice)+
+        ' · PnL '+money(p.unrealizedNetPnlQuote)+
+        ' · '+String(p.horizonId||'')
+      );
+    }
+  }
   lines.push(
     '',
     'Exit-Regeln: Stop-Loss · Take-Profit · Prognose-Horizont.',
@@ -4654,6 +4678,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       mandatoryDiscoveryOrderId:mandatoryDiscoveryRun?.orderId||null,
       mandatoryDiscoveryLearningValue:Number(mandatoryDiscoveryRun?.learning?.learningValue||0),
       mandatoryDiscoveryQualityLabel:mandatoryDiscoveryRun?.learning?.qualityLabel||null,
+      mandatoryDiscoveryMode:mandatoryDiscoveryRun?.entryMode||null,
       learnedChallengerPlaced:Number(learnedChallengerRun?.placed||0),
       learnedChallengerEligible:Number(learnedChallengerRun?.eligible||0),
       learnedChallengerReason:learnedChallengerRun?.reason||null,
@@ -5746,6 +5771,9 @@ async function autoLearnForecastWatcher() {
               autoShadowTradeReason:result.autoShadowTradeReason||null,
               autoShadowOrderId:result.autoShadowOrderId||null,
               autoShadowSide:result.autoShadowSide||null,
+              mandatoryDiscoveryPlaced:result.mandatoryDiscoveryPlaced===true,
+              mandatoryDiscoveryReason:result.mandatoryDiscoveryReason||null,
+              mandatoryDiscoveryMode:result.mandatoryDiscoveryMode||null,
               strategyLeaguePlaced:result.strategyLeaguePlaced||0,
               strategyLeagueEligible:result.strategyLeagueEligible||0,
               strategyLeagueAllocationMode:result.strategyLeagueAllocationMode||null,

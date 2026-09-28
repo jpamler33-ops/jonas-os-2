@@ -59,3 +59,67 @@ test('discovery prioritizes learnable candidates without claiming live execution
   assert.equal(d.searchRequired,true);
   assert.equal(d.canExecuteLive,false);
 });
+
+
+test('ABSTAIN probe uses calibrated internal probabilities for learning only',()=>{
+  const x=issuance({
+    admission:{gate:'ABSTAIN',reasons:['RESEARCH_VALIDITY_ABSTAIN']},
+    probabilityDisplayAllowed:false
+  });
+  x.forecast={horizons:x.forecast.horizons.map(h=>({
+    ...h,
+    gate:'ABSTAIN',
+    probabilities:h.display.probabilities,
+    display:{probabilityDisplayAllowed:false,probabilities:null}
+  }))};
+  const model=buildShadowTradeQualityModel({positions:[]},{asOf:2000});
+  const d=deriveMandatoryShadowDiscovery(x,model,{
+    now:2000,
+    assetClass:'CORE',
+    allowAbstainProbe:true,
+    abstainProbeNotionalQuote:5
+  });
+  assert.equal(d.eligible,true);
+  assert.equal(d.entryMode,'ABSTAIN_PROBE');
+  assert.equal(d.probeOnly,true);
+  assert.equal(d.admissionOverrideForLearning,true);
+  assert.equal(d.notionalQuote,5);
+  assert.equal(d.admissionGate,'ABSTAIN');
+  assert.equal(d.reason,'MANDATORY_ABSTAIN_SHADOW_PROBE_CANDIDATE');
+  assert.deepEqual(d.admissionReasons,['RESEARCH_VALIDITY_ABSTAIN']);
+  assert.equal(d.execution,'SHADOW_ONLY');
+  assert.equal(d.action,'ABSTAIN');
+  assert.equal(d.canExecuteLive,false);
+});
+
+test('ABSTAIN forecast stays blocked when probe mode is not enabled',()=>{
+  const x=issuance({
+    admission:{gate:'ABSTAIN',reasons:['RESEARCH_VALIDITY_ABSTAIN']},
+    probabilityDisplayAllowed:false
+  });
+  const model=buildShadowTradeQualityModel({positions:[]},{asOf:2000});
+  const d=deriveMandatoryShadowDiscovery(x,model,{now:2000,assetClass:'CORE'});
+  assert.equal(d.eligible,false);
+  assert.equal(d.reason,'ADMISSION_ABSTAIN');
+});
+
+test('ABSTAIN probe still refuses degraded safety state',()=>{
+  const x=issuance({
+    admission:{gate:'ABSTAIN',reasons:['RESEARCH_VALIDITY_ABSTAIN']},
+    probabilityDisplayAllowed:false,
+    trace:{safety:{state:'DEGRADED'}}
+  });
+  x.forecast={horizons:x.forecast.horizons.map(h=>({
+    ...h,
+    gate:'ABSTAIN',
+    probabilities:h.display.probabilities,
+    display:{probabilityDisplayAllowed:false,probabilities:null}
+  }))};
+  const model=buildShadowTradeQualityModel({positions:[]},{asOf:2000});
+  const d=deriveMandatoryShadowDiscovery(x,model,{
+    now:2000,
+    allowAbstainProbe:true
+  });
+  assert.equal(d.eligible,false);
+  assert.equal(d.reason,'DATA_SAFETY_NOT_NORMAL');
+});
