@@ -102,6 +102,15 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     forecastFingerprint:String(order.strategyMeta?.forecastFingerprint||''),
     horizonId:String(order.strategyMeta?.horizonId||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
+    entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
+    exploration:String(order.strategyMeta?.entryMode||'').toUpperCase()==='EXPLORATION',
+    entryQualityLearnerVersion:String(order.strategyMeta?.entryQualityLearnerVersion||''),
+    entryQualityLabel:String(order.strategyMeta?.entryQualityLabel||'UNKNOWN'),
+    entryQualityScore:finite(order.strategyMeta?.entryQualityScore),
+    entryQualityConfidence:finite(order.strategyMeta?.entryQualityConfidence),
+    entryQualitySamples:finite(order.strategyMeta?.entryQualitySamples),
+    entryLearningValue:finite(order.strategyMeta?.entryLearningValue),
+    entryDiscoveryScore:finite(order.strategyMeta?.entryDiscoveryScore),
     trainingSupervisorVersion:String(order.strategyMeta?.trainingSupervisorVersion||''),
     trainingMissionId:String(order.strategyMeta?.trainingMissionId||''),
     trainingMissionType:String(order.strategyMeta?.trainingMissionType||''),
@@ -258,7 +267,7 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const known=new Set(base.positions.map(p=>String(p.entryOrderId)));
   let added=0;
   for(const order of Array.isArray(orders)?orders:[]){
-    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY']})||known.has(String(order.id))) continue;
+    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY']})||known.has(String(order.id))) continue;
     const p=shadowPositionFromEntryOrder(order,{openedAt:finite(order.updatedAt,finite(order.createdAt,now))});
     base.positions.push(p);
     known.add(String(order.id));
