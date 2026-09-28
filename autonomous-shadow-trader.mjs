@@ -31,7 +31,8 @@ export function deriveAutonomousShadowTrade(issuance,{
   minProbabilityEdge=0.08,
   cautionMinExpectedReturn=0.0035,
   cautionMinDirectionalProbability=0.62,
-  cautionMinProbabilityEdge=0.15
+  cautionMinProbabilityEdge=0.15,
+  horizonSelection='SHORTEST'
 }={}){
   if(!issuance||typeof issuance!=='object') return ineligible('ISSUANCE_MISSING');
   if(
@@ -56,6 +57,7 @@ export function deriveAutonomousShadowTrade(issuance,{
   const ageMs=t-generatedAt;
   if(ageMs>Math.max(1,Number(maxAgeMs)||1)) return ineligible('FORECAST_STALE',{admissionGate,ageMs});
 
+  const selection=String(horizonSelection||'SHORTEST').toUpperCase();
   const horizons=(Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[])
     .filter(h=>
       String(h?.gate||'').toUpperCase()==='PASS'&&
@@ -64,7 +66,18 @@ export function deriveAutonomousShadowTrade(issuance,{
       ['UP','DOWN'].includes(String(h?.direction||'').toUpperCase())&&
       finite(h?.expectedReturn)!=null
     )
-    .sort((a,b)=>Number(a.horizonMs||Infinity)-Number(b.horizonMs||Infinity));
+    .sort((a,b)=>{
+      if(selection==='LONGEST') return Number(b.horizonMs||0)-Number(a.horizonMs||0);
+      const pa=a.display?.probabilities||a.probabilities||{};
+      const pb=b.display?.probabilities||b.probabilities||{};
+      const da=String(a.direction||'').toUpperCase()==='UP'?finite(pa.up):finite(pa.down);
+      const db=String(b.direction||'').toUpperCase()==='UP'?finite(pb.up):finite(pb.down);
+      const oa=String(a.direction||'').toUpperCase()==='UP'?finite(pa.down):finite(pa.up);
+      const ob=String(b.direction||'').toUpperCase()==='UP'?finite(pb.down):finite(pb.up);
+      if(selection==='MAX_EDGE') return Number((db??-Infinity)-(ob??0))-Number((da??-Infinity)-(oa??0));
+      if(selection==='MAX_RETURN') return Math.abs(Number(b.expectedReturn||0))-Math.abs(Number(a.expectedReturn||0));
+      return Number(a.horizonMs||Infinity)-Number(b.horizonMs||Infinity);
+    });
   if(!horizons.length) return ineligible('NO_ADMITTED_DIRECTIONAL_HORIZON',{admissionGate,ageMs});
 
   const h=horizons[0],direction=String(h.direction).toUpperCase();
@@ -109,7 +122,8 @@ export function deriveAutonomousShadowTrade(issuance,{
     directionalProbability,
     oppositeProbability,
     admissionGate,
-    generatedAt
+    generatedAt,
+    horizonSelection:selection
   };
   return freezeDeep({
     ...decisionCore,
