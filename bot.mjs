@@ -8,6 +8,7 @@ import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './port
 import { buildPointInTimeCorrelation, PIT_CORRELATION_ENGINE_VERSION } from './pit-correlation-engine.mjs';
 import { buildLeverageCounterfactualLab, LEVERAGE_COUNTERFACTUAL_LAB_VERSION } from './leverage-counterfactual-lab.mjs';
 import { createFrozenShadowPolicy, SHADOW_POLICY_FREEZE_VERSION } from './shadow-policy-freeze.mjs';
+import { classifyShadowSetup, TRADE_LIFECYCLE_VERSION } from './trade-lifecycle-v2.mjs';
 import { buildTcxProofReport, TCX_PROOF_SYSTEM_VERSION } from './tcx-proof-system.mjs';
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
@@ -1313,6 +1314,8 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
   });
   if(!decision.eligible) return {...decision,placed:false};
+  const setup=classifyShadowSetup({expectedReturn:decision.expectedReturn,probabilityEdge:decision.probabilityEdge,regimeConfidence:Number(issuance?.regime?.confidence||issuance?.regimeConfidence||0),stressRobustnessScore:Number(issuance?.stressRobustnessScore||0),assetClass});
+  if(setup.setupType==='REJECT') return {...decision,placed:false,reason:'ENTRY_SETUP_REJECT',setup,execution:'SHADOW_ONLY'};
   const strategyDnaMemory=buildStrategyDnaMemory(shadowPortfolioLedger);
   const opportunityAllocation=allocateShadowOpportunity(strategyDnaMemory,{
     ...decision,assetClass,symbol:decision.symbol
@@ -1397,7 +1400,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     return {...decision,placed:false,reason:'DAILY_SYMBOL_CAP'};
   }
 
-  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type}});
+  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,setupType:setup.setupType,setupScore:setup.score}});
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
@@ -1406,6 +1409,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
       role:'ENTRY',
+      tradeLifecycleVersion:TRADE_LIFECYCLE_VERSION,
+      setupType:setup.setupType,
+      setupScore:setup.score,
       frozenPolicyFingerprint:frozenPolicy.fingerprint,
       frozenPolicyVersion:frozenPolicy.policyVersion,
       frozenPolicyFreezeVersion:SHADOW_POLICY_FREEZE_VERSION,
@@ -1431,7 +1437,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
       leverageRiskCap:leverageRisk.riskCap,
       leverageRiskFingerprint:leverageRisk.fingerprint,
       opportunityAllocatorVersion:OPPORTUNITY_ALLOCATOR_VERSION,
-      opportunityScore:opportunityAllocation.score,
+      setupType:setup.setupType,
+    setupScore:setup.score,
+    opportunityScore:opportunityAllocation.score,
       opportunityMultiplier:opportunityAllocation.multiplier,
       opportunityReason:opportunityAllocation.reason,
       strategyDnaSamples:opportunityAllocation.samples,
