@@ -24,6 +24,7 @@ export function evaluateOperationalReadiness({
   if(!bool(auditLedger?.healthy)) hard.push('AUDIT_LEDGER_UNHEALTHY');
   if(!bool(marketFabric?.healthy)) hard.push('MARKET_FABRIC_UNHEALTHY');
   if(!bool(releaseRegistry?.healthy)) hard.push('RELEASE_REGISTRY_UNHEALTHY');
+  if(bool(releaseRegistry?.recoveredFromTruncatedTail)) warnings.push('RELEASE_REGISTRY_TRUNCATED_TAIL_RECOVERED');
   if(!runtimeReleaseRecord) hard.push('CURRENT_RUNTIME_RELEASE_NOT_REGISTERED');
   if(!bool(forecastRuntime?.healthy)) hard.push('FORECAST_RUNTIME_UNHEALTHY');
   if(!bool(persistence?.healthy)) hard.push('STATE_PERSISTENCE_UNHEALTHY');

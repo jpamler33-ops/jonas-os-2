@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { open as openFile, mkdir, readFile } from 'node:fs/promises';
+import { open as openFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { canonicalJson, sha256 } from './institutional-kernel.mjs';
 
 const SCHEMA_VERSION=1;
@@ -215,12 +215,47 @@ export function verifyReleaseRegistry(records){
 export async function openReleaseRegistry(filePath){
   await mkdir(path.dirname(filePath),{recursive:true});
   let records=[];
+  let recoveredFromTruncatedTail=false;
+  let backupPath=null;
   try{
     const raw=await readFile(filePath,'utf8');
-    records=raw.split(/\r?\n/).filter(Boolean).map((line,i)=>{
-      try{return JSON.parse(line);}
-      catch{throw new Error(`Invalid release-registry JSON at line ${i+1}`);}
-    });
+    const lines=raw.split(/\r?\n/);
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i];
+      if(!line.trim()) continue;
+      try{records.push(JSON.parse(line));}
+      catch{
+        const trailingOnly=lines.slice(i+1).every(x=>!x.trim());
+        const prefix=verifyReleaseRegistry(records);
+        if(!trailingOnly||!prefix.ok){
+          throw new Error(`Invalid release-registry JSON at line ${i+1}`);
+        }
+        const stamp=Date.now();
+        const tempPath=filePath+'.repair-'+stamp;
+        backupPath=filePath+'.truncated-tail-'+stamp;
+        const repaired=records.length?records.map(canonicalJson).join('\n')+'\n':'';
+        let tempHandle;
+        try{
+          await writeFile(tempPath,repaired,{encoding:'utf8',mode:0o600,flag:'wx'});
+          tempHandle=await openFile(tempPath,'r+');
+          await tempHandle.sync();
+          await tempHandle.close();
+          tempHandle=null;
+          await rename(filePath,backupPath);
+          try{await rename(tempPath,filePath);}
+          catch(err){
+            await rename(backupPath,filePath).catch(()=>{});
+            throw err;
+          }
+          recoveredFromTruncatedTail=true;
+        }catch(err){
+          if(tempHandle) await tempHandle.close().catch(()=>{});
+          await unlink(tempPath).catch(()=>{});
+          throw new Error(`Could not preserve and repair truncated release-registry tail: ${err instanceof Error?err.message:String(err)}`);
+        }
+        break;
+      }
+    }
   }catch(err){
     if(err?.code!=='ENOENT'){
       return {
@@ -237,7 +272,9 @@ export async function openReleaseRegistry(filePath){
     verification,
     records,
     seq:verification.ok?verification.lastSeq:0,
-    tailHash:verification.ok?verification.tailHash:GENESIS
+    tailHash:verification.ok?verification.tailHash:GENESIS,
+    recoveredFromTruncatedTail,
+    backupPath
   };
 }
 
@@ -285,7 +322,9 @@ export function releaseRegistrySummary(registry,currentManifest=null){
     releases:Array.isArray(registry?.records)?registry.records.length:0,
     currentReleaseId:currentManifest?.releaseId||null,
     currentRegistered:Boolean(currentRecord),
-    currentRegistrySeq:currentRecord?.seq??null
+    currentRegistrySeq:currentRecord?.seq??null,
+    recoveredFromTruncatedTail:registry?.recoveredFromTruncatedTail===true,
+    backupPath:registry?.backupPath??null
   };
 }
 

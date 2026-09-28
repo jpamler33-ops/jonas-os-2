@@ -76,6 +76,27 @@ test('release registry detects historical manifest tampering',async()=>{
   assert.equal(reopened.verification.error,'MANIFEST_HASH_MISMATCH');
 });
 
+test('release registry preserves a damaged tail and resumes from verified history',async()=>{
+  const dir=await fixture();
+  const file=path.join(dir,'registry.jsonl');
+  const registry=await openReleaseRegistry(file);
+  const first=await buildRuntimeManifest({rootDir:dir,files:['a.mjs'],config:{x:1}});
+  await registerRuntimeRelease(registry,first,{registeredAt:1});
+  await writeFile(file,'{"seq":2,"manifest":', {flag:'a'});
+
+  const reopened=await openReleaseRegistry(file);
+  assert.equal(reopened.healthy,true);
+  assert.equal(reopened.recoveredFromTruncatedTail,true);
+  assert.match(reopened.backupPath,/\.truncated-tail-/);
+  assert.equal(verifyReleaseRegistry(reopened.records).ok,true);
+  assert.match(await readFile(reopened.backupPath,'utf8'),/"seq":2,"manifest":$/);
+
+  const second=await buildRuntimeManifest({rootDir:dir,files:['a.mjs'],config:{x:2}});
+  const appended=await registerRuntimeRelease(reopened,second,{registeredAt:2});
+  assert.equal(appended.record.seq,2);
+  assert.equal(verifyReleaseRegistry(reopened.records).ok,true);
+});
+
 
 test('institutional staged release set hashes forecast, science, admission and trace code',()=>{
   const files=institutionalRuntimeFiles();
