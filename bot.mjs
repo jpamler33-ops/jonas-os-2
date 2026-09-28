@@ -670,6 +670,7 @@ async function flushForecastRuntimePersistence(force=false){
         trackerArchive:snapshotMeta?.trackerArchive??null,
         engineStore:snapshotMeta?.engineStore??null,
         journalStore:snapshotMeta?.journalStore??null,
+        persistenceManifest:snapshotMeta?.persistenceManifest??null,
         componentProfile:snapshotMeta?.componentProfile??null
       }));
       return true;
@@ -7130,6 +7131,11 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
       count:forecastRuntime.journalStoreCount??0,
       storageBytes:forecastRuntime.lastJournalStoreBytes??null,
       logicalBytes:forecastRuntime.lastJournalStoreLogicalBytes??null
+    },
+    manifest:{
+      status:forecastRuntime.persistenceManifestStatus??'UNINITIALIZED',
+      generationId:forecastRuntime.persistenceGenerationId??null,
+      hotHash:forecastRuntime.persistenceManifestHotHash??null
     }
   },
   forecastMemoryCaps:{

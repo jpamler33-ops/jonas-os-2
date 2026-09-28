@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { gunzipSync } from 'node:zlib';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 import { sha256 } from './institutional-kernel.mjs';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
@@ -433,6 +433,58 @@ test('gzip snapshot migration loads legacy JSON, writes compressed target, and r
   assert.equal(reopened.issuances.length,1);
   assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
   assert.equal(reopened.engine.historySize(),original.engine.historySize());
+});
+
+test('persistence manifest binds main snapshot and all sidecar references to one verified generation',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-manifest-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const firstInput=input();
+  issueInstitutionalForecast(r,{
+    input:firstInput,
+    scientificValidity:science(firstInput.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(firstInput),
+    generatedAt:firstInput.asOf+100
+  });
+  const first=await saveInstitutionalForecastRuntime(r);
+  assert.equal(first.persistenceManifest.status,'VERIFIED');
+  const firstIssuance={...first.issuanceStore};
+
+  const secondInput=input(firstInput.asOf+60_000,firstInput.price*1.001);
+  issueInstitutionalForecast(r,{
+    input:secondInput,
+    scientificValidity:science(secondInput.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(secondInput),
+    generatedAt:secondInput.asOf+100
+  });
+  const second=await saveInstitutionalForecastRuntime(r);
+  assert.equal(second.persistenceManifest.status,'VERIFIED');
+  assert.notEqual(second.persistenceManifest.generationId,first.persistenceManifest.generationId);
+
+  const reopened=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  assert.equal(reopened.persistenceManifestStatus,'VERIFIED');
+  assert.equal(reopened.persistenceGenerationId,second.persistenceManifest.generationId);
+
+  // Simulate a valid-but-stale sidecar reference from the previous generation.
+  // Without the generation manifest, the old sidecar's own hash would still be valid.
+  const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
+  main.issuanceStore=firstIssuance;
+  await writeFile(file,gzipSync(Buffer.from(JSON.stringify(main),'utf8'),{level:1}),{mode:0o600});
+
+  const rejected=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  assert.equal(rejected.recoveredFromCorrupt,true);
+  assert.match(rejected.lastError,/manifest component reference mismatch/);
 });
 
 test('gzip persistence externalizes learning journal and restores entries without replaying memory',async()=>{
