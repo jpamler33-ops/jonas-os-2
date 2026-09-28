@@ -51,6 +51,7 @@ test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("mtf:BTCUSDT"),{kind:"MTF_MATRIX",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("liqmap:BTCUSDT:5m"),{kind:"LIQ_MAP",symbol:"BTCUSDT",window:"5m"});
   assert.deepEqual(parseProductCallback("confluence:BTCUSDT"),{kind:"CONFLUENCE",symbol:"BTCUSDT"});
+  assert.deepEqual(parseProductCallback("events:BTCUSDT"),{kind:"STRUCTURE_EVENTS",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("why:BTCUSDT"),{kind:"WHY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("regime:BTCUSDT"),{kind:"REGIME",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("evidence:BTCUSDT"),{kind:"EVIDENCE",symbol:"BTCUSDT"});

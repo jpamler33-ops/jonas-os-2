@@ -17,6 +17,8 @@ import { renderCandlestickPng } from './chart-renderer.mjs';
 import { buildChartIntelligence, CHART_INTELLIGENCE_VERSION } from './chart-intelligence.mjs';
 import { buildMarketXray, buildMtfMatrix, MARKET_XRAY_VIEW_VERSION } from './market-xray-view.mjs';
 import { buildObservedLiquidationHeatmap, buildConfluenceMap, LIQUIDATION_CONFLUENCE_VIEW_VERSION } from './liquidation-confluence-view.mjs';
+import { buildStructureEventRadar, deriveStructureEvents, STRUCTURE_EVENT_RADAR_VERSION } from './structure-event-radar.mjs';
+import { forecastIssuanceToChartOverlay, forecastOverlaySummary, FORECAST_CHART_OVERLAY_VERSION } from './forecast-chart-overlay.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -1154,8 +1156,8 @@ function alertPreset(symbol,preset,{witnessPct=75,memorySupport=8}={}) {
   return null;
 }
 
-function alertSetupKeyboard(symbol){return {inline_keyboard:[[{text:'🧭 Regime-Wechsel',callback_data:'alertpreset:'+symbol+':REGIME'},{text:'📈 Trend-Wechsel',callback_data:'alertpreset:'+symbol+':STRUCTURE'}],[{text:'🌐 Evidenz ≥75%',callback_data:'alertpreset:'+symbol+':WITNESS75'},{text:'🧠 Memory bereit',callback_data:'alertpreset:'+symbol+':MEMORY8'}],[{text:'⚠️ Risiko-Status',callback_data:'alertpreset:'+symbol+':SAFETY'},{text:'🎯 Smart Alert',callback_data:'alertpreset:'+symbol+':COMPOSITE'}],[{text:'📊 Zurück zum Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]]};}
-async function showAlertSetup(chatId,symbol){return tg('sendMessage',{chat_id:chatId,text:['🔔 ALERTS · '+symbol.replace('USDT','/USDT'),'','Wähle, was TCX überwachen soll.','','🧭 Regime  · Marktphase ändert sich','📈 Trend   · Struktur kippt','🌐 Evidenz · Quellen bestätigen sich','🧠 Memory  · genug Vergleichsfälle','⚠️ Risiko  · Sicherheitsstatus ändert sich','🎯 Smart   · mehrere Faktoren passen','','Fester Preis: /alert '+symbolLabel(symbol)+' 70000','','Benachrichtigung · kein Trade-Signal'].join('\n'),reply_markup:alertSetupKeyboard(symbol)});}
+function alertSetupKeyboard(symbol){return {inline_keyboard:[[{text:'🧭 Regime-Wechsel',callback_data:'alertpreset:'+symbol+':REGIME'},{text:'⚡ Struktur-Event',callback_data:'alertpreset:'+symbol+':STRUCTURE'}],[{text:'🌐 Evidenz ≥75%',callback_data:'alertpreset:'+symbol+':WITNESS75'},{text:'🧠 Memory bereit',callback_data:'alertpreset:'+symbol+':MEMORY8'}],[{text:'⚠️ Risiko-Status',callback_data:'alertpreset:'+symbol+':SAFETY'},{text:'🎯 Smart Alert',callback_data:'alertpreset:'+symbol+':COMPOSITE'}],[{text:'📊 Zurück zum Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]]};}
+async function showAlertSetup(chatId,symbol){return tg('sendMessage',{chat_id:chatId,text:['🔔 ALERTS · '+symbol.replace('USDT','/USDT'),'','Wähle, was TCX überwachen soll.','','🧭 Regime  · Marktphase ändert sich','⚡ Struktur · HH/HL/LH/LL, BOS, Retest oder Bruch ändert sich','🌐 Evidenz · Quellen bestätigen sich','🧠 Memory  · genug Vergleichsfälle','⚠️ Risiko  · Sicherheitsstatus ändert sich','🎯 Smart   · mehrere Faktoren passen','','Fester Preis: /alert '+symbolLabel(symbol)+' 70000','','Benachrichtigung · kein Trade-Signal'].join('\n'),reply_markup:alertSetupKeyboard(symbol)});}
 
 function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safetyOverride=null}={}) {
   const engine=engineOverride||runMechanismTransitionEngine({
@@ -1183,6 +1185,12 @@ function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safe
   const pattern=state.analysis?.pattern
     ? [state.analysis.pattern.stage,state.analysis.pattern.side,Number(state.analysis.pattern.level||0).toFixed(8)].join(':')
     : 'NONE';
+  const structureEvents=deriveStructureEvents({
+    timeframe:'5m',
+    analysis:state.memoryAnalysis,
+    candles:state.byTf?.['5m']||[]
+  });
+  const structureEventKey=structureEvents.map(e=>[e.type,e.level??'NA'].join(':')).join('|')||'NONE';
   return {
     capturedAt:Date.now(),
     market:{
@@ -1195,7 +1203,8 @@ function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safe
       regime:String(state.dashboard.regime),
       mtfBias:String(state.dashboard.bias),
       structure:String(state.analysis?.trend||'INSUFFICIENT'),
-      structureKey:String(state.analysis?.trend||'INSUFFICIENT')+'|'+pattern,
+      structureKey:String(state.analysis?.trend||'INSUFFICIENT')+'|'+pattern+'|'+structureEventKey,
+      structureEventKey,
       liquidity:String(state.dashboard.liquidity),
       flow:String(state.dashboard.flow),
       pressure:Number(state.dashboard.pressureScore)
@@ -2196,8 +2205,12 @@ function chartKeyboard(symbol, interval, live=false) {
       { text:live?"⏸ AUTO AUS":"⚡ AUTO 10s", callback_data:`chartlive:${symbol}:${interval}:${live?'off':'on'}` }
     ],
     [
-      { text:"◫ X-RAY", callback_data:`xray:${symbol}` },
+      { text:"⚡ EVENTS", callback_data:`events:${symbol}` },
       { text:"▦ MTF", callback_data:`mtf:${symbol}` }
+    ],
+    [
+      { text:"◫ X-RAY", callback_data:`xray:${symbol}` },
+      { text:"⌁ FORECAST", callback_data:`forecast:${symbol}` }
     ],
     [
       { text:"🔥 LIQ MAP", callback_data:`liqmap:${symbol}:5m` },
@@ -2205,11 +2218,11 @@ function chartKeyboard(symbol, interval, live=false) {
     ],
     [
       { text:"◇ STRUKTUR", callback_data:`structure:${symbol}` },
-      { text:"⌁ FORECAST", callback_data:`forecast:${symbol}` }
+      { text:"◇ WHY", callback_data:`why:${symbol}` }
     ],
     [
-      { text:"◇ WHY", callback_data:`why:${symbol}` },
-      { text:"↺ TRADE REPLAY", callback_data:`tradereplay:${symbol}` }
+      { text:"↺ TRADE REPLAY", callback_data:`tradereplay:${symbol}` },
+      { text:"◉ ALERT", callback_data:`alerthelp:${symbol}` }
     ],
     [
       { text:"▦ MARKT", callback_data:`refresh:${symbol}` },
@@ -2306,11 +2319,29 @@ function confluenceKeyboard(symbol){
   ]};
 }
 
+function structureEventKeyboard(symbol){
+  return {inline_keyboard:[
+    [
+      {text:"↻ AKTUALISIEREN",callback_data:`events:${symbol}`},
+      {text:"▥ CHART + PATH",callback_data:`chart:${symbol}:5m`}
+    ],
+    [
+      {text:"▦ MTF MATRIX",callback_data:`mtf:${symbol}`},
+      {text:"◉ STRUKTUR-ALERT",callback_data:`alertpreset:${symbol}:STRUCTURE`}
+    ],
+    [
+      {text:"◎ CONFLUENCE",callback_data:`confluence:${symbol}`},
+      {text:"▦ MARKT",callback_data:`refresh:${symbol}`}
+    ],
+    [{text:"🏠 Start",callback_data:"home"}]
+  ]};
+}
+
 function structureKeyboard(symbol) {
   return { inline_keyboard:[
     [
       { text:"📈 5m Chart", callback_data:`chart:${symbol}:5m` },
-      { text:"📈 1h Chart", callback_data:`chart:${symbol}:1h` }
+      { text:"⚡ Event Radar", callback_data:`events:${symbol}` }
     ],
     [
       { text:"🔮 Prognose", callback_data:`forecast:${symbol}` },
@@ -3189,8 +3220,8 @@ function priceText(v) {
   return fmt(v,Math.abs(v)<1?6:2);
 }
 
-function chartCaption(symbol, interval, state, live=false) {
-  return buildChartIntelligence({
+function chartCaption(symbol, interval, state, live=false,forecastOverlay=null) {
+  const base=buildChartIntelligence({
     symbol,
     interval,
     analysis:state.analysis,
@@ -3201,6 +3232,9 @@ function chartCaption(symbol, interval, state, live=false) {
     refreshSeconds:Math.round(refreshMs/1000),
     now:state.availableAt
   }).caption;
+  const summary=forecastOverlaySummary(forecastOverlay);
+  const extra=summary.available?'\n\n'+summary.text:'\n\nForecast Overlay: kein frischer Pfad';
+  return (base+extra).slice(0,1024);
 }
 
 async function researchState(symbol,interval="5m") {
@@ -3442,6 +3476,31 @@ async function showXray(chatId,messageId,symbol,{live=true}={}){
   return sent;
 }
 
+async function showStructureEvents(chatId,messageId,symbol){
+  const state=await researchState(symbol,'1m');
+  const analyses={
+    '1m':state.analysis,
+    '5m':state.mtf?.analyses?.['5m'],
+    '15m':state.mtf?.analyses?.['15m'],
+    '1h':state.mtf?.analyses?.['1h'],
+    '4h':state.mtf?.analyses?.['4h']
+  };
+  const view=buildStructureEventRadar({
+    symbol,
+    analyses,
+    candlesByTf:state.byTf,
+    now:state.availableAt
+  });
+  sessions.set(String(chatId),{
+    chatId,messageId,symbol,live:false,view:'STRUCTURE_EVENTS',
+    lastRefresh:Date.now(),structureEventRadarVersion:STRUCTURE_EVENT_RADAR_VERSION
+  });
+  return deliverTelegramTextCard(tg,chatId,messageId,{
+    text:view.text,
+    reply_markup:structureEventKeyboard(symbol)
+  });
+}
+
 async function showMtfMatrix(chatId,messageId,symbol){
   const state=await researchState(symbol,'1m');
   const analyses={
@@ -3474,8 +3533,12 @@ async function showMtfMatrix(chatId,messageId,symbol){
 async function showChart(chatId, symbol, interval="5m",{messageId=null,edit=false,live=true}={}) {
   const state=await researchState(symbol,interval);
   await captureEpisodeFromState(state,{persist:true});
-  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1100,height:760,dashboard:state.dashboard});
-  const caption=chartCaption(symbol,interval,state,live);
+  const latestForecast=latestInstitutionalForecast(forecastRuntime,symbol);
+  const forecastOverlay=forecastIssuanceToChartOverlay(latestForecast,{now:state.availableAt,maxAgeMs:6*60*60_000});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{
+    width:1100,height:760,dashboard:state.dashboard,forecastOverlay
+  });
+  const caption=chartCaption(symbol,interval,state,live,forecastOverlay);
   const keyboard=chartKeyboard(symbol,interval,live);
   let sent=null;
   if(edit&&messageId){
@@ -3501,7 +3564,9 @@ async function showChart(chatId, symbol, interval="5m",{messageId=null,edit=fals
     view:'CHART',
     interval,
     lastRefresh:Date.now(),
-    chartIntelligenceVersion:CHART_INTELLIGENCE_VERSION
+    chartIntelligenceVersion:CHART_INTELLIGENCE_VERSION,
+    forecastChartOverlayVersion:FORECAST_CHART_OVERLAY_VERSION,
+    forecastOverlayAvailable:Boolean(forecastOverlay)
   });
   return sent;
 }
@@ -5599,6 +5664,14 @@ async function handle(update) {
       await ack(q.id);
       return;
     }
+    if (a.kind === 'STRUCTURE_EVENTS') {
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showStructureEvents(chatId,textMessageId,a.symbol);
+      await ack(q.id,'Structure Events geladen');
+      return;
+    }
+
     if (a.kind === 'LIQ_MAP') {
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       const current=sessions.get(String(chatId));

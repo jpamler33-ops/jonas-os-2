@@ -107,10 +107,13 @@ function labelBox(buf,w,h,x,y,text,fg,bg,scale=2){
   fillRect(buf,w,h,x-3,y-3,tw+6,th+6,bg);
   drawText(buf,w,h,x,y,text,fg,scale);
 }
-function priceScale(candles,analysis){
+function priceScale(candles,analysis,forecastOverlay=null){
   let min=Math.min(...candles.map(c=>c.l)),max=Math.max(...candles.map(c=>c.h));
-  for(const v of [analysis?.support,analysis?.resistance,analysis?.ema20,analysis?.ema50]){
-    if(Number.isFinite(v)){min=Math.min(min,v);max=Math.max(max,v);}
+  const values=[analysis?.support,analysis?.resistance,analysis?.ema20,analysis?.ema50,forecastOverlay?.anchorPrice];
+  for(const h of forecastOverlay?.horizons||[]) values.push(h?.lowerPrice,h?.medianPrice,h?.upperPrice);
+  for(const s of forecastOverlay?.scenarios||[]) for(const p of s?.points||[]) values.push(p?.targetPrice);
+  for(const v of values){
+    if(Number.isFinite(Number(v))){min=Math.min(min,Number(v));max=Math.max(max,Number(v));}
   }
   const pad=Math.max((max-min)*0.07,Math.abs(max)*0.0005,1e-9);
   return {min:min-pad,max:max+pad};
@@ -131,7 +134,7 @@ function fmtCompact(n){
   return n.toFixed(2);
 }
 
-export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null}={}){
+export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null}={}){
   const candles=candlesInput.slice(-100);
   if(candles.length<2)throw new Error('Need at least 2 candles');
 
@@ -139,6 +142,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
   const muted=color('#8290a0'),up=color('#20c997'),down=color('#ff5c5c'),wick=color('#aab7c4');
   const ema20c=color('#f4c430'),ema50c=color('#4ea1ff'),supportC=color('#3ddc97'),resistanceC=color('#ff8c69');
   const pivotC=color('#d0d7de'),activeC=color('#9aa4ad'),breakC=color('#ffd166'),retestC=color('#b388ff');
+  const forecastBaseC=color('#4ea1ff'),forecastUpC=color('#3ddc97'),forecastDownC=color('#ff5c5c'),forecastBandC=color('#4ea1ff',32);
   const volUp=color('#147d68'),volDown=color('#9b3d45'),zoneSupport=color('#3ddc97',35),zoneResistance=color('#ff8c69',35);
 
   const buf=Buffer.alloc(width*height*4);
@@ -162,9 +166,13 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     line(buf,width,height,x,volumeTop,x,volumeBottom,grid);
   }
 
-  const scale=priceScale(candles,analysis||{});
+  const overlayActive=Boolean(forecastOverlay&&((forecastOverlay.scenarios||[]).length||(forecastOverlay.horizons||[]).length));
+  const candlePlotW=overlayActive?plotW*0.74:plotW;
+  const futureStart=left+candlePlotW;
+  const futureEnd=width-right;
+  const scale=priceScale(candles,analysis||{},forecastOverlay);
   const yOf=p=>priceTop+(scale.max-p)/(scale.max-scale.min)*plotH;
-  const step=plotW/candles.length,bodyW=Math.max(2,Math.floor(step*0.58));
+  const step=candlePlotW/candles.length,bodyW=Math.max(2,Math.floor(step*0.58));
   const zonePct=0.0012;
 
   if(Number.isFinite(analysis?.support)){
@@ -232,6 +240,49 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     }
   }
 
+  if(overlayActive){
+    const allHorizonMs=[
+      ...(forecastOverlay?.horizons||[]).map(x=>Number(x?.horizonMs)),
+      ...(forecastOverlay?.scenarios||[]).flatMap(x=>(x?.points||[]).map(p=>Number(p?.horizonMs)))
+    ].filter(x=>Number.isFinite(x)&&x>0);
+    const maxH=Math.max(1,...allHorizonMs);
+    const xFuture=h=>futureStart+Math.max(0,Math.min(1,Number(h)/maxH))*Math.max(8,futureEnd-futureStart-8);
+    const anchorPrice=Number(forecastOverlay?.anchorPrice);
+    line(buf,width,height,futureStart,priceTop,futureStart,priceBottom,grid);
+    labelBox(buf,width,height,Math.min(width-right-78,futureStart+5),priceTop+8,'FORECAST',forecastBaseC,panel,1);
+
+    const hs=[...(forecastOverlay?.horizons||[])].sort((a,b)=>Number(a.horizonMs)-Number(b.horizonMs));
+    for(let i=0;i<hs.length;i++){
+      const h=hs[i];
+      const x=xFuture(h.horizonMs);
+      const lo=Number(h.lowerPrice),hi=Number(h.upperPrice);
+      if(Number.isFinite(lo)&&Number.isFinite(hi)){
+        const y1=yOf(Math.max(lo,hi)),y2=yOf(Math.min(lo,hi));
+        const prevX=i===0?futureStart:xFuture(hs[i-1].horizonMs);
+        fillRect(buf,width,height,prevX,Math.min(y1,y2),Math.max(2,x-prevX),Math.max(2,Math.abs(y2-y1)),forecastBandC,true);
+        line(buf,width,height,x,y1,x,y2,forecastBaseC);
+      }
+      const txt=String(h.horizonId||'');
+      if(txt) drawText(buf,width,height,Math.max(futureStart,x-textWidth(txt,1)/2),priceBottom+5,txt,muted,1);
+    }
+
+    const scenarioColor=id=>id==='UPSIDE_PATH'?forecastUpC:id==='DOWNSIDE_PATH'?forecastDownC:forecastBaseC;
+    for(const s of forecastOverlay?.scenarios||[]){
+      const pts=(s?.points||[]).filter(p=>Number.isFinite(Number(p?.targetPrice))&&Number.isFinite(Number(p?.horizonMs))).sort((a,b)=>Number(a.horizonMs)-Number(b.horizonMs));
+      if(!pts.length)continue;
+      const fg=scenarioColor(String(s.id||''));
+      let px=futureStart,py=Number.isFinite(anchorPrice)?yOf(anchorPrice):yOf(candles.at(-1)?.c);
+      for(const p of pts){
+        const x=xFuture(p.horizonMs),y=yOf(Number(p.targetPrice));
+        line(buf,width,height,px,py,x,y,fg);
+        fillRect(buf,width,height,x-2,y-2,5,5,fg);
+        px=x;py=y;
+      }
+      const short=String(s.id||'PATH').replace('_PATH','').replace('DOWNSIDE','DOWN').replace('UPSIDE','UP');
+      labelBox(buf,width,height,Math.min(width-right-52,Math.max(futureStart,px-18)),Math.max(priceTop+25,Math.min(priceBottom-14,py-7)),short,fg,panel,1);
+    }
+  }
+
   if(tradeReplay){
     const marks=[['ENTRY',Number(tradeReplay.entryAt),Number(tradeReplay.entryPrice),supportC],['EXIT',Number(tradeReplay.exitAt),Number(tradeReplay.exitPrice),resistanceC]];
     for(const [label,at,price,fg] of marks){
@@ -266,7 +317,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     hx+=tw+8;
     if(hx>width-160)break;
   }
-  drawText(buf,width,height,16,46,'OBSERVED OHLCV  DERIVED STRUCTURE REGIME RIFT  MECHANISM NOT INFERRED',muted,1);
+  drawText(buf,width,height,16,46,overlayActive?'OBSERVED OHLCV  DERIVED STRUCTURE  PROBABILISTIC FORECAST PATH  NOT GUARANTEED':'OBSERVED OHLCV  DERIVED STRUCTURE REGIME RIFT  MECHANISM NOT INFERRED',muted,1);
 
   return pngEncode(width,height,buf);
 }
