@@ -106,6 +106,7 @@ import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './f
 import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } from './expansion-runtime/institutional-expansion.mjs';
 import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/dexscreener-public-provider.mjs';
 import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
+import { createExternalResearchProvider, EXTERNAL_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/external-research-provider.mjs';
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
@@ -288,6 +289,11 @@ const marketDataProvider=createMarketDataProvider({
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch});
+const externalResearchProvider=createExternalResearchProvider({
+  fetchImpl:globalThis.fetch,
+  fredApiKey:process.env.TCX_FRED_API_KEY||'',
+  polymarketMarkets:process.env.TCX_POLYMARKET_MARKETS_JSON||'{}'
+});
 const liquidationResearchStream=createLiquidationPublicStream({symbols:autoLearnSymbols});
 const onchainResearchProvider=createOnchainResearchProvider({
   fetchImpl:globalThis.fetch,
@@ -4352,6 +4358,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let onchainResearchSnapshot=null;
   let entityFlowResearchSnapshot=null;
   let walletResearchSnapshot=null;
+  let externalResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
       derivativesResearchSnapshot=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
@@ -4373,6 +4380,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       onchainResearchSnapshot=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
     }catch(err){
       recordError(observability,{scope:'onchain_research',message:err instanceof Error?err.message:String(err)});
+    }
+    try{
+      externalResearchSnapshot=await externalResearchProvider.fetchBundle(symbol);
+      recordOperation(observability,{
+        name:'external_research_data_hub',
+        ok:Boolean(externalResearchSnapshot?.coinMetrics?.ok||externalResearchSnapshot?.deribitOptions?.ok||externalResearchSnapshot?.macro?.ok||externalResearchSnapshot?.predictionMarket?.ok),
+        latencyMs:0,
+        error:null
+      });
+    }catch(err){
+      recordError(observability,{scope:'external_research_data_hub',message:err instanceof Error?err.message:String(err)});
     }
     if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
       try{
@@ -4423,7 +4441,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         liquidationSnapshot:liquidationResearchSnapshot,
         onchainSnapshot:onchainResearchSnapshot,
         entityFlowSnapshot:entityFlowResearchSnapshot,
-        walletSnapshot:walletResearchSnapshot
+        walletSnapshot:walletResearchSnapshot,
+        externalSnapshot:externalResearchSnapshot
       });
       researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
     }catch(err){

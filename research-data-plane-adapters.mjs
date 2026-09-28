@@ -20,6 +20,13 @@ import {
   entityFlowSnapshotToExtraFeatures,
   ENTITY_FLOW_ENGINE_VERSION
 } from './expansion-runtime/entity-flow-engine.mjs';
+import {
+  coinMetricsSnapshotToExtraFeatures,
+  deribitOptionsSnapshotToExtraFeatures,
+  macroSnapshotToExtraFeatures,
+  predictionMarketSnapshotToExtraFeatures,
+  EXTERNAL_RESEARCH_PROVIDER_VERSION
+} from './expansion-runtime/external-research-provider.mjs';
 
 export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V1';
 
@@ -210,6 +217,81 @@ function entityFlowInput(symbol,snapshot,ingestedAt){
   });
 }
 
+function externalInput({
+  symbol,snapshot,ingestedAt,domain,source,features,ttlMs,finality='OBSERVED',qualityStatus='SOURCE_RESPONSE_COMPLETE'
+}={}){
+  if(!snapshot?.ok||!Array.isArray(features)||!features.length) return null;
+  const availableAt=finite(snapshot?.availableAt);
+  if(availableAt==null) return null;
+  const eventTime=eventTimeOrAvailable(snapshot?.eventTime,availableAt);
+  const expected=Math.max(1,Number(features.expectedCount||features.length||1));
+  const completeness=Math.max(0,Math.min(1,
+    finite(snapshot?.quality?.completeness)??Math.min(1,features.length/expected)
+  ));
+  return createResearchFeatureSnapshot({
+    streamKey:symbol,
+    domain,
+    source,
+    sourceVersion:EXTERNAL_RESEARCH_PROVIDER_VERSION,
+    sourceEventId:makeSourceEventId({
+      symbol,domain,source,availableAt,eventTime,
+      features:features.map(x=>[x.id,x.value]),
+      fingerprint:snapshot?.fingerprint||null,
+      slug:snapshot?.slug||null
+    }),
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs,
+    finality,
+    quality:{
+      completeness,
+      sourceCount:1,
+      expectedSourceCount:1,
+      status:qualityStatus
+    },
+    features,
+    provenance:{
+      adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+      providerVersion:EXTERNAL_RESEARCH_PROVIDER_VERSION,
+      upstreamSource:String(snapshot?.source||source),
+      upstreamProvenance:snapshot?.provenance||{},
+      researchOnly:true,
+      mayExecute:false
+    }
+  });
+}
+
+function externalInputs(symbol,bundle,ingestedAt){
+  if(!bundle) return [];
+  const coinMetricsFeatures=coinMetricsSnapshotToExtraFeatures(bundle.coinMetrics);
+  coinMetricsFeatures.expectedCount=6;
+  const optionsFeatures=deribitOptionsSnapshotToExtraFeatures(bundle.deribitOptions);
+  optionsFeatures.expectedCount=5;
+  const macroFeatures=macroSnapshotToExtraFeatures(bundle.macro);
+  macroFeatures.expectedCount=5;
+  const predictionFeatures=predictionMarketSnapshotToExtraFeatures(bundle.predictionMarket);
+  predictionFeatures.expectedCount=4;
+  return [
+    externalInput({
+      symbol,snapshot:bundle.coinMetrics,ingestedAt,domain:'NETWORK_METRICS',source:'COINMETRICS_COMMUNITY_V4',
+      features:coinMetricsFeatures,ttlMs:48*60*60_000,qualityStatus:'COMMUNITY_DAILY_METRICS'
+    }),
+    externalInput({
+      symbol,snapshot:bundle.deribitOptions,ingestedAt,domain:'OPTIONS',source:'DERIBIT_PUBLIC_OPTIONS',
+      features:optionsFeatures,ttlMs:10*60_000,qualityStatus:'PUBLIC_OPTIONS_SUMMARY'
+    }),
+    externalInput({
+      symbol,snapshot:bundle.macro,ingestedAt,domain:'MACRO',source:'FRED_REALTIME_V1',
+      features:macroFeatures,ttlMs:6*60*60_000,qualityStatus:'CURRENT_VINTAGE_CAPTURE'
+    }),
+    externalInput({
+      symbol,snapshot:bundle.predictionMarket,ingestedAt,domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',
+      features:predictionFeatures,ttlMs:10*60_000,qualityStatus:'CONFIGURED_MARKET_PROBABILITY'
+    })
+  ].filter(Boolean);
+}
+
 function walletInput(symbol,snapshot,ingestedAt){
   const features=walletCohortSnapshotToExtraFeatures(snapshot);
   if(!features.length) return null;
@@ -256,7 +338,8 @@ export function buildResearchDataPlaneSnapshots({
   liquidationSnapshot=null,
   onchainSnapshot=null,
   entityFlowSnapshot=null,
-  walletSnapshot=null
+  walletSnapshot=null,
+  externalSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -267,6 +350,7 @@ export function buildResearchDataPlaneSnapshots({
     liquidationInput(s,liquidationSnapshot,t),
     onchainInput(s,onchainSnapshot,t),
     entityFlowInput(s,entityFlowSnapshot,t),
-    walletInput(s,walletSnapshot,t)
+    walletInput(s,walletSnapshot,t),
+    ...externalInputs(s,externalSnapshot,t)
   ].filter(Boolean);
 }

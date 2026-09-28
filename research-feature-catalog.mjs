@@ -58,6 +58,31 @@ define('research.onchain.sol.nonVoteTps','ONCHAIN',{unit:'TPS',min:0,max:1000000
 define('research.onchain.sol.priorityFeeMedian','ONCHAIN',{unit:'MICROLAMPORT',min:0,max:1e15,description:'Solana median prioritization fee'});
 define('research.onchain.sol.slotMs','ONCHAIN',{unit:'MILLISECONDS',min:1,max:60000,description:'Solana average slot duration'});
 
+
+define('research.coinmetrics.activeAddressesLog','NETWORK_METRICS',{unit:'LOG_COUNT',min:0,description:'log1p Coin Metrics active address count'});
+define('research.coinmetrics.activeAddressesChange1d','NETWORK_METRICS',{unit:'RATE',min:-1,max:100,description:'1d relative change in active addresses'});
+define('research.coinmetrics.newAddressesLog','NETWORK_METRICS',{unit:'LOG_COUNT',min:0,description:'log1p Coin Metrics new address count'});
+define('research.coinmetrics.txCountLog','NETWORK_METRICS',{unit:'LOG_COUNT',min:0,description:'log1p Coin Metrics transaction count'});
+define('research.coinmetrics.mvrv','NETWORK_METRICS',{unit:'RATIO',min:0,max:1000,description:'Coin Metrics current MVRV'});
+define('research.coinmetrics.mvrvChange1d','NETWORK_METRICS',{unit:'RATE',min:-1,max:100,description:'1d relative change in Coin Metrics MVRV'});
+
+define('research.options.weightedIvPct','OPTIONS',{unit:'PERCENT',min:0,max:5000,description:'Deribit option open-interest-weighted mark IV'});
+define('research.options.putCallOiRatio','OPTIONS',{unit:'RATIO',min:0,max:1000,description:'Deribit put/call open-interest ratio'});
+define('research.options.openInterestLog','OPTIONS',{unit:'LOG_CONTRACTS',min:0,description:'log1p total Deribit option open interest'});
+define('research.options.volumeUsdLog','OPTIONS',{unit:'LOG_USD',min:0,description:'log1p Deribit option USD volume'});
+define('research.options.putCallIvSkewPct','OPTIONS',{unit:'PERCENTAGE_POINTS',min:-5000,max:5000,description:'Deribit put IV minus call IV'});
+
+define('research.macro.fedFundsPct','MACRO',{unit:'PERCENT',min:-20,max:100,description:'FRED effective federal funds rate'});
+define('research.macro.us10yPct','MACRO',{unit:'PERCENT',min:-20,max:100,description:'FRED US 10-year Treasury yield'});
+define('research.macro.broadDollarIndex','MACRO',{unit:'INDEX',min:0,max:1000,description:'FRED broad trade-weighted US dollar index'});
+define('research.macro.fedAssetsLog','MACRO',{unit:'LOG_LEVEL',min:0,description:'log1p Federal Reserve total assets'});
+define('research.macro.us10yMinusFedFundsPct','MACRO',{unit:'PERCENTAGE_POINTS',min:-100,max:100,description:'US 10-year yield minus effective Fed Funds'});
+
+define('research.prediction.yesProbability','PREDICTION_MARKET',{unit:'PROBABILITY',min:0,max:1,description:'Configured Polymarket YES probability'});
+define('research.prediction.confidenceFromHalf','PREDICTION_MARKET',{unit:'SHARE',min:0,max:1,description:'Distance of configured market probability from 50 percent'});
+define('research.prediction.liquidityLog','PREDICTION_MARKET',{unit:'LOG_USD',min:0,description:'log1p configured Polymarket liquidity'});
+define('research.prediction.volume24hLog','PREDICTION_MARKET',{unit:'LOG_USD',min:0,description:'log1p configured Polymarket 24h volume'});
+
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
   define('research.entityflow.eth.grossExternal'+window,'ENTITY_FLOW',{unit:'LOG_ETH',min:0,description:'log1p verified entity gross external flow'});
