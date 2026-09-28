@@ -32,7 +32,8 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
   maxAgeMs=10*60_000,
   minDirectionalProbability=.505,
   minAbsoluteExpectedReturn=.0004,
-  minLearningValue=.10
+  minLearningValue=.10,
+  assetClass='CORE'
 }={}){
   if(!issuance||typeof issuance!=='object') return no('ISSUANCE_MISSING');
   if(issuance.executionMode!=='SHADOW_ONLY'||issuance.action!=='ABSTAIN'||issuance.canExecute!==false){
@@ -69,7 +70,7 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
     if(Math.abs(expectedReturn)<minAbsoluteExpectedReturn) continue;
     const side=direction==='UP'?'BUY':'SELL';
     const features={
-      assetClass:String(issuance.assetClass||'CORE').toUpperCase(),
+      assetClass:String(assetClass||'CORE').toUpperCase(),
       side:side==='BUY'?'LONG':'SHORT',
       horizonMs:Number(h.horizonMs||0),
       directionalProbability,probabilityEdge,expectedReturn
