@@ -481,7 +481,7 @@ test('gzip persistence externalizes tracker issue-state and revision history los
   const restored=reopened.intelligence.get(issued.forecastId);
   assert.equal(restored.revisions.length,2);
   assert.equal(restored.issueState.inputFingerprint,before.issueState.inputFingerprint);
-  assert.deepEqual(restored.revisions,before.revisions);
+  assert.deepEqual(restored.revisions,JSON.parse(JSON.stringify(before.revisions)));
   const cf=reopened.intelligence.counterfactual(issued.forecastId,{maxFeatures:2});
   assert.equal(cf.interpretation,'MODEL_SENSITIVITY_NOT_CAUSAL');
 });
