@@ -66,25 +66,50 @@ function keysFor(x={}){
     ['GLOBAL','ALL']
   ];
 }
+function observationWeight(row){
+  const mode=String(row?.entryMode||'STANDARD').toUpperCase();
+  if(mode==='COVERAGE_PROBE'){
+    return String(row?.coverageEvidenceTier||'').toUpperCase()==='CALIBRATED'?.50:.25;
+  }
+  if(mode==='ABSTAIN_PROBE') return .50;
+  if(mode==='EXPLORATION') return .75;
+  return 1;
+}
 function add(map,key,row){
-  const x=map.get(key)||{trades:0,wins:0,returns:[],pnls:[],explorationTrades:0};
+  const x=map.get(key)||{
+    trades:0,wins:0,returns:[],pnls:[],explorationTrades:0,
+    effectiveSamples:0,weightedWins:0,weightedReturnSum:0,weightedPnlSum:0
+  };
+  const weight=observationWeight(row);
+  const ret=Number(row.realizedReturnPct||0);
+  const pnl=Number(row.realizedNetPnlQuote||0);
   x.trades++;
-  if(Number(row.realizedNetPnlQuote||0)>0) x.wins++;
-  x.returns.push(Number(row.realizedReturnPct||0));
-  x.pnls.push(Number(row.realizedNetPnlQuote||0));
+  x.effectiveSamples+=weight;
+  if(pnl>0){
+    x.wins++;
+    x.weightedWins+=weight;
+  }
+  x.returns.push(ret);
+  x.pnls.push(pnl);
+  x.weightedReturnSum+=ret*weight;
+  x.weightedPnlSum+=pnl*weight;
   if(
     row.exploration===true||
-    ['EXPLORATION','ABSTAIN_PROBE'].includes(String(row.entryMode||'').toUpperCase())
+    ['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(row.entryMode||'').toUpperCase())
   ) x.explorationTrades++;
   map.set(key,x);
 }
 function summarize(raw,{priorWinRate=.5,priorStrength=12,returnPriorStrength=10}={}){
   const n=raw?.trades||0,w=raw?.wins||0;
-  const posteriorWinRate=(w+priorWinRate*priorStrength)/(n+priorStrength);
-  const rawMeanReturn=mean(raw?.returns||[]);
-  const shrinkage=n/(n+returnPriorStrength);
+  const effectiveSamples=Number(raw?.effectiveSamples??n);
+  const weightedWins=Number(raw?.weightedWins??w);
+  const posteriorWinRate=(weightedWins+priorWinRate*priorStrength)/(effectiveSamples+priorStrength);
+  const rawMeanReturn=effectiveSamples>0
+    ?Number(raw?.weightedReturnSum||0)/effectiveSamples
+    :mean(raw?.returns||[]);
+  const shrinkage=effectiveSamples/(effectiveSamples+returnPriorStrength);
   const shrinkedMeanReturn=rawMeanReturn*shrinkage;
-  const confidence=clamp(n/(n+priorStrength));
+  const confidence=clamp(effectiveSamples/(effectiveSamples+priorStrength));
   const positiveReturnScore=clamp(.5+.5*Math.tanh(shrinkedMeanReturn/.006));
   const qualityScore=clamp(.50*posteriorWinRate+.30*positiveReturnScore+.20*confidence);
   const label=n<8
@@ -96,12 +121,15 @@ function summarize(raw,{priorWinRate=.5,priorStrength=12,returnPriorStrength=10}
         :'MIXED';
   return {
     samples:n,
+    effectiveSamples,
     wins:w,
     rawWinRate:n?w/n:null,
     posteriorWinRate,
     rawMeanReturn,
     shrinkedMeanReturn,
-    expectancyQuote:mean(raw?.pnls||[]),
+    expectancyQuote:effectiveSamples>0
+      ?Number(raw?.weightedPnlSum||0)/effectiveSamples
+      :mean(raw?.pnls||[]),
     confidence,
     qualityScore,
     label,
@@ -139,7 +167,7 @@ export function buildShadowTradeQualityModel(ledger,{
     samples:closed.length,
     explorationSamples:closed.filter(p=>
       p.exploration===true||
-      ['EXPLORATION','ABSTAIN_PROBE'].includes(String(p.entryMode||'').toUpperCase())
+      ['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'').toUpperCase())
     ).length,
     groups,
     global,
