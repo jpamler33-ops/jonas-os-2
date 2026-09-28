@@ -1478,7 +1478,8 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={
       continue;
     }
     const openSymbol=openAll.filter(p=>p.symbol===candidate.symbol);
-    if(openSymbol.length+placed>=learnedChallengerMaxOpenPerSymbol){
+    const placedForSymbol=results.filter(x=>x.placed===true&&x.symbol===candidate.symbol).length;
+    if(openSymbol.length+placedForSymbol>=learnedChallengerMaxOpenPerSymbol){
       results.push({ruleId:candidate.ruleId,placed:false,reason:'CHALLENGER_SYMBOL_OPEN_CAP'});
       continue;
     }
@@ -1532,7 +1533,7 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false}={
     });
     placed++;remainingGlobal--;
     results.push({
-      ruleId:candidate.ruleId,placed:true,orderId:order.id,
+      ruleId:candidate.ruleId,placed:true,orderId:order.id,symbol:candidate.symbol,
       status:candidate.ruleStatus,side:candidate.side,horizonId:candidate.horizonId,
       notionalQuote:candidate.notionalQuote
     });
