@@ -26,6 +26,7 @@ import { buildSuperRadar, renderSuperRadar, buildSuperSetup, renderSuperSetup, b
 import { buildSuperMemory, discoverPatterns, buildDigitalTwin, renderCognitiveCore, COGNITIVE_CORE_VERSION } from './cognitive-core.mjs';
 import { validateDiscoveredPatterns, buildModelLeague, diagnoseScientificBrain, buildBullBearDebate, buildMetaJudge, renderScientificBrain, SCIENTIFIC_BRAIN_VERSION } from './scientific-brain.mjs';
 import { buildMarketGraph, buildCapitalRotation, buildRegimeGenome, renderWorldModelFoundation, WORLD_MODEL_FOUNDATION_VERSION } from './world-model-foundation.mjs';
+import { discoverLeadLag, buildShockPropagation, buildEventReactionMemory, buildSystemReadiness, renderFinalFoundation, FINAL_FOUNDATION_PACK_VERSION } from './final-foundation-pack.mjs';
 import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
@@ -3028,6 +3029,30 @@ async function showSuperRadar(chatId,messageId){
  buttons.push([{text:'↻ REFRESH',callback_data:'terminal:radar'},{text:'🏠 Home',callback_data:'home'}]);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderSuperRadar(radar),reply_markup:{inline_keyboard:buttons}});
 }
+async function finalFoundationContext(symbol){
+ const world=await worldModelContext(symbol);
+ const science=await scientificBrainContext(symbol);
+ const leadLag=discoverLeadLag(Object.fromEntries((world.graph?.nodes||[]).map(n=>[n.symbol,[]])),{asOf:world.state.availableAt});
+ // Re-fetch bounded PIT series because graph intentionally stores summaries, not raw candles.
+ const symbols=[...new Set([symbol,...requestedSymbols])].slice(0,12),series={};
+ const fetched=await Promise.allSettled(symbols.map(async s=>({symbol:s,rows:(await fetchKlines(s,'5m',130)).rows})));
+ for(const x of fetched){if(x.status!=='fulfilled')continue;const candles=closedCandles(candlesFromKlines(x.value.rows,world.state.availableAt));if(candles.length>=48)series[x.value.symbol]=candles.map(k=>({closeTime:k.closeTime,close:k.c}));}
+ const temporal=discoverLeadLag(series,{asOf:world.state.availableAt,maxLagBars:6,minSamples:48,minAbsCorrelation:.25,maxHypotheses:200});
+ const shock=buildShockPropagation({seriesBySymbol:series,graph:world.graph,asOf:world.state.availableAt});
+ const eventMemory=buildEventReactionMemory([],{asOf:world.state.availableAt});
+ const tradeDiagnostics=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now:world.state.availableAt,runtime:{}});
+ const readiness=buildSystemReadiness({world,science,leadLag:temporal,shock,eventMemory,tradeDiagnostics});
+ return {...world,science,leadLag:temporal,shock,eventMemory,tradeDiagnostics,readiness};
+}
+async function showFinalFoundation(chatId,messageId,symbol){
+ const x=await finalFoundationContext(symbol);
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderFinalFoundation(x),reply_markup:{inline_keyboard:[
+  [{text:'🌐 WORLD MODEL',callback_data:`world:${symbol}`},{text:'🔬 SCIENTIFIC BRAIN',callback_data:`science:${symbol}`}],
+  [{text:'🔎 TRADE DIAGNOSTICS',callback_data:'home:trade_diagnostics'},{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`}],
+  [{text:'↻ REFRESH',callback_data:`foundation:${symbol}`},{text:'🏠 Home',callback_data:'home'}]
+ ]}});
+}
+
 async function worldModelContext(symbol){
  const state=await researchState(symbol,'5m');
  const symbols=[...new Set([symbol,...requestedSymbols])].slice(0,12);
@@ -3045,6 +3070,7 @@ async function showWorldModel(chatId,messageId,symbol){
  const x=await worldModelContext(symbol);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderWorldModelFoundation(x),reply_markup:{inline_keyboard:[
   [{text:'🔬 SCIENTIFIC BRAIN',callback_data:`science:${symbol}`},{text:'🧬 COGNITIVE CORE',callback_data:`cognitive:${symbol}`}],
+  [{text:'🧱 FINAL FOUNDATION',callback_data:`foundation:${symbol}`}],
   [{text:'🧠 SUPERCHART',callback_data:`superchart:${symbol}:FULL:5m`},{text:'◉ RADAR',callback_data:'terminal:radar'}],
   [{text:'↻ REFRESH',callback_data:`world:${symbol}`},{text:'🏠 Home',callback_data:'home'}]
  ]}});
@@ -5838,6 +5864,12 @@ async function handle(update) {
       else if(a.command==='memory') await showMemory(chatId,a.symbol);
       else if(a.command==='engine') await showEngine(chatId,a.symbol);
       await ack(q.id); return;
+    }
+    if (a.kind === 'FINAL_FOUNDATION') {
+      if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showFinalFoundation(chatId,textMessageId,a.symbol); await ack(q.id,'Final Foundation geladen'); return;
     }
     if (a.kind === 'WORLD_MODEL') {
       if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
