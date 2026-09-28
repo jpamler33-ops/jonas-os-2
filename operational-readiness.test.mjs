@@ -72,6 +72,15 @@ test('oversized legacy forecast snapshot recovers into degraded readiness',()=>{
   assert.ok(r.warningReasons.includes('FORECAST_RUNTIME_OVERSIZED_SNAPSHOT_RECOVERED'));
 });
 
+test('truncated release registry recovery is degraded but usable',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    releaseRegistry:{healthy:true,recoveredFromTruncatedTail:true}
+  }));
+  assert.equal(r.ready,true);
+  assert.equal(r.state,'DEGRADED');
+  assert.ok(r.warningReasons.includes('RELEASE_REGISTRY_TRUNCATED_TAIL_RECOVERED'));
+});
+
 test('user-state corruption is degraded but does not impersonate research corruption',()=>{
   const r=evaluateOperationalReadiness(healthy({
     persistence:{healthy:true,recoveredFromCorrupt:true}
