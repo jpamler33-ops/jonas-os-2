@@ -25,7 +25,10 @@ const REASON_TEXT={
   NO_SAFE_LEARNABLE_CANDIDATE:'No calibrated, directionally usable exploration candidate was found',
   LEARNING_VALUE_TOO_LOW:'The candidate does not add enough learning value',
   DISCOVERY_RESPECTS_STANDARD_BLOCK_ADMISSION_ABSTAIN:'Discovery correctly respects the ABSTAIN admission block',
-  DISCOVERY_RESPECTS_STANDARD_BLOCK_NO_ADMITTED_DIRECTIONAL_HORIZON:'Discovery correctly respects the missing admitted horizon'
+  DISCOVERY_RESPECTS_STANDARD_BLOCK_NO_ADMITTED_DIRECTIONAL_HORIZON:'Discovery correctly respects the missing admitted horizon',
+  FORECAST_ALL_HORIZONS_ABSTAIN:'Every forecast horizon is blocked; no entry signal is admitted',
+  NO_CALIBRATED_HORIZONS:'No horizon has enough resolved calibration evidence yet',
+  RESEARCH_DEPENDENCY_ABSTAIN:'Research dependency validation is blocking forecast admission'
 };
 
 export function createTradeDiscoveryDiagnostics({maxSymbols=32}={}){
@@ -70,8 +73,13 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
       .filter(Boolean)
       .filter(x=>!['STANDARD_SHADOW_TRADE_ALREADY_PLACED','COVERAGE_SLOTS_PLACED','NO_SAFE_DUE_COVERAGE_SLOT'].includes(String(x))));
     for(const reason of reasons) increment(blockers,String(reason));
+    if(String(row.admissionGate||'').toUpperCase()==='ABSTAIN') increment(blockers,'ADMISSION_ABSTAIN');
+    if(String(row.researchDependencyGate||'').toUpperCase()==='ABSTAIN') increment(blockers,'RESEARCH_DEPENDENCY_ABSTAIN');
+    const hs=Array.isArray(row.horizons)?row.horizons:[];
+    if(hs.length&&hs.every(x=>String(x.gate||'').toUpperCase()==='ABSTAIN')) increment(blockers,'FORECAST_ALL_HORIZONS_ABSTAIN');
+    if(hs.length&&!hs.some(x=>String(x.calibration||'').toUpperCase()==='CALIBRATED')) increment(blockers,'NO_CALIBRATED_HORIZONS');
   }
-  const topBlockers=[...blockers.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4).map(([reason,count])=>({reason,count,text:humanReason(reason)}));
+  const topBlockers=[...blockers.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([reason,count])=>({reason,count,text:humanReason(reason)}));
   const horizonRows=rows.flatMap(x=>Array.isArray(x.horizons)?x.horizons:[]);
   const stateSafety=count(x=>String(x.dataSafety||'UNKNOWN').toUpperCase()==='NORMAL');
   const admitted=count(x=>['PASS','CAUTION'].includes(String(x.admissionGate||'').toUpperCase()));
@@ -97,6 +105,7 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
     coverageProbes:rows.reduce((s,x)=>s+Number(x.coverageCurriculumPlaced||0),0),
     abstainForecasts:count(x=>String(x.forecastGate||'').toUpperCase()==='ABSTAIN'),
     admittedForecasts:admitted,
+    researchDependencyAbstain:count(x=>String(x.researchDependencyGate||'').toUpperCase()==='ABSTAIN'),
     probabilityDisplayAllowed:displayAllowed,
     normalDataSafety:stateSafety,
     totalCalibratedHorizons:horizonRows.filter(x=>String(x.calibration||'').toUpperCase()==='CALIBRATED').length,
@@ -107,6 +116,12 @@ export function summarizeTradeDiscovery(state,{now=Date.now(),runtime={}}={}){
     probabilityEdgePasses:horizonRows.filter(x=>x.probabilityEdgePass===true).length,
     topBlockers,
     latest,
+    latestHorizonDetails:(latest?.horizons||[]).map(h=>({
+      horizonId:String(h.horizonId||'unknown'),gate:String(h.gate||'UNKNOWN'),
+      calibration:String(h.calibration||'UNKNOWN'),direction:String(h.direction||'NEUTRAL'),
+      expectedReturn:h.expectedReturn,directionalProbability:h.directionalProbability,
+      probabilityEdge:h.probabilityEdge,reasons:Array.isArray(h.reasons)?h.reasons.slice(0,2):[]
+    })),
     nextStep,
     runtime:{...runtime,execution:'SHADOW_ONLY',canExecuteLive:false},
     execution:'SHADOW_ONLY',canExecuteLive:false,
@@ -125,6 +140,13 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
   const latestText=latest
     ?`Letzter Coin: ${latest.symbol} · Forecast ${latest.forecastGate||'unbekannt'} · Admission ${latest.admissionGate||'unbekannt'} · Datensicherheit ${latest.dataSafety||'unbekannt'}\nKalibrierung: ${latest.horizons?.filter(x=>x.calibration==='CALIBRATED').length||0}/${latest.horizons?.length||0} Horizonte · letzter Grund: ${humanReason(latest.mandatoryDiscoveryReason||latest.autoShadowTradeReason||latest.coverageCurriculumReason)}`
     :'AutoLearn hat noch keinen vollständigen Scan erfasst.';
+  const horizonText=(s.latestHorizonDetails||[]).map(h=>{
+    const vals=[`${h.horizonId}: ${h.gate}/${h.calibration}`,h.direction&&h.direction!=='NEUTRAL'?h.direction:null,
+      Number.isFinite(Number(h.expectedReturn))?`Return ${(Number(h.expectedReturn)*100).toFixed(2)}%`:null,
+      Number.isFinite(Number(h.directionalProbability))?`Richtung ${(Number(h.directionalProbability)*100).toFixed(0)}%`:null,
+      Number.isFinite(Number(h.probabilityEdge))?`Edge ${(Number(h.probabilityEdge)*100).toFixed(0)}pp`:null].filter(Boolean);
+    return '• '+vals.join(' · ')+(h.reasons.length?' — '+h.reasons.join('; '):'');
+  }).join('\n');
   return [
     '🔎 WARUM KEIN SHADOW-TRADE?',
     '',
@@ -135,6 +157,7 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
     '',
     'GATES',
     `Forecast ABSTAIN: ${s.abstainForecasts}/${s.checkedCoins} · Admission PASS/CAUTION: ${s.admittedForecasts}/${s.checkedCoins}`,
+    `Research Dependency ABSTAIN: ${s.researchDependencyAbstain}/${s.checkedCoins}`,
     `Wahrscheinlichkeiten freigegeben: ${s.probabilityDisplayAllowed}/${s.checkedCoins} · Datensicherheit NORMAL: ${s.normalDataSafety}/${s.checkedCoins}`,
     `Kalibrierte Horizonte: ${s.totalCalibratedHorizons}/${s.totalHorizons} · Horizon PASS: ${s.horizonPasses}`,
     `Schwellen erfüllt: Return ${s.expectedReturnPasses} · Richtung ${s.directionProbabilityPasses} · Edge ${s.probabilityEdgePasses}`,
@@ -143,9 +166,12 @@ export function renderTradeDiscoveryDiagnostics(summary,{timeZone='Europe/Berlin
     blockerText,
     '',
     latestText,
+    ...(horizonText?['Horizont-Details',horizonText]:[]),
     '',
     `OMS: ${s.runtime.omsStatus||'unbekannt'} · gefüllt ${s.runtime.omsFilled??'unbekannt'} · aktiv ${s.runtime.omsActive??'unbekannt'}`,
-    `Offene normale Positionen: ${s.runtime.openStandardPositions??'unbekannt'} · offene Discovery: ${s.runtime.openDiscoveryPositions??'unbekannt'}/${s.runtime.discoveryOpenCap??'?'}`,
+    `Academy: ${s.runtime.academyStage||'unbekannt'} · Core ${s.runtime.academyCoreAllowed===true?'freigegeben':s.runtime.academyCoreAllowed===false?'gehalten':'unbekannt'} · Meme ${s.runtime.academyMemeAllowed===true?'freigegeben':s.runtime.academyMemeAllowed===false?'gehalten':'unbekannt'}`,
+    `Training Supervisor: ${s.runtime.trainingHold===true?'HOLD':s.runtime.trainingHold===false?'freigegeben':'unbekannt'} · Mission ${s.runtime.trainingMission||'unbekannt'}`,
+    `Offene normale Positionen: ${s.runtime.openStandardPositions??'unbekannt'}/${s.runtime.standardOpenCap??'?'} · offene Discovery: ${s.runtime.openDiscoveryPositions??'unbekannt'}/${s.runtime.discoveryOpenCap??'?'}`,
     `Reconciliation: ${s.runtime.reconciliation||'unbekannt'} · zuletzt geprüft ${fmtTime(s.runtime.reconciledAt)}`,
     '',
     'Nächster Lernschritt: '+s.nextStep,
