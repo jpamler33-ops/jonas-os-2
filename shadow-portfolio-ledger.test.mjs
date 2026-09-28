@@ -226,3 +226,33 @@ test('exploration entry is reconciled and preserves learning metadata',()=>{
   assert.equal(x.ledger.positions[0].entryQualityLabel,'UNCERTAIN');
   assert.equal(x.ledger.positions[0].entryLearningValue,.9);
 });
+
+
+test('learned challenger is tracked but excluded from primary portfolio metrics',()=>{
+  const e=entry({
+    id:'sh_challenger_1',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'LEARNED_CHALLENGER_ENTRY',
+      entryMode:'CHALLENGER',
+      challengerEngineVersion:'TCX_LEARNED_CHALLENGER_ENGINE_V1',
+      challengerRuleId:'lc_test',
+      challengerDecisionKey:'cd_test',
+      challengerRuleStatus:'DISCOVERED',
+      challengerDiscoveryStrength:.72,
+      challengerSourceSamples:16,
+      challengerForwardSamples:0
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  assert.equal(l.positions.length,1);
+  assert.equal(l.positions[0].entryMode,'CHALLENGER');
+  assert.equal(l.positions[0].challengerRuleId,'lc_test');
+  let x=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0}).position;
+  x=closeShadowPosition(x,{reason:'TAKE_PROFIT',at:61_000});
+  l=replaceShadowPortfolioPosition(l,x);
+  const summary=shadowPortfolioSummary(l,{asOf:70_000});
+  assert.equal(summary.closedTrades,0);
+  const stats=shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000});
+  assert.equal(stats.trades,0);
+});
