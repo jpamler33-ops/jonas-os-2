@@ -63,6 +63,15 @@ test('critical research-state corruption blocks readiness',()=>{
   assert.ok(r.hardReasons.includes('FORECAST_RUNTIME_RECOVERED_FROM_CORRUPT'));
 });
 
+test('oversized legacy forecast snapshot recovers into degraded readiness',()=>{
+  const r=evaluateOperationalReadiness(healthy({
+    forecastRuntime:{healthy:true,recoveredFromCorrupt:false,recoveredFromOversizedSnapshot:true}
+  }));
+  assert.equal(r.ready,true);
+  assert.equal(r.state,'DEGRADED');
+  assert.ok(r.warningReasons.includes('FORECAST_RUNTIME_OVERSIZED_SNAPSHOT_RECOVERED'));
+});
+
 test('user-state corruption is degraded but does not impersonate research corruption',()=>{
   const r=evaluateOperationalReadiness(healthy({
     persistence:{healthy:true,recoveredFromCorrupt:true}
