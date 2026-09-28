@@ -13,7 +13,7 @@ function metrics(rows,initial=10_000){
   }
   const net=rows.reduce((s,p)=>s+finite(p.realizedNetPnlQuote),0);
   return {trades:rows.length,netPnlQuote:net,expectancyQuote:rows.length?net/rows.length:null,
-    profitFactor:grossLoss>0?grossProfit/grossLoss:(grossProfit>0?Infinity:null),maxDrawdownPct:maxDd};
+    profitFactor:grossLoss>0?grossProfit/grossLoss:(grossProfit>0?999:null),maxDrawdownPct:maxDd};
 }
 function eligibleRows(ledger){
   return (ledger?.positions||[]).filter(p=>p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false&&p?.status==='CLOSED'&&
