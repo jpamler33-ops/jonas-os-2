@@ -1104,38 +1104,8 @@ function alertPreset(symbol,preset,{witnessPct=75,memorySupport=8}={}) {
   return null;
 }
 
-function alertSetupKeyboard(symbol) {
-  return {inline_keyboard:[
-    [
-      {text:'🧭 Marktphase ändert sich',callback_data:'alertpreset:'+symbol+':REGIME'},
-      {text:'📈 Trendstruktur ändert sich',callback_data:'alertpreset:'+symbol+':STRUCTURE'}
-    ],
-    [
-      {text:'🌐 Quellen stimmen überein',callback_data:'alertpreset:'+symbol+':WITNESS75'},
-      {text:'🧠 Genug Vergleichsfälle',callback_data:'alertpreset:'+symbol+':MEMORY8'}
-    ],
-    [
-      {text:'⚠️ Sicherheitsstatus ändert sich',callback_data:'alertpreset:'+symbol+':SAFETY'},
-      {text:'🎯 Mehrere Bedingungen passen',callback_data:'alertpreset:'+symbol+':COMPOSITE'}
-    ],
-    [{text:'📊 Coin',callback_data:'refresh:'+symbol},{text:'🏠 Start',callback_data:'home'}]
-  ]};
-}
-
-async function showAlertSetup(chatId,symbol) {
-  return tg('sendMessage',{
-    chat_id:chatId,
-    text:[
-      '🔔 ALERT EINRICHTEN · '+symbol.replace('USDT','/USDT'),'',
-      'TCX kann dich informieren, wenn sich etwas Wichtiges verändert.','',
-      'Wähle unten eine Bedingung.',
-      'Für einen festen Preisalarm nutze:',
-      '/alert '+symbolLabel(symbol)+' 70000','',
-      'Ein Alert ist nur eine Benachrichtigung und kein Kauf-/Verkaufssignal.'
-    ].join('\n'),
-    reply_markup:alertSetupKeyboard(symbol)
-  });
-}
+function alertSetupKeyboard(symbol){return {inline_keyboard:[[{text:'🧭 Regime-Wechsel',callback_data:'alertpreset:'+symbol+':REGIME'},{text:'📈 Trend-Wechsel',callback_data:'alertpreset:'+symbol+':STRUCTURE'}],[{text:'🌐 Evidenz ≥75%',callback_data:'alertpreset:'+symbol+':WITNESS75'},{text:'🧠 Memory bereit',callback_data:'alertpreset:'+symbol+':MEMORY8'}],[{text:'⚠️ Risiko-Status',callback_data:'alertpreset:'+symbol+':SAFETY'},{text:'🎯 Smart Alert',callback_data:'alertpreset:'+symbol+':COMPOSITE'}],[{text:'📊 Zurück zum Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]]};}
+async function showAlertSetup(chatId,symbol){return tg('sendMessage',{chat_id:chatId,text:['🔔 ALERTS · '+symbol.replace('USDT','/USDT'),'','Wähle, was TCX überwachen soll.','','🧭 Regime  · Marktphase ändert sich','📈 Trend   · Struktur kippt','🌐 Evidenz · Quellen bestätigen sich','🧠 Memory  · genug Vergleichsfälle','⚠️ Risiko  · Sicherheitsstatus ändert sich','🎯 Smart   · mehrere Faktoren passen','','Fester Preis: /alert '+symbolLabel(symbol)+' 70000','','Benachrichtigung · kein Trade-Signal'].join('\n'),reply_markup:alertSetupKeyboard(symbol)});}
 
 function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safetyOverride=null}={}) {
   const engine=engineOverride||runMechanismTransitionEngine({
@@ -2846,52 +2816,7 @@ async function showHomeSection(chatId,messageId,section) {
   else await tg('sendMessage',payload);
 }
 
-async function showWhy(chatId,messageId,symbol) {
-  const state=await researchState(symbol,'5m');
-  const witness=await witnessState(symbol,state.market).catch(()=>null);
-  const stored=episodes.filter(e=>e.symbol===symbol).length;
-  const mature=episodes.filter(e=>e.symbol===symbol && e.outcomes?.['12']).length;
-  const bias=String(state.dashboard.bias||'').toUpperCase();
-  const flow=String(state.dashboard.flow||'').toUpperCase();
-  const direction=bias.includes('BULL')||bias.includes('UP')
-    ?'🟢 mehr Signale zeigen nach oben'
-    :bias.includes('BEAR')||bias.includes('DOWN')
-      ?'🔴 mehr Signale zeigen nach unten'
-      :'🟡 keine klare Richtung';
-  const pressure=flow.includes('BID')||flow.includes('BUY')
-    ?'Käufer sind aktuell stärker'
-    :flow.includes('ASK')||flow.includes('SELL')
-      ?'Verkäufer sind aktuell stärker'
-      :'Kauf- und Verkaufsdruck sind relativ ausgeglichen';
-  const witnessText=witness
-    ?Math.round((witness.agreementScore||0)*100)+'% Übereinstimmung zwischen Datenquellen'
-    :'Vergleich mehrerer Datenquellen gerade nicht verfügbar';
-  const contradictions=witness?.contradictions?.length
-    ?'Es gibt widersprüchliche Daten zwischen Börsen.'
-    :'Keine starke Abweichung zwischen den geprüften Börsen erkannt.';
-  const text=[
-    `🔎 WARUM? · ${symbol.replace('USDT','/USDT')}`,'',
-    'DIE KURZE ANTWORT',
-    direction+'.',
-    pressure+'.','',
-    'DAS HAT TCX GEPRÜFT',
-    `• Marktphase: ${String(state.dashboard.regime||'unklar').replaceAll('_',' ')}`,
-    `• Marktstruktur: ${state.analysis?.trend||'noch unklar'}`,
-    `• Datenquellen: ${witnessText}`,
-    `• Historische Vergleichsfälle: ${stored} gespeichert · ${mature} mit 1h-Ergebnis`,
-    `• Marktdruck: ${Math.round(state.dashboard.pressureScore)}/100`,'',
-    'UNSICHERHEIT',
-    '• '+contradictions,
-    '• Neue Kursbewegungen können die Einschätzung jederzeit ändern.',
-    '• Ein ungewöhnlicher Markt kann alte Vergleichsmuster unbrauchbar machen.','',
-    'TCX führt keine echten Orders aus.',
-    'Systemmodus: ABSTAIN / SHADOW_ONLY'
-  ].join('\n');
-  await tg('editMessageText',{
-    chat_id:chatId,message_id:messageId,text:text.slice(0,4096),
-    reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})
-  });
-}
+async function showWhy(chatId,messageId,symbol){const state=await researchState(symbol,'5m'),w=await witnessState(symbol,state.market).catch(()=>null),bias=String(state.dashboard.bias||'').toUpperCase(),flow=String(state.dashboard.flow||'').toUpperCase(),dir=bias.includes('BULL')||bias.includes('UP')?'↗ Aufwärts-Bias':bias.includes('BEAR')||bias.includes('DOWN')?'↘ Abwärts-Bias':'→ Neutral',pressure=flow.includes('BUY')||flow.includes('BID')?'Käufer stärker':flow.includes('SELL')||flow.includes('ASK')?'Verkäufer stärker':'Ausgeglichen',stored=episodes.filter(e=>e.symbol===symbol).length;const text=['🔎 WARUM? · '+symbol.replace('USDT','/USDT'),'','HAUPTFAKTOREN','1 · Richtung     '+dir,'2 · Regime       '+String(state.dashboard.regime||'unklar').replaceAll('_',' '),'3 · Flow         '+pressure,'4 · Marktdruck   '+Math.round(state.dashboard.pressureScore)+'/100','5 · Quellen      '+(w?Math.round((w.agreementScore||0)*100)+'% Agreement':'nicht verfügbar'),'','EVIDENZ','Historische Fälle: '+stored,'Widersprüche: '+(w?.contradictions?.length?'🟡 vorhanden':'🟢 keine starken'),'','Die Einschätzung wird mit neuen Marktdaten neu bewertet.','ABSTAIN / SHADOW_ONLY'].join('\n');return tg('editMessageText',{chat_id:chatId,message_id:messageId,text,reply_markup:marketProductKeyboard(symbol,{live:false,isFavorite:favoriteSet(chatId).has(symbol)})});}
 
 async function showRegime(chatId,messageId,symbol) {
   const state=await researchState(symbol,'5m');
