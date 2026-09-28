@@ -1,3 +1,4 @@
+import { manageShadowPosition, attributeClosedShadowTrade } from './trade-lifecycle-v2.mjs';
 import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { sha256, canonicalJson } from './institutional-kernel.mjs';
@@ -266,14 +267,15 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
 
   let trigger=null;
   const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
+  const lifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
   }else{
-    if(ret<=-Math.abs(Number(position.stopLossPct)||0)) trigger='STOP_LOSS';
+    if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+    else if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
     else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
-    else if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
   }
-  return {position:next,trigger,changed:true,exit};
+  return {position:{...next,lifecycle},trigger,changed:true,exit,lifecycle};
 }
 
 export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=Date.now()}={}){
@@ -288,7 +290,7 @@ export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=D
   const exitFees=Number(m.estimatedExitFeesQuote||0);
   const net=gross-Number(position.entryFeesQuote||0)-exitFees;
   const basis=Number(position.entryQuote);
-  return {
+  const closed={
     ...position,
     status:'CLOSED',
     closeReason:String(reason),
@@ -304,6 +306,7 @@ export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=D
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
+  return {...closed,tradeAttribution:attributeClosedShadowTrade(closed)};
 }
 
 export function createEmptyShadowPortfolioLedger({initialEquityQuote=10_000}={}){
