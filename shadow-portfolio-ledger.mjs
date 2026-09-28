@@ -214,7 +214,10 @@ export function simulateShadowPositionExit(position,book,{feeBps=10}={}){
   const allocatedEntryFees=Number(position.entryFeesQuote||0)*(filledBase/qty);
   const netPnlQuote=grossPnlQuote-allocatedEntryFees-exitFeesQuote;
   const basis=entryQuote*(filledBase/qty);
-  const returnPct=basis>0?netPnlQuote/basis:null;
+  const priceReturnPct=basis>0?netPnlQuote/basis:null;
+  const marginBasis=Math.max(0,Number(position.marginQuote||basis));
+  const marginRoePct=marginBasis>0?netPnlQuote/marginBasis:null;
+  const returnPct=priceReturnPct;
   return {
     fullyExecutable:fillRatio>=1-1e-9,
     fillRatio,
@@ -225,6 +228,8 @@ export function simulateShadowPositionExit(position,book,{feeBps=10}={}){
     grossPnlQuote,
     netPnlQuote,
     returnPct,
+    priceReturnPct,
+    marginRoePct,
     fills,
     feeBps:Number(feeBps)||0,
     exitSide:isLong?'SELL':'BUY',
@@ -243,7 +248,9 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
     executableExitPrice:exit.avgExitPrice,
     unrealizedGrossPnlQuote:exit.grossPnlQuote,
     unrealizedNetPnlQuote:exit.netPnlQuote,
-    unrealizedReturnPct:exit.returnPct,
+    unrealizedReturnPct:exit.marginRoePct,
+    unrealizedPriceReturnPct:exit.priceReturnPct,
+    unrealizedMarginRoePct:exit.marginRoePct,
     estimatedExitFeesQuote:exit.exitFeesQuote,
     source:String(book?.source||'UNKNOWN'),
     availableAt:finite(book?.availableAt,markAt),
@@ -253,7 +260,7 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
   if(!exit.fullyExecutable) return {position:next,trigger:null,changed:true,reason:'EXIT_LIQUIDITY_INSUFFICIENT'};
 
   let trigger=null;
-  const ret=finite(exit.returnPct,0);
+  const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
   }else{
@@ -287,6 +294,8 @@ export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=D
     realizedGrossPnlQuote:gross,
     realizedNetPnlQuote:net,
     realizedReturnPct:Math.max(0,Number(position.marginQuote||basis))>0?net/Math.max(0,Number(position.marginQuote||basis)):null,
+    realizedPriceReturnPct:basis>0?net/basis:null,
+    realizedMarginRoePct:Math.max(0,Number(position.marginQuote||basis))>0?net/Math.max(0,Number(position.marginQuote||basis)):null,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
