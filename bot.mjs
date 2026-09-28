@@ -6724,12 +6724,14 @@ await syncFeatureResearch('startup');
 const me = await tg('getMe',{});
 const persistenceSmoke=runPersistenceSmokeTest();
 console.log('[TCX_PERSISTENCE_SMOKE]',JSON.stringify(persistenceSmoke));
+const startupReadiness=currentOperationalReadiness();
 console.log('[TCX_STARTUP_READY]',JSON.stringify({
   service:'TCX Telegram UI',
   botUsername:me?.username||'UNKNOWN',
   markets:markets.length,
   releaseId:runtimeManifest?.releaseId||null,
-  operationalReadiness:currentOperationalReadiness().state,
+  operationalReadiness:startupReadiness.state,
+  operationalReadinessReasons:{hard:startupReadiness.hardReasons,warnings:startupReadiness.warningReasons},
   persistenceHealthy,
   shadowOmsHealthy,
   shadowPortfolioHealthy,
