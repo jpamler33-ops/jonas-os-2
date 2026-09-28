@@ -1104,38 +1104,8 @@ function alertPreset(symbol,preset,{witnessPct=75,memorySupport=8}={}) {
   return null;
 }
 
-function alertSetupKeyboard(symbol) {
-  return {inline_keyboard:[
-    [
-      {text:'🧭 Marktphase ändert sich',callback_data:'alertpreset:'+symbol+':REGIME'},
-      {text:'📈 Trendstruktur ändert sich',callback_data:'alertpreset:'+symbol+':STRUCTURE'}
-    ],
-    [
-      {text:'🌐 Quellen stimmen überein',callback_data:'alertpreset:'+symbol+':WITNESS75'},
-      {text:'🧠 Genug Vergleichsfälle',callback_data:'alertpreset:'+symbol+':MEMORY8'}
-    ],
-    [
-      {text:'⚠️ Sicherheitsstatus ändert sich',callback_data:'alertpreset:'+symbol+':SAFETY'},
-      {text:'🎯 Mehrere Bedingungen passen',callback_data:'alertpreset:'+symbol+':COMPOSITE'}
-    ],
-    [{text:'📊 Coin',callback_data:'refresh:'+symbol},{text:'🏠 Start',callback_data:'home'}]
-  ]};
-}
-
-async function showAlertSetup(chatId,symbol) {
-  return tg('sendMessage',{
-    chat_id:chatId,
-    text:[
-      '🔔 ALERT EINRICHTEN · '+symbol.replace('USDT','/USDT'),'',
-      'TCX kann dich informieren, wenn sich etwas Wichtiges verändert.','',
-      'Wähle unten eine Bedingung.',
-      'Für einen festen Preisalarm nutze:',
-      '/alert '+symbolLabel(symbol)+' 70000','',
-      'Ein Alert ist nur eine Benachrichtigung und kein Kauf-/Verkaufssignal.'
-    ].join('\n'),
-    reply_markup:alertSetupKeyboard(symbol)
-  });
-}
+function alertSetupKeyboard(symbol){return {inline_keyboard:[[{text:'🧭 Regime-Wechsel',callback_data:'alertpreset:'+symbol+':REGIME'},{text:'📈 Struktur-Wechsel',callback_data:'alertpreset:'+symbol+':STRUCTURE'}],[{text:'🌐 Evidenz ≥75%',callback_data:'alertpreset:'+symbol+':WITNESS75'},{text:'🧠 Memory bereit',callback_data:'alertpreset:'+symbol+':MEMORY8'}],[{text:'⚠️ Risiko-Status',callback_data:'alertpreset:'+symbol+':SAFETY'},{text:'🎯 Setup bestätigt',callback_data:'alertpreset:'+symbol+':COMPOSITE'}],[{text:'📊 Zurück zum Markt',callback_data:'refresh:'+symbol},{text:'🏠 Command Center',callback_data:'home'}]]};}
+async function showAlertSetup(chatId,symbol){return tg('sendMessage',{chat_id:chatId,text:['🔔 ALERTS · '+symbol.replace('USDT','/USDT'),'','Wähle, was TCX für dich überwachen soll.','','MARKT','Regime · Struktur','','EVIDENZ','Quellen · Memory · Setup','','RISIKO','Safety-Status','','Fester Preis: /alert '+symbolLabel(symbol)+' 70000','Alerts informieren nur · keine Order-Ausführung.'].join('\n'),reply_markup:alertSetupKeyboard(symbol)});}
 
 function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safetyOverride=null}={}) {
   const engine=engineOverride||runMechanismTransitionEngine({
