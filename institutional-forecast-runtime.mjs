@@ -254,7 +254,7 @@ function createRuntimeState(filePath,config,opts={}){
 export async function openInstitutionalForecastRuntime(filePath,{
   config=DEFAULT_INSTITUTIONAL_FORECAST_CONFIG,
   maxHistoryRows=8_000,
-  maxSnapshotBytes=48*1024*1024,
+  maxSnapshotBytes=80*1024*1024,
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
@@ -262,7 +262,7 @@ export async function openInstitutionalForecastRuntime(filePath,{
 
   try{
     const snapshotStat=await stat(filePath);
-    if(snapshotStat.size>Math.max(1024,Number(maxSnapshotBytes)||48*1024*1024)) throw Object.assign(new Error('forecast runtime snapshot exceeds configured safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE'});
+    if(snapshotStat.size>Math.max(1024,Number(maxSnapshotBytes)||80*1024*1024)) throw Object.assign(new Error('forecast runtime snapshot exceeds configured safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE'});
     const raw=await readFile(filePath,'utf8');
     const snapshot=JSON.parse(raw);
     if(snapshot?.version!==INSTITUTIONAL_FORECAST_RUNTIME_VERSION){
