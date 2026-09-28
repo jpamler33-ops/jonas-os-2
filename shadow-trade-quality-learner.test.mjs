@@ -82,3 +82,21 @@ test('ABSTAIN probes teach the learner as exploration samples',()=>{
   assert.equal(model.samples,10);
   assert.equal(model.explorationSamples,5);
 });
+
+
+test('raw coverage probes teach with reduced effective sample weight',()=>{
+  const rows=Array.from({length:8},(_,i)=>({
+    ...closed(500+i,{pnl:2}),
+    entryMode:'COVERAGE_PROBE',
+    exploration:true,
+    coverageEvidenceTier:'BOOTSTRAP_RAW_FORECAST'
+  }));
+  const model=buildShadowTradeQualityModel({positions:rows});
+  const s=scoreShadowTradeCandidate(model,{
+    assetClass:'CORE',side:'LONG',horizonMs:300000,
+    directionalProbability:.62,probabilityEdge:.16,expectedReturn:.004
+  });
+  assert.equal(s.samples,8);
+  assert.ok(s.confidence<.25);
+  assert.equal(model.explorationSamples,8);
+});
