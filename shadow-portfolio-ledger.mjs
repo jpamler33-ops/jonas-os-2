@@ -118,6 +118,14 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     entryRegimeState:order.strategyMeta?.entryRegimeState&&typeof order.strategyMeta.entryRegimeState==='object'
       ?JSON.parse(JSON.stringify(order.strategyMeta.entryRegimeState))
       :null,
+    entryStressLabVersion:String(order.strategyMeta?.entryStressLabVersion||''),
+    entryStressStatus:String(order.strategyMeta?.entryStressStatus||''),
+    entryStressSamples:finite(order.strategyMeta?.entryStressSamples),
+    entryStressMultiplier:finite(order.strategyMeta?.entryStressMultiplier),
+    entryStressRobustnessScore:finite(order.strategyMeta?.entryStressRobustnessScore),
+    entryStressFailedChecks:Array.isArray(order.strategyMeta?.entryStressFailedChecks)
+      ?[...order.strategyMeta.entryStressFailedChecks].map(String).slice(0,20)
+      :[],
     entryQualityLearnerVersion:String(order.strategyMeta?.entryQualityLearnerVersion||''),
     entryQualityLabel:String(order.strategyMeta?.entryQualityLabel||'UNKNOWN'),
     entryQualityScore:finite(order.strategyMeta?.entryQualityScore),
