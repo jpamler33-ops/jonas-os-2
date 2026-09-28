@@ -191,7 +191,8 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
   baseNotionalQuote=10,
   maxCandidates=2,
   maxAgeMs=10*60_000,
-  regimeBrain=null
+  regimeBrain=null,
+  stressLab=null
 }={}){
   const blocked=safeIssuance(issuance,Number(now),Math.max(1,Number(maxAgeMs)||1));
   if(blocked) return freeze({version:LEARNED_CHALLENGER_ENGINE_VERSION,candidates:[],reason:blocked,execution:'SHADOW_ONLY',canExecuteLive:false});
@@ -227,6 +228,10 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
         ?regimeBrain.decisionForRule(rule.ruleId)
         :{status:'NOT_APPLIED',multiplier:1,reason:'REGIME_BRAIN_NOT_REQUESTED',samples:0};
       if(Number(regimeDecision?.multiplier||0)<=0) continue;
+      const stressDecision=typeof stressLab?.decisionForRule==='function'
+        ?stressLab.decisionForRule(rule.ruleId)
+        :{status:'NOT_APPLIED',multiplier:1,reason:'STRESS_LAB_NOT_REQUESTED',samples:0,robustnessScore:0};
+      if(Number(stressDecision?.multiplier??1)<=0) continue;
       const core={
         issuanceId:String(issuance.issuanceId||''),
         forecastFingerprint:String(issuance.forecastFingerprint||issuance.forecast?.fingerprint||''),
@@ -252,7 +257,16 @@ export function deriveLearnedChallengerTrades(issuance,lab,{
         regimeSamples:Number(regimeDecision?.samples||0),
         regimeMultiplier:Number(regimeDecision?.multiplier||.65),
         regimeReason:String(regimeDecision?.reason||'UNKNOWN'),
-        notionalQuote:Math.max(1,Number(baseNotionalQuote)||10)*statusMultiplier*Number(regimeDecision?.multiplier||.65),
+        stressStatus:String(stressDecision?.status||'UNKNOWN'),
+        stressSamples:Number(stressDecision?.samples||0),
+        stressMultiplier:Number(stressDecision?.multiplier??1),
+        stressRobustnessScore:Number(stressDecision?.robustnessScore||0),
+        stressReason:String(stressDecision?.reason||'UNKNOWN'),
+        stressFailedChecks:Array.isArray(stressDecision?.failedChecks)?[...stressDecision.failedChecks]:[],
+        notionalQuote:Math.max(1,Number(baseNotionalQuote)||10)
+          *statusMultiplier
+          *Number(regimeDecision?.multiplier||.65)
+          *Number(stressDecision?.multiplier??1),
         generatedAt:Number(issuance.generatedAt),
         admissionGate:String(issuance.admission?.gate||'').toUpperCase(),
         execution:'SHADOW_ONLY',
