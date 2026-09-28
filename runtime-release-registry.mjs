@@ -70,6 +70,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-learning-center.mjs',
   'forecast-hypothesis-generator.mjs',
   'forecast-shadow-competition.mjs',
+  'forecast-shadow-evaluation-client.mjs',
+  'forecast-shadow-evaluation-worker.mjs',
   'forecast-experiment-governor.mjs',
   'forecast-feature-research.mjs',
   'research-data-plane.mjs',
