@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 
 import {
   ProbabilisticForecastEngine,
@@ -12,6 +12,12 @@ import { createResearchTraceEvaluation } from './research-trace.mjs';
 import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
 
 export const INSTITUTIONAL_FORECAST_RUNTIME_VERSION='TCX_INSTITUTIONAL_FORECAST_RUNTIME_V1';
+
+const DEFAULT_FORECAST_SNAPSHOT_BYTES=80*1024*1024;
+function snapshotByteLimit(value){
+  const n=Number(value);
+  return Math.max(1024,Number.isFinite(n)&&n>0?Math.floor(n):DEFAULT_FORECAST_SNAPSHOT_BYTES);
+}
 
 export const EPISODE_FORECAST_FEATURE_IDS=Object.freeze([
   'episode.biasScore',
@@ -247,6 +253,8 @@ function createRuntimeState(filePath,config,opts={}){
     recoveredFromOversizedSnapshot:false,
     backupPath:null,
     lastError:null,
+    maxSnapshotBytes:snapshotByteLimit(opts.maxSnapshotBytes),
+    lastPersistedBytes:null,
     maxIssuances:Math.max(100,Math.floor(opts.maxIssuances??5_000))
   };
 }
@@ -258,11 +266,12 @@ export async function openInstitutionalForecastRuntime(filePath,{
   ...opts
 }={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows});
+  const runtime=createRuntimeState(filePath,{...config,featureIds:[...config.featureIds],horizons:config.horizons.map(x=>({...x}))},{...opts,maxHistoryRows,maxSnapshotBytes});
 
   try{
     const snapshotStat=await stat(filePath);
-    if(snapshotStat.size>Math.max(1024,Number(maxSnapshotBytes)||80*1024*1024)) throw Object.assign(new Error('forecast runtime snapshot exceeds configured safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE'});
+    runtime.lastPersistedBytes=snapshotStat.size;
+    if(snapshotStat.size>runtime.maxSnapshotBytes) throw Object.assign(new Error('forecast runtime snapshot exceeds configured safety limit'),{code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE',bytes:snapshotStat.size,maxSnapshotBytes:runtime.maxSnapshotBytes});
     const raw=await readFile(filePath,'utf8');
     const snapshot=JSON.parse(raw);
     if(snapshot?.version!==INSTITUTIONAL_FORECAST_RUNTIME_VERSION){
@@ -310,11 +319,23 @@ export async function saveInstitutionalForecastRuntime(runtime){
   const tmp=runtime.filePath+'.tmp-'+process.pid;
   try{
     const serialized=JSON.stringify(payload);
+    const bytes=Buffer.byteLength(serialized);
+    const maxSnapshotBytes=snapshotByteLimit(runtime.maxSnapshotBytes);
+    if(bytes>maxSnapshotBytes){
+      throw Object.assign(new Error('forecast runtime snapshot exceeds configured persistence limit'),{
+        code:'TCX_RUNTIME_SNAPSHOT_TOO_LARGE_TO_PERSIST',
+        bytes,
+        maxSnapshotBytes
+      });
+    }
     await writeFile(tmp,serialized,{encoding:'utf8',mode:0o600});
     await rename(tmp,runtime.filePath);
+    runtime.maxSnapshotBytes=maxSnapshotBytes;
+    runtime.lastPersistedBytes=bytes;
     runtime.lastError=null;
-    return {bytes:Buffer.byteLength(serialized)};
+    return {bytes,maxSnapshotBytes};
   }catch(err){
+    await rm(tmp,{force:true}).catch(()=>{});
     runtime.healthy=false;
     runtime.lastError=err instanceof Error?err.message:String(err);
     throw err;
@@ -518,6 +539,11 @@ export function institutionalForecastRuntimeSummary(runtime){
     recoveredFromOversizedSnapshot:runtime?.recoveredFromOversizedSnapshot===true,
     backupPath:runtime?.backupPath??null,
     lastError:runtime?.lastError??null,
+    maxSnapshotBytes:runtime?.maxSnapshotBytes??null,
+    lastPersistedBytes:runtime?.lastPersistedBytes??null,
+    snapshotBudgetUtilization:Number(runtime?.maxSnapshotBytes)>0&&Number.isFinite(Number(runtime?.lastPersistedBytes))
+      ?Number(runtime.lastPersistedBytes)/Number(runtime.maxSnapshotBytes)
+      :null,
     historyCases:runtime?.engine?.historySize?.()??0,
     journalEntries:runtime?.journal?.all?.().length??0,
     pendingOutcomes:runtime?.journal?.pending?.().length??0,
