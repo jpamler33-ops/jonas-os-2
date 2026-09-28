@@ -369,8 +369,12 @@ const alerts = loadedState.alerts;
 const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
 const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
-const forecastRuntimeFile = process.env.TCX_FORECAST_RUNTIME_FILE || '/data/tcx-forecast-runtime.json';
+const configuredForecastRuntimeFile=process.env.TCX_FORECAST_RUNTIME_FILE||null;
+const forecastRuntimeFile=configuredForecastRuntimeFile||'/data/tcx-forecast-runtime.v2.json.gz';
+const forecastRuntimeLegacyFile=configuredForecastRuntimeFile?null:'/data/tcx-forecast-runtime.json';
 const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile,{
+  legacyFilePath:forecastRuntimeLegacyFile,
+  snapshotCompression:'gzip',
   maxHistoryRows:Math.max(2000,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||2000)))),
   maxSnapshotBytes:Math.max(64*1024*1024,Math.min(96*1024*1024,Math.floor(Number(process.env.TCX_FORECAST_MAX_SNAPSHOT_BYTES||80*1024*1024)))),
   maxJournalEntries:forecastJournalMaxEntries,
@@ -634,8 +638,11 @@ async function flushForecastRuntimePersistence(force=false){
       console.log('forecast runtime snapshot persisted',JSON.stringify({
         reason,durationMs:Date.now()-started,
         bytes:snapshotMeta?.bytes||null,
+        logicalBytes:snapshotMeta?.logicalBytes||null,
+        encoding:snapshotMeta?.encoding||forecastRuntime.snapshotEncoding||null,
+        compressionRatio:snapshotMeta?.compressionRatio??null,
         maxSnapshotBytes:snapshotMeta?.maxSnapshotBytes||forecastRuntime.maxSnapshotBytes||null,
-        snapshotBudgetUtilization:snapshotMeta?.bytes&&forecastRuntime.maxSnapshotBytes?snapshotMeta.bytes/forecastRuntime.maxSnapshotBytes:null,
+        snapshotBudgetUtilization:snapshotMeta?.logicalBytes&&forecastRuntime.maxSnapshotBytes?snapshotMeta.logicalBytes/forecastRuntime.maxSnapshotBytes:null,
         heapUsedMb:Math.round(m.heapUsed/1024/1024),
         historyRows:forecastRuntime.engine.historySize(),
         journalRows:forecastRuntime.journal.entries.length,
@@ -794,8 +801,11 @@ async function persistForecastRuntime(reason='mutation',{force=false}={}) {
   return true;
 }
 
-if(forecastSeedAtBoot.addedRows>0 && forecastRuntime.healthy){
-  await persistForecastRuntime('boot-episode-seed',{force:true});
+if((forecastSeedAtBoot.addedRows>0||forecastRuntime.migratedFromLegacyPath) && forecastRuntime.healthy){
+  await persistForecastRuntime(
+    forecastRuntime.migratedFromLegacyPath?'boot-snapshot-compression-migration':'boot-episode-seed',
+    {force:true}
+  );
 }
 
 function latestEvidenceRecord(symbol) {
@@ -6614,9 +6624,13 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   coverageHorizons:DEFAULT_COVERAGE_HORIZONS.map(x=>x.id),
   autoLearnSymbols:autoLearnSymbols.length,
   forecastSnapshotPersistence:{
-    lastBytes:forecastRuntime.lastPersistedBytes??null,
-    maxBytes:forecastRuntime.maxSnapshotBytes??null,
-    utilization:forecastRuntime.maxSnapshotBytes&&forecastRuntime.lastPersistedBytes!=null?forecastRuntime.lastPersistedBytes/forecastRuntime.maxSnapshotBytes:null
+    storageBytes:forecastRuntime.lastPersistedBytes??null,
+    logicalBytes:forecastRuntime.lastPersistedLogicalBytes??null,
+    maxLogicalBytes:forecastRuntime.maxSnapshotBytes??null,
+    encoding:forecastRuntime.snapshotEncoding??'unknown',
+    loadedFromPath:forecastRuntime.loadedFromPath??null,
+    utilization:forecastRuntime.maxSnapshotBytes&&forecastRuntime.lastPersistedLogicalBytes!=null?forecastRuntime.lastPersistedLogicalBytes/forecastRuntime.maxSnapshotBytes:null,
+    compressionRatio:forecastRuntime.lastPersistedLogicalBytes>0&&forecastRuntime.lastPersistedBytes!=null?forecastRuntime.lastPersistedBytes/forecastRuntime.lastPersistedLogicalBytes:null
   },
   forecastMemoryCaps:{
     history:forecastRuntime.engine.maxHistoryRows,

@@ -341,6 +341,49 @@ test('online forecast memories accept explicit bounded row caps',async()=>{
   assert.equal(r.engine.drift.maxRows,705);
 });
 
+test('gzip snapshot migration loads legacy JSON, writes compressed target, and restores full state',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-gzip-'));
+  const legacy=path.join(dir,'runtime.json');
+  const target=path.join(dir,'runtime.v2.json.gz');
+
+  const original=await openInstitutionalForecastRuntime(legacy);
+  seedInstitutionalForecastRuntimeFromEpisodes(original,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  issueInstitutionalForecast(original,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  await saveInstitutionalForecastRuntime(original);
+
+  const migrated=await openInstitutionalForecastRuntime(target,{
+    legacyFilePath:legacy,
+    snapshotCompression:'gzip',
+    config:original.engine.configSnapshot()
+  });
+  assert.equal(migrated.migratedFromLegacyPath,legacy);
+  assert.equal(migrated.issuances.length,1);
+  const meta=await saveInstitutionalForecastRuntime(migrated);
+  assert.equal(meta.encoding,'gzip');
+  assert.ok(meta.bytes<meta.logicalBytes);
+
+  const stored=await readFile(target);
+  assert.equal(stored[0],0x1f);
+  assert.equal(stored[1],0x8b);
+
+  const reopened=await openInstitutionalForecastRuntime(target,{
+    snapshotCompression:'gzip',
+    config:original.engine.configSnapshot()
+  });
+  assert.equal(reopened.snapshotEncoding,'gzip');
+  assert.equal(reopened.issuances.length,1);
+  assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
+  assert.equal(reopened.engine.historySize(),original.engine.historySize());
+});
+
 test('snapshot writer enforces the same byte ceiling as reload and preserves the last valid file',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-contract-'));
   const file=path.join(dir,'runtime.json');
