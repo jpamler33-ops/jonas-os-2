@@ -2,6 +2,7 @@ import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { sha256, canonicalJson } from './institutional-kernel.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
+import { evaluateStrategyEvidence, STRATEGY_EVIDENCE_ENGINE_VERSION } from './strategy-evidence-engine.mjs';
 import {
   shadowPositionFromEntryOrder, markShadowPosition, closeShadowPosition,
   shadowPortfolioSummary
@@ -157,43 +158,24 @@ function strategyAccount(ledger,strategyId,{asOf=Date.now()}={}){
     initialEquityQuote:initial,
     positions
   },{asOf});
-  const closed=positions.filter(p=>p.status==='CLOSED');
-  const independentDecisions=new Set(closed.map(p=>String(p.leagueSampleKey||p.entryOrderId))).size;
-  const tradingDays=new Set(closed.map(p=>dayKey(p.closedAt))).size;
-  const bySymbol=new Map();
-  for(const p of closed) bySymbol.set(p.symbol,(bySymbol.get(p.symbol)||0)+1);
-  const maxSymbolTrades=closed.length?Math.max(...bySymbol.values()):0;
-  const symbolConcentration=closed.length?maxSymbolTrades/closed.length:0;
-  const eligibleForAllocation=
-    closed.length>=30&&
-    independentDecisions>=30&&
-    tradingDays>=7&&
-    symbolConcentration<=.60;
-
-  const pf=summary.profitFactor;
-  const pfScore=pf==null
-    ? (summary.realizedPnlQuote>0&&closed.length>=10?.80:.20)
-    : clamp((Number(pf)-.75)/.75,0,1);
-  const returnScore=clamp((Number(summary.returnPct||0)+.02)/.08,0,1);
-  const ddScore=clamp(1-Number(summary.maxDrawdownPct||0)/.10,0,1);
-  const consistency=clamp(Number(summary.winRate||0)/.60,0,1);
-  const performanceScore=clamp(
-    .35*pfScore+.30*returnScore+.20*ddScore+.15*consistency,
-    0,1
-  );
-  const riskHold=Number(summary.maxDrawdownPct||0)>.12;
+  const evidence=evaluateStrategyEvidence(positions,{
+    asOf,
+    maxDrawdownPct:Number(summary.maxDrawdownPct||0),
+    strategyTrials:SHADOW_STRATEGIES.length
+  });
 
   return {
     strategyId,
     label:strategy.label,
     profile:strategy,
     summary,
-    independentDecisions,
-    tradingDays,
-    symbolConcentration,
-    eligibleForAllocation,
-    performanceScore,
-    riskHold,
+    independentDecisions:evidence.independentDecisions,
+    tradingDays:evidence.tradingDays,
+    symbolConcentration:evidence.symbolConcentration,
+    eligibleForAllocation:evidence.allocationEligible,
+    performanceScore:evidence.scores.evidenceScore,
+    riskHold:evidence.riskHold,
+    evidence,
     positions
   };
 }
@@ -207,7 +189,7 @@ export function strategyLeagueSummary(ledger,{asOf=Date.now()}={}){
   let allocationMode='EQUAL_EXPLORATION';
 
   if(eligible.length>=2){
-    allocationMode='EVIDENCE_WEIGHTED';
+    allocationMode='EVIDENCE_WEIGHTED_V2';
     const floor=.08;
     const remaining=Math.max(0,1-floor*n);
     const scoreSum=eligible.reduce((s,x)=>s+Math.max(.05,x.performanceScore),0);
@@ -222,9 +204,13 @@ export function strategyLeagueSummary(ledger,{asOf=Date.now()}={}){
     const allocationWeight=weights.get(a.strategyId)||0;
     const status=a.riskHold
       ?'RISK_HOLD'
-      :a.eligibleForAllocation
-        ?(a.performanceScore>=.55?'PROVEN':'PROBATION')
-        :'CHALLENGER';
+      :a.evidence.degradationWatch
+        ?'DRIFT_WATCH'
+        :a.eligibleForAllocation
+          ?(a.evidence.evidenceGrade==='ROBUST'?'PROVEN':'QUALIFIED')
+          :a.evidence.independentDecisions>=20
+            ?'DEVELOPING'
+            :'CHALLENGER';
     return {
       strategyId:a.strategyId,
       label:a.label,
@@ -236,6 +222,18 @@ export function strategyLeagueSummary(ledger,{asOf=Date.now()}={}){
       tradingDays:a.tradingDays,
       symbolConcentration:a.symbolConcentration,
       riskHold:a.riskHold,
+      evidence:{
+        version:a.evidence.version,
+        grade:a.evidence.evidenceGrade,
+        failedGates:a.evidence.failedGates,
+        degradationWatch:a.evidence.degradationWatch,
+        trialPenalty:a.evidence.scores.trialPenalty,
+        rawScore:a.evidence.scores.rawEvidenceScore,
+        score:a.evidence.scores.evidenceScore,
+        recent:a.evidence.temporalValidation.recent,
+        early:a.evidence.temporalValidation.early,
+        meaning:a.evidence.temporalValidation.meaning
+      },
       account:{
         initialEquityQuote:a.summary.initialEquityQuote,
         equityQuote:a.summary.equityQuote,
@@ -253,6 +251,8 @@ export function strategyLeagueSummary(ledger,{asOf=Date.now()}={}){
 
   const core={
     version:SHADOW_STRATEGY_LEAGUE_VERSION,
+    policyVersion:'TCX_STRATEGY_LEAGUE_EVIDENCE_POLICY_V2',
+    evidenceEngineVersion:STRATEGY_EVIDENCE_ENGINE_VERSION,
     asOf:Number(asOf),
     allocationMode,
     strategyCount:n,
@@ -332,6 +332,8 @@ export function deriveStrategyLeagueCandidates(issuance,ledger,{
       leagueAllocationWeight:account.allocationWeight,
       leagueNotionalMultiplier:strategy.notionalMultiplier,
       leaguePerformanceScore:account.performanceScore,
+      leagueEvidenceGrade:account.evidence.grade,
+      leagueEvidenceFailedGates:account.evidence.failedGates,
       leagueStatus:account.status,
       assetClass:cls,
       role:'LEAGUE_ENTRY',
