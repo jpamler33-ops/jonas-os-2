@@ -97,6 +97,31 @@ test('hash-chain ledger appends and verifies',async()=>{
   assert.equal(verifyLedgerRecords(reopened.records).ok,true);
 });
 
+test('audit ledger verifies full chain while retaining only bounded tail',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-ledger-bounded-'));
+  const file=path.join(dir,'audit.jsonl');
+  const ledger=await openAuditLedger(file,{maxInMemoryRecords:5});
+  for(let i=1;i<=25;i++){
+    await appendAuditRecord(ledger,{kind:'TEST',payload:{x:i},occurredAt:i});
+  }
+  assert.equal(ledger.seq,25);
+  assert.equal(ledger.records.length,5);
+  assert.deepEqual(ledger.records.map(x=>x.seq),[21,22,23,24,25]);
+
+  const reopened=await openAuditLedger(file,{maxInMemoryRecords:5});
+  assert.equal(reopened.healthy,true);
+  assert.equal(reopened.verification.ok,true);
+  assert.equal(reopened.verification.count,25);
+  assert.equal(reopened.seq,25);
+  assert.equal(reopened.records.length,5);
+  assert.deepEqual(reopened.records.map(x=>x.seq),[21,22,23,24,25]);
+
+  const next=await appendAuditRecord(reopened,{kind:'TEST',payload:{x:26},occurredAt:26});
+  assert.equal(next.seq,26);
+  assert.equal(reopened.records.length,5);
+  assert.deepEqual(reopened.records.map(x=>x.seq),[22,23,24,25,26]);
+});
+
 test('ledger detects historical tampering',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-ledger-'));
   const file=path.join(dir,'audit.jsonl');
