@@ -7325,6 +7325,12 @@ async function shadowPortfolioWatcher(){
           recordError(observability,{scope:'shadow_portfolio.book',message:err instanceof Error?err.message:String(err)});
         }
       }
+      const latestReviewForecasts=new Map();
+      for(const position of openPositions){
+        if(String(position.tradingPolicyVersion||'')!==BIGGJ_TRADING_POLICY_VERSION) continue;
+        if(latestReviewForecasts.has(position.symbol)) continue;
+        latestReviewForecasts.set(position.symbol,latestInstitutionalForecast(forecastRuntime,position.symbol));
+      }
 
       for(const current of [...(shadowPortfolioLedger.positions||[])]){
         if(current.status!=='OPEN') continue;
@@ -7333,7 +7339,7 @@ async function shadowPortfolioWatcher(){
         const markAt=Number(book.availableAt||Date.now());
         let lifecycleState=null;
         if(String(current.tradingPolicyVersion||'')===BIGGJ_TRADING_POLICY_VERSION){
-          const latestReviewForecast=latestInstitutionalForecast(forecastRuntime,current.symbol);
+          const latestReviewForecast=latestReviewForecasts.get(current.symbol)||null;
           lifecycleState=deriveBiggjThesisEvidence(current,latestReviewForecast,{at:markAt});
         }
         const marked=markShadowPosition(current,book,{
