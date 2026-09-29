@@ -568,12 +568,15 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const tradeSyncConcurrency=Math.max(1,Math.min(4,Math.floor(Number(process.env.TCX_DISCORD_TRADE_SYNC_CONCURRENCY||3)||3)));
   const tradeCardRefreshMs=Math.max(30000,Number(process.env.TCX_DISCORD_TRADE_CARD_REFRESH_MS||60000));
   const thesisRefreshMs=Math.max(60000,Number(process.env.TCX_DISCORD_THESIS_REFRESH_MS||120000));
+  const starterRefreshBudget=Math.max(1,Math.min(8,Math.floor(Number(process.env.TCX_DISCORD_STARTER_REFRESH_BUDGET||4)||4)));
+  const thesisRefreshBudget=Math.max(1,Math.min(6,Math.floor(Number(process.env.TCX_DISCORD_THESIS_REFRESH_BUDGET||2)||2)));
+  const threadThesisRefreshBudget=Math.max(1,Math.min(8,Math.floor(Number(process.env.TCX_DISCORD_THREAD_THESIS_REFRESH_BUDGET||4)||4)));
   let schedulerStopped=false;
   let closedFeedInitialized=false;
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -834,6 +837,14 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       messageCreatedAt:message?.createdTimestamp
     });
   }
+  function claimRefreshBudget(stats,key,limit){
+    if(!stats)return true;
+    const usedKey=key+'BudgetUsed';
+    const used=Math.max(0,Number(stats[usedKey]||0));
+    if(used>=Math.max(1,Number(limit)||1))return false;
+    stats[usedKey]=used+1;
+    return true;
+  }
   async function upsertThesisChannelCard(position,{recentByFooter=null,stats=null}={}){
     const channel=channelCache.get('theses'); if(!channel)return null;
     const id=String(position?.positionId||''); if(!id)return null;
@@ -845,8 +856,10 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const now=Date.now();
     if(msg){
       if(messageRefreshDue(msg,null,thesisRefreshMs,now)){
-        await msg.edit(biggjThesisPayload(position));
-        if(stats)stats.thesisEdits++;
+        if(claimRefreshBudget(stats,'thesis',thesisRefreshBudget)){
+          await msg.edit(biggjThesisPayload(position));
+          if(stats)stats.thesisEdits++;
+        }else if(stats)stats.thesisBudgetDeferred++;
       }else if(stats)stats.thesisSkips++;
     }else{
       msg=await channel.send(biggjThesisPayload(position));
@@ -870,9 +883,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const thesisNow=Date.now();
     if(thesisMsg){
       if(messageRefreshDue(thesisMsg,prior?.lastThreadThesisEditAt,thesisRefreshMs,thesisNow)){
-        await thesisMsg.edit(biggjThesisPayload(position));
-        prior={...prior,lastThreadThesisEditAt:thesisNow};
-        if(stats)stats.threadThesisEdits++;
+        if(claimRefreshBudget(stats,'threadThesis',threadThesisRefreshBudget)){
+          await thesisMsg.edit(biggjThesisPayload(position));
+          prior={...prior,lastThreadThesisEditAt:thesisNow};
+          if(stats)stats.threadThesisEdits++;
+        }else if(stats)stats.threadThesisBudgetDeferred++;
       }else if(stats)stats.threadThesisSkips++;
     }else{
       thesisMsg=await thread.send(biggjThesisPayload(position));
@@ -934,9 +949,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const recentClosed=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
     const syncStats={
       positions:Math.min(20,positions.length),
-      thesisEdits:0,thesisCreates:0,thesisSkips:0,
-      starterEdits:0,starterCreates:0,starterSkips:0,
-      threadThesisEdits:0,threadThesisCreates:0,threadThesisSkips:0,
+      thesisEdits:0,thesisCreates:0,thesisSkips:0,thesisBudgetDeferred:0,thesisBudgetUsed:0,
+      starterEdits:0,starterCreates:0,starterSkips:0,starterBudgetDeferred:0,starterBudgetUsed:0,
+      threadThesisEdits:0,threadThesisCreates:0,threadThesisSkips:0,threadThesisBudgetDeferred:0,threadThesisBudgetUsed:0,
       feedVisualCreates:0,threadCreates:0
     };
     await syncThesisDashboard(positions,syncStats);
@@ -970,9 +985,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         const starterNow=Date.now();
         if(starter){
           if(messageRefreshDue(starter,card.lastStarterEditAt,tradeCardRefreshMs,starterNow)){
-            await starter.edit(shadowTradePayload(p));
-            card.lastStarterEditAt=starterNow;
-            syncStats.starterEdits++;
+            if(claimRefreshBudget(syncStats,'starter',starterRefreshBudget)){
+              await starter.edit(shadowTradePayload(p));
+              card.lastStarterEditAt=starterNow;
+              syncStats.starterEdits++;
+            }else syncStats.starterBudgetDeferred++;
           }else syncStats.starterSkips++;
         }else{
           starter=await c.send(shadowTradePayload(p));

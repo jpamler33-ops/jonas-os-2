@@ -105,3 +105,14 @@ test('refresh freshness policy prefers latest known activity',()=>{
     now:100000,intervalMs:60000
   }),true);
 });
+
+
+test('refresh budgets are exposed in bridge source',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/TCX_DISCORD_STARTER_REFRESH_BUDGET\|\|4/);
+  assert.match(source,/TCX_DISCORD_THESIS_REFRESH_BUDGET\|\|2/);
+  assert.match(source,/TCX_DISCORD_THREAD_THESIS_REFRESH_BUDGET\|\|4/);
+  assert.match(source,/starterBudgetDeferred/);
+  assert.match(source,/threadThesisBudgetDeferred/);
+});
