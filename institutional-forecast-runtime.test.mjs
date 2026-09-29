@@ -515,6 +515,10 @@ test('gzip persistence externalizes learning journal and restores entries withou
   assert.ok(meta.journalStore);
   assert.equal(meta.journalStore.count,before.length);
   assert.ok(meta.journalStore.storageBytes<meta.journalStore.logicalBytes);
+  const journalSidecar=file+'.journal.'+meta.journalStore.slot+'.json.gz';
+  const logicalJournal=gunzipSync(await readFile(journalSidecar)).toString('utf8');
+  assert.equal(Buffer.byteLength(logicalJournal),meta.journalStore.logicalBytes);
+  assert.equal(sha256(logicalJournal),meta.journalStore.sha256);
 
   const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
   assert.deepEqual(main.journal.entries,[]);
@@ -554,6 +558,10 @@ test('gzip persistence externalizes engine learning memories and restores them l
   assert.ok(meta.engineStore);
   assert.ok(meta.engineStore.logicalBytes>0);
   assert.ok(meta.engineStore.storageBytes<meta.engineStore.logicalBytes);
+  const engineSidecar=file+'.engine.'+meta.engineStore.slot+'.json.gz';
+  const logicalEngine=gunzipSync(await readFile(engineSidecar)).toString('utf8');
+  assert.equal(Buffer.byteLength(logicalEngine),meta.engineStore.logicalBytes);
+  assert.equal(sha256(logicalEngine),meta.engineStore.sha256);
 
   const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
   assert.ok(main.engineStore);
