@@ -1655,6 +1655,166 @@ async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,
   return order;
 }
 
+
+let biggjLearningCache={
+  closedCount:-1,
+  outcomeMemory:null,
+  holdMemory:null,
+  experiments:null,
+  consistency:null,
+  refreshedAt:0
+};
+function biggjClamp(v,a=0,b=1){return Math.max(a,Math.min(b,Number(v)));}
+function refreshBiggjLearningCache({force=false}={}){
+  const closed=(shadowPortfolioLedger?.positions||[]).filter(p=>p?.status==='CLOSED').length;
+  if(!force&&biggjLearningCache.closedCount===closed&&biggjLearningCache.outcomeMemory&&biggjLearningCache.holdMemory) return biggjLearningCache;
+  const outcomeMemory=buildBiggjOutcomeFactorMemory(shadowPortfolioLedger);
+  const holdMemory=buildBiggjAdaptiveHoldMemory(shadowPortfolioLedger);
+  const experiments=discoverBiggjStrategyExperiments(outcomeMemory);
+  const consistency=scoreBiggjTradingConsistency((shadowPortfolioLedger?.positions||[]).filter(p=>String(p?.entryMode||'STANDARD').toUpperCase()==='STANDARD'));
+  biggjLearningCache={closedCount:closed,outcomeMemory,holdMemory,experiments,consistency,refreshedAt:Date.now()};
+  return biggjLearningCache;
+}
+function biggjForecastSide(issuance){
+  const rows=(Array.isArray(issuance?.forecast?.horizons)?issuance.forecast.horizons:[])
+    .filter(h=>String(h?.gate||'').toUpperCase()==='PASS'&&['UP','DOWN'].includes(String(h?.direction||'').toUpperCase()))
+    .map(h=>{
+      const p=h?.display?.probabilities||h?.probabilities||{};
+      const d=String(h.direction).toUpperCase();
+      const dp=Number(d==='UP'?p.up:p.down),op=Number(d==='UP'?p.down:p.up);
+      return {direction:d,edge:Number.isFinite(dp)&&Number.isFinite(op)?dp-op:-Infinity,expectedReturn:Math.abs(Number(h.expectedReturn||0))};
+    }).sort((a,b)=>b.edge-a.edge||b.expectedReturn-a.expectedReturn);
+  return rows[0]?.direction==='UP'?1:rows[0]?.direction==='DOWN'?-1:0;
+}
+function biggjStyleHorizonWindow(style){
+  const x=String(style||'').toUpperCase();
+  if(x==='SCALP') return {minHorizonMs:5*60_000,maxHorizonMs:60*60_000};
+  if(x==='SWING') return {minHorizonMs:3*60*60_000,maxHorizonMs:12*60*60_000};
+  return {minHorizonMs:60*60_000,maxHorizonMs:3*60*60_000};
+}
+function biggjStructurePlan(analysis){
+  const side=String(analysis?.side||'UNKNOWN').toUpperCase();
+  const current=Number(analysis?.entryPlan?.preferredLimitPrice||analysis?.currentPrice);
+  if(!(current>0)||!['LONG','SHORT'].includes(side)) return {valid:false,reason:'ENTRY_REFERENCE_MISSING'};
+  const levels=(analysis?.liquidityMap?.structuralLevels||[]).filter(x=>Number(x?.price)>0);
+  const invalidationCandidates=levels.filter(x=>side==='LONG'
+    ?Number(x.price)<current&&['SUPPORT','SWING_LOW'].includes(String(x.kind))
+    :Number(x.price)>current&&['RESISTANCE','SWING_HIGH'].includes(String(x.kind))
+  ).sort((a,b)=>Math.abs(Number(a.price)-current)-Math.abs(Number(b.price)-current));
+  const targetCandidates=(analysis?.liquidityMap?.likelySweepTargets||[]).filter(x=>side==='LONG'?Number(x.price)>current:Number(x.price)<current);
+  const invalidationLevel=invalidationCandidates[0]||null,targetLevel=targetCandidates[0]||null;
+  if(!invalidationLevel||!targetLevel) return {valid:false,reason:'STRUCTURE_TARGET_OR_INVALIDATION_MISSING',entryPrice:current};
+  const pad=.0015;
+  const invalidationPrice=side==='LONG'?Number(invalidationLevel.price)*(1-pad):Number(invalidationLevel.price)*(1+pad);
+  const targetPrice=Number(targetLevel.price);
+  const risk=Math.abs(current-invalidationPrice),reward=Math.abs(targetPrice-current);
+  const rewardRisk=risk>0?reward/risk:null;
+  return {
+    valid:Number.isFinite(rewardRisk)&&rewardRisk>0,
+    reason:'STRUCTURE_PLAN_READY',
+    entryPrice:current,
+    invalidationPrice,
+    targetPrice,
+    rewardRisk,
+    invalidationSource:String(invalidationLevel.source||invalidationLevel.kind||'STRUCTURE'),
+    targetSource:String(targetLevel.source||targetLevel.kind||'LIQUIDITY')
+  };
+}
+async function buildBiggjRuntimeMarketAnalysis(issuance){
+  const symbol=String(issuance?.symbol||'').toUpperCase();
+  const now=Date.now();
+  if(!symbol) throw new Error('BIGGJ_SYMBOL_REQUIRED');
+  const frames=['1m','5m','15m','1h','4h'];
+  const [frameResults,book,derivatives,onchain,external]=await Promise.all([
+    Promise.all(frames.map(tf=>fetchKlines(symbol,tf,tf==='1m'?160:tf==='5m'?220:180))),
+    fetchExecutionBook(symbol),
+    derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000}).catch(()=>null),
+    onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000}).catch(()=>null),
+    externalResearchProvider.fetchBundle(symbol).catch(()=>null)
+  ]);
+  const candlesByTf={};
+  for(let i=0;i<frames.length;i++) candlesByTf[frames[i]]=candlesFromKlines(frameResults[i].rows,now);
+  let liquidation=null;
+  try{
+    const bestBid=Number(book?.bids?.[0]?.[0]),bestAsk=Number(book?.asks?.[0]?.[0]);
+    const ref=Number.isFinite(bestBid)&&Number.isFinite(bestAsk)?(bestBid+bestAsk)/2:null;
+    liquidation=liquidationResearchStream.snapshot(symbol,{asOf:now,referencePrice:ref,clusterBinBps:25,maxClusters:12});
+  }catch{}
+  const bidDepth=(book?.bids||[]).slice(0,12).reduce((z,[p,q])=>z+Number(p)*Number(q),0);
+  const askDepth=(book?.asks||[]).slice(0,12).reduce((z,[p,q])=>z+Number(p)*Number(q),0);
+  const depthTotal=bidDepth+askDepth;
+  const bookImbalance=depthTotal>0?(bidDepth-askDepth)/depthTotal:0;
+  const taker=Number(derivatives?.binance?.takerBuySellRatio);
+  const takerSigned=Number.isFinite(taker)?biggjClamp((taker-1)/.35,-1,1):0;
+  const directionSign=biggjForecastSide(issuance);
+  const rawFlow=.65*bookImbalance+.35*takerSigned;
+  const flowAlignment=directionSign*rawFlow;
+  const oiDelta=Number(derivatives?.binance?.openInterestDelta5m);
+  const openInterestExpansion=Number.isFinite(oiDelta)?biggjClamp(oiDelta/.03,-1,1):0;
+  const dataTrustScore=auditLedger.healthy&&marketFabric.healthy&&researchGovernanceHealthy?.95:
+    auditLedger.healthy&&marketFabric.healthy?.78:.45;
+  const analysis=buildBiggjPreTradeAnalysis({
+    symbol,asOf:now,candlesByTf,orderBook:book,liquidation,forecast:issuance?.forecast||null,
+    dataTrustScore,flowAlignment,openInterestExpansion,macroAlignment:0,onchainAlignment:0
+  });
+  return {
+    analysis,book,derivatives,onchain,external,liquidation,
+    flowAlignment,openInterestExpansion,dataTrustScore,
+    evidence:{
+      derivativesAvailable:derivatives?.ok===true,
+      onchainAvailable:onchain?.ok===true,
+      macroAvailable:Boolean(external?.macro),
+      liquidationAvailable:Boolean(liquidation),
+      orderBookAvailable:Boolean(book?.bids?.length&&book?.asks?.length),
+      timeframes:frames
+    }
+  };
+}
+function biggjEntryComponents({analysis,setupEvidence,rewardRisk}){
+  const style=(analysis?.styleCandidates||[]).find(x=>x.style===analysis?.selectedStyle);
+  const spread=Number(analysis?.microstructure?.spreadBps);
+  const maxSpread=BIGGJ_TRADING_STYLES?.[analysis?.selectedStyle]?.maxSpreadBps||20;
+  const flow=Number(style?.evidence?.flowAlignment??0);
+  return {
+    forecastEdge:biggjClamp((Number(analysis?.forecast?.edge||0)-.04)/.30),
+    structureQuality:biggjClamp(Number(analysis?.strategyStrength||0)),
+    regimeFit:biggjClamp(Number(analysis?.styleScore||0)),
+    flowConfirmation:biggjClamp(.5+flow*.5),
+    liquidityQuality:Number.isFinite(spread)?biggjClamp(1-spread/maxSpread):.35,
+    setupMemory:setupEvidence?.status==='SUPPORTED'?.85:setupEvidence?.status==='WATCH'?.35:.55,
+    riskRewardQuality:biggjClamp(Number(rewardRisk||0)/3),
+    dataTrust:biggjClamp(Number(analysis?.dataTrustScore||0))
+  };
+}
+function biggjCurrentThesisState(position,analysis){
+  const side=String(position?.side||'UNKNOWN').toUpperCase();
+  const currentSide=String(analysis?.side||'UNKNOWN').toUpperCase();
+  const bias=String(analysis?.marketStructure?.bias||'MIXED').toUpperCase();
+  const forecastAlignment=currentSide===side?.90:currentSide==='UNKNOWN'?.45:.10;
+  const structureAlignment=
+    side==='LONG'?(bias==='BULLISH'?.90:bias==='BEARISH'?.12:.50):
+    side==='SHORT'?(bias==='BEARISH'?.90:bias==='BULLISH'?.12:.50):.40;
+  const styleMatch=String(analysis?.selectedStyle||'')===String(position?.tradingStyle||'')?.85:.55;
+  const strategyMatch=String(analysis?.strategyFamily||'')===String(position?.strategyFamily||'')?.85:.50;
+  const spread=Number(analysis?.microstructure?.spreadBps);
+  const maxSpread=BIGGJ_TRADING_STYLES?.[position?.tradingStyle]?.maxSpreadBps||20;
+  const liquidityHealth=Number.isFinite(spread)?biggjClamp(1-spread/maxSpread):.35;
+  const imbalance=Number(analysis?.microstructure?.imbalance||0);
+  const flowAlignment=biggjClamp(.5+(side==='LONG'?imbalance:-imbalance)*.5);
+  const dataTrust=biggjClamp(Number(analysis?.dataTrustScore||0));
+  const thesisHealth=biggjClamp(.25*forecastAlignment+.24*structureAlignment+.13*styleMatch+.13*strategyMatch+.10*liquidityHealth+.08*flowAlignment+.07*dataTrust);
+  const oppositeThesisStrength=biggjClamp(1-(.55*forecastAlignment+.45*structureAlignment));
+  return {
+    thesisHealth,oppositeThesisStrength,
+    structureHealth:structureAlignment,
+    regimeAlignment:styleMatch,
+    flowAlignment,
+    liquidityHealth,
+    volatilityShock:0,
+    structureInvalidationConfirmed:structureAlignment<=.12&&forecastAlignment<=.25
+  };
+}
+
 async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,portfolioPrepared=false}={}){
   const now=Date.now();
   if(!portfolioPrepared){
