@@ -32,7 +32,7 @@ import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independent-witness-network.mjs';
-import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, verifyLedgerRecords, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
@@ -240,6 +240,7 @@ const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FOR
 const forecastMaxTracked = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_TRACKED || 1200) || 1200));
 const researchPlaneMaxMemoryRecords = Math.max(1500, Math.min(5000, Math.floor(Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS || 3000) || 3000)));
 const marketFabricMaxMemoryEvents = Math.max(2000, Math.min(8000, Math.floor(Number(process.env.TCX_MARKET_FABRIC_MAX_MEMORY_EVENTS || 4000) || 4000)));
+const auditLedgerMaxMemoryRecords = Math.max(50, Math.min(2000, Math.floor(Number(process.env.TCX_AUDIT_LEDGER_MAX_MEMORY_RECORDS || 500) || 500)));
 const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
 const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
 const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
@@ -452,7 +453,7 @@ const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-
 const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
-const auditLedger = await openAuditLedger(auditFile);
+const auditLedger = await openAuditLedger(auditFile,{maxInMemoryRecords:auditLedgerMaxMemoryRecords});
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
 let marketFabric = await openMarketDataFabric(marketFabricFile,{maxInMemoryEvents:marketFabricMaxMemoryEvents});
 if(marketFabric.healthy){
@@ -4001,7 +4002,7 @@ async function showWitness(chatId,symbol) {
 }
 
 async function showAudit(chatId) {
-  const verification=verifyLedgerRecords(auditLedger.records);
+  const verification=auditLedger.verification||{ok:false,error:'LEDGER_VERIFICATION_UNAVAILABLE'};
   const tail=ledgerTailSummary(auditLedger);
   const last=auditLedger.records.at(-1);
   const replay=last?.kind==='TCX_RESEARCH_ENVELOPE'?replayEnvelopeIntegrity(last.payload):null;
