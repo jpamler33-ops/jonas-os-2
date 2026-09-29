@@ -3,6 +3,7 @@ import { STATE_STORE_SCHEMA_VERSION, STATE_STORE_LEGACY_SCHEMA_VERSIONS } from '
 import { EPISODE_MEMORY_SCHEMA_VERSION } from './episode-memory.mjs';
 import { EVIDENCE_HISTORY_SCHEMA_VERSION } from './evidence-history.mjs';
 import { SHADOW_OMS_SCHEMA_VERSION } from './shadow-oms.mjs';
+import { SHADOW_PORTFOLIO_SCHEMA_VERSION } from './shadow-portfolio-ledger.mjs';
 import { VENUE_QUALITY_MEMORY_SCHEMA_VERSION } from './venue-quality-memory.mjs';
 import { INSTITUTIONAL_FORECAST_RUNTIME_VERSION } from './institutional-forecast-runtime.mjs';
 import { RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
@@ -61,6 +62,16 @@ const CONTRACTS=Object.freeze([
     legacySchemas:[],
     criticality:'DEGRADE',
     corruptionPolicy:'BACKUP_AND_DISABLE_SHADOW_EXECUTION_RESEARCH'
+  }),
+  Object.freeze({
+    id:'SHADOW_PORTFOLIO',
+    format:'JSON_ATOMIC_RENAME',
+    env:'TCX_SHADOW_PORTFOLIO_FILE',
+    defaultPath:'/data/tcx-shadow-portfolio.json',
+    schema:SHADOW_PORTFOLIO_SCHEMA_VERSION,
+    legacySchemas:[],
+    criticality:'DEGRADE',
+    corruptionPolicy:'BACKUP_AND_DISABLE_SHADOW_PORTFOLIO_RESEARCH'
   }),
   Object.freeze({
     id:'VENUE_QUALITY_MEMORY',
