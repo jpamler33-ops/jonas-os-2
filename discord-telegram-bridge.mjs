@@ -339,7 +339,20 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
   const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
-  function fail(scope,err){state.lastError=scope+': '+(err instanceof Error?err.message:String(err));try{logger.error('[TCX_DISCORD]',state.lastError);}catch{}}
+  function fail(scope,err){
+    const message=err instanceof Error?err.message:String(err);
+    state.lastError=scope+': '+message;
+    try{
+      const detail={
+        scope:String(scope),
+        message,
+        code:err?.code??null,
+        status:err?.status??null,
+        apiErrors:err?.rawError?.errors??null
+      };
+      logger.error('[TCX_DISCORD]',JSON.stringify(detail));
+    }catch{}
+  }
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
     const ctx=contexts.get(String(chatId)); const chunks=splitText(body.text,2000); let first=null;
