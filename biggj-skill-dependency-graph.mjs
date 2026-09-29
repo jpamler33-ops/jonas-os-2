@@ -650,40 +650,45 @@ function compositionMemberships(capabilityId){
   return BIGGJ_SKILL_COMPOSITIONS.filter(c=>c.members.some(m=>m.capabilityId===id)).map(c=>c.id);
 }
 
+let LEVERAGE_INDEX_CACHE=null;
+function leverageIndex(){
+  if(LEVERAGE_INDEX_CACHE) return LEVERAGE_INDEX_CACHE;
+  const allIds=BIGGJ_SEED_CAPABILITIES.map(x=>x.id);
+  const raw=allIds.map(id=>({
+    id,
+    direct:canonicalDependentsOf(id,{includeSupport:false}).length,
+    transitive:transitiveDependents(id,{includeSupport:false}).length,
+    compositions:compositionMemberships(id)
+  }));
+  const maxDirect=Math.max(1,...raw.map(x=>x.direct));
+  const maxTransitive=Math.max(1,...raw.map(x=>x.transitive));
+  const maxCompositions=Math.max(1,...raw.map(x=>x.compositions.length));
+  LEVERAGE_INDEX_CACHE=new Map(raw.map(row=>{
+    const score=
+      .25*(row.direct/maxDirect)+
+      .55*(row.transitive/maxTransitive)+
+      .20*(row.compositions.length/maxCompositions);
+    return [row.id,deepFreeze({
+      capabilityId:row.id,
+      score:Math.max(0,Math.min(1,score)),
+      directUnlocks:row.direct,
+      transitiveUnlocks:row.transitive,
+      compositionCount:row.compositions.length,
+      compositions:[...row.compositions]
+    })];
+  }));
+  return LEVERAGE_INDEX_CACHE;
+}
+
 export function canonicalSkillLeverage(capabilityId){
   const id=String(capabilityId||'').toUpperCase();
-  if(!capabilityIdSet().has(id)){
-    return deepFreeze({
-      capabilityId:id,
-      score:0,
-      directUnlocks:0,
-      transitiveUnlocks:0,
-      compositionCount:0,
-      compositions:[]
-    });
-  }
-  const allIds=BIGGJ_SEED_CAPABILITIES.map(x=>x.id);
-  const rows=allIds.map(x=>({
-    id:x,
-    direct:canonicalDependentsOf(x,{includeSupport:false}).length,
-    transitive:transitiveDependents(x,{includeSupport:false}).length,
-    compositions:compositionMemberships(x).length
-  }));
-  const maxDirect=Math.max(1,...rows.map(x=>x.direct));
-  const maxTransitive=Math.max(1,...rows.map(x=>x.transitive));
-  const maxCompositions=Math.max(1,...rows.map(x=>x.compositions));
-  const row=rows.find(x=>x.id===id);
-  const score=
-    .25*(row.direct/maxDirect)+
-    .55*(row.transitive/maxTransitive)+
-    .20*(row.compositions/maxCompositions);
-  return deepFreeze({
+  return leverageIndex().get(id)||deepFreeze({
     capabilityId:id,
-    score:Math.max(0,Math.min(1,score)),
-    directUnlocks:row.direct,
-    transitiveUnlocks:row.transitive,
-    compositionCount:row.compositions,
-    compositions:compositionMemberships(id)
+    score:0,
+    directUnlocks:0,
+    transitiveUnlocks:0,
+    compositionCount:0,
+    compositions:[]
   });
 }
 
