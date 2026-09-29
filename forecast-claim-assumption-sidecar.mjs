@@ -313,13 +313,30 @@ export function verifyForecastClaimAssumptionSidecar(value){
     if(value?.execution!=='SHADOW_ONLY'||value?.action!=='ABSTAIN'||value?.canInfluencePrimary!==false||value?.canExecuteLive!==false){
       reasons.push('SAFETY_INVARIANT_INVALID');
     }
+    for(const [field,v] of [
+      ['forecastFingerprint',value?.forecastFingerprint],
+      ['inputFingerprint',value?.inputFingerprint],
+      ['scienceFingerprint',value?.scienceFingerprint],
+      ['admissionFingerprint',value?.admissionFingerprint],
+      ['traceId',value?.traceId],
+      ['graphFingerprint',value?.graphFingerprint]
+    ]){
+      if(!/^[a-f0-9]{64}$/i.test(String(v??''))) reasons.push(String(field).toUpperCase()+'_INVALID');
+    }
+    if(!Number.isFinite(Number(value?.decisionAsOf))||!Number.isFinite(Number(value?.generatedAt))){
+      reasons.push('TIMESTAMP_INVALID');
+    }else if(Number(value.generatedAt)<Number(value.decisionAsOf)){
+      reasons.push('GENERATED_BEFORE_DECISION');
+    }
     const gv=verifyClaimAssumptionGraph(value?.graph);
     if(!gv.ok) reasons.push('GRAPH_INVALID');
     if(value?.graphFingerprint!==value?.graph?.fingerprint) reasons.push('GRAPH_FINGERPRINT_LINK_MISMATCH');
     if(value?.traceId!==value?.graph?.sourceTraceId) reasons.push('TRACE_LINK_MISMATCH');
+    if(Number(value?.graph?.asOf)!==Number(value?.generatedAt)) reasons.push('GRAPH_ASOF_LINK_MISMATCH');
+    if(String(value?.graph?.subjectId??'')!=='FORECAST:'+String(value?.forecastId??'')) reasons.push('GRAPH_SUBJECT_LINK_MISMATCH');
     const expected=sha256(sidecarCore(value));
     if(value?.fingerprint!==expected) reasons.push('FINGERPRINT_MISMATCH');
-    return {ok:reasons.length===0,reasons,expectedFingerprint:expected};
+    return {ok:reasons.length===0,reasons:[...new Set(reasons)],expectedFingerprint:expected};
   }catch(err){
     return {ok:false,reasons:['FORECAST_CLAIM_ASSUMPTION_SIDECAR_INVALID',err instanceof Error?err.message:String(err)]};
   }
@@ -408,11 +425,29 @@ export function verifyForecastClaimAssumptionShadowObservation(value){
     if(value?.execution!=='SHADOW_ONLY'||value?.action!=='ABSTAIN'||value?.canInfluencePrimary!==false||value?.canExecuteLive!==false){
       reasons.push('SAFETY_INVARIANT_INVALID');
     }
+    for(const [field,v] of [
+      ['sidecarFingerprint',value?.sidecarFingerprint],
+      ['graphFingerprint',value?.graphFingerprint],
+      ['forecastFingerprint',value?.forecastFingerprint],
+      ['traceId',value?.traceId],
+      ['evaluationId',value?.evaluationId]
+    ]){
+      if(!/^[a-f0-9]{64}$/i.test(String(v??''))) reasons.push(String(field).toUpperCase()+'_INVALID');
+    }
+    for(const [field,v] of [
+      ['decisionAsOf',value?.decisionAsOf],
+      ['issuanceGeneratedAt',value?.issuanceGeneratedAt],
+      ['maturedAt',value?.maturedAt],
+      ['observedAt',value?.observedAt]
+    ]){
+      if(!Number.isFinite(Number(v))) reasons.push(String(field).toUpperCase()+'_INVALID');
+    }
+    if(Number(value?.issuanceGeneratedAt)<Number(value?.decisionAsOf)) reasons.push('ISSUANCE_BEFORE_DECISION');
     if(Number(value?.maturedAt)<Number(value?.decisionAsOf)) reasons.push('MATURITY_BEFORE_DECISION');
     if(Number(value?.observedAt)<Number(value?.maturedAt)) reasons.push('OBSERVED_BEFORE_MATURITY');
     const expected=sha256(observationCore(value));
     if(value?.fingerprint!==expected) reasons.push('FINGERPRINT_MISMATCH');
-    return {ok:reasons.length===0,reasons,expectedFingerprint:expected};
+    return {ok:reasons.length===0,reasons:[...new Set(reasons)],expectedFingerprint:expected};
   }catch(err){
     return {ok:false,reasons:['FORECAST_CLAIM_ASSUMPTION_SHADOW_OBSERVATION_INVALID',err instanceof Error?err.message:String(err)]};
   }
