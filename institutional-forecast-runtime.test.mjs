@@ -342,6 +342,50 @@ test('duplicate issuance is idempotent',async()=>{
   assert.equal(r.issuances.length,1);
 });
 
+test('duplicate issuance fails closed when custom assumption sidecar diverges',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const a=traceContext(inp);
+  a.claimAssumptionDeclarations={
+    assumptions:[{
+      assumptionId:'CUSTOM-A',
+      statement:'Custom assumption A.',
+      evidenceIds:[],
+      requiresEvidence:false,
+      availableAt:inp.asOf+100
+    }]
+  };
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:a,
+    generatedAt:inp.asOf+100
+  });
+
+  const b=traceContext(inp);
+  b.claimAssumptionDeclarations={
+    assumptions:[{
+      assumptionId:'CUSTOM-B',
+      statement:'Different custom assumption B.',
+      evidenceIds:[],
+      requiresEvidence:false,
+      availableAt:inp.asOf+100
+    }]
+  };
+  assert.throws(()=>issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:b,
+    generatedAt:inp.asOf+100
+  }),/claim-assumption sidecar mismatch/);
+  assert.equal(r.issuances.length,1);
+});
+
 test('corrupt persistence fails closed into recovered clean runtime',async()=>{
   const r=await runtime();
   await saveInstitutionalForecastRuntime(r);
