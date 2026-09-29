@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import {
   deriveDisagreementMap,
@@ -133,4 +133,45 @@ test("evidence snapshots persist state fingerprints and lifecycle metadata",asyn
   assert.equal(restored.stateFingerprint.hash,one.stateFingerprint.hash);
   assert.equal(restored.validityLast.status,"DRIFTED");
   assert.equal(restored.closedAt,6000);
+});
+
+
+test("streaming evidence save cleans temporary file when logical limit is exceeded",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-limit-"));
+  const file=path.join(dir,"history.json");
+  const oversized={
+    ...createEvidenceRecord("BTCUSDT",ctx(),null),
+    diagnosticBlob:"x".repeat(8192)
+  };
+
+  await assert.rejects(
+    ()=>saveEvidenceHistory(file,[oversized],{maxLogicalBytes:1024}),
+    /persistence safety limit/
+  );
+
+  const names=await readdir(dir);
+  assert.ok(!names.some(name=>name.startsWith("history.json.tmp-")));
+});
+
+test("streaming evidence save preserves exact schema for a larger batch",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-stream-"));
+  const file=path.join(dir,"history.json");
+  const rows=[];
+  for(let i=0;i<200;i++){
+    rows.push({
+      ...createEvidenceRecord("BTCUSDT",{...ctx(),capturedAt:1000+i},null),
+      diagnosticBlob:"repeatable-evidence-".repeat(80)
+    });
+  }
+
+  await saveEvidenceHistory(file,rows,{maxPerSymbol:200});
+  const stored=await readFile(file);
+  const parsed=JSON.parse(gunzipSync(stored).toString("utf8"));
+  assert.equal(parsed.schemaVersion,1);
+  assert.equal(parsed.version,"TCX_EVIDENCE_HISTORY_V2");
+  assert.equal(parsed.records.length,200);
+
+  const loaded=await loadEvidenceHistory(file);
+  assert.equal(loaded.recoveredFromCorrupt,false);
+  assert.equal(loaded.records.length,200);
 });
