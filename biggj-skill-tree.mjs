@@ -65,6 +65,7 @@ function seedNode(cap,asOf){
     title:cap.id,
     purpose:cap.purpose,
     layer:cap.layer,
+    plane:cap.plane||null,
     kind:cap.kind==='ROOT'?'ROOT':'SEEDED_CAPABILITY',
     status:cap.kind==='ROOT'?'DISCOVERING':'UNKNOWN',
     promotionStage:'IDEA',
@@ -189,6 +190,88 @@ export function createBiggjSkillTree({asOf=Date.now()}={}){
     action:'ABSTAIN',
     canExecuteLive:false
   };
+  return finalized(core);
+}
+
+
+export function reconcileBiggjSkillTreeWithCapabilityMap(tree,{asOf=Date.now()}={}){
+  verifyTreeShape(tree);
+  const t=finite(asOf);
+  if(t==null) throw new Error('asOf must be finite');
+  const map=biggjCapabilityMap();
+  const core=cloneTree(tree);
+  const beforeVersion=core.capabilityMapVersion||null;
+  const beforeFingerprint=core.capabilityMapFingerprint||null;
+  const existing=new Set(core.nodes.map(x=>String(x.skillId)));
+  const added=[];
+  const metadataUpdated=[];
+
+  for(const cap of map.roots){
+    const skillId='root:'+cap.id;
+    const current=core.nodes.find(x=>String(x.skillId)===skillId);
+    if(!current){
+      core.nodes.push({...seedNode(cap,t),skillId,parentSkillId:null});
+      existing.add(skillId);
+      added.push(skillId);
+      continue;
+    }
+    const desiredPlane=cap.plane||null;
+    if(current.plane!==desiredPlane){
+      current.plane=desiredPlane;
+      current.updatedAt=Math.max(Number(current.updatedAt||0),t);
+      metadataUpdated.push(skillId);
+    }
+  }
+
+  for(const cap of map.capabilities){
+    const seeded=seedNode(cap,t);
+    const current=core.nodes.find(x=>String(x.skillId)===seeded.skillId);
+    if(!current){
+      core.nodes.push(seeded);
+      existing.add(seeded.skillId);
+      added.push(seeded.skillId);
+      continue;
+    }
+    const desiredPlane=cap.plane||null;
+    if(current.plane!==desiredPlane){
+      current.plane=desiredPlane;
+      current.updatedAt=Math.max(Number(current.updatedAt||0),t);
+      metadataUpdated.push(seeded.skillId);
+    }
+  }
+
+  core.capabilityMapVersion=map.version;
+  core.capabilityMapFingerprint=map.fingerprint;
+  core.asOf=Math.max(Number(core.asOf||0),t);
+  core.migrations=Array.isArray(core.migrations)?core.migrations:[];
+  const changed=
+    beforeVersion!==map.version||
+    beforeFingerprint!==map.fingerprint||
+    added.length>0||
+    metadataUpdated.length>0;
+  if(changed){
+    core.migrations.push({
+      migrationId:'capability-map:'+sha256({
+        beforeVersion,
+        beforeFingerprint,
+        afterVersion:map.version,
+        afterFingerprint:map.fingerprint,
+        added,
+        metadataUpdated,
+        asOf:t
+      }).slice(0,24),
+      kind:'CAPABILITY_MAP_RECONCILIATION',
+      fromVersion:beforeVersion,
+      toVersion:map.version,
+      at:t,
+      addedSkillIds:[...added],
+      metadataUpdatedSkillIds:[...metadataUpdated],
+      evidenceRewritten:false,
+      promotionHistoryRewritten:false,
+      productionMutationPerformed:false
+    });
+  }
+
   return finalized(core);
 }
 
