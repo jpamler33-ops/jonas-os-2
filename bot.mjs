@@ -575,12 +575,18 @@ const {
   fetchAggTradesSince
 }=marketDataProvider;
 const stateFile = process.env.TCX_STATE_FILE || '/data/tcx-state.json';
-const loadedState = await loadPersistentState(stateFile);
+let loadedState = await loadPersistentState(stateFile);
 const favorites = loadedState.favorites;
 const alerts = loadedState.alerts;
+const stateRecoveredFromCorrupt=loadedState.recoveredFromCorrupt===true;
+const stateMigrationNeeded=loadedState.migrationNeeded===true;
+const stateLoadedSchemaVersion=loadedState.loadedSchemaVersion;
+loadedState=null;
 const episodeFile = process.env.TCX_EPISODE_FILE || '/data/tcx-episodes.json';
-const loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
+let loadedEpisodeMemory = await loadEpisodeMemory(episodeFile);
 let episodes = loadedEpisodeMemory.episodes;
+const episodeMemoryRecoveredFromCorrupt=loadedEpisodeMemory.recoveredFromCorrupt===true;
+loadedEpisodeMemory=null;
 const configuredForecastRuntimeFile=process.env.TCX_FORECAST_RUNTIME_FILE||null;
 const forecastRuntimeFile=configuredForecastRuntimeFile||'/data/tcx-forecast-runtime.v2.json.gz';
 const forecastRuntimeLegacyFile=configuredForecastRuntimeFile?null:'/data/tcx-forecast-runtime.json';
@@ -655,8 +661,10 @@ let modelPromotionReviewLastSummary=null;
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
 let featureResearchState = await loadFeatureResearch(featureResearchFile);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
-const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
+let loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
+const evidenceHistoryRecoveredFromCorrupt=loadedEvidenceHistory.recoveredFromCorrupt===true;
+loadedEvidenceHistory=null;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
 const auditLedger = await openAuditLedger(auditFile,{
   maxInMemoryRecords:auditLedgerMaxMemoryRecords,
@@ -695,28 +703,35 @@ const researchGovernanceMonitorStartedAt=Date.now();
 const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-release-registry.jsonl';
 const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
 const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
-const loadedShadowOms = await loadShadowOms(shadowOmsFile);
+let loadedShadowOms = await loadShadowOms(shadowOmsFile);
 const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-shadow-portfolio.json';
-const loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
+let loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
 const strategyLeagueFile = process.env.TCX_STRATEGY_LEAGUE_FILE || '/data/tcx-strategy-league.json';
-const loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
+let loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
-const loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
+let loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
 let venueQualityRecords = loadedVenueQuality.records;
 let venueQualityHealthy = loadedVenueQuality.healthy;
 let venueQualityLastError = loadedVenueQuality.error || null;
+const venueQualityRecoveredFromCorrupt=loadedVenueQuality.recoveredFromCorrupt===true;
+loadedVenueQuality=null;
 let venueQualityPersistenceQueue = Promise.resolve();
 let shadowOrders = loadedShadowOms.orders;
 let shadowOmsHealthy = loadedShadowOms.healthy;
 let shadowOmsLastError = loadedShadowOms.error || null;
+const shadowOmsRecoveredFromCorrupt=loadedShadowOms.recoveredFromCorrupt===true;
+loadedShadowOms=null;
 let shadowOmsPersistenceQueue = Promise.resolve();
 let shadowPortfolioLedger = loadedShadowPortfolio.ledger;
 let shadowPortfolioHealthy = loadedShadowPortfolio.healthy;
 let shadowPortfolioLastError = loadedShadowPortfolio.error || null;
+const shadowPortfolioRecoveredFromCorrupt=loadedShadowPortfolio.recoveredFromCorrupt===true;
+loadedShadowPortfolio=null;
 let shadowPortfolioPersistenceQueue = Promise.resolve();
 let strategyLeagueLedger = loadedStrategyLeague.ledger;
 let strategyLeagueHealthy = loadedStrategyLeague.healthy;
 let strategyLeagueLastError = loadedStrategyLeague.error || null;
+loadedStrategyLeague=null;
 let strategyLeaguePersistenceQueue = Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let marketFabricMaintenanceQueue = Promise.resolve();
@@ -8241,17 +8256,17 @@ function currentPersistenceCompatibility(){
     stores:{
       USER_STATE:{
         healthy:persistenceHealthy,
-        recoveredFromCorrupt:loadedState.recoveredFromCorrupt,
-        migrationNeeded:loadedState.migrationNeeded,
-        loadedSchema:loadedState.loadedSchemaVersion
+        recoveredFromCorrupt:stateRecoveredFromCorrupt,
+        migrationNeeded:stateMigrationNeeded,
+        loadedSchema:stateLoadedSchemaVersion
       },
       EPISODE_MEMORY:{
         healthy:episodePersistenceHealthy,
-        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+        recoveredFromCorrupt:episodeMemoryRecoveredFromCorrupt
       },
       EVIDENCE_HISTORY:{
         healthy:evidenceHistoryHealthy,
-        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+        recoveredFromCorrupt:evidenceHistoryRecoveredFromCorrupt
       },
       FORECAST_RUNTIME:{
         healthy:forecastRuntime.healthy,
@@ -8259,15 +8274,15 @@ function currentPersistenceCompatibility(){
       },
       SHADOW_OMS:{
         healthy:shadowOmsHealthy,
-        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt
+        recoveredFromCorrupt:shadowOmsRecoveredFromCorrupt
       },
       SHADOW_PORTFOLIO:{
         healthy:shadowPortfolioHealthy,
-        recoveredFromCorrupt:loadedShadowPortfolio.recoveredFromCorrupt
+        recoveredFromCorrupt:shadowPortfolioRecoveredFromCorrupt
       },
       VENUE_QUALITY_MEMORY:{
         healthy:venueQualityHealthy,
-        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt
+        recoveredFromCorrupt:venueQualityRecoveredFromCorrupt
       },
       AUDIT_LEDGER:{healthy:auditLedger.healthy},
       MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
@@ -8295,15 +8310,15 @@ function currentOperationalReadiness(){
     forecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
     persistence:{
       healthy:persistenceHealthy,
-      recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+      recoveredFromCorrupt:stateRecoveredFromCorrupt
     },
     episodePersistence:{
       healthy:episodePersistenceHealthy,
-      recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+      recoveredFromCorrupt:episodeMemoryRecoveredFromCorrupt
     },
     evidenceHistory:{
       healthy:evidenceHistoryHealthy,
-      recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+      recoveredFromCorrupt:evidenceHistoryRecoveredFromCorrupt
     },
     providerHealth:marketDataProvider.providerHealth(),
     slo,
@@ -8462,7 +8477,7 @@ const server = http.createServer((req,res) => {
         active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,
         filled:shadowOrders.filter(o=>o.status==='FILLED').length,
         lastError:shadowOmsLastError,
-        recoveredFromCorrupt:loadedShadowOms.recoveredFromCorrupt,
+        recoveredFromCorrupt:shadowOmsRecoveredFromCorrupt,
         capabilities:SHADOW_OMS_CAPABILITIES
       },
       shadowSor:{
@@ -8482,7 +8497,7 @@ const server = http.createServer((req,res) => {
         file:venueQualityFile,
         records:venueQualityRecords.length,
         lastError:venueQualityLastError,
-        recoveredFromCorrupt:loadedVenueQuality.recoveredFromCorrupt,
+        recoveredFromCorrupt:venueQualityRecoveredFromCorrupt,
         watchMs:vqmWatchMs,
         markoutMaxLagMs:vqmMarkoutMaxLagMs,
         minSamples:vqmMinSamples,
@@ -8523,7 +8538,7 @@ const server = http.createServer((req,res) => {
         mature1h:episodes.filter(e=>e.outcomes?.["12"]).length,
         healthy:episodePersistenceHealthy,
         lastError:episodePersistenceLastError,
-        recoveredFromCorrupt:loadedEpisodeMemory.recoveredFromCorrupt
+        recoveredFromCorrupt:episodeMemoryRecoveredFromCorrupt
       },
       evidenceHistory:{
         version:EVIDENCE_HISTORY_VERSION,
@@ -8531,7 +8546,7 @@ const server = http.createServer((req,res) => {
         total:evidenceRecords.length,
         healthy:evidenceHistoryHealthy,
         lastError:evidenceHistoryLastError,
-        recoveredFromCorrupt:loadedEvidenceHistory.recoveredFromCorrupt
+        recoveredFromCorrupt:evidenceHistoryRecoveredFromCorrupt
       },
       stateValidity:{
         version:STATE_VALIDITY_VERSION,
@@ -8560,7 +8575,7 @@ const server = http.createServer((req,res) => {
         file:stateFile,
         healthy:persistenceHealthy,
         lastError:persistenceLastError,
-        recoveredFromCorrupt:loadedState.recoveredFromCorrupt
+        recoveredFromCorrupt:stateRecoveredFromCorrupt
       }
     }));
     return;
