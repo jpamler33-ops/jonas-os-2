@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_DEPENDENCY_GRAPH_VERSION='TCX_RESEARCH_DEPENDENCY_GRAPH_V2';
+export const RESEARCH_DEPENDENCY_GRAPH_VERSION='TCX_RESEARCH_DEPENDENCY_GRAPH_V3';
 
 const HEX64=/^[a-f0-9]{64}$/i;
 const SOURCE_BLOCKING=new Set(['QUARANTINED','FAILED','REJECTED']);
@@ -83,19 +83,34 @@ function sourceAssessment(record,currentStatus,requireGoverned,dependencyRows=[]
   const ungoverned=!governance;
   const dependencyBlocked=(dependencyRows||[]).some(x=>x.state==='BLOCKED');
   const dependencyDegraded=!dependencyBlocked&&(dependencyRows||[]).some(x=>x.state==='DEGRADED');
+  const semanticReviewFeatureIds=uniqueSorted(
+    (Array.isArray(governance?.reasons)?governance.reasons:[])
+      .filter(x=>String(x?.code||'').toUpperCase()==='SEMANTIC_DISTRIBUTION_SHIFT_REVIEW'&&x?.id)
+      .map(x=>x.id)
+  );
+  const semanticOnlyDecision=
+    decision==='DEGRADED'&&
+    !SOURCE_DEGRADED.has(status)&&
+    semanticReviewFeatureIds.length>0;
   const blocked=
     (requireGoverned&&ungoverned)||
     SOURCE_BLOCKING.has(status)||
     DECISION_BLOCKING.has(decision)||
     governance?.usableForResearch===false||
     dependencyBlocked;
-  const degraded=!blocked&&(SOURCE_DEGRADED.has(status)||decision==='DEGRADED'||dependencyDegraded);
+  const degraded=!blocked&&(
+    SOURCE_DEGRADED.has(status)||
+    (decision==='DEGRADED'&&!semanticOnlyDecision)||
+    dependencyDegraded
+  );
   return {
     status,
     decision,
     governed:!ungoverned,
     usable:!blocked,
     degraded,
+    semanticOnlyDecision,
+    semanticReviewFeatureIds:Object.freeze(semanticReviewFeatureIds),
     dependencyBlocked,
     dependencyDegraded,
     dependencies:Object.freeze((dependencyRows||[]).map(x=>Object.freeze({...x}))),
@@ -197,7 +212,9 @@ export function buildResearchDependencyGraph({
       domain:String(record.domain||'').toUpperCase(),
       source:String(record.source||''),
       status:assessment.status,
+      governanceDecision:assessment.decision,
       state:assessment.state,
+      semanticReviewFeatureIds:assessment.semanticReviewFeatureIds,
       upstreamSourceKeys:Object.freeze(assessment.dependencies.map(x=>x.sourceKey)),
       upstreamState:assessment.dependencyBlocked?'BLOCKED':assessment.dependencyDegraded?'DEGRADED':assessment.dependencies.length?'HEALTHY':'NONE'
     });
@@ -229,6 +246,11 @@ export function buildResearchDependencyGraph({
     addEdge(edgeMap,obsNodeId,featureNodeId,'EMITS_FEATURE');
     addEdge(edgeMap,featureNodeId,factorId,'ROLLS_UP_TO_FACTOR');
 
+    const featureSemanticDegraded=assessment.semanticReviewFeatureIds.includes(String(row.id));
+    const contributorDegraded=assessment.degraded||featureSemanticDegraded;
+    const contributorState=assessment.state==='BLOCKED'
+      ?'BLOCKED'
+      :contributorDegraded?'DEGRADED':'HEALTHY';
     const list=featureContributors.get(String(row.id))||[];
     list.push({
       sourceKey,
@@ -236,9 +258,10 @@ export function buildResearchDependencyGraph({
       domain:String(record.domain||'UNKNOWN').toUpperCase(),
       availableAt:Number(record.availableAt),
       value:Number(row.value),
-      state:assessment.state,
+      state:contributorState,
       usable:assessment.usable,
-      degraded:assessment.degraded,
+      degraded:contributorDegraded,
+      semanticReview:featureSemanticDegraded,
       dependencies:assessment.dependencies
     });
     featureContributors.set(String(row.id),list);
