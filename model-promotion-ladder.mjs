@@ -1,5 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 import { verifyScientificValidity } from './scientific-validity.mjs';
+import { verifyEpistemicIntegrity } from './science-runtime/epistemic-integrity.mjs';
 
 export const MODEL_PROMOTION_LADDER_VERSION='TCX_MODEL_PROMOTION_LADDER_V1';
 
@@ -52,6 +53,7 @@ export function evaluateModelPromotion({
   asOf,
   candidate,
   scientificValidity,
+  epistemicIntegrity=null,
   software,
   evaluation,
   policy=DEFAULT_PROMOTION_POLICY
@@ -70,6 +72,7 @@ export function evaluateModelPromotion({
   }
 
   const scienceCheck=verifyScientificValidity(scientificValidity);
+  const epistemicCheck=epistemicIntegrity?verifyEpistemicIntegrity(epistemicIntegrity):{ok:false,reasons:['REPORT_MISSING']};
   const candidateMetrics=metricBlock(evaluation?.candidate,'evaluation.candidate');
   const incumbentMetrics=metricBlock(evaluation?.incumbent,'evaluation.incumbent');
   const cases=Math.max(0,Math.floor(Number(evaluation?.cases??0)));
@@ -91,6 +94,19 @@ export function evaluateModelPromotion({
 
   if(!scienceCheck.ok) hardFailures.push('SCIENTIFIC_VALIDITY_INTEGRITY_FAILED');
   else if(scientificValidity.gate!=='PASS') hardFailures.push('SCIENTIFIC_VALIDITY_NOT_PASS');
+
+  if(!epistemicIntegrity){
+    holds.push('EPISTEMIC_INTEGRITY_REQUIRED');
+  }else if(!epistemicCheck.ok){
+    hardFailures.push('EPISTEMIC_INTEGRITY_INTEGRITY_FAILED');
+  }else{
+    if(epistemicIntegrity.gate!=='PASS') holds.push('EPISTEMIC_INTEGRITY_NOT_PASS');
+    if(epistemicIntegrity.identificationStatus!=='IDENTIFIED') holds.push('EPISTEMIC_IDENTIFICATION_NOT_COMPLETE');
+    if(epistemicIntegrity.identity?.status!=='RESOLVED') holds.push('EPISTEMIC_IDENTITY_NOT_RESOLVED');
+    if(epistemicIntegrity.trustClosure?.closed!==true) holds.push('EPISTEMIC_TRUST_CHAIN_NOT_CLOSED');
+    if(epistemicIntegrity.coverage?.status!=='CALIBRATED') holds.push('EPISTEMIC_COVERAGE_NOT_CALIBRATED');
+    if(epistemicIntegrity.discovery?.status!=='INDEPENDENT') holds.push('EPISTEMIC_DISCOVERY_NOT_INDEPENDENT');
+  }
 
   if(cases<p.minCases) holds.push('INSUFFICIENT_EVALUATION_CASES');
   if(independentEpisodes<p.minIndependentEpisodes) holds.push('INSUFFICIENT_INDEPENDENT_EPISODES');
@@ -163,6 +179,16 @@ export function evaluateModelPromotion({
       gate:scientificValidity?.gate??'UNKNOWN',
       fingerprint:scientificValidity?.fingerprint??null
     },
+    epistemic:{
+      integrity:epistemicIntegrity?(epistemicCheck.ok?'VALID':'INVALID'):'MISSING',
+      gate:epistemicIntegrity?.gate??'MISSING',
+      identificationStatus:epistemicIntegrity?.identificationStatus??'MISSING',
+      identityStatus:epistemicIntegrity?.identity?.status??'MISSING',
+      trustClosureClosed:epistemicIntegrity?.trustClosure?.closed===true,
+      coverageStatus:epistemicIntegrity?.coverage?.status??'MISSING',
+      discoveryStatus:epistemicIntegrity?.discovery?.status??'MISSING',
+      fingerprint:epistemicIntegrity?.fingerprint??null
+    },
     decision,
     hardFailures:[...new Set(hardFailures)],
     holds:[...new Set(holds)],
@@ -171,6 +197,8 @@ export function evaluateModelPromotion({
       sameSampleSelfFeedbackAllowed:false,
       silentProductionMutationAllowed:false,
       requiresExplicitPromotionRecord:true,
+      requiresEpistemicIntegrityPass:true,
+      evidencePlanCanClearPromotionBlock:false,
       executionMode:'SHADOW_ONLY',
       action:'ABSTAIN',
       canExecute:false
