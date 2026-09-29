@@ -254,6 +254,18 @@ const autoLearnMemoryBackoffMs = Math.max(30000, Math.min(180000, Number(process
 const servingGuardHeapMb = Math.max(260, Math.min(380, Number(process.env.TCX_SERVING_GUARD_HEAP_MB || 330)));
 const servingGuardRssMb = Math.max(550, Math.min(900, Number(process.env.TCX_SERVING_GUARD_RSS_MB || 720)));
 const servingGuardExternalMb = Math.max(24, Math.min(160, Number(process.env.TCX_SERVING_GUARD_EXTERNAL_MB || 64)));
+const forecastPersistenceHeapHeadroomMb = Math.max(
+  servingGuardHeapMb,
+  Math.min(420,Number(process.env.TCX_FORECAST_PERSIST_HEAP_HEADROOM_MB||340))
+);
+const forecastPersistenceRssHeadroomMb = Math.max(
+  550,
+  Math.min(servingGuardRssMb,Number(process.env.TCX_FORECAST_PERSIST_RSS_HEADROOM_MB||servingGuardRssMb))
+);
+const forecastPersistenceExternalHeadroomMb = Math.max(
+  24,
+  Math.min(servingGuardExternalMb,Number(process.env.TCX_FORECAST_PERSIST_EXTERNAL_HEADROOM_MB||servingGuardExternalMb))
+);
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
@@ -805,8 +817,23 @@ function scheduleForecastRuntimePersist(delayMs){
 async function flushForecastRuntimePersistence(force=false){
   if(forecastRuntimePersistRunning) return forecastRuntimePersistRunning;
   if(!forecastRuntimePersistDirty||!forecastRuntime.healthy) return false;
-  const beforeHeapMb=Math.round(process.memoryUsage().heapUsed/1024/1024);
-  if(!force&&beforeHeapMb>=340){
+  const beforeMemory=process.memoryUsage();
+  const persistenceAdmission=evaluateAutoLearnMemoryAdmission({
+    phase:'ISSUE',
+    heapUsedMb:Math.round(beforeMemory.heapUsed/1024/1024),
+    rssMb:Math.round(beforeMemory.rss/1024/1024),
+    externalMb:Math.round(beforeMemory.external/1024/1024),
+    issueHeapMb:forecastPersistenceHeapHeadroomMb,
+    issueRssMb:forecastPersistenceRssHeadroomMb,
+    issueExternalMb:forecastPersistenceExternalHeadroomMb
+  });
+  if(!force&&!persistenceAdmission.allowed){
+    console.warn('forecast runtime persistence deferred for memory headroom',JSON.stringify({
+      ...persistenceAdmission.memory,
+      arrayBuffersMb:Math.round((beforeMemory.arrayBuffers||0)/1024/1024),
+      exceeded:persistenceAdmission.exceeded,
+      threshold:persistenceAdmission.limits
+    }));
     scheduleForecastRuntimePersist(15000);
     return false;
   }
@@ -831,6 +858,9 @@ async function flushForecastRuntimePersistence(force=false){
         maxSnapshotBytes:snapshotMeta?.maxSnapshotBytes||forecastRuntime.maxSnapshotBytes||null,
         snapshotBudgetUtilization:snapshotMeta?.logicalBytes&&forecastRuntime.maxSnapshotBytes?snapshotMeta.logicalBytes/forecastRuntime.maxSnapshotBytes:null,
         heapUsedMb:Math.round(m.heapUsed/1024/1024),
+        rssMb:Math.round(m.rss/1024/1024),
+        externalMb:Math.round(m.external/1024/1024),
+        arrayBuffersMb:Math.round((m.arrayBuffers||0)/1024/1024),
         historyRows:forecastRuntime.engine.historySize(),
         journalRows:forecastRuntime.journal.entries.length,
         cacheRows:{calibration:forecastRuntime.engine.calibration.rows.length,reliability:forecastRuntime.engine.reliability.rows.length,modelPerformance:forecastRuntime.engine.modelPerformance.rows.length,interval:forecastRuntime.engine.intervalCalibration.rows.length,drift:forecastRuntime.engine.drift.rows.length},
@@ -8132,6 +8162,11 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     shadowWorker:{
       auto:{heapUsedMb:shadowCompetitionAutoHeapMb,rssMb:shadowCompetitionAutoRssMb,externalMb:shadowCompetitionAutoExternalMb},
       hard:{heapUsedMb:300,rssMb:900,externalMb:shadowCompetitionHardExternalMb}
+    },
+    forecastPersistence:{
+      heapUsedMb:forecastPersistenceHeapHeadroomMb,
+      rssMb:forecastPersistenceRssHeadroomMb,
+      externalMb:forecastPersistenceExternalHeadroomMb
     }
   },
   shadowResearchWorkerMode:shadowCompetitionWorkerMode,
