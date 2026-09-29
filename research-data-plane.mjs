@@ -337,6 +337,34 @@ export async function openResearchDataPlane(filePath,{
   };
 }
 
+export function preflightResearchDataPlaneInputs(plane,inputs){
+  if(!plane?.healthy) throw new Error('Research Data Plane unhealthy: fail closed');
+  const novel=[];
+  let duplicates=0;
+  const localSourcePayload=new Map();
+
+  for(const input of Array.isArray(inputs)?inputs:[]){
+    if(!input) continue;
+    const sourceKey=String(input.streamKey)+'\u0000'+String(input.domain)+'\u0000'+String(input.source)+'\u0000'+String(input.sourceEventId);
+    const payloadHash=sourceEventPayloadHash(input);
+    const priorPayload=plane.sourcePayload.get(sourceKey)||localSourcePayload.get(sourceKey);
+    if(priorPayload){
+      if(priorPayload!==payloadHash){
+        throw new Error('SOURCE_EVENT_ID_CONFLICT:'+String(input.sourceEventId));
+      }
+      duplicates++;
+      continue;
+    }
+    localSourcePayload.set(sourceKey,payloadHash);
+    novel.push(input);
+  }
+
+  return Object.freeze({
+    novel:Object.freeze(novel),
+    duplicates
+  });
+}
+
 export async function appendResearchDataPlane(plane,inputs){
   if(!plane?.healthy) throw new Error('Research Data Plane unhealthy: fail closed');
   if(!Array.isArray(inputs)||!inputs.length) return {appended:[],duplicates:0};
