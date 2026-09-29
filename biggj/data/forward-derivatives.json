@@ -1,0 +1,10 @@
+{
+  "schema": "BIGGJ_FORWARD_DERIVATIVES_V1",
+  "purpose": "RESEARCH_ONLY",
+  "mode": "SHADOW_ONLY",
+  "canExecuteLive": false,
+  "updatedAt": null,
+  "chain": [],
+  "summary": {"count":0,"first":null,"last":null,"providers":[],"features":{},"chainHead":null},
+  "lastCollection": {"providers":[],"errors":[]}
+}
