@@ -55,6 +55,20 @@ import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
 import {
+  buildBiggjPreTradeAnalysis, freezeBiggjTradeDecision, reverseEngineerBiggjTrade,
+  BIGGJ_MARKET_PLAYBOOK_VERSION, BIGGJ_TRADING_STYLES
+} from './biggj-market-playbook.mjs';
+import {
+  buildBiggjOutcomeFactorMemory, buildBiggjAdaptiveHoldMemory,
+  selectBiggjAdaptiveHoldPlan, analyzeBiggjClosedTrade,
+  discoverBiggjStrategyExperiments, scoreBiggjTradingConsistency,
+  BIGGJ_ADAPTIVE_LEARNING_VERSION
+} from './biggj-adaptive-learning-core.mjs';
+import {
+  evaluateBiggjEntryAdmission, deriveBiggjShadowRiskBudget, evaluateBiggjPositionLifecycle,
+  BIGGJ_TRADING_POLICY_VERSION
+} from './biggj-trading-policy.mjs';
+import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
   markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
