@@ -3,8 +3,27 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": null,
+  "updatedAt": "2026-09-29T06:22:07.497Z",
   "chain": [],
-  "summary": {"count":0,"first":null,"last":null,"providers":[],"features":{},"chainHead":null},
-  "lastCollection": {"providers":[],"errors":[]}
+  "summary": {
+    "count": 0,
+    "first": null,
+    "last": null,
+    "providers": [],
+    "features": {},
+    "chainHead": null
+  },
+  "lastCollection": {
+    "providers": [],
+    "errors": [
+      {
+        "provider": "binance",
+        "error": "HTTP_451"
+      },
+      {
+        "provider": "bybit",
+        "error": "HTTP_403"
+      }
+    ]
+  }
 }
