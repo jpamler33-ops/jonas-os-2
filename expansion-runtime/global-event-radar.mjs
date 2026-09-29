@@ -8,10 +8,41 @@ const ACTOR_RULES=Object.freeze({
   'elon musk':{id:'elon-musk',role:'PUBLIC_EXECUTIVE',topics:['TESLA','SPACEX','XAI','X','CRYPTO','DOGE','AI']}
 });
 
+
+const ACTOR_CATALOG=Object.freeze([
+ {id:'donald-trump',name:'Donald Trump',role:'US_PRESIDENT',domains:['TRADE','TARIFF','SANCTIONS','ENERGY','REGULATION','GEOPOLITICS','CRYPTO']},
+ {id:'xi-jinping',name:'Xi Jinping',role:'CHINA_PRESIDENT',domains:['CHINA','TRADE','TAIWAN','AI','CRITICAL_MINERALS','GEOPOLITICS']},
+ {id:'jerome-powell',name:'Jerome Powell',role:'FED_CHAIR',domains:['RATES','INFLATION','LIQUIDITY','USD']},
+ {id:'scott-bessent',name:'Scott Bessent',role:'US_TREASURY',domains:['TREASURY','TRADE','FX','SANCTIONS','DEBT']},
+ {id:'elon-musk',name:'Elon Musk',role:'PUBLIC_EXECUTIVE',domains:['TESLA','SPACEX','XAI','X','CRYPTO','DOGE','AI']},
+ {id:'sam-altman',name:'Sam Altman',role:'AI_EXECUTIVE',domains:['AI','COMPUTE','CHIPS']},
+ {id:'jensen-huang',name:'Jensen Huang',role:'SEMICONDUCTOR_EXECUTIVE',domains:['AI','CHIPS','COMPUTE']},
+ {id:'tim-cook',name:'Tim Cook',role:'TECH_EXECUTIVE',domains:['APPLE','CHINA','SUPPLY_CHAIN','TECH']},
+ {id:'mark-zuckerberg',name:'Mark Zuckerberg',role:'TECH_EXECUTIVE',domains:['META','AI','TECH']},
+ {id:'sundar-pichai',name:'Sundar Pichai',role:'TECH_EXECUTIVE',domains:['GOOGLE','AI','TECH']}
+]);
+export function importantActorCatalog(){return ACTOR_CATALOG.map(x=>structuredClone(x));}
+export function buildInteractionEvent({id,participants=[],interactionType='MEETING',topics=[],headline='',sourceId='',availableAt=Date.now()}={}){
+ const ps=[...new Set(participants.map(x=>String(x).trim()).filter(Boolean))];
+ const known=ps.map(classifyPublicActor);
+ const core={id:String(id||''),participants:ps,knownActors:known,interactionType:String(interactionType).toUpperCase(),topics:[...new Set(topics.map(x=>String(x).toUpperCase()))],headline:String(headline).slice(0,500),sourceId:String(sourceId),availableAt:Number(availableAt),eventClass:'PUBLIC_ACTOR_INTERACTION',epistemic:'DOCUMENTED_INTERACTION_NOT_MOTIVE_INFERENCE'};
+ return Object.freeze({...core,fingerprint:sha256(core)});
+}
+export function prioritizeActorEvent(event){
+ const actorKnown=Boolean(classifyPublicActor(event?.actor).known);
+ const interactionKnown=(event?.participants||[]).some(x=>classifyPublicActor(x).known);
+ const marketDomains=new Set(['TARIFF','TRADE','SANCTIONS','ENERGY','RATES','INFLATION','LIQUIDITY','AI','CHIPS','CRYPTO','DOGE','REGULATION','TAIWAN','CRITICAL_MINERALS','GEOPOLITICS']);
+ const topics=[event?.topic,...(event?.topics||[])].filter(Boolean).map(x=>String(x).toUpperCase());
+ const relevant=topics.some(x=>marketDomains.has(x));
+ return Object.freeze({track:actorKnown||interactionKnown,marketRelevant:relevant,notifyEligible:(actorKnown||interactionKnown)&&relevant});
+}
+
 export function classifyPublicActor(name=''){
   const key=String(name).trim().toLowerCase();
   const known=ACTOR_RULES[key];
-  return known?{known:true,...known}:{known:false,id:null,role:'OTHER',topics:[]};
+  if(known) return {known:true,...known};
+  const catalog=ACTOR_CATALOG.find(x=>x.name.toLowerCase()===key);
+  return catalog?{known:true,id:catalog.id,role:catalog.role,topics:catalog.domains}:{known:false,id:null,role:'OTHER',topics:[]};
 }
 
 export function scoreGlobalEvent(event,{sourceReliability=.5}={}){
