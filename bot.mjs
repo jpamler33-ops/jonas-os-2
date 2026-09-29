@@ -5800,6 +5800,15 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         blockedFeatures:coverageDiagnostic.blockedFeatures,
         degradedFeatures:coverageDiagnostic.degradedFeatures,
         impactedSourceKeys:coverageDiagnostic.impactedSourceKeys.slice(0,8),
+        sources:coverageDiagnostic.sources.slice(0,8).map(x=>({
+          sourceKey:x.sourceKey,
+          status:x.status,
+          lastDecision:x.lastDecision,
+          consecutiveViolations:x.consecutiveViolations,
+          silenceMs:x.silenceMs,
+          reasonCodes:x.reasonCodes.slice(0,8)
+        })),
+        factorProblems:coverageDiagnostic.factorProblems.slice(0,8),
         blockedFeatureIds:coverageDiagnostic.blockedFeatureIds.slice(0,12),
         graphReasons:coverageDiagnostic.graphReasons.slice(0,8)
       }));
