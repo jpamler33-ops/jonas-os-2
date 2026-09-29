@@ -567,7 +567,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -675,6 +675,28 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function findMarked(channel,marker){try{const messages=await channel.messages.fetch({limit:50});return messages.find(m=>m.author?.id===client.user?.id&&hasMarker(m,marker))||null;}catch{return null;}}
   async function upsertMarked(channel,marker,payload){let m=await findMarked(channel,marker);return m?m.edit(payload):channel.send(payload);}
   async function ensureStart(){const c=channelCache.get('start-here');return c?upsertMarked(c,MARKERS.start,startPayload()):null;}
+  async function ensureAcademy(){
+    const specs=[
+      ['academy-start',MARKERS.academyStart,'start'],
+      ['academy-roadmap',MARKERS.academyRoadmap,'roadmap'],
+      ['academy-lessons',MARKERS.academyLessons,'lessons'],
+      ['academy-chart-training',MARKERS.academyChart,'chart'],
+      ['academy-challenges',MARKERS.academyChallenges,'challenges'],
+      ['academy-glossary',MARKERS.academyGlossary,'glossary'],
+      ['academy-progress',MARKERS.academyProgress,'progress'],
+      ['academy-questions',MARKERS.academyQuestions,'questions']
+    ];
+    let ready=0;
+    for(const [name,marker,kind] of specs){
+      const c=channelCache.get(name);
+      if(!c)continue;
+      await upsertMarked(c,marker,academyStaticPayload(kind));
+      ready++;
+    }
+    state.academyPanels=ready;
+    return ready;
+  }
+
   async function refreshTerminal(){const c=channelCache.get('tcx-terminal');if(!c)return null;const m=await upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot()));state.lastRefreshAt=Date.now();return m;}
   async function refreshSystem(){const c=channelCache.get('system-status');return c?upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())):null;}
   async function refreshPerformance(){const c=channelCache.get('performance');return c?upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())):null;}
@@ -901,7 +923,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(maybeDailyReport,60000);
   }
   async function bootstrapV2(){
-    try{const setup=await ensureLayout();await ensureStart();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
+    try{const setup=await ensureLayout();await ensureStart();await ensureAcademy();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
     catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
   }
   async function setupCommand(interaction){
@@ -920,6 +942,15 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const p=[...rows].filter(x=>x?.symbol===symbol&&x?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
     if(!p){await interaction.editReply('Für '+String(symbol||'diesen Markt')+' gibt es gerade keine aktive primäre Shadow-Position.');return;}
     await interaction.editReply(biggjThesisPayload(p));
+  }
+  async function academyCommand(interaction){
+    await interaction.deferReply();
+    await interaction.editReply(academyStaticPayload('start'));
+  }
+  async function lessonCommand(interaction){
+    const topic=String(interaction.options?.getString('topic')||'basics');
+    await interaction.deferReply();
+    await interaction.editReply(academyLessonPayload(topic));
   }
   async function terminalCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordTerminalPayload(await safeMissionSnapshot()));}
   async function systemCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordSystemPayload(await safeMissionSnapshot()));}
@@ -962,6 +993,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='dashboard'||name==='terminal'){await terminalCommand(interaction);return;}
     if(name==='system'){await systemCommand(interaction);return;}
     if(name==='thesis'){await thesisCommand(interaction);return;}
+    if(name==='academy'){await academyCommand(interaction);return;}
+    if(name==='lesson'){await lessonCommand(interaction);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
     const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
@@ -974,6 +1007,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function onButton(interaction){
     if(String(interaction.guildId)!==guildId)return;
     const customId=decodeDiscordCallbackCustomId(interaction.customId);
+    if(customId.startsWith('dc5:lesson:')){
+      const topic=String(customId.split(':')[2]||'basics');
+      await interaction.deferReply();
+      await interaction.editReply(academyLessonPayload(topic));
+      return;
+    }
     if(customId.startsWith('dc4:thesis:')){
       const symbol=normalizeDiscordSymbol(customId.split(':')[2]);
       await interaction.deferReply();
@@ -1016,6 +1055,6 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return snapshot();
   }
   async function stop(){schedulerStopped=true;for(const timer of timers){clearInterval(timer);clearTimeout(timer);}timers.clear();client.destroy();state.ready=false;}
-  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size});}
+  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size,academyPanels:state.academyPanels});}
   return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }
