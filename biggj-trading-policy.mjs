@@ -314,8 +314,9 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
   const horizonMs=Math.max(ap.minHorizonMs,finite(position.horizonMs,ap.minHorizonMs));
   const style=String(position.tradingStyle||'INTRADAY').toUpperCase();
   const styleMultiplierCap=style==='SWING'?16:style==='SCALP'?1.5:3;
+  const styleReviewIntervalMs=style==='SWING'?60*60_000:style==='SCALP'?5*60_000:ap.reviewIntervalMs;
   const adaptiveHoldMultiplier=clamp(finite(state.adaptiveHoldMultiplier,1),.50,Math.max(lp.maxHoldHorizonMultiplier,styleMultiplierCap));
-  const effectiveReviewHorizonMs=Math.max(ap.reviewIntervalMs,horizonMs*adaptiveHoldMultiplier);
+  const effectiveReviewHorizonMs=Math.max(styleReviewIntervalMs,horizonMs*adaptiveHoldMultiplier);
   const styleMaxHoldMs=Math.max(horizonMs,finite(position.maxHoldMs,ap.maxHoldMs));
   const dynamicCap=Math.max(effectiveReviewHorizonMs,Math.min(styleMaxHoldMs,effectiveReviewHorizonMs*1.75,ap.maxHoldMs));
   const maxHoldAt=openedAt+dynamicCap;
@@ -350,19 +351,19 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
 
   if(targetReached){
     if(thesis<lp.strongThesis||opposite>.50)return result('EXIT','TARGET_THESIS_EXHAUSTED');
-    return result('TRAIL','TARGET_RUNNER',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+    return result('TRAIL','TARGET_RUNNER',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
   }
-  if(roe>=target*lp.trailAtTargetFraction)return result('TRAIL','PROFIT_LOCK',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
-  if(roe>=target*lp.protectAtTargetFraction)return result('PROTECT','BREAK_EVEN_LOCK',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+  if(roe>=target*lp.trailAtTargetFraction)return result('TRAIL','PROFIT_LOCK',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
+  if(roe>=target*lp.protectAtTargetFraction)return result('PROTECT','BREAK_EVEN_LOCK',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
 
   if(ageMs>=effectiveReviewHorizonMs){
     if(thesis>=lp.strongThesis&&opposite<=lp.maxOppositeForExtension){
-      return result('HOLD','HORIZON_REVIEW_EXTEND',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+      return result('HOLD','HORIZON_REVIEW_EXTEND',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
     }
     if(thesis<lp.weakThesis)return result('EXIT','HORIZON_REVIEW_THESIS_WEAK');
-    if(roe>0)return result('PROTECT','HORIZON_REVIEW_NEUTRAL',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
-    return result('REVIEW','HORIZON_REVIEW_NEUTRAL',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+    if(roe>0)return result('PROTECT','HORIZON_REVIEW_NEUTRAL',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
+    return result('REVIEW','HORIZON_REVIEW_NEUTRAL',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
   }
 
-  return result('HOLD','THESIS_ACTIVE',{nextReviewAt:Math.min(maxHoldAt,openedAt+horizonMs)});
+  return result('HOLD','THESIS_ACTIVE',{nextReviewAt:Math.min(maxHoldAt,at+styleReviewIntervalMs)});
 }
