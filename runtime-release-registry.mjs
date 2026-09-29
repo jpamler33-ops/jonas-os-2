@@ -14,6 +14,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-trading-policy.mjs',
   'biggj-market-playbook.mjs',
   'biggj-adaptive-learning-core.mjs',
+  'biggj-style-experiment-engine.mjs',
   'dashboard-state.mjs',
   'episode-memory.mjs',
   'mechanism-transition-engine.mjs',
