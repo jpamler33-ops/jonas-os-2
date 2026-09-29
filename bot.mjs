@@ -6366,8 +6366,7 @@ async function alertWatcher() {
                 '🔔 TCX ALERT · '+symbolLabel(symbol)+'/USDT',
                 describeAlert(alert),'',
                 ...alertCurrentStateLines(context),'',
-                'Trigger: '+result.message,
-                'Action: ABSTAIN / SHADOW_ONLY'
+                'Trigger: '+result.message
               ].join('\n').slice(0,4096)
             });
             delivered=true;

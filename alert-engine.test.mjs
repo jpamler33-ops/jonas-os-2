@@ -100,3 +100,26 @@ test("threshold alert rearms only after leaving matched state",()=>{
   r=evaluateAlert(a,{witness:{agreement:0.78}},{now:5000});
   assert.equal(r.triggered,true);
 });
+
+
+test("setup transitions suppress tick flapping and duplicate phases",async()=>{
+  const {createSetupTransitionState,advanceSetupTransition}=await import("./alert-engine.mjs");
+  let s=createSetupTransitionState({setupId:"BTC-SHORT-82844-5M",now:1000});
+  let r=advanceSetupTransition(s,"APPROACHING",{now:2000}); assert.equal(r.notify,true); s=r.state;
+  r=advanceSetupTransition(s,"BREAK_PENDING",{now:3000}); assert.equal(r.notify,false); s=r.state;
+  r=advanceSetupTransition(s,"APPROACHING",{now:3500}); assert.equal(r.reason,"REGRESSION_SUPPRESSED"); assert.equal(r.notify,false);
+  r=advanceSetupTransition(s,"BREAK_PENDING",{now:4000}); assert.equal(r.reason,"DUPLICATE_PHASE"); assert.equal(r.notify,false);
+});
+
+test("confirmed close, retest and entry-ready each notify once",async()=>{
+  const {createSetupTransitionState,advanceSetupTransition}=await import("./alert-engine.mjs");
+  let s=createSetupTransitionState({setupId:"BTC-SHORT-82844-5M",phase:"BREAK_PENDING",now:1000});
+  for(const phase of ["CONFIRMED","RETEST","ENTRY_READY"]){const r=advanceSetupTransition(s,phase,{now:s.updatedAt+1000});assert.equal(r.notify,true);s=r.state;}
+  assert.equal(advanceSetupTransition(s,"ENTRY_READY",{now:5000}).notify,false);
+});
+
+test("setup alert copy omits internal execution boilerplate",async()=>{
+  const {formatSetupTransitionAlert}=await import("./alert-engine.mjs");
+  const msg=formatSetupTransitionAlert({symbol:"BTCUSDT",direction:"SHORT",phase:"ENTRY_READY",price:82810,level:82844.42,confidence:0.82,reasons:["5m close","retest"],invalidation:82930});
+  assert.match(msg,/BTC · SHORT · SETUP BEREIT/); assert.match(msg,/Confidence: 82%/); assert.doesNotMatch(msg,/SHADOW_ONLY|canExecuteLive|ABSTAIN/);
+});
