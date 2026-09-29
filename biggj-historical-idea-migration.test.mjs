@@ -12,6 +12,7 @@ import {
   biggjHistoricalMigrationSummary
 } from './biggj-historical-idea-migration.mjs';
 import {
+  BIGGJ_CAPABILITY_ROOTS,
   BIGGJ_SEED_CAPABILITIES
 } from './biggj-capability-map.mjs';
 
@@ -41,10 +42,12 @@ test('migration deduplicates history into substantially fewer semantic targets',
 });
 
 test('every mapped canonical target exists in the V2 capability map',()=>{
-  const ids=new Set(BIGGJ_SEED_CAPABILITIES.map(x=>x.id));
+  const capabilityIds=new Set(BIGGJ_SEED_CAPABILITIES.map(x=>x.id));
+  const rootIds=new Set(BIGGJ_CAPABILITY_ROOTS.map(x=>x.id));
   const r=migrateBiggjHistoricalIdeas();
   for(const row of r.ideas){
-    if(row.capabilityId) assert.ok(ids.has(row.capabilityId),'unknown canonical target '+row.capabilityId);
+    if(row.capabilityId) assert.ok(capabilityIds.has(row.capabilityId),'unknown canonical capability '+row.capabilityId);
+    if(row.targetKind==='ROOT') assert.ok(rootIds.has(row.rootId),'unknown canonical root '+row.rootId);
   }
 });
 
