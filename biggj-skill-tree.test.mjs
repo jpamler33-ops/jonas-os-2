@@ -38,6 +38,8 @@ test('first-principles V2 adds the missing cognitive, economic and platform root
   assert.equal(BIGGJ_ARCHITECTURE_PLANES.length,6);
   assert.equal(map.architecturePlanes.length,6);
   assert.ok(BIGGJ_CAPABILITY_ROOTS.length>=22);
+  assert.ok(BIGGJ_CAPABILITY_ROOTS.every(x=>typeof x.plane==='string'&&x.plane.length>0));
+  assert.ok(BIGGJ_SEED_CAPABILITIES.every(x=>typeof x.plane==='string'&&x.plane.length>0));
 
   const requiredRoots=[
     'WORLD_STATE_MODEL',
@@ -82,6 +84,7 @@ test('V1-like persisted trees reconcile to V2 without rewriting evidence or prom
     x.skillId!=='seed:CANONICAL_WORLD_STATE'
   );
   const preserved=legacy.nodes.find(x=>x.capabilityId==='STYLE_SELECTION');
+  const preservedUpdatedAt=preserved.updatedAt;
   preserved.evidence=[{evidenceId:'legacy-evidence',statement:'must survive migration'}];
   legacy.promotions=[{transitionId:'legacy-promotion'}];
 
@@ -90,6 +93,7 @@ test('V1-like persisted trees reconcile to V2 without rewriting evidence or prom
   assert.ok(next.nodes.some(x=>x.skillId==='root:WORLD_STATE_MODEL'));
   assert.ok(next.nodes.some(x=>x.skillId==='seed:CANONICAL_WORLD_STATE'));
   assert.deepEqual(next.nodes.find(x=>x.capabilityId==='STYLE_SELECTION').evidence,preserved.evidence);
+  assert.equal(next.nodes.find(x=>x.capabilityId==='STYLE_SELECTION').updatedAt,preservedUpdatedAt);
   assert.deepEqual(next.promotions,[{transitionId:'legacy-promotion'}]);
   assert.equal(next.migrations.at(-1).evidenceRewritten,false);
   assert.equal(next.migrations.at(-1).promotionHistoryRewritten,false);
