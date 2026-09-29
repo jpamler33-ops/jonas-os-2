@@ -287,7 +287,7 @@ export function advanceSetupTransition(state,nextPhase,{now=Date.now()}={}){
   if(!s?.setupId) throw new Error("setup transition state required");
   const next=String(nextPhase||"").toUpperCase(),t=Number(now);
   if(!(next in SETUP_PHASE_RANK)) throw new Error("invalid setup phase");
-  if(Number.isFinite(Number(s.expiresAt))&&t>=Number(s.expiresAt)){
+  if(s.expiresAt!=null&&Number.isFinite(Number(s.expiresAt))&&t>=Number(s.expiresAt)){
     const changed=s.phase!=="INVALIDATED";
     return {changed,notify:changed&&s.lastNotifiedPhase!=="INVALIDATED",reason:"EXPIRED",state:{...s,phase:"INVALIDATED",lastNotifiedPhase:changed?"INVALIDATED":s.lastNotifiedPhase,updatedAt:t}};
   }
