@@ -1,11 +1,11 @@
-import { appendAuditRecord, sha256 } from './institutional-kernel.mjs';
+import { appendAuditRecord, findAuditRecordIdentity, sha256 } from './institutional-kernel.mjs';
 import { verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { verifyResearchTrace, verifyResearchTraceEvaluation } from './research-trace.mjs';
 
 export const INSTITUTIONAL_AUDIT_BINDING_VERSION='TCX_INSTITUTIONAL_AUDIT_BINDING_V1';
 
 function existing(ledger,kind,idField,id){
-  return ledger?.records?.find(r=>r?.kind===kind&&r?.payload?.[idField]===id)||null;
+  return findAuditRecordIdentity(ledger,{kind,idField,id});
 }
 
 export async function appendInstitutionalForecastIssuanceAudit(

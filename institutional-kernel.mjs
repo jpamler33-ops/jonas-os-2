@@ -7,6 +7,46 @@ import readline from 'node:readline';
 const LEDGER_SCHEMA=1;
 const GENESIS='0'.repeat(64);
 
+const AUDIT_IDENTITY_FIELDS=Object.freeze({
+  TCX_INSTITUTIONAL_FORECAST_ISSUED:'issuanceId',
+  TCX_RESEARCH_TRACE_EVALUATED:'evaluationId'
+});
+
+function auditIdentityKey(kind,idField,id){
+  return String(kind)+'\u0000'+String(idField)+'\u0000'+String(id);
+}
+
+function indexAuditIdentity(index,record){
+  const idField=AUDIT_IDENTITY_FIELDS[String(record?.kind||'')];
+  if(!idField) return;
+  const id=record?.payload?.[idField];
+  if(id===undefined||id===null||id==='') return;
+  index.set(auditIdentityKey(record.kind,idField,id),{
+    seq:Number(record.seq),
+    recordHash:String(record.recordHash||''),
+    occurredAt:Number(record.occurredAt),
+    kind:String(record.kind),
+    idField,
+    id:String(id)
+  });
+}
+
+export function findAuditRecordIdentity(ledger,{kind,idField,id}={}){
+  if(id===undefined||id===null||id==='') return null;
+  const retained=(ledger?.records||[]).find(r=>r?.kind===kind&&r?.payload?.[idField]===id);
+  if(retained) return retained;
+  const hit=ledger?.identityIndex?.get?.(auditIdentityKey(kind,idField,id));
+  if(!hit) return null;
+  return {
+    seq:hit.seq,
+    recordHash:hit.recordHash,
+    occurredAt:hit.occurredAt,
+    kind:hit.kind,
+    payload:{[hit.idField]:hit.id},
+    indexedIdentity:true
+  };
+}
+
 function finite(x){ const n=Number(x); return Number.isFinite(n)?n:null; }
 function clamp(x,a=0,b=1){ return Math.max(a,Math.min(b,x)); }
 
@@ -252,6 +292,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
   const keep=Math.max(1,Math.floor(Number(maxInMemoryRecords)||1000));
   const ring=new Array(keep);
   let retainedCount=0,ringPos=0,total=0;
+  const identityIndex=new Map();
   let prev=GENESIS,expectedSeq=1;
   let healthy=true,error=null,detail=null;
 
@@ -285,6 +326,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
         healthy=false;error='RECORD_HASH_MISMATCH';detail='seq '+String(record.seq);break;
       }
 
+      indexAuditIdentity(identityIndex,record);
       ring[ringPos]=record;
       ringPos=(ringPos+1)%keep;
       retainedCount=Math.min(retainedCount+1,keep);
@@ -302,6 +344,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
         tailHash:GENESIS,
         totalRecords:0,
         maxInMemoryRecords:keep,
+        identityIndex,
         records:[]
       };
     }
@@ -313,6 +356,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
       tailHash:GENESIS,
       totalRecords:0,
       maxInMemoryRecords:keep,
+      identityIndex,
       records:[]
     };
   }
@@ -326,6 +370,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
       tailHash:GENESIS,
       totalRecords:total,
       maxInMemoryRecords:keep,
+      identityIndex,
       records:[]
     };
   }
@@ -341,6 +386,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
     tailHash:prev,
     totalRecords:total,
     maxInMemoryRecords:keep,
+    identityIndex,
     records
   };
 }
@@ -358,6 +404,8 @@ export async function appendAuditRecord(ledger,{kind,payload,occurredAt=Date.now
   await appendFile(ledger.filePath,canonicalJson(record)+'\n',{encoding:'utf8',mode:0o600});
   ledger.seq=record.seq;
   ledger.tailHash=record.recordHash;
+  if(!ledger.identityIndex) ledger.identityIndex=new Map();
+  indexAuditIdentity(ledger.identityIndex,record);
   ledger.records.push(record);
   const keep=Math.max(1,Math.floor(Number(ledger.maxInMemoryRecords)||1000));
   while(ledger.records.length>keep) ledger.records.shift();

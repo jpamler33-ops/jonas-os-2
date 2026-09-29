@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 
-import { sha256, openAuditLedger, verifyLedgerRecords } from './institutional-kernel.mjs';
+import { sha256, openAuditLedger, appendAuditRecord, verifyLedgerRecords } from './institutional-kernel.mjs';
 import { createInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { createResearchTraceEvaluation } from './research-trace.mjs';
 import { appendInstitutionalForecastIssuanceAudit, appendResearchTraceEvaluationAudit } from './institutional-audit-binding.mjs';
@@ -60,6 +60,30 @@ test('issuance audit is append-only and idempotent',async()=>{
   assert.equal(ledger.records.length,1);
   assert.equal(verifyLedgerRecords(ledger.records).ok,true);
   assert.equal(ledger.records[0].payload.issuanceId,x.issuanceId);
+});
+
+test('issuance dedupe survives eviction from bounded ledger tail',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-audit-index-'));
+  const file=path.join(dir,'ledger.jsonl');
+  let ledger=await openAuditLedger(file,{maxInMemoryRecords:2});
+  const x=issuance();
+  const first=await appendInstitutionalForecastIssuanceAudit(ledger,x,{occurredAt:1010});
+  assert.equal(first.duplicate,false);
+  for(let i=0;i<8;i++){
+    await appendAuditRecord(ledger,{kind:'NOISE',payload:{i},occurredAt:2000+i});
+  }
+  assert.equal(ledger.records.some(r=>r?.payload?.issuanceId===x.issuanceId),false);
+  const beforeSeq=ledger.seq;
+  const duplicate=await appendInstitutionalForecastIssuanceAudit(ledger,x,{occurredAt:9999});
+  assert.equal(duplicate.duplicate,true);
+  assert.equal(ledger.seq,beforeSeq);
+
+  ledger=await openAuditLedger(file,{maxInMemoryRecords:2});
+  assert.equal(ledger.records.some(r=>r?.payload?.issuanceId===x.issuanceId),false);
+  const reopenedBefore=ledger.seq;
+  const afterRestart=await appendInstitutionalForecastIssuanceAudit(ledger,x,{occurredAt:10000});
+  assert.equal(afterRestart.duplicate,true);
+  assert.equal(ledger.seq,reopenedBefore);
 });
 
 test('matured evaluation links to trace and deduplicates',async()=>{
