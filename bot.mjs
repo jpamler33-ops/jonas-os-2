@@ -62,6 +62,7 @@ import {
   shadowPortfolioPeriodStats, shadowPortfolioStatistics,
   SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
 } from './shadow-portfolio-ledger.mjs';
+import { deriveBiggjThesisEvidence, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
 import {
   evaluateShadowCapitalAcademy, academyTradeBudget,
   SHADOW_CAPITAL_ACADEMY_VERSION
@@ -7329,10 +7330,60 @@ async function shadowPortfolioWatcher(){
         if(current.status!=='OPEN') continue;
         const book=books.get(current.symbol);
         if(!book) continue;
-        const marked=markShadowPosition(current,book,{at:Number(book.availableAt||Date.now()),feeBps:shadowTakerFeeBps});
+        const markAt=Number(book.availableAt||Date.now());
+        let lifecycleState=null;
+        if(String(current.tradingPolicyVersion||'')===BIGGJ_TRADING_POLICY_VERSION){
+          const latestReviewForecast=latestInstitutionalForecast(forecastRuntime,current.symbol);
+          lifecycleState=deriveBiggjThesisEvidence(current,latestReviewForecast,{at:markAt});
+        }
+        const marked=markShadowPosition(current,book,{
+          at:markAt,
+          feeBps:shadowTakerFeeBps,
+          lifecycleState
+        });
         if(marked.changed){
           shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,marked.position);
           changed=true;
+        }
+        if(String(current.tradingPolicyVersion||'')===BIGGJ_TRADING_POLICY_VERSION&&lifecycleState){
+          const priorEvidence=current.lifecycleEvidence||null;
+          const evidenceChanged=
+            String(priorEvidence?.issuanceId||'')!==String(lifecycleState.issuanceId||'')||
+            String(priorEvidence?.forecastFingerprint||'')!==String(lifecycleState.forecastFingerprint||'')||
+            String(priorEvidence?.reason||'')!==String(lifecycleState.reason||'')||
+            priorEvidence?.trusted!==lifecycleState.trusted;
+          const lifecycleChanged=
+            String(current.lifecycle?.action||'')!==String(marked.lifecycle?.action||'')||
+            String(current.lifecycle?.reason||'')!==String(marked.lifecycle?.reason||'');
+          if(evidenceChanged||lifecycleChanged||marked.trigger){
+            const reviewEvent={
+              version:BIGGJ_TRADING_POLICY_VERSION,
+              at:markAt,
+              positionId:current.positionId,
+              symbol:current.symbol,
+              side:current.side,
+              horizonId:current.horizonId,
+              ageMs:Math.max(0,markAt-Number(current.openedAt||markAt)),
+              action:marked.lifecycle?.action||'UNKNOWN',
+              reason:marked.lifecycle?.reason||'UNKNOWN',
+              trigger:marked.trigger||null,
+              thesisEvidence:{
+                trusted:lifecycleState.trusted===true,
+                reason:lifecycleState.reason,
+                issuanceId:lifecycleState.issuanceId||null,
+                generatedAt:lifecycleState.generatedAt||null,
+                forecastAgeMs:lifecycleState.forecastAgeMs??null,
+                thesisHealth:lifecycleState.thesisHealth??null,
+                oppositeThesisStrength:lifecycleState.oppositeThesisStrength??null
+              },
+              execution:'SHADOW_ONLY',
+              canExecuteLive:false
+            };
+            console.log('[TCX_BIGGJ_POSITION_REVIEW]',JSON.stringify(reviewEvent));
+            if(auditLedger.healthy){
+              await appendInstitutionalAudit('TCX_BIGGJ_POSITION_REVIEW',reviewEvent);
+            }
+          }
         }
         if(marked.trigger){
           const academyBefore=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Number(book.availableAt||Date.now()),timeZone:shadowStatsTimeZone});
