@@ -247,3 +247,54 @@ test('retired aggregate FRED quarantine is ignored after per-series contract mig
   assert.ok(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_DFF_CURRENT'));
   assert.ok(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_WALCL_CURRENT'));
 });
+
+
+function entityFlowGovernanceSnapshot({
+  sourceEventId='entity-flow',
+  eventTime=1_000_000,
+  availableAt=2_107_417,
+  ingestedAt=2_154_968,
+  value=.5
+}={}){
+  return createResearchFeatureSnapshot({
+    streamKey:'ETHUSDT',
+    domain:'ENTITY_FLOW',
+    source:'VERIFIED_ENTITY_FINALIZED_FLOW',
+    sourceVersion:'TCX_ENTITY_FLOW_ENGINE_V1',
+    sourceEventId,
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:30*60_000,
+    finality:'FINALIZED',
+    quality:{completeness:1,sourceCount:1,expectedSourceCount:1,status:'FINALIZED_BOUNDED_ENTITY_SAMPLE'},
+    features:[{id:'research.entityflow.eth.netExternal5m',value}],
+    provenance:{finalizedBlocksOnly:true,test:true}
+  });
+}
+
+test('finalized entity flow accepts normal Ethereum finality lag near 18.5 minutes',()=>{
+  const state=createResearchDataGovernanceState({createdAt:3_000_000});
+  const governed=governResearchSnapshot(state,entityFlowGovernanceSnapshot(),{evaluatedAt:2_154_968});
+  assert.equal(governed.governance.decision,'ACCEPT');
+  assert.equal(governed.governance.sourceStatus,'HEALTHY');
+  assert.equal(governed.governance.usableForResearch,true);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='PUBLICATION_LAG_SLO_BREACH'),false);
+});
+
+test('finalized entity flow still quarantines sustained finality lag above 30 minutes',()=>{
+  const state=createResearchDataGovernanceState({createdAt:5_000_000});
+  const decisions=[];
+  for(let i=0;i<3;i++){
+    const availableAt=5_000_000+i*1000;
+    const governed=governResearchSnapshot(state,entityFlowGovernanceSnapshot({
+      sourceEventId:'entity-stalled-'+i,
+      eventTime:availableAt-(31*60_000),
+      availableAt,
+      ingestedAt:availableAt+10_000
+    }),{evaluatedAt:availableAt+10_000});
+    decisions.push(governed.governance.decision);
+  }
+  assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
+  assert.ok(quarantinedResearchSourceKeys(state).includes('ENTITY_FLOW:VERIFIED_ENTITY_FINALIZED_FLOW'));
+});
