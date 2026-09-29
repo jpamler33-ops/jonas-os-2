@@ -151,6 +151,20 @@ test('expired assumptions remain visible but invalidate dependent required claim
   assert.equal(g.nodes.find(x=>x.id==='ASSUMPTION:A-REGIME').state,'EXPIRED');
 });
 
+test('expired evidence is distinguished from missing evidence for claims and assumptions',()=>{
+  const input=base({asOf:1100});
+  input.assumptions[1].evidenceIds=['E-DEPTH'];
+  input.assumptions[1].requiresEvidence=true;
+  const g=buildClaimAssumptionGraph(input);
+  assert.ok(g.diagnostics.defects.some(x=>
+    x.kind==='EXPIRED_CLAIM_EVIDENCE'&&x.claimId==='C-DIRECTION'&&x.evidenceId==='E-DEPTH'
+  ));
+  assert.ok(g.diagnostics.defects.some(x=>
+    x.kind==='EXPIRED_ASSUMPTION_EVIDENCE'&&x.assumptionId==='A-LIQUIDITY'&&x.evidenceId==='E-DEPTH'
+  ));
+  assert.equal(g.nodes.find(x=>x.id==='ASSUMPTION:A-LIQUIDITY').supportState,'EVIDENCE_EXPIRED');
+});
+
 test('shared assumption fanout and transitive invalidation impact are explicit but not treated as proof of invalidity',()=>{
   const g=buildClaimAssumptionGraph(base());
   const shared=g.diagnostics.sharedAssumptions.find(x=>x.assumptionId==='A-REGIME');
