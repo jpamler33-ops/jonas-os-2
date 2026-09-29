@@ -139,6 +139,7 @@ import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DE
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
 import { createOnchainResearchProvider, onchainSnapshotToExtraFeatures, ONCHAIN_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/onchain-research-provider.mjs';
 import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnapshotToExtraFeatures, WALLET_COHORT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/wallet-cohort-public-provider.mjs';
+import { runResearchProviderFanout, RESEARCH_PROVIDER_FANOUT_VERSION } from './research-provider-fanout.mjs';
 import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
 import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
@@ -461,17 +462,20 @@ const marketDataProvider=createMarketDataProvider({
 });
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
-const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch});
+const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
+const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
 const externalResearchProvider=createExternalResearchProvider({
   fetchImpl:globalThis.fetch,
   fredApiKey:process.env.TCX_FRED_API_KEY||'',
-  polymarketMarkets:process.env.TCX_POLYMARKET_MARKETS_JSON||'{}'
+  polymarketMarkets:process.env.TCX_POLYMARKET_MARKETS_JSON||'{}',
+  timeoutMs:researchProviderTimeoutMs
 });
 const liquidationResearchStream=createLiquidationPublicStream({symbols:autoLearnSymbols});
 const onchainResearchProvider=createOnchainResearchProvider({
   fetchImpl:globalThis.fetch,
   ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
-  solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
+  solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com',
+  timeoutMs:researchProviderTimeoutMs
 });
 const entityRegistryFile=process.env.TCX_ENTITY_REGISTRY_FILE||'/data/tcx-entity-registry.json';
 const okxPorSource=Object.freeze({
@@ -518,7 +522,7 @@ const entityFlowResearchProvider=createEthereumEntityFlowProvider({
   entityIds:entityFlowEntityIds,
   maxBlocks:96,
   batchSize:6,
-  timeoutMs:15000,
+  timeoutMs:researchProviderTimeoutMs,
   cacheMs:45000
 });
 const manuallyConfiguredWalletCohorts=parseWalletCohorts(process.env.TCX_WALLET_RESEARCH_COHORTS_JSON||'');
@@ -526,7 +530,8 @@ const walletCohortResearchProvider=createWalletCohortPublicProvider({
   fetchImpl:globalThis.fetch,
   cohorts:manuallyConfiguredWalletCohorts,
   ethereumRpcUrl:process.env.TCX_ETHEREUM_RPC_URL||'https://ethereum-rpc.publicnode.com',
-  solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com'
+  solanaRpcUrl:process.env.TCX_SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com',
+  timeoutMs:researchProviderTimeoutMs
 });
 const predictionMarketResearchEnabled=(()=>{
   try{
@@ -5557,55 +5562,81 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let walletResearchSnapshot=null;
   let externalResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    const researchAsOf=Date.now();
     try{
-      derivativesResearchSnapshot=await derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000});
-      recordOperation(observability,{
-        name:'derivatives_research_snapshot',
-        ok:derivativesResearchSnapshot?.ok===true,
-        latencyMs:0,
-        error:derivativesResearchSnapshot?.ok?null:(derivativesResearchSnapshot?.errors||[]).map(x=>x.source+':'+x.error).join(' | ')
-      });
-    }catch(err){
-      recordError(observability,{scope:'derivatives_research',message:err instanceof Error?err.message:String(err)});
-    }
-    try{
-      liquidationResearchSnapshot=liquidationResearchStream.snapshot(symbol,{asOf:Date.now()});
+      liquidationResearchSnapshot=liquidationResearchStream.snapshot(symbol,{asOf:researchAsOf});
     }catch(err){
       recordError(observability,{scope:'liquidation_research',message:err instanceof Error?err.message:String(err)});
     }
-    try{
-      onchainResearchSnapshot=await onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000});
-    }catch(err){
-      recordError(observability,{scope:'onchain_research',message:err instanceof Error?err.message:String(err)});
-    }
-    try{
-      externalResearchSnapshot=await externalResearchProvider.fetchBundle(symbol);
-      recordOperation(observability,{
-        name:'external_research_data_hub',
-        ok:Boolean(externalResearchSnapshot?.coinMetrics?.ok||externalResearchSnapshot?.deribitOptions?.ok||externalResearchSnapshot?.macro?.ok||externalResearchSnapshot?.predictionMarket?.ok),
-        latencyMs:0,
-        error:null
-      });
-    }catch(err){
-      recordError(observability,{scope:'external_research_data_hub',message:err instanceof Error?err.message:String(err)});
-    }
-    if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
-      try{
-        const rawEntityFlow=await entityFlowResearchProvider.fetchSnapshot();
-        entityFlowResearchSnapshot=scoreEntityFlowSnapshot(rawEntityFlow,entityFlowMemory,{minBaselineSamples:20});
-        observeEntityFlowMemory(entityFlowMemory,rawEntityFlow,{observedAt:Date.now()});
-        await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory);
-      }catch(err){
-        recordError(observability,{scope:'entity_flow_research',message:err instanceof Error?err.message:String(err)});
+
+    const providerTasks=[
+      {
+        id:'derivatives',
+        run:()=>derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000})
+      },
+      {
+        id:'onchain',
+        run:()=>onchainResearchProvider.fetchAssetSnapshot(symbol,{cacheMs:20000})
+      },
+      {
+        id:'external',
+        run:()=>externalResearchProvider.fetchBundle(symbol)
       }
+    ];
+    if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
+      providerTasks.push({
+        id:'entity_flow',
+        run:async()=>{
+          const rawEntityFlow=await entityFlowResearchProvider.fetchSnapshot();
+          const scored=scoreEntityFlowSnapshot(rawEntityFlow,entityFlowMemory,{minBaselineSamples:20});
+          observeEntityFlowMemory(entityFlowMemory,rawEntityFlow,{observedAt:Date.now()});
+          await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory);
+          return scored;
+        }
+      });
     }
     if(walletCohortResearchProvider.configuredCohorts>0){
-      try{
-        walletResearchSnapshot=await walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:Date.now()});
-      }catch(err){
-        recordError(observability,{scope:'wallet_cohort_research',message:err instanceof Error?err.message:String(err)});
+      providerTasks.push({
+        id:'wallet',
+        run:()=>walletCohortResearchProvider.fetchSnapshot(symbol,{asOf:researchAsOf})
+      });
+    }
+
+    const fanout=await runResearchProviderFanout(providerTasks);
+    derivativesResearchSnapshot=fanout.results.derivatives?.value||null;
+    onchainResearchSnapshot=fanout.results.onchain?.value||null;
+    externalResearchSnapshot=fanout.results.external?.value||null;
+    entityFlowResearchSnapshot=fanout.results.entity_flow?.value||null;
+    walletResearchSnapshot=fanout.results.wallet?.value||null;
+
+    for(const [id,row] of Object.entries(fanout.results)){
+      const value=row.value;
+      let ok=row.status==='FULFILLED';
+      if(id==='derivatives') ok=ok&&value?.ok===true;
+      else if(id==='external') ok=ok&&Boolean(value?.coinMetrics?.ok||value?.deribitOptions?.ok||value?.macro?.ok||value?.predictionMarket?.ok);
+      else if(['onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
+      const error=row.status==='REJECTED'
+        ?row.error
+        :(ok?null:(value?.reason||((value?.errors||[]).map(x=>x.error||x.reason||String(x)).join(' | ')||'PROVIDER_NO_USABLE_DATA')));
+      recordOperation(observability,{
+        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':'research_provider_'+id,
+        ok,
+        latencyMs:row.durationMs,
+        error
+      });
+      if(row.status==='REJECTED'){
+        recordError(observability,{scope:id+'_research',message:row.error||'RESEARCH_PROVIDER_FAILED'});
       }
     }
+    console.log('[TCX_RESEARCH_PROVIDER_FANOUT]',JSON.stringify({
+      version:RESEARCH_PROVIDER_FANOUT_VERSION,
+      symbol,
+      durationMs:fanout.durationMs,
+      timeoutMs:researchProviderTimeoutMs,
+      fulfilled:fanout.fulfilled,
+      rejected:fanout.rejected,
+      tasks:Object.fromEntries(Object.entries(fanout.results).map(([id,row])=>[id,{status:row.status,durationMs:row.durationMs}]))
+    }));
   }
 
   markForecastMemory('research-providers');
