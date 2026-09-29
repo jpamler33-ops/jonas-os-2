@@ -165,13 +165,18 @@ test('Holm-controlled decision promotes only statistically supported candidate',
   const next=evaluateExperimentGovernor(state,{competition:comp,now:2_000_000});
   const byId=new Map(next.participants.map(p=>[p.blueprintId,p]));
   assert.equal(next.status,'COMPLETE_PROMOTION_REVIEW_REQUIRED');
-  assert.equal(byId.get('STRONG').status,'PROMOTION_CANDIDATE');
+  assert.equal(byId.get('STRONG').status,'PROMOTION_REVIEW_REQUIRED');
   assert.equal(byId.get('WEAK').status,'REJECTED');
   assert.ok(byId.get('STRONG').decision.holmAdjustedP<=.05);
   assert.ok(byId.get('STRONG').decision.brierCi95.upper<0);
   assert.equal(next.productionMutationPerformed,false);
   assert.equal(next.canExecute,false);
   assert.equal(next.evidencePacks.length,2);
+  const summary=experimentGovernorSummary(next);
+  assert.equal(summary.counts.PROMOTION_REVIEW_REQUIRED,1);
+  assert.equal(summary.counts.PROMOTION_CANDIDATE,0);
+  assert.equal(summary.promotionReviewRequired.length,1);
+  assert.equal(summary.legacyPromotionCandidates.length,0);
 });
 
 test('terminal generation cannot be re-peeked or rewritten by later outcomes',()=>{
@@ -225,4 +230,24 @@ test('governor state survives persistence round trip',async()=>{
   assert.equal(loaded.generationId,state.generationId);
   assert.equal(loaded.participants.length,1);
   assert.equal(loaded.productionMutationPerformed,false);
+});
+
+
+test('statistical winner is review-required and never implicitly promotion-ready',()=>{
+  const strong=candidate('STRONG-REVIEW','Strong review',-.12,24,1);
+  const comp=competition([strong]);
+  const state=createExperimentGovernor({
+    competition:comp,
+    championConfigHash:HASH,
+    now:1_000_000,
+    policy:policy()
+  });
+  const next=evaluateExperimentGovernor(state,{competition:comp,now:2_000_000});
+  const p=next.participants[0];
+  assert.equal(p.status,'PROMOTION_REVIEW_REQUIRED');
+  assert.notEqual(p.status,'PROMOTION_CANDIDATE');
+  const summary=experimentGovernorSummary(next);
+  assert.equal(summary.promotionSemantics,'STATISTICAL_REVIEW_ONLY_REQUIRES_MODEL_PROMOTION_LADDER_AND_ALPHA76');
+  assert.equal(summary.executionMode,'SHADOW_ONLY');
+  assert.equal(summary.productionMutationPerformed,false);
 });

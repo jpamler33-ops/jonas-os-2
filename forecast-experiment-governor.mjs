@@ -22,7 +22,7 @@ export const DEFAULT_EXPERIMENT_POLICY=Object.freeze({
   bootstrapIterations:1200
 });
 
-const TERMINAL=new Set(['REJECTED','PROMOTION_CANDIDATE','RETIRED']);
+const TERMINAL=new Set(['REJECTED','PROMOTION_REVIEW_REQUIRED','PROMOTION_CANDIDATE','RETIRED']);
 
 function clone(v){ return structuredClone(v); }
 function finite(v){ const n=Number(v); return Number.isFinite(n)?n:null; }
@@ -370,7 +370,7 @@ export function evaluateExperimentGovernor(state,{
     if(coverageDelta>Number(policy.maxCoverageErrorRegression)) reasons.push('INTERVAL_COVERAGE_REGRESSION');
     if(!subgroups.stable) reasons.push('SUBGROUP_INSTABILITY');
 
-    const status=reasons.length?'REJECTED':'PROMOTION_CANDIDATE';
+    const status=reasons.length?'REJECTED':'PROMOTION_REVIEW_REQUIRED';
     const pack=buildEvidencePack(state,p,snap,stats,adjustedP,subgroups,t,status,reasons);
     evidence.push(pack);
     outParticipants.push({
@@ -388,7 +388,7 @@ export function evaluateExperimentGovernor(state,{
   }
 
   const allTerminal=outParticipants.every(p=>TERMINAL.has(p.status));
-  const promotion=outParticipants.filter(p=>p.status==='PROMOTION_CANDIDATE');
+  const promotion=outParticipants.filter(p=>['PROMOTION_REVIEW_REQUIRED','PROMOTION_CANDIDATE'].includes(p.status));
   const finalStatus=allTerminal
     ?(promotion.length?'COMPLETE_PROMOTION_REVIEW_REQUIRED':'COMPLETE_NO_PROMOTION')
     :'ACTIVE';
@@ -410,13 +410,13 @@ export function evaluateExperimentGovernor(state,{
 
 export function experimentGovernorSummary(state){
   const participants=(state?.participants||[]);
-  const counts={SHADOW_TESTING:0,MEASURING:0,INTEGRITY_HOLD:0,REJECTED:0,PROMOTION_CANDIDATE:0,RETIRED:0};
+  const counts={SHADOW_TESTING:0,MEASURING:0,INTEGRITY_HOLD:0,REJECTED:0,PROMOTION_REVIEW_REQUIRED:0,PROMOTION_CANDIDATE:0,RETIRED:0};
   for(const p of participants){
     const key=String(p.status||'SHADOW_TESTING');
     counts[key]=(counts[key]||0)+1;
   }
-  const promotionCandidates=participants
-    .filter(p=>p.status==='PROMOTION_CANDIDATE')
+  const promotionReviewRequired=participants
+    .filter(p=>p.status==='PROMOTION_REVIEW_REQUIRED')
     .map(p=>({
       candidateId:p.candidateId,
       blueprintId:p.blueprintId,
@@ -434,7 +434,14 @@ export function experimentGovernorSummary(state){
     dataCutoffAt:finite(state?.dataCutoffAt),
     participantCount:participants.length,
     counts,
-    promotionCandidates,
+    promotionReviewRequired,
+    legacyPromotionCandidates:participants.filter(p=>p.status==='PROMOTION_CANDIDATE').map(p=>({
+      candidateId:p.candidateId,
+      blueprintId:p.blueprintId,
+      label:p.label,
+      evidenceId:p.decision?.evidenceId??null
+    })),
+    promotionSemantics:'STATISTICAL_REVIEW_ONLY_REQUIRES_MODEL_PROMOTION_LADDER_AND_ALPHA76',
     policy:state?.policy??policyOf(),
     lastEvaluatedAt:finite(state?.lastEvaluatedAt),
     decisionLookAt:finite(state?.decisionLookAt),

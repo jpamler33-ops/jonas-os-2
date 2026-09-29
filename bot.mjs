@@ -7307,7 +7307,7 @@ async function syncExperimentGovernor({evaluate=false}={}){
       participants:summary.participantCount,
       measuring:summary.counts?.MEASURING||0,
       rejected:summary.counts?.REJECTED||0,
-      promotionCandidates:summary.counts?.PROMOTION_CANDIDATE||0,
+      promotionReviewRequired:(summary.counts?.PROMOTION_REVIEW_REQUIRED||0)+(summary.counts?.PROMOTION_CANDIDATE||0),
       changed:before!==summary.status
     }));
   }
