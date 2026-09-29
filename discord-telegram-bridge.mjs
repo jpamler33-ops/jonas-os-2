@@ -1,5 +1,6 @@
 import { AttachmentBuilder, ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, REST, Routes } from 'discord.js';
 import { buildBiggjTradeThesis } from './biggj-visual-intelligence.mjs';
+import { discordComponents, decodeDiscordCallbackCustomId } from './discord-component-ids.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V4';
 
@@ -287,19 +288,6 @@ function splitText(value,max){
 function parseMarkup(markup){
   if(typeof markup==='string'){try{return JSON.parse(markup);}catch{return null;}}
   return markup||null;
-}
-function discordComponents(markup){
-  const rows=parseMarkup(markup)?.inline_keyboard;
-  if(!Array.isArray(rows))return [];
-  const selected=rows.length<=5?rows:rows.slice(0,4).concat(rows.slice(-1));
-  return selected.map(function(row){
-    const components=(Array.isArray(row)?row:[]).slice(0,5).map(function(b){
-      if(b&&b.url)return {type:2,style:5,label:clip(b.text||'Open',80),url:String(b.url)};
-      if(b&&b.callback_data)return {type:2,style:2,label:clip(b.text||'Action',80),custom_id:clip(b.callback_data,100)};
-      return null;
-    }).filter(Boolean);
-    return components.length?{type:1,components:components}:null;
-  }).filter(Boolean);
 }
 function commandText(interaction){
   const n=String(interaction.commandName||'').toLowerCase();
@@ -755,7 +743,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
   async function onButton(interaction){
     if(String(interaction.guildId)!==guildId)return;
-    const customId=String(interaction.customId||'');
+    const customId=decodeDiscordCallbackCustomId(interaction.customId);
     if(customId.startsWith('dc4:thesis:')){
       const symbol=normalizeDiscordSymbol(customId.split(':')[2]);
       await interaction.deferReply();
