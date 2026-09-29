@@ -1,8 +1,11 @@
 # BIGGJ Trading Constitution V1
 
-Status: DESIGN SOURCE OF TRUTH  
+Status: TRADING SUBSYSTEM POLICY  
+Parent architecture: **TCX_RESEARCH_OS_CANON_V1**  
 Execution: SHADOW_ONLY  
 Real-money execution: BLOCKED
+
+This document governs only the downstream trading subsystem. It does not override the TCX Research OS. Market truth, provenance, evidence quality, disagreement, uncertainty, invalidation, audit and promotion are decided by the upstream Research OS contract first.
 
 ## 1. Purpose
 
