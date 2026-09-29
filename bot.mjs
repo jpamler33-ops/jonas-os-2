@@ -189,6 +189,8 @@ const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_O
 const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
+const autoLearnHeapHeadroomMb = Math.max(360, Math.min(480, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 430)));
+const autoLearnRssHeadroomMb = Math.max(700, Math.min(950, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 850)));
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
@@ -6915,11 +6917,11 @@ async function autoLearnForecastWatcher() {
         // Each issuance may scan research history and write bounded state.
         // Leave headroom for transient parsing/serialization instead of
         // letting background learning consume the serving process heap.
-        if(heapUsedMb>=360||rssMb>=900){
+        if(heapUsedMb>=autoLearnHeapHeadroomMb||rssMb>=autoLearnRssHeadroomMb){
           deferred++;
           console.warn('autolearn forecast deferred for memory headroom',JSON.stringify({
             symbol,heapUsedMb,rssMb,historyRows:forecastRuntime.engine.historySize(),
-            threshold:{heapUsedMb:360,rssMb:900}
+            threshold:{heapUsedMb:autoLearnHeapHeadroomMb,rssMb:autoLearnRssHeadroomMb}
           }));
           break;
         }
