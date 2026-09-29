@@ -126,8 +126,17 @@ export function createInstitutionalForecastIssuance({
   const tv=verifyResearchTrace(trace);
   if(!tv.ok) throw new Error('research trace verification failed');
 
+  const canonicalInputFingerprint=input?.inputFingerprint??traceContext?.data?.inputFingerprint;
+  if(
+    input?.inputFingerprint!=null&&
+    traceContext?.data?.inputFingerprint!=null&&
+    String(input.inputFingerprint)!==String(traceContext.data.inputFingerprint)
+  ){
+    throw new Error('forecast input fingerprint mismatch between input and trace context');
+  }
+
   const claimAssumptionSidecar=createForecastClaimAssumptionSidecar({
-    input,
+    input:{...input,inputFingerprint:canonicalInputFingerprint},
     forecast,
     scientificValidity,
     admission,
