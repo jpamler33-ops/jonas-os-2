@@ -1,0 +1,59 @@
+{
+  "schema": "BIGGJ_DERIVATIVES_OUTCOME_STORE_V1",
+  "purpose": "RESEARCH_ONLY",
+  "mode": "SHADOW_ONLY",
+  "canExecuteLive": false,
+  "updatedAt": "2026-09-29T06:37:40.502Z",
+  "cases": [
+    {
+      "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
+      "openedAt": "2026-09-29T06:37:40.502Z",
+      "entryPrice": 83812.1,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "evidenceFeatures": {
+        "fundingMedian": 0.22670008209884326,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 83812.1
+      },
+      "evidenceGuards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "evidenceClassification": "OBSERVED_DERIVED",
+      "status": "OPEN",
+      "outcomes": {},
+      "caseId": "5feca10deb09073482b65aefee43e1df2a55e34575e8dddb824e9eee97b8cafc"
+    }
+  ],
+  "summary": {
+    "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
+    "totalCases": 1,
+    "eligibleCases": 1,
+    "bySignal": {
+      "CROWDED_LONG_PRESSURE": {
+        "cases": 1,
+        "horizons": {
+          "h1": {
+            "n": 0,
+            "meanReturn": null,
+            "positiveRate": null
+          },
+          "h4": {
+            "n": 0,
+            "meanReturn": null,
+            "positiveRate": null
+          },
+          "h24": {
+            "n": 0,
+            "meanReturn": null,
+            "positiveRate": null
+          }
+        }
+      }
+    },
+    "warning": "Descriptive forward evidence only. No causal or profitable-edge claim without adequate sample size and out-of-sample validation."
+  }
+}

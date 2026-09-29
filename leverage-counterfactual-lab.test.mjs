@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {buildLeverageCounterfactualLab} from './leverage-counterfactual-lab.mjs';
+const p=(i,pnl)=>({execution:'SHADOW_ONLY',canExecuteLive:false,status:'CLOSED',entryMode:'STANDARD',closedAt:i,entryQuote:100,marginQuote:100,leverage:1,entryFeesQuote:.1,exitFeesQuote:.1,realizedNetPnlQuote:pnl});
+test('insufficient evidence stays at 1x',()=>{const x=buildLeverageCounterfactualLab({positions:[p(1,2)]});assert.equal(x.evidenceReady,false);assert.equal(x.suggestedShadowLeverage,1);assert.equal(x.canExecuteLive,false);});
+test('lab evaluates bounded leverage levels',()=>{const rows=Array.from({length:150},(_,i)=>p(i,i%4===0?-2:3));const x=buildLeverageCounterfactualLab({positions:rows});assert.equal(x.evidenceReady,true);assert.ok(x.scenarios.every(s=>s.leverage>=1&&s.leverage<=3));assert.equal(x.execution,'SHADOW_ONLY');});

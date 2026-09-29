@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {derivativesEvidenceForDirectionV3} from './direction-v3-derivatives-adapter.mjs';
+const asOf='2026-09-29T08:00:00.000Z';const o=(provider,rate)=>({provider,symbol:provider==='KRAKEN_FUTURES'?'PF_XBTUSD':'BTCUSDT',sourceTimestamp:'2026-09-29T07:30:00.000Z',ingestTimestamp:'2026-09-29T07:31:00.000Z',values:{funding_rate:rate,open_interest:100,mark_price:provider==='OKX'?65000:null}});
+test('positive aligned funding emits pressure evidence, not trade command',()=>{const x=derivativesEvidenceForDirectionV3([o('OKX',.0001),o('KRAKEN_FUTURES',.0002)],{asOf});assert.equal(x.signal,'CROWDED_LONG_PRESSURE');assert.equal(x.canExecuteLive,false);});
+test('negative aligned funding emits short crowding pressure',()=>{const x=derivativesEvidenceForDirectionV3([o('OKX',-.0001),o('KRAKEN_FUTURES',-.0002)],{asOf});assert.equal(x.signal,'CROWDED_SHORT_PRESSURE');});
+test('provider conflict abstains',()=>{const x=derivativesEvidenceForDirectionV3([o('OKX',.0001),o('KRAKEN_FUTURES',-.0002)],{asOf});assert.equal(x.signal,'ABSTAIN');assert.equal(x.guards.qualified,false);});
+test('single provider abstains',()=>{const x=derivativesEvidenceForDirectionV3([o('OKX',.0001)],{asOf});assert.equal(x.signal,'ABSTAIN');});

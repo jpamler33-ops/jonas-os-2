@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {evaluateShadowLeverageRisk} from './shadow-leverage-risk.mjs';
+test('hard cap cannot be overridden',()=>{const x=evaluateShadowLeverageRisk({requestedLeverage:50,volatilityPct:.005,stopDistancePct:.01,stressMovePct:.03});assert.ok(x.allowedLeverage<=3);assert.equal(x.canExecuteLive,false);});
+test('meme cap is lower',()=>{const x=evaluateShadowLeverageRisk({requestedLeverage:10,assetClass:'MEME',volatilityPct:.005,stopDistancePct:.01,stressMovePct:.03});assert.ok(x.allowedLeverage<=2);});
+test('drawdown hard stop fails closed',()=>{const x=evaluateShadowLeverageRisk({requestedLeverage:2,drawdownPct:.22});assert.equal(x.approved,false);assert.equal(x.allowedLeverage,1);assert.ok(x.blockers.includes('DRAWDOWN_HARD_STOP'));});
+test('correlation and volatility reduce leverage',()=>{const x=evaluateShadowLeverageRisk({requestedLeverage:3,volatilityPct:.04,portfolioCorrelation:.9});assert.ok(x.allowedLeverage<=1.25);});
