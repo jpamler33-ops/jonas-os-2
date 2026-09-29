@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-09-29T06:25:23.120Z",
+  "updatedAt": "2026-09-29T06:37:40.502Z",
   "chain": [
     {
       "schema": "BIGGJ_FORWARD_OBSERVATION_V1",
@@ -34,25 +34,56 @@
       "sha256": "5b06c3f1c891148dae559cda0af3b3d7b6820e1eae47dc51a4a444990a4b47be",
       "prevChainSha256": "50ea16f33f362842efc97b49cb32aeda39ba15cf55d58feb24ceb3ec08175610",
       "chainSha256": "a529dd922321510894f053901c4aa2ba85b682f875e86d19849e4d78486babbd"
+    },
+    {
+      "schema": "BIGGJ_FORWARD_OBSERVATION_V1",
+      "provider": "OKX",
+      "symbol": "BTCUSDT",
+      "sourceTimestamp": "2026-09-29T06:37:27.941Z",
+      "ingestTimestamp": "2026-09-29T06:37:39.791Z",
+      "values": {
+        "funding_rate": 0.0000380449147425,
+        "mark_price": 83812.1,
+        "open_interest": 2817618.2100000097,
+        "open_interest_ccy": 28176.182100000096
+      },
+      "sha256": "11814c6d472e930342451a17150ba8fb80f86892a8f517b9b89d20ddb6f33007",
+      "prevChainSha256": "a529dd922321510894f053901c4aa2ba85b682f875e86d19849e4d78486babbd",
+      "chainSha256": "b172998b397e0257f20a673d6af3e91cf26fc0c5f6078aa49b2165d164efad51"
+    },
+    {
+      "schema": "BIGGJ_FORWARD_OBSERVATION_V1",
+      "provider": "KRAKEN_FUTURES",
+      "symbol": "PF_XBTUSD",
+      "sourceTimestamp": "2026-09-29T06:00:00.000Z",
+      "ingestTimestamp": "2026-09-29T06:37:40.335Z",
+      "values": {
+        "funding_rate": 0.453362119282944,
+        "open_interest": 2206.7978
+      },
+      "sha256": "fdd21b7edd2ecb806116a4fab02c2c5ac844442d9583d3aae27087b504ba11c5",
+      "prevChainSha256": "b172998b397e0257f20a673d6af3e91cf26fc0c5f6078aa49b2165d164efad51",
+      "chainSha256": "70813f6f52bf6f2a1255d74a95059f2d2fcf8a77f655de50151abb653062062e"
     }
   ],
   "summary": {
-    "count": 2,
-    "first": "2026-09-29T06:24:26.941Z",
-    "last": "2026-09-29T06:00:00.000Z",
+    "count": 4,
+    "first": "2026-09-29T06:00:00.000Z",
+    "last": "2026-09-29T06:37:27.941Z",
     "providers": [
       "KRAKEN_FUTURES",
       "OKX"
     ],
     "features": {
-      "funding_rate": 2,
-      "mark_price": 1,
-      "open_interest": 2,
-      "open_interest_ccy": 1
+      "funding_rate": 4,
+      "mark_price": 2,
+      "open_interest": 4,
+      "open_interest_ccy": 2
     },
-    "chainHead": "a529dd922321510894f053901c4aa2ba85b682f875e86d19849e4d78486babbd"
+    "chainHead": "70813f6f52bf6f2a1255d74a95059f2d2fcf8a77f655de50151abb653062062e"
   },
   "lastCollection": {
+    "health": "DATA_FLOWING",
     "providers": [
       "OKX",
       "KRAKEN_FUTURES"
@@ -66,6 +97,132 @@
         "provider": "bybit",
         "error": "HTTP_403"
       }
-    ]
+    ],
+    "crossProvider": {
+      "normalized": [
+        {
+          "provider": "OKX",
+          "symbol": "BTCUSDT",
+          "sourceTimestamp": "2026-09-29T06:37:27.941Z",
+          "ingestTimestamp": "2026-09-29T06:37:39.791Z",
+          "market": "BTC_USDT_LINEAR_PERP",
+          "units": {
+            "funding_rate": "RATE",
+            "open_interest": "CONTRACTS"
+          },
+          "funding_rate": 0.0000380449147425,
+          "mark_price": 83812.1,
+          "index_price": null,
+          "open_interest": 2817618.2100000097,
+          "open_interest_ccy": 28176.182100000096,
+          "provenance": {
+            "observationSha256": "11814c6d472e930342451a17150ba8fb80f86892a8f517b9b89d20ddb6f33007",
+            "chainSha256": "b172998b397e0257f20a673d6af3e91cf26fc0c5f6078aa49b2165d164efad51"
+          }
+        },
+        {
+          "provider": "KRAKEN_FUTURES",
+          "symbol": "PF_XBTUSD",
+          "sourceTimestamp": "2026-09-29T06:00:00.000Z",
+          "ingestTimestamp": "2026-09-29T06:37:40.335Z",
+          "market": "BTC_USD_INVERSE_PERP",
+          "units": {
+            "funding_rate": "RATE",
+            "open_interest": "PROVIDER_NATIVE"
+          },
+          "funding_rate": 0.453362119282944,
+          "mark_price": null,
+          "index_price": null,
+          "open_interest": 2206.7978,
+          "open_interest_ccy": null,
+          "provenance": {
+            "observationSha256": "fdd21b7edd2ecb806116a4fab02c2c5ac844442d9583d3aae27087b504ba11c5",
+            "chainSha256": "70813f6f52bf6f2a1255d74a95059f2d2fcf8a77f655de50151abb653062062e"
+          }
+        }
+      ],
+      "alerts": [
+        {
+          "type": "FUNDING_MAGNITUDE_DIVERGENCE",
+          "providers": [
+            "OKX",
+            "KRAKEN_FUTURES"
+          ],
+          "severity": "INFO"
+        }
+      ],
+      "comparableFundingPairs": 1,
+      "policy": "Never aggregate raw OI across providers unless contract/unit normalization is explicitly verified."
+    },
+    "evidence": {
+      "schema": "BIGGJ_DIRECTION_V3_DERIVATIVES_EVIDENCE_V1",
+      "asOf": "2026-09-29T06:37:40.502Z",
+      "classification": "OBSERVED_DERIVED",
+      "execution": "SHADOW_ONLY",
+      "canExecuteLive": false,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "features": {
+        "fundingMedian": 0.22670008209884326,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 83812.1
+      },
+      "guards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "state": {
+        "schema": "BIGGJ_DERIVATIVES_STATE_V1",
+        "asOf": "2026-09-29T06:37:40.502Z",
+        "providerCount": 2,
+        "providers": [
+          "OKX",
+          "KRAKEN_FUTURES"
+        ],
+        "funding": {
+          "median": 0.22670008209884326,
+          "consensus": "ALIGNED",
+          "positive": 2,
+          "negative": 0,
+          "zero": 0
+        },
+        "markPrice": {
+          "median": 83812.1
+        },
+        "openInterest": {
+          "aggregation": "DISABLED_UNLESS_UNITS_VERIFIED",
+          "byProvider": {
+            "OKX": {
+              "value": 2817618.2100000097,
+              "unit": "CONTRACTS",
+              "market": "BTC_USDT_LINEAR_PERP"
+            },
+            "KRAKEN_FUTURES": {
+              "value": 2206.7978,
+              "unit": "PROVIDER_NATIVE",
+              "market": "BTC_USD_INVERSE_PERP"
+            }
+          }
+        },
+        "alerts": [
+          {
+            "type": "FUNDING_MAGNITUDE_DIVERGENCE",
+            "providers": [
+              "OKX",
+              "KRAKEN_FUTURES"
+            ],
+            "severity": "INFO"
+          }
+        ],
+        "quality": {
+          "freshProviders": 2,
+          "crossProviderConflict": false,
+          "usableForDirectionalFeature": true
+        }
+      }
+    },
+    "marketPrice": 83812.1
   }
 }
