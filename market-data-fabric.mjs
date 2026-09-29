@@ -211,9 +211,11 @@ export async function appendMarketEvents(fabric,inputs){
   if(!prepared.length) return {appended:[],duplicates};
 
   let fh;
+  let writtenBytes=0;
   try{
     fh=await openFile(fabric.filePath,'a',0o600);
     const data=prepared.map(x=>canonicalJson(x.event)+'\n').join('');
+    writtenBytes=Buffer.byteLength(data,'utf8');
     await fh.write(data,null,'utf8');
     await fh.sync();
   }catch(err){
@@ -236,7 +238,6 @@ export async function appendMarketEvents(fabric,inputs){
       if(removed) fabric.dedupe.delete(dedupeKeyOf(removed));
     }
   }
-  const writtenBytes=Buffer.byteLength(data,'utf8');
   fabric.verification={
     ...(fabric.verification||{}),
     ok:true,
