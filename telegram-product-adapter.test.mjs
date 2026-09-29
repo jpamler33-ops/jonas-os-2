@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createTelegramProductAdapter} from './telegram-product-adapter.mjs';
+test('modern deep dive is handled before legacy',async()=>{let legacyCalls=0;const d=createTelegramProductAdapter({legacyDispatch:()=>{legacyCalls++;}});const r=await d('deep:BTCUSDT');assert.equal(r.handledBy,'PRODUCT_DISPATCHER');assert.equal(legacyCalls,0);});
+test('specialist callback falls back to legacy unchanged',async()=>{const d=createTelegramProductAdapter({legacyDispatch:(data)=>({data})});const r=await d('liqmap:BTCUSDT:5m');assert.equal(r.handledBy,'LEGACY');assert.deepEqual(r.result,{data:'liqmap:BTCUSDT:5m'});});
+test('unknown route is explicit when no legacy handler exists',async()=>{const d=createTelegramProductAdapter();const r=await d('totally:unknown');assert.equal(r.handledBy,'UNHANDLED');assert.equal(r.result,null);});
