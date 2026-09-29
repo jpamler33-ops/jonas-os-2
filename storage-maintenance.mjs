@@ -176,12 +176,13 @@ export function classifyStoragePressure({
 export function classifyStorageWriteAdmission(pressure,{scope='HIGH_VOLUME'}={}){
   const state=String(pressure?.state||'UNKNOWN').toUpperCase();
   const highVolume=String(scope||'HIGH_VOLUME').toUpperCase();
-  if(state==='CRITICAL'&&['HIGH_VOLUME','MARKET_FABRIC','RESEARCH_DATA_PLANE'].includes(highVolume)){
+  const highVolumeScope=['HIGH_VOLUME','MARKET_FABRIC','RESEARCH_DATA_PLANE'].includes(highVolume);
+  if((state==='CRITICAL'||state==='WARN')&&highVolumeScope){
     return {
       allowed:false,
       state,
       scope:highVolume,
-      reason:'STORAGE_CRITICAL_FAIL_CLOSED',
+      reason:state==='CRITICAL'?'STORAGE_CRITICAL_FAIL_CLOSED':'STORAGE_WARN_BACKPRESSURE',
       availableBytes:Number.isFinite(Number(pressure?.availableBytes))?Number(pressure.availableBytes):null,
       utilization:Number.isFinite(Number(pressure?.utilization))?Number(pressure.utilization):null
     };
@@ -235,4 +236,4 @@ export async function inspectStoragePressure({
   }
 }
 
-export const STORAGE_MAINTENANCE_VERSION='TCX_STORAGE_MAINTENANCE_V3';
+export const STORAGE_MAINTENANCE_VERSION='TCX_STORAGE_MAINTENANCE_V4';

@@ -192,3 +192,39 @@ test('control plane SAFE_STOPs when release registry integrity is unhealthy',()=
   assert.equal(s.canResearch,false);
   assert.equal(s.canExecute,false);
 });
+
+
+test('audit ledger byte cap fails closed before append without corrupting the chain',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-ledger-cap-'));
+  const file=path.join(dir,'audit.jsonl');
+  const ledger=await openAuditLedger(file,{maxFileBytes:1024*1024});
+  const first=await appendAuditRecord(ledger,{kind:'TEST',payload:{x:1},occurredAt:1});
+  const before=await readFile(file,'utf8');
+  ledger.maxFileBytes=ledger.fileBytes+1;
+
+  await assert.rejects(
+    ()=>appendAuditRecord(ledger,{kind:'TEST',payload:{x:2},occurredAt:2}),
+    err=>err?.code==='AUDIT_LEDGER_SIZE_LIMIT'
+  );
+  assert.equal(ledger.healthy,false);
+  assert.equal(ledger.writeBlocked,true);
+  assert.equal(ledger.verification.error,'LEDGER_SIZE_LIMIT');
+  assert.equal(await readFile(file,'utf8'),before);
+
+  const reopened=await openAuditLedger(file,{maxFileBytes:1024*1024});
+  assert.equal(reopened.healthy,true);
+  assert.equal(reopened.seq,first.seq);
+  assert.equal(verifyLedgerRecords(reopened.records).ok,true);
+});
+
+test('audit ledger boots fail-closed when an existing valid chain is already above configured cap',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-ledger-cap-boot-'));
+  const file=path.join(dir,'audit.jsonl');
+  const ledger=await openAuditLedger(file,{maxFileBytes:1024*1024});
+  await appendAuditRecord(ledger,{kind:'TEST',payload:{blob:'x'.repeat(200)},occurredAt:1});
+  const reopened=await openAuditLedger(file,{maxFileBytes:1});
+  assert.equal(reopened.healthy,false);
+  assert.equal(reopened.writeBlocked,true);
+  assert.equal(reopened.verification.error,'LEDGER_SIZE_LIMIT');
+  assert.equal(reopened.seq,1);
+});
