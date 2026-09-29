@@ -3,6 +3,14 @@ import { TCX_RESEARCH_OS_CANON_VERSION } from './tcx-research-os-contract.mjs';
 
 export const BIGGJ_CAPABILITY_MAP_VERSION='BIGGJ_CAPABILITY_MAP_V2';
 
+const deepFreeze=v=>{
+  if(v&&typeof v==='object'&&!Object.isFrozen(v)){
+    Object.freeze(v);
+    for(const x of Object.values(v)) deepFreeze(x);
+  }
+  return v;
+};
+
 export const BIGGJ_ARCHITECTURE_PLANES=deepFreeze([
   {id:'REALITY_EVIDENCE_PLANE',purpose:'Capture point-in-time reality, governed evidence and a coherent multi-scale world state.'},
   {id:'UNDERSTANDING_PREDICTION_PLANE',purpose:'Explain mechanisms and participants, then forecast scenarios with explicit uncertainty and failure conditions.'},
@@ -42,13 +50,6 @@ export const BIGGJ_ROOT_PLANE_MAP=deepFreeze({
   EXPLAINABILITY_OPERATOR:'PLATFORM_OPERATOR_PLANE'
 });
 
-const deepFreeze=v=>{
-  if(v&&typeof v==='object'&&!Object.isFrozen(v)){
-    Object.freeze(v);
-    for(const x of Object.values(v)) deepFreeze(x);
-  }
-  return v;
-};
 
 const root=(id,layer,purpose,priority='CORE')=>({id,parentId:null,layer,plane:BIGGJ_ROOT_PLANE_MAP[id]||null,purpose,priority,kind:'ROOT'});
 const skill=(id,parentId,layer,purpose,priority='CORE',moduleHints=[])=>({id,parentId,layer,purpose,priority,kind:'CAPABILITY',moduleHints});
