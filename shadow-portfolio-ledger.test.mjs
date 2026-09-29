@@ -13,6 +13,7 @@ import {
   reconcileShadowPortfolioEntries,
   replaceShadowPortfolioPosition,
   shadowPortfolioSummary,
+  shadowPortfolioActivitySummary,
   shadowResearchProbeSummary,
   shadowPortfolioPeriodStats,
   shadowPortfolioStatistics,
@@ -355,6 +356,11 @@ test('coverage probe is horizon-only and excluded from primary performance',()=>
     }
   });
   let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  const openActivity=shadowPortfolioActivitySummary(l,{asOf:30_000});
+  assert.equal(openActivity.primaryOpenPositions,0);
+  assert.equal(openActivity.researchOpenPositions,1);
+  assert.equal(openActivity.totalOpenPositions,1);
+  assert.equal(openActivity.byMode.COVERAGE_PROBE.openPositions,1);
   const p=l.positions[0];
   assert.equal(p.entryMode,'COVERAGE_PROBE');
   assert.equal(p.horizonOnlyExit,true);
@@ -370,6 +376,13 @@ test('coverage probe is horizon-only and excluded from primary performance',()=>
 
   assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
   assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
+  const activity=shadowPortfolioActivitySummary(l,{asOf:70_000});
+  assert.equal(activity.primaryClosedTrades,0);
+  assert.equal(activity.researchClosedTrades,1);
+  assert.equal(activity.totalClosedTrades,1);
+  assert.equal(activity.byMode.COVERAGE_PROBE.closedTrades,1);
+  assert.ok(activity.researchRealizedPnlQuote>0);
+  assert.equal(activity.researchExcludedFromPrimaryEquity,true);
 });
 
 test('leveraged positions expose price return and margin ROE separately',()=>{const p={execution:'SHADOW_ONLY',canExecuteLive:false,status:'OPEN',side:'LONG',qtyBase:1,entryQuote:100,entryFeesQuote:0,marginQuote:50,leverage:2,plannedExitAt:999999,stopLossPct:1,takeProfitPct:1};const book={bids:[[110,2]],asks:[[111,2]],source:'TEST',availableAt:2};const m=markShadowPosition(p,book,{at:2,feeBps:0});assert.equal(m.exit.priceReturnPct,.1);assert.equal(m.exit.marginRoePct,.2);const closed=closeShadowPosition(m.position,{at:3});assert.equal(closed.realizedPriceReturnPct,.1);assert.equal(closed.realizedMarginRoePct,.2);assert.equal(closed.realizedReturnPct,.2);});
