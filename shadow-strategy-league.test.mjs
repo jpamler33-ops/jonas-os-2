@@ -97,7 +97,7 @@ test('league starts with equal exploration allocation',()=>{
   const s=strategyLeagueSummary(l,{asOf:2_000_000});
   assert.equal(s.allocationMode,'EQUAL_EXPLORATION');
   assert.equal(s.strategies.length,SHADOW_STRATEGIES.length);
-  for(const x of s.strategies) assert.ok(Math.abs(x.allocationWeight-.2)<1e-12);
+  for(const x of s.strategies) assert.ok(Math.abs(x.allocationWeight-(1/SHADOW_STRATEGIES.length))<1e-12);
   assert.equal(s.canExecuteLive,false);
 });
 

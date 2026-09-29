@@ -8,10 +8,22 @@ import {
   shadowPortfolioSummary
 } from './shadow-portfolio-ledger.mjs';
 
-export const SHADOW_STRATEGY_LEAGUE_VERSION='TCX_SHADOW_STRATEGY_LEAGUE_V1';
+export const SHADOW_STRATEGY_LEAGUE_VERSION='TCX_SHADOW_STRATEGY_LEAGUE_V1_1';
 export const SHADOW_STRATEGY_LEAGUE_SCHEMA_VERSION=1;
 
 export const SHADOW_STRATEGIES=Object.freeze([
+  Object.freeze({
+    id:'SCOUT',label:'Scout',
+    horizonSelection:'MAX_EDGE',
+    minExpectedReturn:.0012,minDirectionalProbability:.54,minProbabilityEdge:.06,
+    notionalMultiplier:.30,assetClasses:['CORE','MEME']
+  }),
+  Object.freeze({
+    id:'BALANCED',label:'Balanced',
+    horizonSelection:'MAX_RETURN',
+    minExpectedReturn:.002,minDirectionalProbability:.56,minProbabilityEdge:.08,
+    notionalMultiplier:.50,assetClasses:['CORE','MEME']
+  }),
   Object.freeze({
     id:'DEFENSIVE',label:'Defensive',
     horizonSelection:'SHORTEST',
@@ -272,9 +284,9 @@ export function deriveStrategyLeagueCandidates(issuance,ledger,{
   now=Date.now(),
   assetClass='CORE',
   baseNotionalQuote=50,
-  memeMinExpectedReturn=.0035,
-  memeMinDirectionalProbability=.60,
-  memeMinProbabilityEdge=.12
+  memeMinExpectedReturn=.0025,
+  memeMinDirectionalProbability=.57,
+  memeMinProbabilityEdge=.09
 }={}){
   const cls=String(assetClass||'CORE').toUpperCase();
   const summary=strategyLeagueSummary(ledger,{asOf:now});
@@ -312,9 +324,9 @@ export function deriveStrategyLeagueCandidates(issuance,ledger,{
       minExpectedReturn,
       minDirectionalProbability,
       minProbabilityEdge,
-      cautionMinExpectedReturn:Math.max(minExpectedReturn,.0045),
-      cautionMinDirectionalProbability:Math.max(minDirectionalProbability,.66),
-      cautionMinProbabilityEdge:Math.max(minProbabilityEdge,.18),
+      cautionMinExpectedReturn:Math.max(minExpectedReturn,strategy.id==='SCOUT'?.0025:.0035),
+      cautionMinDirectionalProbability:Math.max(minDirectionalProbability,strategy.id==='SCOUT'?.59:.62),
+      cautionMinProbabilityEdge:Math.max(minProbabilityEdge,strategy.id==='SCOUT'?.11:.14),
       horizonSelection:strategy.horizonSelection
     });
     if(!decision.eligible) continue;
