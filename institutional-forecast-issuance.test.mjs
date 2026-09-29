@@ -59,6 +59,11 @@ test('issuance atomically binds forecast, science, admission and trace',()=>{
   assert.equal(x.canExecute,false);
   assert.equal(x.trace.forecast.fingerprint,x.forecast.fingerprint);
   assert.equal(x.trace.science.fingerprint,x.scientificValidity.fingerprint);
+  assert.ok(x.claimAssumptionSidecar);
+  assert.equal(x.claimAssumptionSidecar.traceId,x.trace.traceId);
+  assert.equal(x.claimAssumptionSidecar.forecastFingerprint,x.forecast.fingerprint);
+  assert.equal(x.claimAssumptionSidecar.canInfluencePrimary,false);
+  assert.equal(x.claimAssumptionSidecar.canExecuteLive,false);
   assert.equal(verifyInstitutionalForecastIssuance(x).ok,true);
 });
 
@@ -94,6 +99,49 @@ test('tampering any linked artifact invalidates issuance',()=>{
   const y=structuredClone(x);
   y.admission.gate='ABSTAIN';
   assert.equal(verifyInstitutionalForecastIssuance(y).ok,false);
+});
+
+test('tampering claim-assumption sidecar invalidates the linked issuance when present',()=>{
+  const x=createInstitutionalForecastIssuance({
+    input:input(),forecastReport:report(),scientificValidity:science('PASS'),
+    dataSafety:{state:'NORMAL'},researchValidity:{status:'VALID'},
+    traceContext:ctx(),generatedAt:1010
+  });
+  const y=structuredClone(x);
+  y.claimAssumptionSidecar.graph.diagnostics.researchGate='TAMPERED';
+  const v=verifyInstitutionalForecastIssuance(y);
+  assert.equal(v.ok,false);
+  assert.ok(v.reasons.includes('CLAIM_ASSUMPTION_SIDECAR_INVALID'));
+});
+
+test('custom trace-context declarations extend the sidecar but cannot affect admission',()=>{
+  const context=ctx();
+  context.claimAssumptionDeclarations={
+    assumptions:[{
+      assumptionId:'CUSTOM-ASSUMPTION',
+      statement:'A custom research assumption remains applicable.',
+      evidenceIds:[],
+      requiresEvidence:false,
+      availableAt:1010
+    }],
+    claims:[{
+      claimId:'CUSTOM-CLAIM',
+      statement:'A custom thesis claim depends on the custom assumption.',
+      epistemicClass:'INFERRED',
+      required:false,
+      assumptionIds:['CUSTOM-ASSUMPTION'],
+      evidenceIds:[],
+      availableAt:1010
+    }]
+  };
+  const x=createInstitutionalForecastIssuance({
+    input:input(),forecastReport:report(),scientificValidity:science('PASS'),
+    dataSafety:{state:'NORMAL'},researchValidity:{status:'VALID'},
+    traceContext:context,generatedAt:1010
+  });
+  assert.ok(x.claimAssumptionSidecar.graph.nodes.some(n=>n.id==='CLAIM:CUSTOM-CLAIM'));
+  assert.equal(x.gate,'PASS');
+  assert.equal(x.claimAssumptionSidecar.canInfluencePrimary,false);
 });
 
 test('missing trace provenance fails closed during issuance',()=>{
