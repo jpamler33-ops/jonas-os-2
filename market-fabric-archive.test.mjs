@@ -143,3 +143,53 @@ test('rejected Brotli candidate is not retried on every maintenance pass',async(
   assert.equal(r.migrationAttempts,0);
   assert.equal(r.codecBreakdown.gzip.segments,1);
 });
+
+
+test('archive budget fails closed before committing a new compressed segment',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-budget-'));
+  const file=path.join(dir,'tcx-market-events.jsonl');
+  const seg=file+'.segment-1-200-1.jsonl';
+  const rows=[];
+  for(let i=1;i<=200;i++) rows.push(JSON.stringify({seq:i,eventHash:String(i).padStart(64,'0'),payload:'market-state-'+i}));
+  const raw=rows.join('\n')+'\n';
+  await writeFile(seg,raw);
+
+  const result=await archiveMarketFabricSegments({
+    filePath:file,
+    maxArchivedBytes:1,
+    migrateExisting:false
+  });
+
+  assert.equal(result.budgetBlocked,true);
+  assert.equal(result.budgetBlockedSegments,1);
+  assert.ok(result.budgetBlockedCandidateBytes>1);
+  assert.equal(result.archivedBytes,0);
+  assert.equal(result.segments,0);
+
+  const names=await readdir(dir);
+  assert.ok(names.includes(path.basename(seg)));
+  assert.ok(!names.some(x=>x.endsWith('.jsonl.gz')));
+  assert.equal(await readFile(seg,'utf8'),raw);
+});
+
+test('archive budget admits a segment when compressed bytes fit',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-archive-budget-fit-'));
+  const file=path.join(dir,'tcx-market-events.jsonl');
+  const seg=file+'.segment-1-300-1.jsonl';
+  const rows=[];
+  for(let i=1;i<=300;i++) rows.push(JSON.stringify({seq:i,eventHash:String(i).padStart(64,'0'),payload:'repeat-repeat-repeat'}));
+  const raw=rows.join('\n')+'\n';
+  await writeFile(seg,raw);
+
+  const result=await archiveMarketFabricSegments({
+    filePath:file,
+    maxArchivedBytes:10*1024*1024,
+    migrateExisting:false
+  });
+
+  assert.equal(result.budgetBlocked,false);
+  assert.equal(result.budgetBlockedSegments,0);
+  assert.equal(result.segments,1);
+  assert.ok(result.archivedBytes>0);
+  await assert.rejects(()=>stat(seg),err=>err?.code==='ENOENT');
+});
