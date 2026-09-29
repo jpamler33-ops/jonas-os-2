@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {fitDirectionModel,scoreDirection,evaluateDirection} from './direction-engine.mjs';
+const rows=Array.from({length:300},(_,i)=>{const up=i%2===0,s=up?1:-1;return {features:{ret_3:.01*s,ret_6:.008*s,ret_12:.004*s,range_position_3:up?.8:.2,range_position_6:up?.7:.3,body_fraction:.7,close_direction:s,volatility_3:.02,volatility_12:.01,volume_ratio_3:1.2},label:{largeMove:true,returnPct:.02*s}}});
+test('direction model learns only from movement-qualified training rows',()=>{const model=fitDirectionModel(rows);assert.equal(model.schema,'BIGGJ_DIRECTION_V1');const s=scoreDirection(model,rows[0]);assert.ok(s.pUp>=0&&s.pUp<=1);});
+test('evaluation reports accuracy against majority baseline',()=>{const model=fitDirectionModel(rows.slice(0,200));const r=evaluateDirection(model,rows.slice(200));assert.equal(r.n,100);assert.ok(r.accuracy>=r.baseline);});
+test('movement gate can abstain before direction scoring',()=>{const model=fitDirectionModel(rows);const r=evaluateDirection(model,rows,{movementGate:()=>false});assert.equal(r.n,0);assert.equal(r.accuracy,null);});
