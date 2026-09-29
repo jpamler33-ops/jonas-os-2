@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {discoverDirectionalRules,testDirectionalRule,walkForwardDirection} from './direction-discovery-v2.mjs';
+const rows=Array.from({length:3000},(_,i)=>{const up=i%4!==0,s=up?1:-1;return {asOf:new Date(i*3600000).toISOString(),features:{ret_3:.01*s,ret_6:.008*s,ret_12:.004*s,range_position_3:up?.8:.2,range_position_6:up?.7:.3,volatility_3:.02,volatility_12:.01,volume_ratio_3:1.2,volume_ratio_6:1.1},label:{largeMove:true,returnPct:.02*s}}});
+test('discovers directional structural rules',()=>{const rules=discoverDirectionalRules(rows.slice(0,2000));assert.ok(rules.length);assert.ok(rules[0].accuracy>=.5);});
+test('frozen directional rule can be tested unchanged',()=>{const rule=discoverDirectionalRules(rows.slice(0,2000))[0],r=testDirectionalRule(rule,rows.slice(2000));assert.ok(r.support>0);assert.ok(r.accuracy>=0&&r.accuracy<=1);});
+test('walk forward keeps train before test',()=>{const folds=walkForwardDirection(rows,{train:1500,test:500});assert.ok(folds.length);assert.ok(folds.every(f=>Date.parse(f.trainTo)<Date.parse(f.testFrom)));});
