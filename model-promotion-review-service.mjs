@@ -115,6 +115,40 @@ function findReviewCandidate(governorState,competitionState,candidateId){
   if(String(experimentEvidence.generationId)!==String(governorState?.generationId)){
     throw new Error('PROMOTION_REVIEW_GENERATION_MISMATCH');
   }
+  if(Number(experimentEvidence.trainingCutoffAt)!==Number(artifact.dataCutoffAt)){
+    throw new Error('PROMOTION_REVIEW_TRAINING_CUTOFF_ARTIFACT_MISMATCH');
+  }
+  if(
+    Number.isFinite(Number(competitionState?.dataCutoffAt))&&
+    Number(experimentEvidence.trainingCutoffAt)!==Number(competitionState.dataCutoffAt)
+  ){
+    throw new Error('PROMOTION_REVIEW_TRAINING_CUTOFF_COMPETITION_MISMATCH');
+  }
+  if(
+    String(experimentEvidence.championReleaseId)!==String(artifact.parentReleaseId)||
+    String(experimentEvidence.championReleaseId)!==String(governorState?.championReleaseId)
+  ){
+    throw new Error('PROMOTION_REVIEW_CHAMPION_RELEASE_MISMATCH');
+  }
+  if(
+    competitionState?.incumbentConfigHash&&
+    String(experimentEvidence.championConfigHash).toLowerCase()!==String(competitionState.incumbentConfigHash).toLowerCase()
+  ){
+    throw new Error('PROMOTION_REVIEW_CHAMPION_CONFIG_MISMATCH');
+  }
+  const promotionInput=walkForward?.promotionEvaluationInput||{};
+  const evidenceMetrics={
+    cases:Number(experimentEvidence.cases??0),
+    independentEpisodes:Number(experimentEvidence.independentEpisodes??0),
+    candidate:experimentEvidence?.metrics?.candidate??null,
+    incumbent:experimentEvidence?.metrics?.incumbent??null
+  };
+  if(sha256(promotionInput)!==sha256(evidenceMetrics)){
+    throw new Error('PROMOTION_REVIEW_EVIDENCE_WALK_FORWARD_MISMATCH');
+  }
+  if(Number(participant?.decision?.evaluatedAt)!==Number(experimentEvidence.evaluatedAt)){
+    throw new Error('PROMOTION_REVIEW_PARTICIPANT_EVIDENCE_TIME_MISMATCH');
+  }
 
   return {participant,live,artifact,walkForward,experimentEvidence};
 }
@@ -171,18 +205,37 @@ function buildSoftwareProofs({artifact,walkForward,governorState,softwareProofs}
     rollbackReady:proofValue(supplied.rollbackReady)
   };
 }
-function reviewAsOf({artifact,walkForward,experimentEvidence,epistemicIntegrity,softwareProofs}){
-  const times=[
-    Number(artifact.createdAt),
-    Number(walkForward.asOf),
-    Number(experimentEvidence.decisionLookAt),
-    Number(epistemicIntegrity?.asOf)
+function assertReviewPointInTimeBoundary({
+  reviewedAt,
+  artifact,
+  walkForward,
+  experimentEvidence,
+  epistemicIntegrity,
+  softwareProofs
+}){
+  const t=finite(reviewedAt,'reviewedAt');
+  const evidenceTimes=[
+    ['ARTIFACT_CREATED_AT',Number(artifact?.createdAt)],
+    ['WALK_FORWARD_ASOF',Number(walkForward?.asOf)],
+    ['EXPERIMENT_EVALUATED_AT',Number(experimentEvidence?.evaluatedAt)],
+    ['EXPERIMENT_DECISION_LOOK_AT',Number(experimentEvidence?.decisionLookAt)]
   ];
-  for(const v of Object.values(softwareProofs||{})){
-    const n=proofAt(v);
-    if(n!=null) times.push(n);
+  if(epistemicIntegrity){
+    evidenceTimes.push(['EPISTEMIC_ASOF',Number(epistemicIntegrity.asOf)]);
   }
-  return Math.max(...times.filter(Number.isFinite));
+  for(const [name,value] of Object.entries(softwareProofs||{})){
+    const n=proofAt(value);
+    if(n!=null) evidenceTimes.push(['SOFTWARE_PROOF_'+String(name).toUpperCase(),n]);
+  }
+  const invalid=evidenceTimes.filter(([,n])=>!Number.isFinite(n));
+  if(invalid.length){
+    throw new Error('PROMOTION_REVIEW_EVIDENCE_TIME_INVALID:'+invalid.map(([name])=>name).join(','));
+  }
+  const future=evidenceTimes.filter(([,n])=>n>t);
+  if(future.length){
+    throw new Error('PROMOTION_REVIEW_FUTURE_EVIDENCE:'+future.map(([name])=>name).join(','));
+  }
+  return t;
 }
 
 export function buildModelPromotionReview({
@@ -191,13 +244,20 @@ export function buildModelPromotionReview({
   candidateId,
   epistemicIntegrity=null,
   softwareProofs={},
-  policy
+  policy,
+  reviewedAt=Date.now()
 }={}){
   const {participant,live,artifact,walkForward,experimentEvidence}=findReviewCandidate(
     governorState,competitionState,candidateId
   );
-  const asOf=reviewAsOf({artifact,walkForward,experimentEvidence,epistemicIntegrity,softwareProofs});
-  finite(asOf,'review asOf');
+  const asOf=assertReviewPointInTimeBoundary({
+    reviewedAt,
+    artifact,
+    walkForward,
+    experimentEvidence,
+    epistemicIntegrity,
+    softwareProofs
+  });
 
   const scientificValidity=buildScientificValidity({walkForward,experimentEvidence,asOf});
   const software=buildSoftwareProofs({artifact,walkForward,governorState,softwareProofs});
@@ -285,7 +345,8 @@ export async function processGovernorPromotionReviews({
   auditLedger,
   epistemicByCandidate={},
   softwareProofsByCandidate={},
-  policy
+  policy,
+  reviewedAt=Date.now()
 }={}){
   const candidates=(governorState?.participants||[])
     .filter(x=>REVIEW_STATUSES.has(String(x?.status)))
@@ -299,7 +360,8 @@ export async function processGovernorPromotionReviews({
         candidateId,
         epistemicIntegrity:epistemicByCandidate?.[candidateId]??null,
         softwareProofs:softwareProofsByCandidate?.[candidateId]??{},
-        policy
+        policy,
+        reviewedAt
       });
       const persisted=await persistModelPromotionReview({
         registry,auditLedger,review,competitionState
