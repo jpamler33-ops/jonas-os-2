@@ -5,7 +5,7 @@ import {
   discordComponents,
   decodeDiscordCallbackCustomId,
   encodeDiscordCallbackCustomId
-} from './discord-telegram-bridge.mjs';
+} from './discord-component-adapter.mjs';
 
 test('duplicate Telegram callbacks receive unique reversible Discord custom ids',()=>{
   const action='superchart:BTCUSDT:FULL:5m';
