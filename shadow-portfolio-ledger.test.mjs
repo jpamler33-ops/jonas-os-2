@@ -460,3 +460,94 @@ test('coverage probe remains excluded from primary performance but is visible as
 });
 
 test('leveraged positions expose price return and margin ROE separately',()=>{const p={execution:'SHADOW_ONLY',canExecuteLive:false,status:'OPEN',side:'LONG',qtyBase:1,entryQuote:100,entryFeesQuote:0,marginQuote:50,leverage:2,plannedExitAt:999999,stopLossPct:1,takeProfitPct:1};const book={bids:[[110,2]],asks:[[111,2]],source:'TEST',availableAt:2};const m=markShadowPosition(p,book,{at:2,feeBps:0});assert.equal(m.exit.priceReturnPct,.1);assert.equal(m.exit.marginRoePct,.2);const closed=closeShadowPosition(m.position,{at:3});assert.equal(closed.realizedPriceReturnPct,.1);assert.equal(closed.realizedMarginRoePct,.2);assert.equal(closed.realizedReturnPct,.2);});
+
+
+test('trusted live thesis can extend BIGGJ primary beyond review horizon',()=>{
+  const e=entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingPolicyVersion:'BIGGJ_TRADING_POLICY_V1',
+      horizonSelection:'BIGGJ_POLICY',
+      horizonMs:15*60_000,
+      horizonId:'15m'
+    }
+  });
+  const p=shadowPositionFromEntryOrder(e);
+  const m=markShadowPosition(p,book({bid:100.1}),{
+    at:901_000,
+    feeBps:0,
+    lifecycleState:{
+      trusted:true,
+      reason:'THESIS_EVIDENCE_TRUSTED',
+      thesisHealth:.78,
+      oppositeThesisStrength:.12,
+      issuanceId:'iss_live_strong',
+      generatedAt:880_000,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }
+  });
+  assert.equal(m.trigger,null);
+  assert.equal(m.lifecycle.action,'HOLD');
+  assert.equal(m.lifecycle.reason,'HORIZON_REVIEW_EXTEND');
+  assert.equal(m.position.lifecycleEvidence.issuanceId,'iss_live_strong');
+});
+
+test('trusted opposite thesis can close BIGGJ primary before forecast horizon',()=>{
+  const e=entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingPolicyVersion:'BIGGJ_TRADING_POLICY_V1',
+      horizonSelection:'BIGGJ_POLICY',
+      horizonMs:15*60_000,
+      horizonId:'15m'
+    }
+  });
+  const p=shadowPositionFromEntryOrder(e);
+  const m=markShadowPosition(p,book({bid:100.1}),{
+    at:5*60_000,
+    feeBps:0,
+    lifecycleState:{
+      trusted:true,
+      reason:'THESIS_EVIDENCE_TRUSTED',
+      thesisHealth:.20,
+      oppositeThesisStrength:.75,
+      issuanceId:'iss_live_flip',
+      generatedAt:290_000,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }
+  });
+  assert.equal(m.trigger,'THESIS_COLLAPSE');
+  assert.equal(m.lifecycle.action,'EXIT');
+  assert.equal(m.lifecycle.reason,'THESIS_COLLAPSE');
+});
+
+test('untrusted thesis evidence never fabricates a directional exit',()=>{
+  const e=entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingPolicyVersion:'BIGGJ_TRADING_POLICY_V1',
+      horizonSelection:'BIGGJ_POLICY',
+      horizonMs:15*60_000,
+      horizonId:'15m'
+    }
+  });
+  const p=shadowPositionFromEntryOrder(e);
+  const m=markShadowPosition(p,book({bid:100.1}),{
+    at:901_000,
+    feeBps:0,
+    lifecycleState:{
+      trusted:false,
+      reason:'FORECAST_STALE',
+      thesisHealth:null,
+      oppositeThesisStrength:null,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }
+  });
+  assert.equal(m.trigger,null);
+  assert.equal(m.position.lifecycleEvidence.reason,'FORECAST_STALE');
+  assert.equal(m.lifecycle.thesisHealth,.5);
+  assert.equal(m.lifecycle.oppositeThesisStrength,0);
+});
