@@ -54,6 +54,12 @@ Testing, decision influence and trust fail closed.
 
 ## 3. Dependency relations
 
+Important distinction:
+
+This graph describes **research maturity and prerequisite readiness**. It is not a runtime import graph and it does not override the TCX truth-flow rules.
+
+A downstream trading, learning or operator component cannot become an upstream truth source merely because a maturity edge exists. Any information that flows back into research must re-enter as a new PIT-safe, provenance-preserving evidence object under the normal TCX scientific controls.
+
 ### HARD
 
 A structural prerequisite.
