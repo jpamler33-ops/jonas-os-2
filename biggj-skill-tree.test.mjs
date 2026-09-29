@@ -114,7 +114,7 @@ function addEvidence(tree,skillId,count,{
       asOf:start+i*1000,
       availableAt:start+i*1000-1,
       sourceId:'SHADOW:'+i,
-      independentEpisodeId:'EP:'+i,
+      independentEpisodeId:'EP:'+start+':'+i,
       statement:'Forward point-in-time observation '+i,
       outcome,
       metricDelta:outcome==='POSITIVE'?.002:-.002,
