@@ -339,32 +339,49 @@ function sanitizePosition(p){
 }
 
 export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={}){
-  const base=ledger&&ledger.version===SHADOW_PORTFOLIO_LEDGER_VERSION
-    ? structuredClone(ledger)
-    : createEmptyShadowPortfolioLedger();
-  const known=new Set(base.positions.map(p=>String(p.entryOrderId)));
-  let added=0;
+  const validLedger=ledger&&ledger.version===SHADOW_PORTFOLIO_LEDGER_VERSION;
+  const current=validLedger?ledger:createEmptyShadowPortfolioLedger();
+  const positions=Array.isArray(current.positions)?current.positions:[];
+  const known=new Set(positions.map(p=>String(p.entryOrderId)));
+  const acceptedRoles=['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY'];
+  const additions=[];
+
   for(const order of Array.isArray(orders)?orders:[]){
-    if(!validAutoEntryOrder(order,{acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']})||known.has(String(order.id))) continue;
-    const p=shadowPositionFromEntryOrder(order,{
+    if(!validAutoEntryOrder(order,{acceptedRoles})||known.has(String(order.id))) continue;
+    additions.push(shadowPositionFromEntryOrder(order,{
       openedAt:finite(order.updatedAt,finite(order.createdAt,now)),
-      acceptedRoles:['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY']
-    });
-    base.positions.push(p);
+      acceptedRoles
+    }));
     known.add(String(order.id));
-    added++;
   }
-  if(added) base.updatedAt=Number(now);
-  return {ledger:base,added,changed:added>0};
+
+  if(additions.length===0){
+    return {ledger:current,added:0,changed:false,copyMode:'HOT_NOOP'};
+  }
+
+  const next={
+    ...current,
+    positions:[...positions,...additions],
+    updatedAt:Number(now),
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  return {ledger:next,added:additions.length,changed:true,copyMode:'COPY_ON_WRITE'};
 }
 
 export function replaceShadowPortfolioPosition(ledger,position){
-  const next=structuredClone(ledger);
-  const i=next.positions.findIndex(p=>p.positionId===position.positionId);
+  const positions=Array.isArray(ledger?.positions)?ledger.positions:[];
+  const i=positions.findIndex(p=>p.positionId===position.positionId);
   if(i<0) throw new Error('POSITION_NOT_FOUND');
-  next.positions[i]=structuredClone(position);
-  next.updatedAt=Date.now();
-  return next;
+  const nextPositions=positions.slice();
+  nextPositions[i]=structuredClone(position);
+  return {
+    ...ledger,
+    positions:nextPositions,
+    updatedAt:Date.now(),
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
 }
 
 export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
