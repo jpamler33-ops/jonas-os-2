@@ -18,6 +18,7 @@ import { buildTcxProofReport, TCX_PROOF_SYSTEM_VERSION } from './tcx-proof-syste
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
+import { tradeOverlayFromPosition } from './biggj-visual-intelligence.mjs';
 import { buildChartIntelligence, CHART_INTELLIGENCE_VERSION } from './chart-intelligence.mjs';
 import { buildMarketXray, buildMtfMatrix, MARKET_XRAY_VIEW_VERSION } from './market-xray-view.mjs';
 import { buildObservedLiquidationHeatmap, buildConfluenceMap, LIQUIDATION_CONFLUENCE_VIEW_VERSION } from './liquidation-confluence-view.mjs';
@@ -3803,7 +3804,7 @@ async function showTradeReplay(chatId,messageId,symbol){
     const replayCandles=candlesFromKlines(fetched.rows,replayEnd);
     const entryCandles=replayCandles.filter(x=>x.closed===true&&Number(x.closeTime)<=openedAt);
     const entryAnalysis=analyzeStructure(entryCandles);
-    const png=renderCandlestickPng(replayCandles,entryAnalysis,{width:1100,height:760,dashboard:null,tradeReplay:{entryAt:openedAt,entryPrice:Number(p.entryPrice),exitAt:closedAt,exitPrice:Number(p.exitPrice)}});
+    const png=renderCandlestickPng(replayCandles,entryAnalysis,{width:1100,height:760,dashboard:null,tradeReplay:{entryAt:openedAt,entryPrice:Number(p.entryPrice),exitAt:closedAt,exitPrice:Number(p.exitPrice)},tradeOverlay:tradeOverlayFromPosition(p,{asOf:closedAt})});
     const caption=['TCX // TRADE REPLAY · '+symbol.replace('USDT','/USDT'),String(p.side||'—')+' · '+String(p.setupType||'UNKNOWN')+' · '+String(p.horizonId||'—'),'Entry '+priceText(p.entryPrice)+' → Exit '+priceText(p.exitPrice),'Margin ROE '+(Number.isFinite(roe)?fmt(roe*100,2)+'%':'—')+' · MFE '+(Number.isFinite(mfe)?fmt(mfe*100,2)+'%':'—')+' · MAE '+(Number.isFinite(mae)?fmt(mae*100,2)+'%':'—'),'Entry-Struktur: '+String(entryAnalysis.trend||'UNKNOWN')+' · nur bis Entry geschlossene 5m-Kerzen','Exit: '+String(p.closeReason||'UNKNOWN'),'MFE/MAE: gespeicherte Shadow-Marks; keine erfundenen Extrem-Zeitpunkte.','SHADOW_ONLY · REAL ORDERS BLOCKED'].join('\n');
     return tgMultipart('sendPhoto',{chat_id:String(chatId),caption:caption.slice(0,1024),reply_markup:JSON.stringify(tradeReplayKeyboard(symbol))},'photo',symbol+'-trade-replay.png',png,'image/png');
   }catch(err){
@@ -4110,7 +4111,11 @@ async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=
   });
   const accuracy=buildForecastAccuracyView(forecastRuntime?.journal?.all?.()??[],{symbol,minDisplaySamples:30,foldSize:50,highConfidenceThreshold:.65});
   const intel=buildSuperchartIntel({mode,symbol,confluence,liquidation,entityFlow,walletCohort,onchain,accuracy,events:eventRadar,forecastOverlay});
-  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1200,height:820,dashboard:state.dashboard,forecastOverlay,superchart:intel});
+  const activeTrade=[...(shadowPortfolioLedger?.positions||[])]
+    .filter(p=>p?.symbol===symbol&&p?.status==='OPEN'&&p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false)
+    .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
+  const tradeOverlay=activeTrade?tradeOverlayFromPosition(activeTrade,{asOf:state.availableAt}):null;
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1200,height:820,dashboard:state.dashboard,forecastOverlay,superchart:intel,tradeOverlay});
   const caption=[
     '🧠 TCX SUPERCHART · '+symbol.replace('USDT','/USDT')+' · '+String(interval).toUpperCase()+' · '+intel.mode,
     'Struktur + Forecast + Confluence + Liquidationen'+(intel.mode==='FULL'?' + Flow + Accuracy + Chain':''),
@@ -4134,8 +4139,12 @@ async function showChart(chatId, symbol, interval="5m",{messageId=null,edit=fals
   await captureEpisodeFromState(state,{persist:true});
   const latestForecast=latestInstitutionalForecast(forecastRuntime,symbol);
   const forecastOverlay=forecastIssuanceToChartOverlay(latestForecast,{now:state.availableAt,maxAgeMs:6*60*60_000});
+  const activeTrade=[...(shadowPortfolioLedger?.positions||[])]
+    .filter(p=>p?.symbol===symbol&&p?.status==='OPEN'&&p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false)
+    .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
+  const tradeOverlay=activeTrade?tradeOverlayFromPosition(activeTrade,{asOf:state.availableAt}):null;
   const png=renderCandlestickPng(state.byTf[interval],state.analysis,{
-    width:1100,height:760,dashboard:state.dashboard,forecastOverlay
+    width:1100,height:760,dashboard:state.dashboard,forecastOverlay,tradeOverlay
   });
   const caption=chartCaption(symbol,interval,state,live,forecastOverlay);
   const keyboard=chartKeyboard(symbol,interval,live);
