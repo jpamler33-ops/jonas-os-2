@@ -5,7 +5,7 @@ import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive,
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { createS3ColdStoreFromEnv, MARKET_FABRIC_COLD_STORE_VERSION } from './market-fabric-cold-store.mjs';
 import { offloadMarketFabricArchive, MARKET_FABRIC_COLD_TIER_VERSION } from './market-fabric-cold-tier.mjs';
-import { sampleArchivedReplayPoints, loadArchivedReplayTail, MARKET_FABRIC_COLD_REPLAY_VERSION } from './market-fabric-cold-replay.mjs';
+import { sampleArchivedReplayPoints, loadArchivedReplayTail, classifyVerifiedReplayAvailability, MARKET_FABRIC_COLD_REPLAY_VERSION } from './market-fabric-cold-replay.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
@@ -5058,9 +5058,11 @@ async function showReplay(chatId,symbol,asOf,messageId=null) {
   let source='HOT';
   let archiveMeta=null;
   let archiveError=null;
+  let archiveAttempted=false;
   let state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
 
   if(!state.primary){
+    archiveAttempted=true;
     try{
       archiveMeta=await loadArchivedReplayTail({
         filePath:marketFabricFile,
@@ -5084,6 +5086,33 @@ async function showReplay(chatId,symbol,asOf,messageId=null) {
         failClosed:true
       }));
     }
+  }
+
+  const replayAvailability=classifyVerifiedReplayAvailability(state,{archiveAttempted,archiveError});
+  if(!replayAvailability.available){
+    const text=[
+      '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
+      '',
+      'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+      'Cold archive: '+MARKET_FABRIC_COLD_REPLAY_VERSION,
+      'Status: '+replayAvailability.status,
+      'Reason: '+replayAvailability.reason,
+      'asOf: '+new Date(asOf).toISOString(),
+      '',
+      'Kein historischer Zustand wird als verifiziert ausgegeben, solange PRIMARY_MARKET fehlt oder die Archivprüfung fehlschlägt.',
+      'Future leakage guard: ACTIVE',
+      'Action: ABSTAIN / SHADOW_ONLY'
+    ].join('\n');
+    const payload={
+      chat_id:chatId,
+      text:text.slice(0,4096),
+      reply_markup:{inline_keyboard:[
+        [{text:'🎬 Andere Zeit',callback_data:'replaymenu:'+symbol}],
+        [{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]
+      ]}
+    };
+    if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+    return tg('sendMessage',payload);
   }
 
   const s=replaySummary(state);
