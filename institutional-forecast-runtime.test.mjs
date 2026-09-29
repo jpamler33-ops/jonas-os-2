@@ -6,6 +6,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { gzipSync, gunzipSync } from 'node:zlib';
 
 import { sha256 } from './institutional-kernel.mjs';
+import { selectIndependenceAwareAnalogs } from './forecast-runtime/forecast/engine.js';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
 import { verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import {
@@ -735,4 +736,46 @@ test('oversized legacy snapshot recovery is distinguished from corruption and wr
   assert.match(r.backupPath,/\.oversized-/);
   const summary=institutionalForecastRuntimeSummary(r);
   assert.equal(summary.recoveredFromOversizedSnapshot,true);
+});
+
+
+test('analogue selection reserves independent episodes before similarity fill',()=>{
+  const windowMs=5*60_000;
+  const crowded=Array.from({length:12},(_,i)=>({
+    row:{id:'crowded-'+i,timestamp:i*1000,forwardReturn:i/1000},
+    similarity:.99-i*.001,
+    weight:.98-i*.001
+  }));
+  const independent=Array.from({length:10},(_,i)=>({
+    row:{id:'independent-'+i,timestamp:(i+1)*windowMs,forwardReturn:-i/1000},
+    similarity:.88-i*.005,
+    weight:.80-i*.005
+  }));
+  const result=selectIndependenceAwareAnalogs([...crowded,...independent],{
+    topK:8,
+    windowMs,
+    minIndependentEpisodes:3
+  });
+  assert.equal(result.rows.length,8);
+  assert.equal(result.policy,'INDEPENDENCE_AWARE_TOPK_V1');
+  assert.ok(result.reservedIndependentEpisodes>=6);
+  assert.ok(result.rows.some(x=>x.row.id==='crowded-0'));
+
+  const times=result.rows.map(x=>x.row.timestamp).sort((a,b)=>a-b);
+  let episodes=0,start=null;
+  for(const ts of times){
+    if(start==null||ts-start>=windowMs){episodes++;start=ts;}
+  }
+  assert.ok(episodes>=6);
+});
+
+test('analogue diversity selection is outcome-blind',()=>{
+  const make=(flip=false)=>Array.from({length:12},(_,i)=>({
+    row:{id:'a-'+i,timestamp:i*5*60_000,forwardReturn:flip?-1000+i:1000-i},
+    similarity:.95-i*.01,
+    weight:.90-i*.01
+  }));
+  const a=selectIndependenceAwareAnalogs(make(false),{topK:6,windowMs:5*60_000,minIndependentEpisodes:3});
+  const b=selectIndependenceAwareAnalogs(make(true),{topK:6,windowMs:5*60_000,minIndependentEpisodes:3});
+  assert.deepEqual(a.rows.map(x=>x.row.id),b.rows.map(x=>x.row.id));
 });
