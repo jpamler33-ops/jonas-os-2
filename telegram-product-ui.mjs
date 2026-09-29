@@ -127,7 +127,7 @@ export function homeText({marketCount=0,systemStatus="ONLINE"}={}) {
   return ["TCX // COMMAND CENTER","━━━━━━━━━━━━━━━━━━━━","SYSTEM  "+(online?"● ONLINE":"◐ CHECK")+"   SHADOW  ● ACTIVE","MARKETS "+(Number(marketCount)||0)+" CONNECTED","","MARKET INTELLIGENCE · DECISION ENGINE","","Radar → Forecast → Why → Risk → Shadow → Learning","","REAL ORDERS BLOCKED"].join("\n");
 }
 
-export function homeKeyboard() {return {inline_keyboard:[[{text:"🧠 INTELLIGENCE TERMINAL",callback_data:"home:terminal"}],[{text:"◉ LIVE RADAR",callback_data:"home:radar"},{text:"▦ MÄRKTE",callback_data:"home:markets"}],[{text:"▤ PORTFOLIO",callback_data:"home:portfolio"},{text:"⌁ STATISTIK",callback_data:"home:stats_day"}],[{text:"☆ WATCHLIST",callback_data:"home:watchlist"},{text:"◇ ALERTS",callback_data:"home:alerts"}],[{text:"⌁ FORECAST",callback_data:"cmd:forecast"},{text:"☰ MEHR",callback_data:"home:more"}]]};}
+export function homeKeyboard() {return {inline_keyboard:[[{text:"🧠 INTELLIGENCE TERMINAL",callback_data:"home:terminal"}],[{text:"◉ LIVE RADAR",callback_data:"home:radar"},{text:"▦ MÄRKTE",callback_data:"home:markets"}],[{text:"▤ PORTFOLIO",callback_data:"home:portfolio"},{text:"⌁ STATISTIK",callback_data:"home:stats_day"}],[{text:"☆ WATCHLIST",callback_data:"home:watchlist"},{text:"◇ ALERTS",callback_data:"home:alerts"}],[{text:"▤ GLOBAL INTEL / NEWS",callback_data:"home:news"}],[{text:"⌁ FORECAST",callback_data:"cmd:forecast"},{text:"☰ MEHR",callback_data:"home:more"}]]};}
 
 export function marketsKeyboard(markets=[],favoritesCount=0) {
   const rows=[];
