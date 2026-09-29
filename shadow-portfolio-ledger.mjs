@@ -1,4 +1,5 @@
 import { manageShadowPosition, attributeClosedShadowTrade } from './trade-lifecycle-v2.mjs';
+import { evaluateBiggjPositionLifecycle, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
 import path from 'node:path';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { sha256 } from './institutional-kernel.mjs';
@@ -117,6 +118,8 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     issuanceId:String(order.strategyMeta?.issuanceId||''),
     forecastFingerprint:String(order.strategyMeta?.forecastFingerprint||''),
     horizonId:String(order.strategyMeta?.horizonId||''),
+    biggjTradingPolicyVersion:String(order.strategyMeta?.biggjTradingPolicyVersion||order.strategyMeta?.tradingPolicyVersion||''),
+    biggjHorizonSelectionRule:String(order.strategyMeta?.biggjHorizonSelectionRule||order.strategyMeta?.horizonSelectionRule||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
     exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
@@ -273,15 +276,48 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
 
   let trigger=null;
   const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
-  const lifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
+  const entryMode=String(position.entryMode||'STANDARD').toUpperCase();
+  const researchMode=['COVERAGE_PROBE','ABSTAIN_PROBE','CHALLENGER','EXPLORATION'].includes(entryMode);
+  let lifecycle;
+
   if(position.horizonOnlyExit===true){
+    // Scientific fixed-horizon lanes deliberately ignore early TP/SL so their
+    // outcome remains a comparable point-in-time horizon measurement.
+    lifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
-  }else{
+  }else if(researchMode){
+    // Preserve legacy research/challenger behavior. Constitution V1 is wired
+    // into PRIMARY first so research evaluation semantics do not drift.
+    lifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
     else if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
     else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
+  }else{
+    // PRIMARY: horizon is a thesis review point, never an unconditional timer
+    // exit. Until a fresh thesis-health feed is wired, missing thesis evidence
+    // is explicit and results in REVIEW/PROTECT, not fabricated certainty.
+    lifecycle=evaluateBiggjPositionLifecycle(position,{
+      marginRoePct:ret,
+      at:markAt,
+      trustedExecutableBook:true,
+      protectedStopRoe:position.lifecycle?.effectiveStopRoe
+    });
+    if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
   }
-  return {position:{...next,lifecycle},trigger,changed:true,exit,lifecycle};
+
+  return {
+    position:{
+      ...next,
+      lifecycle,
+      biggjTradingPolicyVersion:researchMode||position.horizonOnlyExit===true
+        ?String(position.biggjTradingPolicyVersion||'')
+        :BIGGJ_TRADING_POLICY_VERSION
+    },
+    trigger,
+    changed:true,
+    exit,
+    lifecycle
+  };
 }
 
 export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=Date.now()}={}){
