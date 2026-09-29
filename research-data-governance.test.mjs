@@ -32,7 +32,7 @@ function derivativeSnapshot({
   return createResearchFeatureSnapshot({
     streamKey:'BTCUSDT',
     domain:'DERIVATIVES',
-    source:'BINANCE_OKX_PUBLIC_DERIVATIVES',
+    source:'BINANCE_USDM_PUBLIC',
     sourceVersion:'V1',
     sourceEventId,
     eventTime,
@@ -40,7 +40,7 @@ function derivativeSnapshot({
     ingestedAt,
     ttlMs:600000,
     finality:'OBSERVED',
-    quality:{completeness,sourceCount:2,expectedSourceCount:2,status:'OK'},
+    quality:{completeness,sourceCount:1,expectedSourceCount:1,status:'OK'},
     features:[{id:featureId,value}],
     provenance:{test:true}
   });
@@ -101,7 +101,7 @@ test('repeated operational SLO breaches degrade then auto-quarantine a source',(
     sourceEventId:'late-usability'
   }),{evaluatedAt:2_100_000});
   assert.equal(probe.governance.usableForResearch,false);
-  assert.deepEqual(quarantinedResearchSourceKeys(state),['DERIVATIVES:BINANCE_OKX_PUBLIC_DERIVATIVES']);
+  assert.deepEqual(quarantinedResearchSourceKeys(state),['DERIVATIVES:BINANCE_USDM_PUBLIC']);
 });
 
 test('quarantined source needs consecutive healthy observations before recovery',()=>{
@@ -178,4 +178,37 @@ test('governance state survives atomic persistence round trip',async()=>{
   const summary=researchDataGovernanceSummary(loaded,{now:2_000_000});
   assert.equal(summary.statuses.HEALTHY,1);
   assert.ok(/^[a-f0-9]{64}$/.test(summary.fingerprint));
+});
+
+
+test('retired derivative aggregate quarantine is ignored by active contract summary',()=>{
+  const state=createResearchDataGovernanceState({
+    createdAt:2_000_000,
+    sources:{
+      'DERIVATIVES:BINANCE_OKX_PUBLIC_DERIVATIVES':{
+        key:'DERIVATIVES:BINANCE_OKX_PUBLIC_DERIVATIVES',
+        domain:'DERIVATIVES',
+        source:'BINANCE_OKX_PUBLIC_DERIVATIVES',
+        status:'QUARANTINED',
+        firstSeenAt:1,
+        lastSeenAt:1,
+        lastAvailableAt:1,
+        lastDecision:'QUARANTINE',
+        consecutiveViolations:99,
+        consecutiveHealthy:0,
+        totalSnapshots:99,
+        totalViolations:99,
+        totalRejected:0,
+        totalQuarantined:1,
+        totalSemanticReviews:0,
+        lastReasons:[{code:'LEGACY'}],
+        publicationLagMs:[],
+        ingestLagMs:[],
+        completeness:[]
+      }
+    }
+  });
+  assert.deepEqual(quarantinedResearchSourceKeys(state),[]);
+  const summary=researchDataGovernanceSummary(state,{now:2_000_000});
+  assert.equal(summary.quarantinedSources.includes('DERIVATIVES:BINANCE_OKX_PUBLIC_DERIVATIVES'),false);
 });
