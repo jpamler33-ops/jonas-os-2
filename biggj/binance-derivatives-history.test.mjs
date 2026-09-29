@@ -1,5 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {fetchFundingHistory,fetchOpenInterestHistory,mergeOrthogonalStreams} from './binance-derivatives-history.mjs';
-const response=x=>({ok:true,json:async()=>x});
-test('funding adapter maps point-in-time values',async()=>{const t=Date.parse('2025-01-01T00:00:00Z'),xs=await fetchFundingHistory({start:t,end:t+1,fetchImpl:async()=>response([{fundingTime:t,fundingRate:'0.0001'}]),pauseMs:0});assert.equal(xs[0].values.funding_rate,.0001);});
-test('open interest adapter preserves timestamp',async()=>{const t=Date.parse('2025-01-01T00:00:00Z'),xs=await fetchOpenInterestHistory({start:t,end:t+1,fetchImpl:async()=>response([{timestamp:t,sumOpenInterest:'100',sumOpenInterestValue:'200'}]),pauseMs:0});assert.equal(xs[0].values.open_interest,100);});
-test('streams merge without replacing missing fields by zero',()=>{const t='2025-01-01T00:00:00.000Z',m=mergeOrthogonalStreams([{sourceTimestamp:t,ingestTimestamp:t,values:{funding_rate:.001}}],[{sourceTimestamp:t,ingestTimestamp:t,values:{open_interest:100}}]);assert.deepEqual(m[0].values,{funding_rate:.001,open_interest:100});});

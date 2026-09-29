@@ -1,5 +1,0 @@
-export const ARCHIVE_TARGETS_V2=Object.freeze([
- {id:'POWAKADATA_BTC',kind:'csv',url:'https://raw.githubusercontent.com/powakadata/powakadata-crypto-funding-sample/main/BTCUSDT_funding_oi.csv',expected:['datetime_utc','funding_rate','open_interest'],notes:'Funding timestamps 8h; OI nullable.'},
- {id:'CRYPTOHFT_OI_SAMPLE',kind:'parquet',url:'https://api.cryptohftdata.com/download?file=binance_futures/2026-09-02/12/BTCUSDT_open_interest.parquet',historyStart:'2025-06-28T00:00:00Z',notes:'Partial-year source only; never classify as full-2025 coverage.'}
-]);
-export async function probeArchiveTargets({fetchImpl=globalThis.fetch}={}){const out=[];for(const t of ARCHIVE_TARGETS_V2){try{const r=await fetchImpl(t.url,{redirect:'follow'}),ct=r.headers.get('content-type')??'',len=Number(r.headers.get('content-length')??0);let preview='';if(t.kind==='csv'&&r.ok)preview=(await r.text()).slice(0,500);out.push({...t,status:r.status,ok:r.ok,contentType:ct,contentLength:len,headerValid:t.kind!=='csv'||t.expected.every(x=>preview.split('\n')[0]?.includes(x))});}catch(e){out.push({...t,ok:false,error:String(e?.message??e)});}}return out;}

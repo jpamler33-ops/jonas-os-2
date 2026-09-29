@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
-import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
@@ -171,6 +171,36 @@ const startupStoragePressure=await inspectStoragePressure({
   criticalFreeBytes:storageCriticalFreeBytes
 });
 console.info('[TCX_STORAGE_PRESSURE]',JSON.stringify({...startupStoragePressure,phase:'startup'}));
+
+let storagePressureCache=startupStoragePressure;
+let storagePressureCheckedAt=Date.now();
+let storagePressureLastBlockLogAt=0;
+const storagePressureCheckMs=Math.max(5000,Math.min(60000,Number(process.env.TCX_STORAGE_PRESSURE_CHECK_MS||15000)));
+
+async function currentStoragePressure(){
+  if(Date.now()-storagePressureCheckedAt<storagePressureCheckMs) return storagePressureCache;
+  storagePressureCache=await inspectStoragePressure({
+    dataDir:persistenceDataDir,
+    warnFreeBytes:storageWarnFreeBytes,
+    criticalFreeBytes:storageCriticalFreeBytes
+  });
+  storagePressureCheckedAt=Date.now();
+  return storagePressureCache;
+}
+
+async function storageWriteAdmission(scope){
+  const pressure=await currentStoragePressure();
+  const admission=classifyStorageWriteAdmission(pressure,{scope});
+  if(!admission.allowed&&Date.now()-storagePressureLastBlockLogAt>=30000){
+    storagePressureLastBlockLogAt=Date.now();
+    console.error('[TCX_STORAGE_WRITE_BLOCKED]',JSON.stringify({
+      ...admission,
+      dataDir:persistenceDataDir,
+      destructiveRetention:false
+    }));
+  }
+  return admission;
+}
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -1030,6 +1060,10 @@ async function appendForecastEvaluationAuditQueued(trace,evaluation) {
 async function appendFabricEvents(inputs) {
   marketFabricAppendQueue = marketFabricAppendQueue.then(async()=>{
     if(!marketFabric.healthy) return {appended:[],duplicates:0,skipped:true};
+    const admission=await storageWriteAdmission('MARKET_FABRIC');
+    if(!admission.allowed){
+      return {appended:[],duplicates:0,skipped:true,reason:admission.reason,storagePressure:admission.state};
+    }
     try {
       return await appendMarketEvents(marketFabric,inputs);
     } catch(err) {
@@ -6956,6 +6990,10 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture'){
   if(!researchDataPlane.healthy) return {ok:false,appended:0,duplicates:0,reason:'RDP_UNHEALTHY'};
   const job=researchDataPlaneAppendQueue.then(async()=>{
     const started=Date.now();
+    const admission=await storageWriteAdmission('RESEARCH_DATA_PLANE');
+    if(!admission.allowed){
+      return {ok:false,appended:0,duplicates:0,governed:0,restrictedSources:0,governanceFingerprint:null,reason:admission.reason,storagePressure:admission.state};
+    }
     const nextGovernance=structuredClone(researchDataGovernance);
     refreshResearchSourceFreshness(nextGovernance,{
       now:started,

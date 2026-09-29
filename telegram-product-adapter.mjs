@@ -1,3 +1,0 @@
-import {createTelegramProductDispatcher} from './telegram-product-dispatcher.mjs';
-export const TELEGRAM_PRODUCT_ADAPTER_VERSION='v1-dispatcher-first-fallback';
-export function createTelegramProductAdapter({dispatcherOptions={},legacyDispatch}={}){const modern=createTelegramProductDispatcher(dispatcherOptions);return async function dispatchTelegramProduct(data,ctx={}){const result=await modern(data,ctx);if(result!=null)return {handledBy:'PRODUCT_DISPATCHER',result};if(typeof legacyDispatch==='function'){const legacy=await legacyDispatch(data,ctx);return {handledBy:'LEGACY',result:legacy};}return {handledBy:'UNHANDLED',result:null};};}

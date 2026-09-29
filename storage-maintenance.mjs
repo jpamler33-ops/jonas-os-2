@@ -173,6 +173,29 @@ export function classifyStoragePressure({
   };
 }
 
+export function classifyStorageWriteAdmission(pressure,{scope='HIGH_VOLUME'}={}){
+  const state=String(pressure?.state||'UNKNOWN').toUpperCase();
+  const highVolume=String(scope||'HIGH_VOLUME').toUpperCase();
+  if(state==='CRITICAL'&&['HIGH_VOLUME','MARKET_FABRIC','RESEARCH_DATA_PLANE'].includes(highVolume)){
+    return {
+      allowed:false,
+      state,
+      scope:highVolume,
+      reason:'STORAGE_CRITICAL_FAIL_CLOSED',
+      availableBytes:Number.isFinite(Number(pressure?.availableBytes))?Number(pressure.availableBytes):null,
+      utilization:Number.isFinite(Number(pressure?.utilization))?Number(pressure.utilization):null
+    };
+  }
+  return {
+    allowed:true,
+    state,
+    scope:highVolume,
+    reason:state==='WARN'?'STORAGE_WARN_MONITOR':'STORAGE_WRITE_ALLOWED',
+    availableBytes:Number.isFinite(Number(pressure?.availableBytes))?Number(pressure.availableBytes):null,
+    utilization:Number.isFinite(Number(pressure?.utilization))?Number(pressure.utilization):null
+  };
+}
+
 export async function inspectStoragePressure({
   dataDir='/data',
   warnFreeBytes=96*1024*1024,
