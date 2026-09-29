@@ -129,8 +129,10 @@ export async function archiveForecastColdBatch({
   const existing=manifest.segments.find(x=>x.sha256===meta.sha256&&Number(x.logicalBytes)===meta.logicalBytes);
   if(existing){
     await rm(tmp,{force:true}).catch(()=>{});
+    const verification=await verifyForecastColdSegment(dir,existing);
+    if(!verification.ok) throw new Error('FORECAST_COLD_ARCHIVE_EXISTING_SEGMENT_VERIFY_FAILED');
     return {
-      archived:true,duplicate:true,
+      archived:true,duplicate:true,verified:true,
       issuances:issueRows.length,trackerRecords:trackerRows.length,
       segment:existing,manifestFingerprint:manifest.fingerprint
     };
@@ -144,8 +146,10 @@ export async function archiveForecastColdBatch({
   const lastAt=allTimes.length?Math.max(...allTimes):0;
   const name='segment-'+String(firstAt)+'-'+String(lastAt)+'-'+meta.sha256.slice(0,16)+'.json.gz';
   const target=path.join(dir,name);
+  let targetPreexisting=false;
   try{
     await stat(target);
+    targetPreexisting=true;
     await rm(tmp,{force:true});
   }catch(err){
     if(err?.code!=='ENOENT'){
@@ -166,10 +170,16 @@ export async function archiveForecastColdBatch({
     lastAt,
     archivedAt:Number(archivedAt)
   };
+  const verification=await verifyForecastColdSegment(dir,segment);
+  if(!verification.ok){
+    if(!targetPreexisting) await rm(target,{force:true}).catch(()=>{});
+    throw new Error('FORECAST_COLD_ARCHIVE_READBACK_VERIFY_FAILED');
+  }
+  segment.storageBytes=verification.storageBytes;
   const next=manifestValue([...manifest.segments,segment]);
   await writeManifest(manifestFile,next);
   return {
-    archived:true,duplicate:false,
+    archived:true,duplicate:false,verified:true,
     issuances:issueRows.length,trackerRecords:trackerRows.length,
     segment,manifestFingerprint:next.fingerprint
   };
