@@ -1,4 +1,5 @@
 import { manageShadowPosition, attributeClosedShadowTrade } from './trade-lifecycle-v2.mjs';
+import { evaluateBiggjPositionLifecycle, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
 import path from 'node:path';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { sha256 } from './institutional-kernel.mjs';
@@ -273,15 +274,42 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
 
   let trigger=null;
   const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
-  const lifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
+  const legacyLifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
+  const entryMode=String(position.entryMode||'STANDARD').toUpperCase();
+  const primaryLane=!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(entryMode)&&position.horizonOnlyExit!==true;
+  let lifecycle=legacyLifecycle;
+
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+  }else if(primaryLane){
+    lifecycle=evaluateBiggjPositionLifecycle(position,{
+      marginRoePct:ret,
+      at:markAt,
+      trustedExecutableBook:true,
+      hardStopReached:false,
+      structureInvalidationConfirmed:false
+    });
+    if(lifecycle.action==='EXIT'){
+      trigger=lifecycle.reason==='TARGET_THESIS_EXHAUSTED'&&ret>=Math.abs(Number(position.takeProfitPct)||0)
+        ?'TAKE_PROFIT'
+        :lifecycle.reason;
+    }
   }else{
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
-    else if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
+    else if(legacyLifecycle.action==='EXIT') trigger=legacyLifecycle.reason;
     else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
   }
-  return {position:{...next,lifecycle},trigger,changed:true,exit,lifecycle};
+  return {
+    position:{
+      ...next,
+      lifecycle,
+      lifecyclePolicyVersion:primaryLane?BIGGJ_TRADING_POLICY_VERSION:String(position.lifecyclePolicyVersion||'')
+    },
+    trigger,
+    changed:true,
+    exit,
+    lifecycle
+  };
 }
 
 export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=Date.now()}={}){
