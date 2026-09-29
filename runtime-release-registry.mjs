@@ -316,6 +316,7 @@ export async function openReleaseRegistry(filePath,{maxFileBytes=16*1024*1024}={
             throw err;
           }
           recoveredFromTruncatedTail=true;
+          fileBytes=Buffer.byteLength(repaired,'utf8');
         }catch(err){
           if(tempHandle) await tempHandle.close().catch(()=>{});
           await unlink(tempPath).catch(()=>{});
