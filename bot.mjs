@@ -7257,6 +7257,32 @@ async function autoLearnForecastWatcher() {
           recordError(observability,{scope:'forecast_runtime.autolearn',message:msg});
           console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
         }
+        if(issued>0){
+          const postMemory=process.memoryUsage();
+          const postAdmission=evaluateAutoLearnMemoryAdmission({
+            phase:'ISSUE',
+            heapUsedMb:Math.round(postMemory.heapUsed/1024/1024),
+            rssMb:Math.round(postMemory.rss/1024/1024),
+            externalMb:Math.round(postMemory.external/1024/1024),
+            issueHeapMb:autoLearnHeapHeadroomMb,
+            issueRssMb:autoLearnRssHeadroomMb,
+            issueExternalMb:autoLearnExternalHeadroomMb,
+            resumeHeapMb:autoLearnResumeHeapMb,
+            resumeRssMb:autoLearnResumeRssMb,
+            resumeExternalMb:autoLearnResumeExternalMb
+          });
+          if(!postAdmission.allowed){
+            deferred++;
+            memoryPressure=true;
+            console.warn('autolearn post-issuance memory pressure',JSON.stringify({
+              symbol,
+              ...postAdmission.memory,
+              exceeded:postAdmission.exceeded,
+              threshold:postAdmission.limits
+            }));
+            break;
+          }
+        }
         await sleep(autoLearnInterIssueMs);
       }
       }finally{
@@ -7411,24 +7437,71 @@ async function shadowCompetitionWatcher(){
           await sleep(shadowCompetitionEvalMs);
           continue;
         }
-        const cfg=forecastRuntime.engine.configSnapshot();
-        const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
-        const heapBefore=Math.round(process.memoryUsage().heapUsed/1024/1024);
+        const slotWaitStarted=Date.now();
+        while(running&&activeBackgroundResearchJob) await sleep(250);
+        if(!running) break;
+        const slotWaitMs=Date.now()-slotWaitStarted;
+        activeBackgroundResearchJob='shadow-competition';
 
-        const result=await runForecastShadowEvaluationWorker({
-          competitionState:shadowCompetitionState,
-          experimentGovernorState,
-          historyRows:history,
-          incumbentConfig:cfg,
-          releaseId,
-          minSeedRows:shadowCompetitionMinSeedRows,
-          minimumTrainCases:shadowCompetitionMinTrainCases,
-          maxGeneratedHypotheses:4,
-          now:Date.now()
-        },{
-          timeoutMs:shadowCompetitionWorkerTimeoutMs,
-          maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
-        });
+        let result=null;
+        let freshAdmission=null;
+        let heapBefore=0;
+        try{
+          const freshMemory=process.memoryUsage();
+          freshAdmission=evaluateShadowWorkerAdmission({
+            mode:shadowCompetitionWorkerMode,
+            heapUsedMb:Math.round(freshMemory.heapUsed/1024/1024),
+            rssMb:Math.round(freshMemory.rss/1024/1024),
+            externalMb:Math.round(freshMemory.external/1024/1024),
+            autoHeapMb:shadowCompetitionAutoHeapMb,
+            autoRssMb:shadowCompetitionAutoRssMb,
+            autoExternalMb:shadowCompetitionAutoExternalMb,
+            hardHeapMb:300,
+            hardRssMb:900,
+            hardExternalMb:shadowCompetitionHardExternalMb
+          });
+          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs};
+          if(freshAdmission.allowed){
+            const cfg=forecastRuntime.engine.configSnapshot();
+            const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
+            heapBefore=Math.round(freshMemory.heapUsed/1024/1024);
+            result=await runForecastShadowEvaluationWorker({
+              competitionState:shadowCompetitionState,
+              experimentGovernorState,
+              historyRows:history,
+              incumbentConfig:cfg,
+              releaseId,
+              minSeedRows:shadowCompetitionMinSeedRows,
+              minimumTrainCases:shadowCompetitionMinTrainCases,
+              maxGeneratedHypotheses:4,
+              now:Date.now()
+            },{
+              timeoutMs:shadowCompetitionWorkerTimeoutMs,
+              maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+            });
+          }
+        }finally{
+          if(activeBackgroundResearchJob==='shadow-competition') activeBackgroundResearchJob=null;
+        }
+
+        if(!freshAdmission?.allowed){
+          shadowCompetitionWorkerMemoryDeferrals++;
+          console.warn('shadow competition deferred after research-slot wait',JSON.stringify({
+            mode:shadowCompetitionWorkerMode,
+            reason:freshAdmission?.reason||'MEMORY_PRESSURE',
+            slotWaitMs,
+            memory:freshAdmission?.memory||null,
+            limits:freshAdmission?.limits||null
+          }));
+          recordOperation(observability,{
+            name:'forecast_shadow_competition',
+            ok:true,
+            latencyMs:Date.now()-started,
+            error:'DEFERRED_AFTER_SLOT_'+String(freshAdmission?.reason||'MEMORY_PRESSURE')
+          });
+          await sleep(shadowCompetitionEvalMs);
+          continue;
+        }
 
         shadowCompetitionState=result.competitionState;
         experimentGovernorState=result.experimentGovernorState;
@@ -7495,6 +7568,7 @@ async function shadowCompetitionWatcher(){
           historyProgressAt,
           configuredHistoryRows:shadowCompetitionHistoryRows,
           workerRuns:shadowCompetitionWorkerRuns,
+          slotWaitMs,
           promotionReview:modelPromotionReviewLastSummary
         }));
       }
