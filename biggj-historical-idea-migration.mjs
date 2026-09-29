@@ -358,7 +358,7 @@ const UNIQUE_RESEARCH=Object.freeze([
   {
     pattern:/RESEARCH OPERATING GENOME/,
     proposalTitle:'RESEARCH_POLICY_GENOME',
-    parentCapabilityId:'CHILD_SKILL_DISCOVERY',
+    parentCapabilityId:'VERSIONED_CANDIDATES',
     purpose:'Represent bounded research-policy candidates as versioned challengers under an immutable integrity kernel.'
   }
 ]);
