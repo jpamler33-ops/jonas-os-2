@@ -324,6 +324,22 @@ async function rpcBatch(fetchImpl,url,calls,{timeoutMs=15000}={}){
   }finally{clearTimeout(timer);}
 }
 
+async function mapConcurrent(items,limit,worker){
+  const xs=Array.isArray(items)?items:[];
+  if(!xs.length) return [];
+  const concurrency=Math.max(1,Math.min(xs.length,Math.floor(Number(limit)||1)));
+  const out=new Array(xs.length);
+  let cursor=0;
+  await Promise.all(Array.from({length:concurrency},async()=>{
+    while(true){
+      const index=cursor++;
+      if(index>=xs.length) return;
+      out[index]=await worker(xs[index],index);
+    }
+  }));
+  return out;
+}
+
 export function createEthereumEntityFlowProvider({
   fetchImpl=globalThis.fetch,
   rpcUrl='https://ethereum-rpc.publicnode.com',
@@ -332,6 +348,7 @@ export function createEthereumEntityFlowProvider({
   windows=DEFAULT_WINDOWS,
   maxBlocks=96,
   batchSize=6,
+  batchConcurrency=4,
   timeoutMs=15000,
   cacheMs=45000,
   now=()=>Date.now()
@@ -358,20 +375,22 @@ export function createEthereumEntityFlowProvider({
     for(let n=head-1;n>=0&&numbers.length<Math.max(1,Number(maxBlocks)||96);n--) numbers.push(n);
 
     const step=Math.max(1,Number(batchSize)||6);
-    for(let i=0;i<numbers.length;i+=step){
-      const chunk=numbers.slice(i,i+step);
-      const rows=await rpcBatch(fetchImpl,rpcUrl,chunk.map(n=>({
+    const concurrency=Math.max(1,Math.min(6,Math.floor(Number(batchConcurrency)||4)));
+    const chunks=[];
+    for(let i=0;i<numbers.length;i+=step) chunks.push(numbers.slice(i,i+step));
+    const batchRows=await mapConcurrent(chunks,concurrency,chunk=>
+      rpcBatch(fetchImpl,rpcUrl,chunk.map(n=>({
         method:'eth_getBlockByNumber',
         params:['0x'+n.toString(16),true]
-      })),{timeoutMs});
-      let reachedOld=false;
+      })),{timeoutMs})
+    );
+    for(const rows of batchRows){
       for(const block of rows){
         if(!block?.timestamp) continue;
         const ts=hexNumber(block.timestamp)*1000;
-        if(Number.isFinite(ts)&&ts<oldestNeeded){reachedOld=true;continue;}
+        if(Number.isFinite(ts)&&ts<oldestNeeded) continue;
         blocks.push(block);
       }
-      if(reachedOld) break;
     }
 
     const events=classifyEvmNativeBlocks(blocks,addressIndex);
@@ -396,6 +415,8 @@ export function createEthereumEntityFlowProvider({
       finalizedBlockNumber:head,
       finalizedBlockTimestamp:headTs,
       blocksScanned:blocks.length,
+      batchRequests:chunks.length,
+      batchConcurrency:concurrency,
       classifiedEvents:events.length,
       addressCount:addressIndex.addressCount,
       entityCount:addressIndex.entityCount,
