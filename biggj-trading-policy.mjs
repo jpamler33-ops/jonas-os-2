@@ -317,6 +317,97 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
   const roe=finite(state.marginRoePct,0);
   const stop=Math.abs(finite(position.stopLossPct,.005));
   const target=Math.abs(finite(position.takeProfitPct,.01));
+  const thesisKnown=state.thesisHealth!==null&&state.thesisHealth!==undefined&&state.thesisHealth!==''&&Number.isFinite(Number(state.thesisHealth));
+  const oppositeKnown=state.oppositeThesisStrength!==null&&state.oppositeThesisStrength!==undefined&&state.oppositeThesisStrength!==''&&Number.isFinite(Number(state.oppositeThesisStrength));
+  const thesisEvidenceAvailable=thesisKnown&&oppositeKnown;
+  const thesis=thesisEvidenceAvailable?clamp(Number(state.thesisHealth)):null;
+  const opposite=thesisEvidenceAvailable?clamp(Number(state.oppositeThesisStrength)):null;
+  const targetReached=state.targetReached===true||roe>=target;
+  const executable=state.trustedExecutableBook!==false;
+  const priorProtectedStop=state.protectedStopRoe!==null&&state.protectedStopRoe!==undefined&&state.protectedStopRoe!==''&&Number.isFinite(Number(state.protectedStopRoe))
+    ?Number(state.protectedStopRoe)
+    :null;
+
+  const result=(action,reason,extra={})=>finalized({
+    version:BIGGJ_TRADING_POLICY_VERSION,
+    action,reason,
+    ageMs,horizonMs,
+    horizonProgress:horizonMs>0?ageMs/horizonMs:0,
+    maxHoldAt,
+    thesisEvidenceAvailable,
+    thesisHealth:thesis,
+    oppositeThesisStrength:opposite,
+    marginRoePct:roe,
+    effectiveStopRoe:priorProtectedStop,
+    ...extra,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  });
+
+  if(!executable)return result('DATA_FREEZE','EXECUTABLE_BOOK_UNTRUSTED');
+  if(state.hardStopReached===true||roe<=-stop)return result('EXIT','STOP_LOSS',{effectiveStopRoe:-stop});
+  if(priorProtectedStop!=null&&roe<=priorProtectedStop)return result('EXIT','TRAILING_STOP',{effectiveStopRoe:priorProtectedStop});
+  if(state.structureInvalidationConfirmed===true)return result('EXIT','THESIS_INVALIDATED');
+  if(thesisEvidenceAvailable&&thesis<=lp.thesisCollapse&&opposite>=lp.oppositeCollapse)return result('EXIT','THESIS_COLLAPSE');
+  if(at>=maxHoldAt)return result('EXIT','MAX_HOLD_EXIT');
+
+  if(targetReached){
+    const protectedStop=Math.max(priorProtectedStop??-stop,target*lp.trailAtTargetFraction*.375);
+    if(!thesisEvidenceAvailable){
+      return result('PROTECT','TARGET_REVIEW_EVIDENCE_MISSING',{
+        effectiveStopRoe:protectedStop,
+        nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)
+      });
+    }
+    if(thesis<lp.strongThesis||opposite>.50)return result('EXIT','TARGET_THESIS_EXHAUSTED',{effectiveStopRoe:protectedStop});
+    return result('TRAIL','TARGET_RUNNER',{effectiveStopRoe:protectedStop,nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+  }
+  if(roe>=target*lp.trailAtTargetFraction){
+    return result('TRAIL','PROFIT_LOCK',{
+      effectiveStopRoe:Math.max(priorProtectedStop??-stop,target*.30),
+      nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)
+    });
+  }
+  if(roe>=target*lp.protectAtTargetFraction){
+    return result('PROTECT','BREAK_EVEN_LOCK',{
+      effectiveStopRoe:Math.max(priorProtectedStop??-stop,0),
+      nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)
+    });
+  }
+
+  if(ageMs>=horizonMs){
+    if(!thesisEvidenceAvailable){
+      return result('REVIEW','HORIZON_REVIEW_EVIDENCE_MISSING',{
+        effectiveStopRoe:priorProtectedStop,
+        nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)
+      });
+    }
+    if(thesis>=lp.strongThesis&&opposite<=lp.maxOppositeForExtension){
+      return result('HOLD','HORIZON_REVIEW_EXTEND',{effectiveStopRoe:priorProtectedStop,nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+    }
+    if(thesis<lp.weakThesis)return result('EXIT','HORIZON_REVIEW_THESIS_WEAK',{effectiveStopRoe:priorProtectedStop});
+    if(roe>0)return result('PROTECT','HORIZON_REVIEW_NEUTRAL',{
+      effectiveStopRoe:Math.max(priorProtectedStop??-stop,0),
+      nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)
+    });
+    return result('REVIEW','HORIZON_REVIEW_NEUTRAL',{effectiveStopRoe:priorProtectedStop,nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
+  }
+
+  return result('HOLD','THESIS_ACTIVE',{effectiveStopRoe:priorProtectedStop,nextReviewAt:Math.min(maxHoldAt,openedAt+horizonMs)});
+},state={},{
+  policy=DEFAULT_BIGGJ_TRADING_POLICY
+}={}){
+  const lp=policy.lifecycle;
+  const ap=assetPolicy(position.assetClass||'CORE',policy);
+  const at=finite(state.at,Date.now());
+  const openedAt=finite(position.openedAt,at);
+  const ageMs=Math.max(0,at-openedAt);
+  const horizonMs=Math.max(ap.minHorizonMs,finite(position.horizonMs,ap.minHorizonMs));
+  const dynamicCap=Math.max(horizonMs,Math.min(ap.maxHoldMs,horizonMs*lp.maxHoldHorizonMultiplier));
+  const maxHoldAt=openedAt+dynamicCap;
+  const roe=finite(state.marginRoePct,0);
+  const stop=Math.abs(finite(position.stopLossPct,.005));
+  const target=Math.abs(finite(position.takeProfitPct,.01));
   const thesis=clamp(finite(state.thesisHealth,.5));
   const opposite=clamp(finite(state.oppositeThesisStrength,0));
   const targetReached=state.targetReached===true||roe>=target;
