@@ -1,13 +1,23 @@
 import { AttachmentBuilder, ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, REST, Routes } from 'discord.js';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='TCX_DISCORD_COMMAND_CENTER_V2';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='TCX_DISCORD_COMMAND_CENTER_V3';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
   {name:'help',description:'TCX Befehle anzeigen'},
+  {name:'dashboard',description:'TCX Mission Control öffnen'},
   {name:'market',description:'Marktübersicht öffnen',options:[symbolOption()]},
   {name:'forecast',description:'TCX Forecast anzeigen',options:[symbolOption()]},
-  {name:'chart',description:'Marktchart anzeigen',options:[symbolOption(),{type:3,name:'interval',description:'Zeitrahmen',required:false,choices:['1m','5m','15m','1h','4h'].map(function(x){return {name:x,value:x};})}]},
+  {name:'chart',description:'Marktchart anzeigen',options:[symbolOption(),intervalOption()]},
+  {name:'superchart',description:'TCX SuperChart öffnen',options:[symbolOption(),intervalOption()]},
+  {name:'deep',description:'Deep-Dive Analysezentrum öffnen',options:[symbolOption()]},
+  {name:'why',description:'Evidence und Begründung anzeigen',options:[symbolOption()]},
+  {name:'flow',description:'Flow Radar öffnen',options:[symbolOption()]},
+  {name:'liquidations',description:'Liquidation Heatmap öffnen',options:[symbolOption()]},
+  {name:'xray',description:'Market X-Ray öffnen',options:[symbolOption()]},
+  {name:'events',description:'Structure Events öffnen',options:[symbolOption()]},
+  {name:'accuracy',description:'Forecast Accuracy öffnen',options:[symbolOption()]},
+  {name:'radar',description:'TCX Super Radar öffnen'},
   {name:'structure',description:'Marktstruktur anzeigen',options:[symbolOption()]},
   {name:'portfolio',description:'Shadow-Portfolio anzeigen'},
   {name:'stats',description:'Shadow-Performance anzeigen',options:[{type:3,name:'period',description:'Zeitraum',required:false,choices:[{name:'Tag',value:'day'},{name:'Woche',value:'week'},{name:'Monat',value:'month'}]}]},
@@ -39,10 +49,12 @@ const SERVER_LAYOUT=Object.freeze([
   {category:'TCX • INTELLIGENCE',channels:[
     {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
     {name:'global-intel',topic:'Global Events und Markt-Kontext aus TCX.'},
-    {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'}
+    {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'},
+    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'}
   ]},
   {category:'TCX • SHADOW',channels:[
     {name:'live-trades',topic:'Offene TCX Shadow-Trades. Keine echten Orders.'},
+    {name:'closed-trades',topic:'Abgeschlossene Shadow-Trades mit Ergebnis und Exit-Grund.'},
     {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
     {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen.'}
   ]},
@@ -58,9 +70,12 @@ const MARKET_PANELS=Object.freeze([
   {channel:'sol',symbol:'SOLUSDT'}
 ]);
 const MARKERS=Object.freeze({
-  start:'TCX_DISCORD_V2_START',
-  terminal:'TCX_DISCORD_V2_TERMINAL',
-  system:'TCX_DISCORD_V2_SYSTEM'
+  start:'TCX_DISCORD_V3_START',
+  terminal:'TCX_DISCORD_V3_TERMINAL',
+  system:'TCX_DISCORD_V3_SYSTEM',
+  performance:'TCX_DISCORD_V3_PERFORMANCE',
+  overview:'TCX_DISCORD_V3_MARKET_OVERVIEW',
+  data:'TCX_DISCORD_V3_DATA_HEALTH'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -99,7 +114,45 @@ function berlinParts(){
   return {date:get('year')+'-'+get('month')+'-'+get('day'),hour:Number(get('hour')),minute:Number(get('minute'))};
 }
 
+const V3_SYMBOLS=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','LINK','AVAX','DOT','LTC','TRX','PEPE','SHIB','BONK','WIF','FLOKI'];
 function symbolOption(){return {type:3,name:'symbol',description:'z. B. BTC, ETH, SOL',required:true};}
+function intervalOption(){return {type:3,name:'interval',description:'Zeitrahmen',required:false,choices:['1m','5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
+function normalizeDiscordSymbol(value=''){const raw=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return raw?(raw.endsWith('USDT')?raw:raw+'USDT'):null;}
+function marketSelectRow(){return {type:1,components:[{type:3,custom_id:'dc3:market-select',placeholder:'Markt öffnen …',min_values:1,max_values:1,options:V3_SYMBOLS.map(x=>({label:x+'/USDT',value:x+'USDT',description:'TCX '+x+' Research'}))}]};}
+function commandCenterComponents(){return [
+  {type:1,components:[
+    {type:2,style:1,label:'BTC',custom_id:'dc3:market:BTCUSDT'},
+    {type:2,style:1,label:'ETH',custom_id:'dc3:market:ETHUSDT'},
+    {type:2,style:1,label:'SOL',custom_id:'dc3:market:SOLUSDT'},
+    {type:2,style:2,label:'Super Radar',custom_id:'dc3:terminal:radar'}
+  ]},
+  {type:1,components:[
+    {type:2,style:2,label:'Portfolio',custom_id:'dc3:home:portfolio'},
+    {type:2,style:2,label:'Performance',custom_id:'dc3:home:stats_day'},
+    {type:2,style:2,label:'Global Intel',custom_id:'dc3:home:news'},
+    {type:2,style:2,label:'Data Health',custom_id:'dc3:home:data'}
+  ]},
+  marketSelectRow()
+];}
+function marketActionComponents(symbol){
+  const s=normalizeDiscordSymbol(symbol)||'BTCUSDT';
+  return [
+    {type:1,components:[
+      {type:2,style:1,label:'SuperChart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
+      {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s},
+      {type:2,style:2,label:'Warum?',custom_id:'dc3:why:'+s},
+      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:'+s}
+    ]},
+    {type:1,components:[
+      {type:2,style:2,label:'Flow',custom_id:'dc3:flow:'+s},
+      {type:2,style:2,label:'Liquidations',custom_id:'dc3:liqmap:'+s+':5m'},
+      {type:2,style:2,label:'X-Ray',custom_id:'dc3:xray:'+s},
+      {type:2,style:2,label:'Events',custom_id:'dc3:events:'+s},
+      {type:2,style:2,label:'Accuracy',custom_id:'dc3:accuracy:'+s}
+    ]},
+    marketSelectRow()
+  ];
+}
 function fakeChatId(guildId,channelId,userId){return 'discord:'+guildId+':'+channelId+':'+userId;}
 export function parseDiscordChatId(value){
   const m=/^discord:([^:]+):([^:]+):([^:]+)$/.exec(String(value||''));
