@@ -209,6 +209,7 @@ export function parseProductCallback(data="") {
   const raw=String(data);
   if(raw==="home") return {kind:"HOME"};
   if(raw.startsWith("home:")) return {kind:"HOME_SECTION",section:raw.slice(5).toUpperCase()};
+  if(raw.startsWith("news:")) return {kind:"GLOBAL_INTEL",filter:raw.slice(5).toUpperCase()};
   const p=raw.split(":");
   if(p[0]==="forecast"&&p[1]) return {kind:"FORECAST",symbol:p[1]};
   if(p[0]==="xray"&&p[1]) return {kind:"XRAY",symbol:p[1]};
