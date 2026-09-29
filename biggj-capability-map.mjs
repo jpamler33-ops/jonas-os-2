@@ -52,7 +52,7 @@ export const BIGGJ_ROOT_PLANE_MAP=deepFreeze({
 
 
 const root=(id,layer,purpose,priority='CORE')=>({id,parentId:null,layer,plane:BIGGJ_ROOT_PLANE_MAP[id]||null,purpose,priority,kind:'ROOT'});
-const skill=(id,parentId,layer,purpose,priority='CORE',moduleHints=[])=>({id,parentId,layer,purpose,priority,kind:'CAPABILITY',moduleHints});
+const skill=(id,parentId,layer,purpose,priority='CORE',moduleHints=[])=>({id,parentId,layer,plane:BIGGJ_ROOT_PLANE_MAP[parentId]||null,purpose,priority,kind:'CAPABILITY',moduleHints});
 
 export const BIGGJ_CAPABILITY_ROOTS=deepFreeze([
   root('MARKET_TRUTH','TEMPORAL_MARKET_FABRIC','Reconstruct exactly what was knowable at decision time.'),
@@ -261,6 +261,7 @@ export function biggjCapabilityMap(){
   }
   for(const x of BIGGJ_SEED_CAPABILITIES){
     if(!rootIds.has(x.parentId)) throw new Error('unknown capability root '+x.parentId);
+    if(!x.plane||!planeIds.has(x.plane)) throw new Error('capability missing architecture plane '+x.id);
   }
   const core={
     version:BIGGJ_CAPABILITY_MAP_VERSION,
