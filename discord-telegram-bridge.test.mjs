@@ -6,7 +6,7 @@ import {
   decodeDiscordCallbackCustomId,
   encodeDiscordCallbackCustomId
 } from './discord-component-ids.mjs';
-import { createSerialDedupeQueue, mapWithConcurrency } from './discord-serial-dedupe-queue.mjs';
+import { createSerialDedupeQueue, mapWithConcurrency, refreshDueFromTimestamps } from './discord-serial-dedupe-queue.mjs';
 
 test('duplicate Telegram callbacks receive unique reversible Discord custom ids',()=>{
   const action='superchart:BTCUSDT:FULL:5m';
@@ -88,4 +88,31 @@ test('bounded async mapper preserves result order and concurrency cap',async()=>
   assert.deepEqual(out,[10,20,30,40,50]);
   assert.ok(maxActive<=2);
   assert.ok(maxActive>=2);
+});
+
+
+test('refresh freshness policy prefers latest known activity',()=>{
+  assert.equal(refreshDueFromTimestamps({
+    now:120000,intervalMs:60000,lastRefreshedAt:70000,messageEditedAt:50000,messageCreatedAt:1000
+  }),false);
+  assert.equal(refreshDueFromTimestamps({
+    now:130001,intervalMs:60000,lastRefreshedAt:70000,messageEditedAt:50000,messageCreatedAt:1000
+  }),true);
+  assert.equal(refreshDueFromTimestamps({
+    now:100000,intervalMs:60000,messageEditedAt:90000,messageCreatedAt:1000
+  }),false);
+  assert.equal(refreshDueFromTimestamps({
+    now:100000,intervalMs:60000
+  }),true);
+});
+
+
+test('refresh budgets are exposed in bridge source',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/TCX_DISCORD_STARTER_REFRESH_BUDGET\|\|4/);
+  assert.match(source,/TCX_DISCORD_THESIS_REFRESH_BUDGET\|\|2/);
+  assert.match(source,/TCX_DISCORD_THREAD_THESIS_REFRESH_BUDGET\|\|4/);
+  assert.match(source,/starterBudgetDeferred/);
+  assert.match(source,/threadThesisBudgetDeferred/);
 });
