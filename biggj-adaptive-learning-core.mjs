@@ -416,7 +416,9 @@ export function selectBiggjAdaptiveHoldPlan(memory,position,current={}){
     .08*(flow-.5)+
     .06*(liquidity-.5)-
     .12*shock;
-  const adjusted=clamp(learned+liveSignal,0.50,2.50);
+  let adjusted=clamp(learned+liveSignal,0.50,2.50);
+  if(thesis<=.35||opposite>=.70||structure<=.30) adjusted=Math.min(adjusted,.75);
+  else if(thesis>=.75&&opposite<=.25&&structure>=.65&&regime>=.60) adjusted=Math.max(adjusted,Math.min(2.50,learned+.25));
   const mode=adjusted>=1.20?'EXTEND':adjusted<=.85?'SHORTEN':'BASE';
   const confidence=match?clamp(match.effectiveSamples/(match.effectiveSamples+12)):0;
   return finalized({
