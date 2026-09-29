@@ -127,6 +127,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-cold-archive.mjs',
   'research-dependency-graph.mjs',
   'research-intelligence-features.mjs',
+  'research-provider-fanout.mjs',
   'model-promotion-review-service.mjs',
   'expansion-runtime/dexscreener-public-provider.mjs',
   'expansion-runtime/public-market-context-provider.mjs',

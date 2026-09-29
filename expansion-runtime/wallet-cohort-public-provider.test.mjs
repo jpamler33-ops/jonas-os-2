@@ -103,3 +103,48 @@ test('ethereum cohort uses batch block scan for verified address sets',async()=>
   assert.equal(s.metrics.nativeNetFlow,1);
   assert.equal(s.metrics.nativeGrossFlow,1);
 });
+
+
+test('wallet cohort RPC aborts within configured timeout',async()=>{
+  const now=2_000_000;
+  const p=createWalletCohortPublicProvider({
+    cohorts:[{id:'sol-timeout',chain:'SOLANA',symbol:'SOLUSDT',addresses:['ADDR1']}],
+    timeoutMs:60,
+    now:()=>now,
+    fetchImpl:async(_url,opts)=>new Promise((_resolve,reject)=>{
+      opts.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true});
+    })
+  });
+  const started=Date.now();
+  const s=await p.fetchSnapshot('SOLUSDT',{asOf:now});
+  const elapsed=Date.now()-started;
+  assert.equal(s.ok,false);
+  assert.equal(s.reason,'COHORT_FETCH_FAILED');
+  assert.ok(elapsed<500,'timeout should fail closed quickly');
+});
+
+test('ethereum cohort does not fall back to unbounded serial block requests',async()=>{
+  const now=2_000_000;
+  const address='0x1111111111111111111111111111111111111111';
+  let calls=0;
+  const p=createWalletCohortPublicProvider({
+    cohorts:[{id:'eth-bounded',chain:'ETHEREUM',symbol:'ETHUSDT',addresses:[address]}],
+    timeoutMs:100,
+    now:()=>now,
+    fetchImpl:async(_url,opts)=>{
+      calls++;
+      const req=JSON.parse(opts.body);
+      if(!Array.isArray(req)) return response('0x64');
+      return {
+        ok:false,
+        status:503,
+        async text(){return 'batch unavailable';}
+      };
+    }
+  });
+  const s=await p.fetchSnapshot('ETHUSDT',{asOf:now});
+  assert.equal(s.ok,false);
+  assert.equal(s.reason,'COHORT_FETCH_FAILED');
+  assert.equal(calls,2);
+  assert.match(s.errors[0].error,/ETHEREUM_COHORT_BATCH_FAILED/);
+});

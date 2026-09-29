@@ -1,30 +1,42 @@
-export const WALLET_COHORT_PUBLIC_PROVIDER_VERSION='TCX_WALLET_COHORT_PUBLIC_PROVIDER_V1';
+export const WALLET_COHORT_PUBLIC_PROVIDER_VERSION='TCX_WALLET_COHORT_PUBLIC_PROVIDER_V2';
 
 function finite(v){const n=Number(v);return Number.isFinite(n)?n:null;}
 function signedLog(v){const n=finite(v);if(n==null)return null;return Math.sign(n)*Math.log1p(Math.abs(n));}
-async function rpc(fetchImpl,url,method,params){
-  const res=await fetchImpl(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
-  const text=await res.text();
-  if(!res.ok) throw new Error('RPC_HTTP_'+res.status);
-  const body=JSON.parse(text);
-  if(body?.error) throw new Error('RPC_'+String(body.error.code||'ERROR'));
-  return body.result;
+async function rpc(fetchImpl,url,method,params,{timeoutMs=7000}={}){
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),Math.max(50,Number(timeoutMs)||7000));
+  try{
+    const res=await fetchImpl(url,{method:'POST',signal:ctrl.signal,headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+    const text=await res.text();
+    if(!res.ok) throw new Error('RPC_HTTP_'+res.status);
+    const body=JSON.parse(text);
+    if(body?.error) throw new Error('RPC_'+String(body.error.code||'ERROR'));
+    return body.result;
+  }finally{
+    clearTimeout(timer);
+  }
 }
 
-async function rpcBatch(fetchImpl,url,calls){
+async function rpcBatch(fetchImpl,url,calls,{timeoutMs=7000}={}){
   const payload=calls.map((x,i)=>({jsonrpc:'2.0',id:i+1,method:x.method,params:x.params}));
-  const res=await fetchImpl(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-  const text=await res.text();
-  if(!res.ok) throw new Error('RPC_BATCH_HTTP_'+res.status);
-  const body=JSON.parse(text);
-  if(!Array.isArray(body)) throw new Error('RPC_BATCH_INVALID');
-  const byId=new Map(body.map(x=>[Number(x.id),x]));
-  return payload.map(req=>{
-    const row=byId.get(Number(req.id));
-    if(!row) throw new Error('RPC_BATCH_MISSING_'+req.id);
-    if(row.error) throw new Error('RPC_'+String(row.error.code||'ERROR'));
-    return row.result;
-  });
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),Math.max(50,Number(timeoutMs)||7000));
+  try{
+    const res=await fetchImpl(url,{method:'POST',signal:ctrl.signal,headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+    const text=await res.text();
+    if(!res.ok) throw new Error('RPC_BATCH_HTTP_'+res.status);
+    const body=JSON.parse(text);
+    if(!Array.isArray(body)) throw new Error('RPC_BATCH_INVALID');
+    const byId=new Map(body.map(x=>[Number(x.id),x]));
+    return payload.map(req=>{
+      const row=byId.get(Number(req.id));
+      if(!row) throw new Error('RPC_BATCH_MISSING_'+req.id);
+      if(row.error) throw new Error('RPC_'+String(row.error.code||'ERROR'));
+      return row.result;
+    });
+  }finally{
+    clearTimeout(timer);
+  }
 }
 
 export function parseWalletCohorts(raw){
@@ -57,6 +69,7 @@ export function createWalletCohortPublicProvider({
   cohorts=[],
   ethereumRpcUrl='https://ethereum-rpc.publicnode.com',
   solanaRpcUrl='https://api.mainnet-beta.solana.com',
+  timeoutMs=7000,
   now=()=>Date.now()
 }={}){
   const defs=parseWalletCohorts(cohorts);
@@ -65,9 +78,16 @@ export function createWalletCohortPublicProvider({
 
   async function solanaCohort(c,asOf){
     let activity5m=0,activity15m=0,success=0,total15=0;
-    for(const address of c.addresses){
-      const rows=await rpc(fetchImpl,solanaRpcUrl,'getSignaturesForAddress',[address,{limit:100,commitment:'finalized'}]);
-      for(const x of Array.isArray(rows)?rows:[]){
+    const settled=await Promise.allSettled(c.addresses.map(address=>
+      rpc(fetchImpl,solanaRpcUrl,'getSignaturesForAddress',[address,{limit:100,commitment:'finalized'}],{timeoutMs})
+    ));
+    const fulfilled=settled.filter(x=>x.status==='fulfilled');
+    if(!fulfilled.length){
+      const first=settled.find(x=>x.status==='rejected');
+      throw first?.reason instanceof Error?first.reason:new Error('SOLANA_COHORT_RPC_FAILED');
+    }
+    for(const result of fulfilled){
+      for(const x of Array.isArray(result.value)?result.value:[]){
         const ts=finite(x?.blockTime)==null?null:Number(x.blockTime)*1000;
         if(ts==null||ts>asOf) continue;
         const age=asOf-ts;
@@ -76,11 +96,17 @@ export function createWalletCohortPublicProvider({
         if(age<=15*60_000) activity15m++;
       }
     }
-    return {activity5m,activity15m,successRate15m:total15?success/total15:null,nativeNetFlow:0,nativeGrossFlow:0};
+    return {
+      activity5m,activity15m,
+      successRate15m:total15?success/total15:null,
+      nativeNetFlow:0,nativeGrossFlow:0,
+      addressResponses:fulfilled.length,
+      addressFailures:settled.length-fulfilled.length
+    };
   }
 
   async function ethereumCohort(c,asOf){
-    const latestHex=await rpc(fetchImpl,ethereumRpcUrl,'eth_blockNumber',[]);
+    const latestHex=await rpc(fetchImpl,ethereumRpcUrl,'eth_blockNumber',[],{timeoutMs});
     const latest=Number(BigInt(latestHex));
     const wanted=new Set(c.addresses.map(a=>a.toLowerCase()));
     let activity5m=0,activity15m=0,nativeNetFlow=0,nativeGrossFlow=0,total15=0,success=0;
@@ -91,12 +117,9 @@ export function createWalletCohortPublicProvider({
       blocks=await rpcBatch(fetchImpl,ethereumRpcUrl,numbers.map(n=>({
         method:'eth_getBlockByNumber',
         params:['0x'+n.toString(16),true]
-      })));
-    }catch{
-      blocks=[];
-      for(const n of numbers){
-        blocks.push(await rpc(fetchImpl,ethereumRpcUrl,'eth_getBlockByNumber',['0x'+n.toString(16),true]));
-      }
+      })),{timeoutMs});
+    }catch(err){
+      throw new Error('ETHEREUM_COHORT_BATCH_FAILED:'+(err instanceof Error?err.message:String(err)));
     }
     for(const block of blocks){
       if(!block?.timestamp) continue;
@@ -123,14 +146,33 @@ export function createWalletCohortPublicProvider({
     if(!cs.length) return {version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,symbol:s,availableAt:asOf,ok:false,reason:'NO_CONFIGURED_COHORT',cohorts:0};
     const metrics={activity5m:0,activity15m:0,successRate15m:null,nativeNetFlow:0,nativeGrossFlow:0};
     const successRates=[];
-    for(const c of cs){
-      const m=c.chain==='SOLANA'?await solanaCohort(c,asOf):await ethereumCohort(c,asOf);
+    const settled=await Promise.allSettled(cs.map(c=>c.chain==='SOLANA'?solanaCohort(c,asOf):ethereumCohort(c,asOf)));
+    const errors=[];
+    let completed=0;
+    settled.forEach((result,index)=>{
+      if(result.status==='rejected'){
+        errors.push({cohortId:cs[index].id,error:result.reason instanceof Error?result.reason.message:String(result.reason)});
+        return;
+      }
+      completed++;
+      const m=result.value;
       metrics.activity5m+=m.activity5m;metrics.activity15m+=m.activity15m;
       metrics.nativeNetFlow+=m.nativeNetFlow;metrics.nativeGrossFlow+=m.nativeGrossFlow;
       if(finite(m.successRate15m)!=null) successRates.push(m.successRate15m);
-    }
+    });
     metrics.successRate15m=successRates.length?successRates.reduce((a,b)=>a+b,0)/successRates.length:null;
-    return {version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,symbol:s,availableAt:asOf,ok:true,cohorts:cs.length,metrics,restrictions:{publicAddressesOnly:true,naturalPersonIdentity:false,researchOnly:true,mayExecute:false}};
+    if(!completed){
+      return {
+        version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,symbol:s,availableAt:asOf,ok:false,
+        reason:'COHORT_FETCH_FAILED',cohorts:cs.length,completedCohorts:0,errors,
+        restrictions:{publicAddressesOnly:true,naturalPersonIdentity:false,researchOnly:true,mayExecute:false}
+      };
+    }
+    return {
+      version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,symbol:s,availableAt:asOf,ok:true,
+      cohorts:cs.length,completedCohorts:completed,errors,metrics,
+      restrictions:{publicAddressesOnly:true,naturalPersonIdentity:false,researchOnly:true,mayExecute:false}
+    };
   }
 
   return Object.freeze({version:WALLET_COHORT_PUBLIC_PROVIDER_VERSION,configuredCohorts:defs.length,fetchSnapshot,walletCohortSnapshotToExtraFeatures});
