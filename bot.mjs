@@ -7585,20 +7585,130 @@ async function shadowPortfolioWatcher(){
           recordError(observability,{scope:'shadow_portfolio.book',message:err instanceof Error?err.message:String(err)});
         }
       }
+      const biggjReviewAnalyses=new Map();
 
       for(const current of [...(shadowPortfolioLedger.positions||[])]){
         if(current.status!=='OPEN') continue;
         const book=books.get(current.symbol);
         if(!book) continue;
-        const marked=markShadowPosition(current,book,{at:Number(book.availableAt||Date.now()),feeBps:shadowTakerFeeBps});
+        const markAt=Number(book.availableAt||Date.now());
+        const adaptivePrimary=
+          String(current.entryMode||'STANDARD').toUpperCase()==='STANDARD'&&
+          current.horizonOnlyExit!==true&&
+          Boolean(current.biggjDecisionFingerprint)&&
+          !['','UNKNOWN'].includes(String(current.tradingStyle||'UNKNOWN').toUpperCase());
+        let lifecycleDecision=null;
+        if(adaptivePrimary){
+          const preview=simulateShadowPositionExit(current,book,{feeBps:shadowTakerFeeBps});
+          const reviewDue=
+            !current.biggjLifecycle||
+            !Number.isFinite(Number(current.nextBiggjReviewAt))||
+            markAt>=Number(current.nextBiggjReviewAt);
+          let thesisState={
+            thesisHealth:Number(current.biggjLifecycle?.thesisHealth??current.entryEvidenceScore??.5),
+            oppositeThesisStrength:Number(current.biggjLifecycle?.oppositeThesisStrength??current.entryCounterThesisStrength??.5),
+            structureHealth:Number(current.biggjLifecycle?.structureHealth??.5),
+            regimeAlignment:Number(current.biggjLifecycle?.regimeAlignment??.5),
+            flowAlignment:Number(current.biggjLifecycle?.flowAlignment??.5),
+            liquidityHealth:Number(current.biggjLifecycle?.liquidityHealth??.5),
+            volatilityShock:Number(current.biggjLifecycle?.volatilityShock??0),
+            structureInvalidationConfirmed:false
+          };
+          let liveReview=null;
+          if(reviewDue){
+            if(biggjReviewAnalyses.has(current.symbol)){
+              liveReview=biggjReviewAnalyses.get(current.symbol);
+            }else{
+              const latest=latestInstitutionalForecast(forecastRuntime,current.symbol);
+              if(latest){
+                try{
+                  liveReview=await buildBiggjRuntimeMarketAnalysis(latest);
+                }catch(err){
+                  recordError(observability,{scope:'biggj.lifecycle_review',message:err instanceof Error?err.message:String(err)});
+                  liveReview=null;
+                }
+              }
+              biggjReviewAnalyses.set(current.symbol,liveReview);
+            }
+            if(liveReview?.analysis){
+              thesisState=biggjCurrentThesisState(current,liveReview.analysis);
+            }else{
+              lifecycleDecision={
+                version:BIGGJ_TRADING_POLICY_VERSION,
+                action:'DATA_FREEZE',
+                reason:'LIVE_THESIS_REVIEW_UNAVAILABLE',
+                thesisHealth:thesisState.thesisHealth,
+                oppositeThesisStrength:thesisState.oppositeThesisStrength,
+                marginRoePct:Number(preview.marginRoePct||0),
+                nextReviewAt:markAt+5*60_000,
+                execution:'SHADOW_ONLY',
+                canExecuteLive:false
+              };
+            }
+          }
+          if(!lifecycleDecision){
+            const learning=refreshBiggjLearningCache();
+            const holdPlan=selectBiggjAdaptiveHoldPlan(learning.holdMemory,current,thesisState);
+            const policyDecision=evaluateBiggjPositionLifecycle(current,{
+              at:markAt,
+              marginRoePct:Number(preview.marginRoePct||0),
+              targetReached:Number(preview.marginRoePct||0)>=Math.abs(Number(current.takeProfitPct)||0),
+              hardStopReached:Number(preview.marginRoePct||0)<=-Math.abs(Number(current.stopLossPct)||0),
+              trustedExecutableBook:preview.fullyExecutable===true,
+              adaptiveHoldMultiplier:holdPlan.recommendedHoldMultiplier,
+              ...thesisState
+            });
+            lifecycleDecision={
+              ...policyDecision,
+              structureHealth:thesisState.structureHealth,
+              regimeAlignment:thesisState.regimeAlignment,
+              flowAlignment:thesisState.flowAlignment,
+              liquidityHealth:thesisState.liquidityHealth,
+              volatilityShock:thesisState.volatilityShock,
+              adaptiveHoldPlan:{
+                mode:holdPlan.mode,
+                recommendedHoldMultiplier:holdPlan.recommendedHoldMultiplier,
+                learnedMultiplier:holdPlan.learnedMultiplier,
+                matchedLevel:holdPlan.matchedLevel,
+                evidenceSamples:holdPlan.evidenceSamples,
+                evidenceConfidence:holdPlan.evidenceConfidence,
+                fingerprint:holdPlan.fingerprint
+              }
+            };
+          }
+        }
+        const marked=markShadowPosition(current,book,{
+          at:markAt,
+          feeBps:shadowTakerFeeBps,
+          lifecycleDecision
+        });
         if(marked.changed){
           shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,marked.position);
           changed=true;
         }
         if(marked.trigger){
-          const academyBefore=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Number(book.availableAt||Date.now()),timeZone:shadowStatsTimeZone});
-          const closedPosition=closeShadowPosition(marked.position,{reason:marked.trigger,at:Number(book.availableAt||Date.now())});
+          const academyBefore=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:markAt,timeZone:shadowStatsTimeZone});
+          const priorLearning=adaptivePrimary?refreshBiggjLearningCache():null;
+          let closedPosition=closeShadowPosition(marked.position,{reason:marked.trigger,at:markAt});
+          if(adaptivePrimary&&priorLearning){
+            const adaptiveAnalysis=analyzeBiggjClosedTrade(closedPosition,priorLearning.outcomeMemory);
+            const postTradeAnalysis=reverseEngineerBiggjTrade(closedPosition,{
+              decision:closedPosition.biggjDecision||current.biggjDecision||null,
+              outcomeMemory:priorLearning.outcomeMemory,
+              holdMemory:priorLearning.holdMemory,
+              adaptiveAnalysis
+            });
+            closedPosition={
+              ...closedPosition,
+              biggjAdaptiveLearningVersion:BIGGJ_ADAPTIVE_LEARNING_VERSION,
+              biggjTradingPolicyVersion:BIGGJ_TRADING_POLICY_VERSION,
+              biggjMarketPlaybookVersion:BIGGJ_MARKET_PLAYBOOK_VERSION,
+              biggjAdaptiveAnalysis:adaptiveAnalysis,
+              biggjPostTradeAnalysis:postTradeAnalysis
+            };
+          }
           shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,closedPosition);
+          if(adaptivePrimary) refreshBiggjLearningCache({force:true});
           changed=true;closed++;
           if(String(closedPosition.entryMode||'').toUpperCase()==='COVERAGE_PROBE'){
             const bootstrap=recordCoverageProbeCalibration(forecastRuntime,{position:closedPosition,closeReason:marked.trigger,resolvedPrice:Number(book.mid)});
@@ -7655,6 +7765,10 @@ async function shadowPortfolioWatcher(){
             reason:closedPosition.closeReason,
             pnlQuote:closedPosition.realizedNetPnlQuote,
             returnPct:closedPosition.realizedReturnPct,
+            tradingStyle:closedPosition.tradingStyle||'UNKNOWN',
+            strategyFamily:closedPosition.strategyFamily||'UNKNOWN',
+            postTradeError:closedPosition.biggjPostTradeAnalysis?.likelyError||null,
+            learnedContext:closedPosition.biggjAdaptiveAnalysis?.contextSignal||null,
             execution:'SHADOW_ONLY'
           }));
         }
