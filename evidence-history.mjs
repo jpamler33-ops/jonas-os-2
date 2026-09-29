@@ -1,9 +1,11 @@
 import path from "node:path";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdir, open as openFile, readFile, rename, unlink } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { gzip as gzipCallback, gunzip as gunzipCallback } from "node:zlib";
+import { createGzip, gunzip as gunzipCallback } from "node:zlib";
 
-const gzip=promisify(gzipCallback);
 const gunzip=promisify(gunzipCallback);
 import { createStateFingerprint, validateStateFingerprint } from "./state-validity.mjs";
 
@@ -257,23 +259,52 @@ export async function loadEvidenceHistory(filePath,{maxLogicalBytes=DEFAULT_MAX_
   }
 }
 
+async function* evidenceHistoryJsonChunks(clean,{updatedAt,maxBytes}){
+  let logicalBytes=0;
+  const checked=chunk=>{
+    const text=String(chunk);
+    logicalBytes+=Buffer.byteLength(text,"utf8");
+    if(logicalBytes>maxBytes){
+      throw new Error("evidence history exceeds configured persistence safety limit");
+    }
+    return text;
+  };
+
+  yield checked(
+    '{"schemaVersion":'+SCHEMA_VERSION+
+    ',"version":'+JSON.stringify(EVIDENCE_HISTORY_VERSION)+
+    ',"updatedAt":'+JSON.stringify(updatedAt)+
+    ',"records":['
+  );
+  for(let i=0;i<clean.length;i++){
+    yield checked((i?",":"")+JSON.stringify(clean[i]));
+  }
+  yield checked("]}");
+}
+
 export async function saveEvidenceHistory(filePath,records,{maxPerSymbol=500,maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
   const clean=normalizedEvidenceRecords(records,{maxPerSymbol});
-  const payload={
-    schemaVersion:SCHEMA_VERSION,
-    version:EVIDENCE_HISTORY_VERSION,
-    updatedAt:new Date().toISOString(),
-    records:clean
-  };
-  const serialized=JSON.stringify(payload);
-  const logicalBytes=Buffer.byteLength(serialized);
   const maxBytes=Math.max(1024,Number(maxLogicalBytes)||DEFAULT_MAX_LOGICAL_BYTES);
-  if(logicalBytes>maxBytes) throw new Error("evidence history exceeds configured persistence safety limit");
-  const compressed=await gzip(Buffer.from(serialized,"utf8"),{level:1});
   const tmp=filePath+".tmp-"+process.pid;
-  await writeFile(tmp,compressed,{mode:0o600});
-  await rename(tmp,filePath);
+  await unlink(tmp).catch(err=>{if(err?.code!=="ENOENT") throw err;});
+
+  try{
+    await pipeline(
+      Readable.from(evidenceHistoryJsonChunks(clean,{
+        updatedAt:new Date().toISOString(),
+        maxBytes
+      })),
+      createGzip({level:1}),
+      createWriteStream(tmp,{flags:"wx",mode:0o600})
+    );
+    const fh=await openFile(tmp,"r");
+    try{await fh.sync();}finally{await fh.close();}
+    await rename(tmp,filePath);
+  }catch(err){
+    await unlink(tmp).catch(()=>{});
+    throw err;
+  }
   return clean;
 }
 
