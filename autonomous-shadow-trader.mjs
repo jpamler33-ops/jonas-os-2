@@ -1,4 +1,5 @@
 import { sha256 } from './institutional-kernel.mjs';
+import { selectBiggjTradingHorizon, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
 
 export const AUTONOMOUS_SHADOW_TRADER_VERSION='TCX_AUTONOMOUS_SHADOW_TRADER_V1';
 
@@ -32,7 +33,8 @@ export function deriveAutonomousShadowTrade(issuance,{
   cautionMinExpectedReturn=0.0035,
   cautionMinDirectionalProbability=0.62,
   cautionMinProbabilityEdge=0.15,
-  horizonSelection='SHORTEST'
+  horizonSelection='SHORTEST',
+  assetClass='CORE'
 }={}){
   if(!issuance||typeof issuance!=='object') return ineligible('ISSUANCE_MISSING');
   if(
@@ -58,27 +60,49 @@ export function deriveAutonomousShadowTrade(issuance,{
   if(ageMs>Math.max(1,Number(maxAgeMs)||1)) return ineligible('FORECAST_STALE',{admissionGate,ageMs});
 
   const selection=String(horizonSelection||'SHORTEST').toUpperCase();
-  const horizons=(Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[])
-    .filter(h=>
-      String(h?.gate||'').toUpperCase()==='PASS'&&
-      h?.display?.probabilityDisplayAllowed===true&&
-      String(h?.calibration?.status||'').toUpperCase()==='CALIBRATED'&&
-      ['UP','DOWN'].includes(String(h?.direction||'').toUpperCase())&&
-      finite(h?.expectedReturn)!=null
-    )
-    .sort((a,b)=>{
-      if(selection==='LONGEST') return Number(b.horizonMs||0)-Number(a.horizonMs||0);
-      const pa=a.display?.probabilities||a.probabilities||{};
-      const pb=b.display?.probabilities||b.probabilities||{};
-      const da=String(a.direction||'').toUpperCase()==='UP'?finite(pa.up):finite(pa.down);
-      const db=String(b.direction||'').toUpperCase()==='UP'?finite(pb.up):finite(pb.down);
-      const oa=String(a.direction||'').toUpperCase()==='UP'?finite(pa.down):finite(pa.up);
-      const ob=String(b.direction||'').toUpperCase()==='UP'?finite(pb.down):finite(pb.up);
-      if(selection==='MAX_EDGE') return Number((db??-Infinity)-(ob??0))-Number((da??-Infinity)-(oa??0));
-      if(selection==='MAX_RETURN') return Math.abs(Number(b.expectedReturn||0))-Math.abs(Number(a.expectedReturn||0));
-      return Number(a.horizonMs||Infinity)-Number(b.horizonMs||Infinity);
-    });
-  if(!horizons.length) return ineligible('NO_ADMITTED_DIRECTIONAL_HORIZON',{admissionGate,ageMs});
+  const allHorizons=Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[];
+  let horizons;
+  let policyHorizon=null;
+  if(selection==='BIGGJ_POLICY'){
+    policyHorizon=selectBiggjTradingHorizon(allHorizons,{assetClass});
+    if(!policyHorizon.eligible){
+      return ineligible('NO_PRIMARY_HORIZON',{
+        admissionGate,
+        ageMs,
+        assetClass:String(assetClass||'CORE').toUpperCase(),
+        tradingPolicyVersion:BIGGJ_TRADING_POLICY_VERSION,
+        tradingPolicyReason:policyHorizon.reason
+      });
+    }
+    const selected=allHorizons.find(h=>
+      String(h?.horizonId||'')===String(policyHorizon.horizonId||'')&&
+      Number(h?.horizonMs||0)===Number(policyHorizon.horizonMs||0)
+    );
+    if(!selected) return ineligible('PRIMARY_HORIZON_RESOLUTION_FAILED',{admissionGate,ageMs});
+    horizons=[selected];
+  }else{
+    horizons=allHorizons
+      .filter(h=>
+        String(h?.gate||'').toUpperCase()==='PASS'&&
+        h?.display?.probabilityDisplayAllowed===true&&
+        String(h?.calibration?.status||'').toUpperCase()==='CALIBRATED'&&
+        ['UP','DOWN'].includes(String(h?.direction||'').toUpperCase())&&
+        finite(h?.expectedReturn)!=null
+      )
+      .sort((a,b)=>{
+        if(selection==='LONGEST') return Number(b.horizonMs||0)-Number(a.horizonMs||0);
+        const pa=a.display?.probabilities||a.probabilities||{};
+        const pb=b.display?.probabilities||b.probabilities||{};
+        const da=String(a.direction||'').toUpperCase()==='UP'?finite(pa.up):finite(pa.down);
+        const db=String(b.direction||'').toUpperCase()==='UP'?finite(pb.up):finite(pb.down);
+        const oa=String(a.direction||'').toUpperCase()==='UP'?finite(pa.down):finite(pa.up);
+        const ob=String(b.direction||'').toUpperCase()==='UP'?finite(pb.down):finite(pb.up);
+        if(selection==='MAX_EDGE') return Number((db??-Infinity)-(ob??0))-Number((da??-Infinity)-(oa??0));
+        if(selection==='MAX_RETURN') return Math.abs(Number(b.expectedReturn||0))-Math.abs(Number(a.expectedReturn||0));
+        return Number(a.horizonMs||Infinity)-Number(b.horizonMs||Infinity);
+      });
+    if(!horizons.length) return ineligible('NO_ADMITTED_DIRECTIONAL_HORIZON',{admissionGate,ageMs});
+  }
 
   const h=horizons[0],direction=String(h.direction).toUpperCase();
   const p=h.display?.probabilities||h.probabilities||null;
@@ -123,7 +147,9 @@ export function deriveAutonomousShadowTrade(issuance,{
     oppositeProbability,
     admissionGate,
     generatedAt,
-    horizonSelection:selection
+    horizonSelection:selection,
+    assetClass:String(assetClass||'CORE').toUpperCase(),
+    tradingPolicyVersion:selection==='BIGGJ_POLICY'?BIGGJ_TRADING_POLICY_VERSION:null
   };
   return freezeDeep({
     ...decisionCore,
