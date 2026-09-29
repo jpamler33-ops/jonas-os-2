@@ -112,7 +112,11 @@ import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } fro
 import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } from './telegram-update-dispatcher.mjs';
 import {
   runForecastShadowEvaluationWorker,
-  FORECAST_SHADOW_EVALUATION_WORKER_VERSION
+  evaluateShadowWorkerAdmission,
+  forecastHistoryProgressAt,
+  forecastHistoryHasAdvanced,
+  FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+  FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION
 } from './forecast-shadow-evaluation-client.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
@@ -249,7 +253,17 @@ const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
 const shadowCompetitionWorkerTimeoutMs = Math.max(60_000, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_TIMEOUT_MS || 8*60_000));
 const shadowCompetitionWorkerHeapMb = Math.max(128, Math.min(192, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_HEAP_MB || 160)));
-const shadowCompetitionServingWorkerEnabled = String(process.env.TCX_SHADOW_COMPETITION_SERVING_WORKER_ENABLED || '0') === '1';
+const shadowCompetitionWorkerModeRaw=String(process.env.TCX_SHADOW_COMPETITION_SERVING_WORKER_ENABLED||'AUTO').trim().toUpperCase();
+const shadowCompetitionWorkerMode=['0','OFF','FALSE','DISABLED'].includes(shadowCompetitionWorkerModeRaw)
+  ?'OFF'
+  :['1','ON','TRUE','ENABLED'].includes(shadowCompetitionWorkerModeRaw)
+    ?'ON'
+    :'AUTO';
+const shadowCompetitionServingWorkerEnabled=shadowCompetitionWorkerMode!=='OFF';
+const shadowCompetitionAutoHeapMb=Math.max(220,Math.min(280,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_HEAP_MB||260)));
+const shadowCompetitionAutoRssMb=Math.max(450,Math.min(700,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_RSS_MB||620)));
+const shadowCompetitionAutoExternalMb=Math.max(32,Math.min(128,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_EXTERNAL_MB||96)));
+const shadowCompetitionHistoryRows=Math.max(500,Math.min(2000,Math.floor(Number(process.env.TCX_SHADOW_COMPETITION_HISTORY_ROWS||1200)||1200)));
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
 const institutionalMarketMaxAgeMs = Math.max(1000, Number(process.env.TCX_INSTITUTIONAL_MARKET_MAX_AGE_MS || 15000));
@@ -533,6 +547,11 @@ const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecast
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
 let shadowCompetitionLastHistorySize = Number(shadowCompetitionState?.evaluatedHistoryRows||0);
+let shadowCompetitionLastHistoryProgressAt=0;
+let shadowCompetitionWorkerRuns=0;
+let shadowCompetitionWorkerMemoryDeferrals=0;
+let shadowCompetitionWorkerNoChangeSkips=0;
+let shadowCompetitionWorkerLastDecision=null;
 const experimentGovernorFile = process.env.TCX_EXPERIMENT_GOVERNOR_FILE || '/data/tcx-experiment-governor.json';
 let experimentGovernorState = await loadExperimentGovernor(experimentGovernorFile);
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
@@ -7303,18 +7322,41 @@ async function shadowCompetitionWatcher(){
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
-        // Worker input is structured-cloned by Node. Keep it small and defer
-        // heavy evaluation while the Telegram serving process has low headroom.
-        if(heapUsedMb>=300||rssMb>=900){
+        const externalMb=Math.round(memory.external/1024/1024);
+        const admission=evaluateShadowWorkerAdmission({
+          mode:shadowCompetitionWorkerMode,
+          heapUsedMb,
+          rssMb,
+          externalMb,
+          autoHeapMb:shadowCompetitionAutoHeapMb,
+          autoRssMb:shadowCompetitionAutoRssMb,
+          autoExternalMb:shadowCompetitionAutoExternalMb,
+          hardHeapMb:300,
+          hardRssMb:900
+        });
+        shadowCompetitionWorkerLastDecision={...admission,at:Date.now()};
+        if(!admission.allowed){
+          shadowCompetitionWorkerMemoryDeferrals++;
           console.warn('shadow competition deferred for memory headroom',JSON.stringify({
-            heapUsedMb,rssMb,historyRows:forecastRuntime.engine.historySize(),
-            threshold:{heapUsedMb:300,rssMb:900}
+            mode:shadowCompetitionWorkerMode,
+            reason:admission.reason,
+            heapUsedMb,rssMb,externalMb,
+            historyRows:forecastRuntime.engine.historySize(),
+            limits:admission.limits
           }));
-          recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'DEFERRED_MEMORY_PRESSURE'});
+          recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'DEFERRED_'+admission.reason});
           await sleep(shadowCompetitionEvalMs);
           continue;
         }
-        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY,{limit:2000});
+        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY,{limit:shadowCompetitionHistoryRows});
+        const historyProgressAt=forecastHistoryProgressAt(history);
+        if(shadowCompetitionLastHistoryProgressAt>0&&!forecastHistoryHasAdvanced(history,shadowCompetitionLastHistoryProgressAt)){
+          shadowCompetitionWorkerNoChangeSkips++;
+          shadowCompetitionWorkerLastDecision={...admission,at:Date.now(),allowed:false,reason:'NO_NEW_PIT_HISTORY',historyProgressAt};
+          recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'SKIPPED_NO_NEW_PIT_HISTORY'});
+          await sleep(shadowCompetitionEvalMs);
+          continue;
+        }
         const cfg=forecastRuntime.engine.configSnapshot();
         const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
         const heapBefore=Math.round(process.memoryUsage().heapUsed/1024/1024);
@@ -7337,6 +7379,15 @@ async function shadowCompetitionWatcher(){
         shadowCompetitionState=result.competitionState;
         experimentGovernorState=result.experimentGovernorState;
         shadowCompetitionLastHistorySize=Number(result.historyRows||history.length);
+        shadowCompetitionLastHistoryProgressAt=historyProgressAt;
+        shadowCompetitionWorkerRuns++;
+        shadowCompetitionWorkerLastDecision={
+          ...admission,
+          at:Date.now(),
+          allowed:true,
+          reason:'WORKER_COMPLETED',
+          historyProgressAt
+        };
 
         await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
         if(experimentGovernorState) await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
@@ -7356,7 +7407,11 @@ async function shadowCompetitionWatcher(){
           governorStatus:gov?.status||experimentGovernorState?.status||null,
           durationMs:Date.now()-started,
           mainHeapBeforeMb:heapBefore,
-          mainHeapAfterMb:Math.round(process.memoryUsage().heapUsed/1024/1024)
+          mainHeapAfterMb:Math.round(process.memoryUsage().heapUsed/1024/1024),
+          mode:shadowCompetitionWorkerMode,
+          historyProgressAt,
+          configuredHistoryRows:shadowCompetitionHistoryRows,
+          workerRuns:shadowCompetitionWorkerRuns
         }));
       }
       recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started});
@@ -7608,10 +7663,18 @@ const server = http.createServer((req,res) => {
       alerts:activeAlerts,
       shadowResearchWorker:{
         version:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+        admissionVersion:FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
         enabledInServingProcess:shadowCompetitionServingWorkerEnabled,
-        state:shadowCompetitionServingWorkerEnabled?'ENABLED':'PAUSED_FOR_SERVING_STABILITY',
+        mode:shadowCompetitionWorkerMode,
+        state:shadowCompetitionServingWorkerEnabled?(shadowCompetitionWorkerMode==='AUTO'?'ADAPTIVE':'ENABLED'):'DISABLED',
         timeoutMs:shadowCompetitionWorkerTimeoutMs,
         maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb,
+        configuredHistoryRows:shadowCompetitionHistoryRows,
+        lastHistoryProgressAt:shadowCompetitionLastHistoryProgressAt||null,
+        runs:shadowCompetitionWorkerRuns,
+        memoryDeferrals:shadowCompetitionWorkerMemoryDeferrals,
+        noChangeSkips:shadowCompetitionWorkerNoChangeSkips,
+        lastDecision:shadowCompetitionWorkerLastDecision,
         memory:(()=>{const m=process.memoryUsage();return {
           heapUsedMb:Math.round(m.heapUsed/1024/1024),
           heapTotalMb:Math.round(m.heapTotal/1024/1024),
@@ -7834,7 +7897,9 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   strategyLeagueHealthy,
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
-  shadowResearchWorkerState:shadowCompetitionServingWorkerEnabled?'ENABLED':'PAUSED_FOR_SERVING_STABILITY',
+  shadowResearchWorkerAdmission:FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
+  shadowResearchWorkerMode:shadowCompetitionWorkerMode,
+  shadowResearchWorkerState:shadowCompetitionServingWorkerEnabled?(shadowCompetitionWorkerMode==='AUTO'?'ADAPTIVE':'ENABLED'):'DISABLED',
   coverageCurriculum:coverageCurriculumEnabled?'ENABLED':'DISABLED',
   coverageHorizons:DEFAULT_COVERAGE_HORIZONS.map(x=>x.id),
   autoLearnSymbols:autoLearnSymbols.length,
