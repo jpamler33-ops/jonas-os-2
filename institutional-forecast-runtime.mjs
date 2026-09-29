@@ -988,7 +988,11 @@ export async function saveInstitutionalForecastRuntime(runtime){
   let journalStoreMeta=null;
   try{
     if(externalizeArchives){
-      const journalFingerprint=fingerprintJsonBuffers(journalStoreBuffers(payload.journal));
+      // Materialize the exact serialized chunks once. The live journal can mutate
+      // while gzip I/O yields to the event loop; hashing one generator and later
+      // streaming a second generator can otherwise observe different bytes.
+      const journalBuffers=[...journalStoreBuffers(payload.journal)];
+      const journalFingerprint=fingerprintJsonBuffers(journalBuffers);
       const journalLogicalBytes=journalFingerprint.logicalBytes;
       const maxJournalStoreBytes=journalStoreByteLimit(runtime.maxJournalStoreBytes);
       if(journalLogicalBytes>maxJournalStoreBytes){
@@ -1008,7 +1012,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
         try{
           const streamed=await writeGzipJsonBuffers({
             filePath:storeTmp,
-            buffers:journalStoreBuffers(payload.journal),
+            buffers:journalBuffers,
             level:1
           });
           if(streamed.sha256!==journalHash||streamed.logicalBytes!==journalLogicalBytes){
@@ -1035,7 +1039,11 @@ export async function saveInstitutionalForecastRuntime(runtime){
         journalStore:journalStoreMeta
       };
 
-      const engineFingerprint=fingerprintJsonBuffers(engineStoreBuffers(payload.engine));
+      // Keep fingerprint and persisted bytes bound to one serialized engine view.
+      // This prevents concurrent bounded-cache rotation from changing the stream
+      // after its fingerprint has already been computed.
+      const engineBuffers=[...engineStoreBuffers(payload.engine)];
+      const engineFingerprint=fingerprintJsonBuffers(engineBuffers);
       const engineLogicalBytes=engineFingerprint.logicalBytes;
       const maxEngineStoreBytes=engineStoreByteLimit(runtime.maxEngineStoreBytes);
       if(engineLogicalBytes>maxEngineStoreBytes){
@@ -1055,7 +1063,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
         try{
           const streamed=await writeGzipJsonBuffers({
             filePath:storeTmp,
-            buffers:engineStoreBuffers(payload.engine),
+            buffers:engineBuffers,
             level:1
           });
           if(streamed.sha256!==engineHash||streamed.logicalBytes!==engineLogicalBytes){
