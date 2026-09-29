@@ -1,6 +1,6 @@
-import { Client, GatewayIntentBits, REST, Routes, AttachmentBuilder } from 'discord.js';
+import { AttachmentBuilder, ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, REST, Routes } from 'discord.js';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='TCX_DISCORD_TELEGRAM_BRIDGE_V1';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='TCX_DISCORD_COMMAND_CENTER_V2';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -16,8 +16,88 @@ const COMMANDS=[
   {name:'intelligence',description:'Intelligence-Status für einen Markt',options:[symbolOption()]},
   {name:'memory',description:'Episode Memory für einen Markt',options:[symbolOption()]},
   {name:'evidence',description:'Evidence-Diagnostik für einen Markt',options:[symbolOption()]},
-  {name:'validity',description:'Research-Validity für einen Markt',options:[symbolOption()]}
+  {name:'validity',description:'Research-Validity für einen Markt',options:[symbolOption()]},
+  {name:'setup',description:'TCX Discord Command Center automatisch einrichten'},
+  {name:'terminal',description:'TCX Live-Terminal anzeigen'},
+  {name:'system',description:'TCX Systemstatus anzeigen'},
+  {name:'report',description:'Aktuellen Tagesreport anzeigen'}
 ];
+
+
+const SERVER_LAYOUT=Object.freeze([
+  {category:'TCX • CONTROL',channels:[
+    {name:'start-here',topic:'Startpunkt, Befehle und Sicherheitsstatus von TCX.'},
+    {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'}
+  ]},
+  {category:'TCX • MARKETS',channels:[
+    {name:'market-overview',topic:'Übersicht der wichtigsten beobachteten Märkte.'},
+    {name:'btc',topic:'BTC/USDT Live-Marktpanel von TCX.'},
+    {name:'eth',topic:'ETH/USDT Live-Marktpanel von TCX.'},
+    {name:'sol',topic:'SOL/USDT Live-Marktpanel von TCX.'},
+    {name:'memecoins',topic:'Memecoin Research und Watchlist. SHADOW_ONLY.'}
+  ]},
+  {category:'TCX • INTELLIGENCE',channels:[
+    {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
+    {name:'global-intel',topic:'Global Events und Markt-Kontext aus TCX.'},
+    {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'}
+  ]},
+  {category:'TCX • SHADOW',channels:[
+    {name:'live-trades',topic:'Offene TCX Shadow-Trades. Keine echten Orders.'},
+    {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
+    {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen.'}
+  ]},
+  {category:'TCX • SYSTEM',channels:[
+    {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
+    {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
+    {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'}
+  ]}
+]);
+const MARKET_PANELS=Object.freeze([
+  {channel:'btc',symbol:'BTCUSDT'},
+  {channel:'eth',symbol:'ETHUSDT'},
+  {channel:'sol',symbol:'SOLUSDT'}
+]);
+const MARKERS=Object.freeze({
+  start:'TCX_DISCORD_V2_START',
+  terminal:'TCX_DISCORD_V2_TERMINAL',
+  system:'TCX_DISCORD_V2_SYSTEM'
+});
+function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
+function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
+function percent(value){const n=Number(value);return Number.isFinite(n)?(n*100).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+'%':'—';}
+function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
+function startPayload(){return {embeds:[{title:'TCX // START HERE',description:['**Eine Engine. Zwei Oberflächen.**','Discord ist das Command Center; Telegram bleibt die schnelle mobile Steuerung.','','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/chart BTC\` · Chart','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','\`/system\` · Runtime-Status','','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],allowedMentions:{parse:[]}};}
+export function buildDiscordTerminalPayload(snapshot={}){
+  const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
+  return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
+    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'Open Shadow',value:String(p?.openPositions??0),inline:true},{name:'Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Closed Trades',value:String(p?.closedTrades??0),inline:true},{name:'Net PnL',value:money(p?.netPnlQuote),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Forecast Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},{name:'Episodes',value:String(h?.episodeMemory?.total??'—'),inline:true},{name:'Evidence',value:String(h?.evidenceHistory?.total??'—'),inline:true},
+    {name:'Execution',value:'SHADOW_ONLY',inline:true},{name:'Live Orders',value:'BLOCKED',inline:true}
+  ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],allowedMentions:{parse:[]}};
+}
+export function buildDiscordSystemPayload(snapshot={}){
+  const h=snapshot?.health||{},r=h?.operationalReadiness||{},oms=h?.shadowOms||{},fabric=h?.marketDataFabric||{},tg=h?.telegramPolling||{};
+  const rows=[['Runtime',yesNo(r?.ready)],['Audit Ledger',yesNo(h?.institutionalKernel?.ledgerHealthy)],['Market Fabric',yesNo(fabric?.healthy)],['Shadow OMS',yesNo(oms?.healthy)],['Telegram',tg?.lastPollError?'● ERROR':'● OK'],['Discord','● OK']];
+  return {embeds:[{title:'TCX // SYSTEM STATUS',description:rows.map(([k,v])=>'\`'+k.padEnd(14)+'\` '+v).join('\n'),fields:[
+    {name:'OMS',value:'Active '+String(oms?.active??0)+' · Filled '+String(oms?.filled??0),inline:true},
+    {name:'Market Events',value:String(fabric?.events??'—'),inline:true},
+    {name:'Safety',value:'ABSTAIN / SHADOW_ONLY',inline:true}
+  ],footer:{text:MARKERS.system},timestamp:new Date().toISOString()}],allowedMentions:{parse:[]}};
+}
+function shadowTradePayload(position={}){
+  const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT'),side=String(position?.side||'—').toUpperCase();
+  const pnl=Number(position?.lastMark?.unrealizedNetPnlQuote),ret=Number(position?.lastMark?.unrealizedReturnPct);
+  return {embeds:[{title:'TCX SHADOW TRADE · '+symbol+' · '+side,description:'**OPEN · SHADOW_ONLY**',fields:[
+    {name:'Entry',value:String(position?.entryPrice??'—'),inline:true},{name:'PnL',value:Number.isFinite(pnl)?money(pnl):'—',inline:true},{name:'Return',value:Number.isFinite(ret)?percent(ret):'—',inline:true},
+    {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true},{name:'Horizon',value:String(position?.horizonId||'—'),inline:true},{name:'Mode',value:String(position?.entryMode||'STANDARD'),inline:true}
+  ],footer:{text:String(position?.positionId||'TCX_SHADOW_POSITION')},timestamp:new Date(Number(position?.openedAt)||Date.now()).toISOString()}],allowedMentions:{parse:[]}};
+}
+function berlinParts(){
+  const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+  const get=k=>p.find(x=>x.type===k)?.value||'';
+  return {date:get('year')+'-'+get('month')+'-'+get('day'),hour:Number(get('hour')),minute:Number(get('minute'))};
+}
 
 function symbolOption(){return {type:3,name:'symbol',description:'z. B. BTC, ETH, SOL',required:true};}
 function fakeChatId(guildId,channelId,userId){return 'discord:'+guildId+':'+channelId+':'+userId;}
@@ -75,24 +155,30 @@ function commandText(interaction){
     return p==='week'?'/weekstats':p==='month'?'/monthstats':'/daystats';
   }
   if(n==='why_not_trade')return '/why_not_trade';
+  if(n==='report')return '/daystats';
   if(n==='start'||n==='help'||n==='portfolio'||n==='data')return '/'+n;
   return null;
 }
 
-export function createDiscordTelegramBridge({token,applicationId,guildId,handleUpdate,logger=console}={}){
+export function createDiscordTelegramBridge({token,applicationId,guildId,handleUpdate,getMissionControlSnapshot=()=>null,autoSetup=true,refreshMs=60000,marketRefreshMs=120000,logger=console}={}){
   token=String(token||'').trim(); applicationId=String(applicationId||'').trim(); guildId=String(guildId||'').trim();
   if(!token||!applicationId||!guildId||typeof handleUpdate!=='function')throw new Error('DISCORD_BRIDGE_CONFIG_INVALID');
   const client=new Client({intents:[GatewayIntentBits.Guilds]});
   const rest=new REST({version:'10'}).setToken(token);
   const contexts=new Map();
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastError:null,commands:COMMANDS.length};
+  const channelCache=new Map();
+  const tradeCards=new Map();
+  const timers=new Set();
+  let lastDailyReportDate=null;
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0};
   function fail(scope,err){state.lastError=scope+': '+(err instanceof Error?err.message:String(err));try{logger.error('[TCX_DISCORD]',state.lastError);}catch{}}
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
     const ctx=contexts.get(String(chatId)); const chunks=splitText(body.text,2000); let first=null;
+    const panelChat=parseDiscordChatId(chatId)?.userId==='panel';
     for(let i=0;i<chunks.length;i++){
       const payload={content:chunks[i],allowedMentions:{parse:[]}};
-      if(i===0){const comps=discordComponents(body.reply_markup);if(comps.length)payload.components=comps;}
+      if(i===0&&!panelChat){const comps=discordComponents(body.reply_markup);if(comps.length)payload.components=comps;}
       let msg;
       if(ctx&&!ctx.responded){msg=await ctx.interaction.editReply(payload);ctx.responded=true;}
       else if(ctx)msg=await ctx.interaction.followUp(payload);
@@ -103,7 +189,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
   async function editText(chatId,body){
     const x=await channelFor(chatId); const msg=await x.c.messages.fetch(String(body.message_id));
-    const payload={content:clip(body.text,2000),components:discordComponents(body.reply_markup),allowedMentions:{parse:[]}};
+    const panelChat=parseDiscordChatId(chatId)?.userId==='panel';
+    const payload={content:clip(body.text,2000),components:panelChat?[]:discordComponents(body.reply_markup),allowedMentions:{parse:[]}};
     const edited=await msg.edit(payload); return {message_id:edited.id,chat:{id:chatId},text:String(body.text||'')};
   }
   async function sendPhoto(chatId,fields,fileName,fileBuffer,mime){
@@ -139,10 +226,89 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(method==='editMessageMedia')return editPhoto(fields.chat_id,fields,fileName,fileBuffer,mime);
     throw new Error('DISCORD_TELEGRAM_MULTIPART_UNSUPPORTED:'+method);
   }
+
+  async function safeMissionSnapshot(){try{return await Promise.resolve(getMissionControlSnapshot())||{};}catch(err){fail('mission-snapshot',err);return {};}}
+  async function getGuild(){return client.guilds.fetch(guildId);}
+  async function ensureLayout(){
+    const g=await getGuild(); await g.channels.fetch();
+    const member=g.members.me||await g.members.fetchMe().catch(()=>null);
+    const canManage=Boolean(member?.permissions?.has(PermissionFlagsBits.ManageChannels));
+    const created=[]; channelCache.clear();
+    for(const section of SERVER_LAYOUT){
+      let category=g.channels.cache.find(c=>c.type===ChannelType.GuildCategory&&c.name===section.category);
+      if(!category){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');category=await g.channels.create({name:section.category,type:ChannelType.GuildCategory,reason:'TCX Discord V2 setup'});created.push(section.category);}
+      for(const spec of section.channels){
+        let channel=g.channels.cache.find(c=>c.type===ChannelType.GuildText&&c.name===spec.name);
+        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:spec.topic,reason:'TCX Discord V2 setup'});created.push('#'+spec.name);}
+        channelCache.set(spec.name,channel);
+      }
+    }
+    state.channels=channelCache.size; state.setupStatus='READY'; state.setupError=null;
+    return {ok:true,created,channels:channelCache.size};
+  }
+  async function findMarked(channel,marker){try{const messages=await channel.messages.fetch({limit:50});return messages.find(m=>m.author?.id===client.user?.id&&hasMarker(m,marker))||null;}catch{return null;}}
+  async function upsertMarked(channel,marker,payload){let m=await findMarked(channel,marker);return m?m.edit(payload):channel.send(payload);}
+  async function ensureStart(){const c=channelCache.get('start-here');return c?upsertMarked(c,MARKERS.start,startPayload()):null;}
+  async function refreshTerminal(){const c=channelCache.get('tcx-terminal');if(!c)return null;const m=await upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot()));state.lastRefreshAt=Date.now();return m;}
+  async function refreshSystem(){const c=channelCache.get('system-status');return c?upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())):null;}
+  async function latestBotMessage(channel){try{const messages=await channel.messages.fetch({limit:20});return messages.find(m=>m.author?.id===client.user?.id)||null;}catch{return null;}}
+  async function refreshCorePanel(channel,callbackData){
+    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
+    const chatId=fakeChatId(guildId,channel.id,'panel');
+    await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||'')}}});
+  }
+  async function refreshMarketPanels(){
+    let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
+    state.marketPanels=count; state.lastMarketRefreshAt=Date.now(); return count;
+  }
+  async function refreshGlobalIntel(){const c=channelCache.get('global-intel');if(c)try{await refreshCorePanel(c,'home:news');}catch(err){fail('global-intel',err);}}
+  async function dispatchReadCommand(channelName,text){
+    const c=channelCache.get(channelName); if(!c)return false; const chatId=fakeChatId(guildId,c.id,'panel');
+    await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
+  }
+  async function syncTradeCards(){
+    const c=channelCache.get('live-trades'); if(!c)return;
+    const snapshot=await safeMissionSnapshot(),positions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[],active=new Set();
+    const perms=c.permissionsFor(client.user),canThreads=Boolean(perms?.has(PermissionFlagsBits.CreatePublicThreads)&&perms?.has(PermissionFlagsBits.SendMessagesInThreads));
+    for(const p of positions.slice(0,20)){
+      const id=String(p?.positionId||''); if(!id)continue; active.add(id); let card=tradeCards.get(id);
+      if(card){try{const msg=await c.messages.fetch(card.messageId);await msg.edit(shadowTradePayload(p));continue;}catch{tradeCards.delete(id);}}
+      try{
+        const recent=await c.messages.fetch({limit:50});const existing=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id));
+        const starter=existing||await c.send(shadowTradePayload(p));let threadId=null;
+        if(canThreads)try{const activeThreads=await c.threads.fetchActive();let thread=activeThreads.threads.find(t=>String(t.name).includes(id.slice(-8)));if(!thread){thread=await starter.startThread({name:clip(String(p.symbol||'TRADE').replace('USDT','')+'-'+String(p.side||'').toUpperCase()+'-'+id.slice(-8),90),autoArchiveDuration:1440,reason:'TCX shadow trade lifecycle'});await thread.send({content:'Lifecycle-Thread für diesen **Shadow-Trade**. Keine echte Order.',allowedMentions:{parse:[]}});}threadId=thread?.id||null;}catch(err){fail('trade-thread:'+id,err);}
+        tradeCards.set(id,{messageId:starter.id,threadId});
+      }catch(err){fail('trade-card:'+id,err);}
+    }
+    for(const [id,card] of [...tradeCards])if(!active.has(id)){try{const msg=await c.messages.fetch(card.messageId);const embed=msg.embeds?.[0]?.toJSON?.()||{};embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();await msg.edit({embeds:[embed],allowedMentions:{parse:[]}});}catch{}tradeCards.delete(id);}
+    state.tradeCards=tradeCards.size;state.lastTradeSyncAt=Date.now();
+  }
+  async function maybeDailyReport(){const t=berlinParts();if(t.hour===23&&t.minute>=55&&lastDailyReportDate!==t.date){lastDailyReportDate=t.date;try{await dispatchReadCommand('performance','/daystats');}catch(err){fail('daily-report',err);}}}
+  function addTimer(fn,ms){const timer=setInterval(()=>void Promise.resolve().then(fn).catch(err=>fail('timer',err)),ms);timer.unref?.();timers.add(timer);}
+  function startSchedulers(){if(timers.size)return;addTimer(refreshTerminal,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshSystem,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshMarketPanels,Math.max(60000,Number(marketRefreshMs)||120000));addTimer(refreshGlobalIntel,180000);addTimer(syncTradeCards,20000);addTimer(maybeDailyReport,60000);}
+  async function bootstrapV2(){
+    try{const setup=await ensureLayout();await ensureStart();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards()]);startSchedulers();return setup;}
+    catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
+  }
+  async function setupCommand(interaction){
+    await interaction.deferReply({ephemeral:true});
+    if(!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)){await interaction.editReply('Für \`/setup\` brauchst du **Server verwalten**.');return;}
+    const result=await bootstrapV2();
+    if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
+    const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
+    await interaction.editReply('TCX Discord V2 eingerichtet: '+result.channels+' Channels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+  }
+  async function terminalCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordTerminalPayload(await safeMissionSnapshot()));}
+  async function systemCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordSystemPayload(await safeMissionSnapshot()));}
+
   async function onCommand(interaction){
+    if(String(interaction.guildId)!==guildId){await interaction.reply({content:'Dieser TCX-Bot ist für einen anderen Server konfiguriert.',ephemeral:true});return;}
+    const name=String(interaction.commandName||'').toLowerCase();
+    if(name==='setup'){await setupCommand(interaction);return;}
+    if(name==='terminal'){await terminalCommand(interaction);return;}
+    if(name==='system'){await systemCommand(interaction);return;}
     const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
     await interaction.deferReply();
-    if(String(interaction.guildId)!==guildId){await interaction.editReply('Dieser TCX-Bot ist für einen anderen Server konfiguriert.');return;}
     const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id); const ctx={interaction:interaction,responded:false}; contexts.set(chatId,ctx);
     try{await handleUpdate({update_id:'discord:'+interaction.id,message:{message_id:interaction.id,chat:{id:chatId},from:{id:interaction.user.id,username:interaction.user.username},text:text}});if(!ctx.responded)await interaction.editReply('TCX hat keine Ausgabe erzeugt.');}
     catch(err){fail('command',err);try{await interaction.editReply('TCX Discord konnte den Befehl gerade nicht ausführen.');}catch{}}
@@ -155,11 +321,16 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     catch(err){fail('button',err);try{await interaction.followUp({content:'TCX konnte diese Aktion gerade nicht ausführen.',ephemeral:true});}catch{}}
     finally{contexts.delete(chatId);}
   }
-  client.on('ready',function(){state.ready=true;state.botUser=client.user?.tag||client.user?.id||null;state.lastReadyAt=Date.now();state.lastError=null;});
-  client.on('error',function(err){fail('client',err);});
-  client.on('interactionCreate',function(interaction){state.lastInteractionAt=Date.now();if(interaction.isChatInputCommand())void onCommand(interaction);else if(interaction.isButton())void onButton(interaction);});
-  async function start(){await rest.put(Routes.applicationGuildCommands(applicationId,guildId),{body:COMMANDS});state.registered=true;await client.login(token);return snapshot();}
-  async function stop(){client.destroy();state.ready=false;}
-  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size});}
-  return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,isChatId:function(v){return isDiscordChatId(v,guildId);}});
+  client.on(Events.ClientReady,function(readyClient){state.ready=true;state.botUser=readyClient.user?.tag||readyClient.user?.id||null;state.lastReadyAt=Date.now();state.lastError=null;});
+  client.on(Events.Error,function(err){fail('client',err);});
+  client.on(Events.InteractionCreate,function(interaction){state.lastInteractionAt=Date.now();if(interaction.isChatInputCommand())void onCommand(interaction);else if(interaction.isButton())void onButton(interaction);});
+  async function start(){
+    await rest.put(Routes.applicationGuildCommands(applicationId,guildId),{body:COMMANDS});state.registered=true;await client.login(token);
+    if(!client.isReady())await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('DISCORD_READY_TIMEOUT')),15000);client.once(Events.ClientReady,()=>{clearTimeout(timeout);resolve();});});
+    if(autoSetup)await bootstrapV2();
+    return snapshot();
+  }
+  async function stop(){for(const timer of timers)clearInterval(timer);timers.clear();client.destroy();state.ready=false;}
+  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size});}
+  return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }
