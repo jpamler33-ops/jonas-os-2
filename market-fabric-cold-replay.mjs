@@ -217,6 +217,19 @@ function orderedSegments(manifest){
   return [...manifest.segments].sort((a,b)=>Number(b.lastSeq||0)-Number(a.lastSeq||0));
 }
 
+export function classifyVerifiedReplayAvailability(state,{archiveAttempted=false,archiveError=null}={}){
+  if(state?.primary){
+    return {available:true,status:'VERIFIED',reason:null};
+  }
+  if(archiveError){
+    return {available:false,status:'FAIL_CLOSED',reason:'ARCHIVE_VERIFICATION_FAILED'};
+  }
+  if(archiveAttempted){
+    return {available:false,status:'UNAVAILABLE',reason:'NO_PRIMARY_AT_ASOF'};
+  }
+  return {available:false,status:'UNAVAILABLE',reason:'PRIMARY_NOT_RETAINED'};
+}
+
 export async function sampleArchivedReplayPoints({
   filePath,
   coldStore,
