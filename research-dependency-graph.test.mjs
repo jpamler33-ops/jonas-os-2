@@ -160,3 +160,92 @@ test('dependency admission binding preserves stricter existing validity',()=>{
   assert.equal(v.status,'EXPIRED');
   assert.ok(v.reasons.includes('OLD_STATE'));
 });
+
+
+test('derived source is blocked when an upstream source is quarantined',()=>{
+  const derived={
+    seq:3,
+    recordHash:'3'.repeat(64),
+    streamKey:'BTCUSDT',
+    domain:'DERIVATIVES',
+    source:'BINANCE_OKX_DERIVED',
+    sourceEventId:'derived-3',
+    availableAt:1000,
+    validUntil:5000,
+    features:[{id:'research.derivatives.fundingRateVenueSpread',value:.0001}],
+    provenance:{dependencies:['DERIVATIVES:BINANCE_USDM_PUBLIC','DERIVATIVES:OKX_PUBLIC']},
+    governance:{
+      sourceKey:'DERIVATIVES:BINANCE_OKX_DERIVED',
+      decision:'ACCEPT',
+      sourceStatus:'HEALTHY',
+      usableForResearch:true
+    }
+  };
+  const p=plane([
+    rec({seq:1,recordHash:R1,source:'BINANCE_USDM_PUBLIC',featureId:'research.derivatives.fundingRate'}),
+    rec({seq:2,recordHash:R2,source:'OKX_PUBLIC',featureId:'research.derivatives.okxFundingRate'}),
+    derived
+  ]);
+  const summary=gov([
+    {sourceKey:'DERIVATIVES:BINANCE_USDM_PUBLIC',status:'HEALTHY'},
+    {sourceKey:'DERIVATIVES:OKX_PUBLIC',status:'QUARANTINED'},
+    {sourceKey:'DERIVATIVES:BINANCE_OKX_DERIVED',status:'HEALTHY'}
+  ],1200);
+  const g=buildResearchDependencyGraph({
+    plane:p,
+    governanceSummary:summary,
+    streamKey:'BTCUSDT',
+    asOf:1500,
+    knowledgeTime:1600,
+    forecastInputFingerprint:H
+  });
+  const feature=explainResearchFeatureLineage(g,'research.derivatives.fundingRateVenueSpread');
+  assert.equal(feature.feature.state,'BLOCKED');
+  assert.ok(feature.upstreamSources.some(x=>x.sourceKey==='DERIVATIVES:OKX_PUBLIC'&&x.state==='BLOCKED'));
+  assert.ok(g.impact.impactedSourceKeys.includes('DERIVATIVES:OKX_PUBLIC'));
+  assert.equal(g.gate,'ABSTAIN');
+  assert.equal(verifyResearchDependencyGraph(g).ok,true);
+});
+
+test('derived source is healthy only when all upstream sources are healthy',()=>{
+  const derived={
+    seq:3,
+    recordHash:'3'.repeat(64),
+    streamKey:'BTCUSDT',
+    domain:'DERIVATIVES',
+    source:'BINANCE_OKX_DERIVED',
+    sourceEventId:'derived-3',
+    availableAt:1000,
+    validUntil:5000,
+    features:[{id:'research.derivatives.fundingRateVenueSpread',value:.0001}],
+    provenance:{dependencies:['DERIVATIVES:BINANCE_USDM_PUBLIC','DERIVATIVES:OKX_PUBLIC']},
+    governance:{
+      sourceKey:'DERIVATIVES:BINANCE_OKX_DERIVED',
+      decision:'ACCEPT',
+      sourceStatus:'HEALTHY',
+      usableForResearch:true
+    }
+  };
+  const p=plane([
+    rec({seq:1,recordHash:R1,source:'BINANCE_USDM_PUBLIC',featureId:'research.derivatives.fundingRate'}),
+    rec({seq:2,recordHash:R2,source:'OKX_PUBLIC',featureId:'research.derivatives.okxFundingRate'}),
+    derived
+  ]);
+  const summary=gov([
+    {sourceKey:'DERIVATIVES:BINANCE_USDM_PUBLIC',status:'HEALTHY'},
+    {sourceKey:'DERIVATIVES:OKX_PUBLIC',status:'HEALTHY'},
+    {sourceKey:'DERIVATIVES:BINANCE_OKX_DERIVED',status:'HEALTHY'}
+  ],1200);
+  const g=buildResearchDependencyGraph({
+    plane:p,
+    governanceSummary:summary,
+    streamKey:'BTCUSDT',
+    asOf:1500,
+    knowledgeTime:1600,
+    forecastInputFingerprint:H
+  });
+  const feature=explainResearchFeatureLineage(g,'research.derivatives.fundingRateVenueSpread');
+  assert.equal(feature.feature.state,'HEALTHY');
+  assert.equal(feature.upstreamSources.length,2);
+  assert.equal(verifyResearchDependencyGraph(g).ok,true);
+});
