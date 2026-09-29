@@ -645,6 +645,11 @@ test('gzip persistence externalizes immutable issuances into an atomic A/B sidec
   assert.equal(meta.issuanceStore.count,1);
   assert.ok(meta.issuanceStore.logicalBytes>0);
   assert.ok(meta.issuanceStore.storageBytes<meta.issuanceStore.logicalBytes);
+  const sidecarPath=file+'.issuances.'+meta.issuanceStore.slot+'.json.gz';
+  const logicalSidecar=gunzipSync(await readFile(sidecarPath)).toString('utf8');
+  assert.equal(Buffer.byteLength(logicalSidecar),meta.issuanceStore.logicalBytes);
+  assert.equal(sha256(logicalSidecar),meta.issuanceStore.sha256);
+  assert.equal(JSON.parse(logicalSidecar).issuances.length,1);
 
   const reopened=await openInstitutionalForecastRuntime(file,{
     snapshotCompression:'gzip',
