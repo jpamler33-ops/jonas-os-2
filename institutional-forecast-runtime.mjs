@@ -124,6 +124,70 @@ async function writeGzipJsonArrayStore({filePath,version,arrayKey,rows,projectRo
   return {sha256:hash.digest('hex'),logicalBytes,storageBytes};
 }
 
+function* jsonArrayBuffers(rows){
+  yield Buffer.from('[','utf8');
+  let first=true;
+  for(const row of Array.isArray(rows)?rows:[]){
+    const serialized=JSON.stringify(row);
+    const value=serialized===undefined?'null':serialized;
+    yield Buffer.from((first?'':',')+value,'utf8');
+    first=false;
+  }
+  yield Buffer.from(']','utf8');
+}
+
+function* journalStoreBuffers(journal){
+  yield Buffer.from('{"version":'+JSON.stringify(FORECAST_JOURNAL_STORE_VERSION)+',"journal":{"version":'+JSON.stringify(journal?.version??3)+',"entries":','utf8');
+  yield* jsonArrayBuffers(journal?.entries);
+  yield Buffer.from('}}','utf8');
+}
+
+function* engineStoreBuffers(engine){
+  yield Buffer.from('{"version":'+JSON.stringify(FORECAST_ENGINE_STORE_VERSION)+',"engine":{"config":'+JSON.stringify(engine?.config??null)+',"history":','utf8');
+  yield* jsonArrayBuffers(engine?.history);
+  yield Buffer.from(',"calibration":','utf8');
+  yield* jsonArrayBuffers(engine?.calibration);
+  yield Buffer.from(',"reliability":','utf8');
+  yield* jsonArrayBuffers(engine?.reliability);
+  yield Buffer.from(',"modelPerformance":','utf8');
+  yield* jsonArrayBuffers(engine?.modelPerformance);
+  yield Buffer.from(',"intervalCalibration":','utf8');
+  yield* jsonArrayBuffers(engine?.intervalCalibration);
+  yield Buffer.from(',"drift":','utf8');
+  yield* jsonArrayBuffers(engine?.drift);
+  yield Buffer.from('}}','utf8');
+}
+
+function fingerprintJsonBuffers(buffers){
+  const hash=createHash('sha256');
+  let logicalBytes=0;
+  for(const chunk of buffers){
+    logicalBytes+=chunk.length;
+    hash.update(chunk);
+  }
+  return {sha256:hash.digest('hex'),logicalBytes};
+}
+
+async function writeGzipJsonBuffers({filePath,buffers,level=1}){
+  const hash=createHash('sha256');
+  let logicalBytes=0;
+  const audit=new Transform({
+    transform(chunk,_encoding,callback){
+      logicalBytes+=chunk.length;
+      hash.update(chunk);
+      callback(null,chunk);
+    }
+  });
+  await pipeline(
+    Readable.from(buffers),
+    audit,
+    createGzip({level}),
+    createWriteStream(filePath,{flags:'w',mode:0o600})
+  );
+  const storageBytes=(await stat(filePath)).size;
+  return {sha256:hash.digest('hex'),logicalBytes,storageBytes};
+}
+
 function manifestComponentsFromSnapshot(snapshot){
   return {
     issuanceStore:snapshot?.issuanceStore??null,
@@ -924,12 +988,8 @@ export async function saveInstitutionalForecastRuntime(runtime){
   let journalStoreMeta=null;
   try{
     if(externalizeArchives){
-      const journalStorePayload={
-        version:FORECAST_JOURNAL_STORE_VERSION,
-        journal:payload.journal
-      };
-      const journalSerialized=JSON.stringify(journalStorePayload);
-      const journalLogicalBytes=Buffer.byteLength(journalSerialized);
+      const journalFingerprint=fingerprintJsonBuffers(journalStoreBuffers(payload.journal));
+      const journalLogicalBytes=journalFingerprint.logicalBytes;
       const maxJournalStoreBytes=journalStoreByteLimit(runtime.maxJournalStoreBytes);
       if(journalLogicalBytes>maxJournalStoreBytes){
         throw Object.assign(new Error('forecast journal store exceeds configured persistence limit'),{
@@ -938,22 +998,28 @@ export async function saveInstitutionalForecastRuntime(runtime){
           maxJournalStoreBytes
         });
       }
-      const journalHash=sha256(journalSerialized);
+      const journalHash=journalFingerprint.sha256;
       let journalSlot=runtime.journalStoreSlot;
       let journalBytes=runtime.lastJournalStoreBytes;
       if(!journalSlot||runtime.journalStoreHash!==journalHash){
         journalSlot=runtime.journalStoreSlot==='a'?'b':'a';
-        const packed=await gzip(Buffer.from(journalSerialized,'utf8'),{level:1});
         const storePath=journalStorePath(runtime.filePath,journalSlot);
         const storeTmp=storePath+'.tmp-'+process.pid;
         try{
-          await writeFile(storeTmp,packed,{mode:0o600});
+          const streamed=await writeGzipJsonBuffers({
+            filePath:storeTmp,
+            buffers:journalStoreBuffers(payload.journal),
+            level:1
+          });
+          if(streamed.sha256!==journalHash||streamed.logicalBytes!==journalLogicalBytes){
+            throw new Error('forecast journal store streaming fingerprint mismatch');
+          }
+          journalBytes=streamed.storageBytes;
           await rename(storeTmp,storePath);
         }catch(err){
           await rm(storeTmp,{force:true}).catch(()=>{});
           throw err;
         }
-        journalBytes=packed.length;
       }
       journalStoreMeta={
         version:FORECAST_JOURNAL_STORE_VERSION,
@@ -969,12 +1035,8 @@ export async function saveInstitutionalForecastRuntime(runtime){
         journalStore:journalStoreMeta
       };
 
-      const engineStorePayload={
-        version:FORECAST_ENGINE_STORE_VERSION,
-        engine:payload.engine
-      };
-      const engineSerialized=JSON.stringify(engineStorePayload);
-      const engineLogicalBytes=Buffer.byteLength(engineSerialized);
+      const engineFingerprint=fingerprintJsonBuffers(engineStoreBuffers(payload.engine));
+      const engineLogicalBytes=engineFingerprint.logicalBytes;
       const maxEngineStoreBytes=engineStoreByteLimit(runtime.maxEngineStoreBytes);
       if(engineLogicalBytes>maxEngineStoreBytes){
         throw Object.assign(new Error('forecast engine store exceeds configured persistence limit'),{
@@ -983,22 +1045,28 @@ export async function saveInstitutionalForecastRuntime(runtime){
           maxEngineStoreBytes
         });
       }
-      const engineHash=sha256(engineSerialized);
+      const engineHash=engineFingerprint.sha256;
       let engineSlot=runtime.engineStoreSlot;
       let engineBytes=runtime.lastEngineStoreBytes;
       if(!engineSlot||runtime.engineStoreHash!==engineHash){
         engineSlot=runtime.engineStoreSlot==='a'?'b':'a';
-        const packed=await gzip(Buffer.from(engineSerialized,'utf8'),{level:1});
         const storePath=engineStorePath(runtime.filePath,engineSlot);
         const storeTmp=storePath+'.tmp-'+process.pid;
         try{
-          await writeFile(storeTmp,packed,{mode:0o600});
+          const streamed=await writeGzipJsonBuffers({
+            filePath:storeTmp,
+            buffers:engineStoreBuffers(payload.engine),
+            level:1
+          });
+          if(streamed.sha256!==engineHash||streamed.logicalBytes!==engineLogicalBytes){
+            throw new Error('forecast engine store streaming fingerprint mismatch');
+          }
+          engineBytes=streamed.storageBytes;
           await rename(storeTmp,storePath);
         }catch(err){
           await rm(storeTmp,{force:true}).catch(()=>{});
           throw err;
         }
-        engineBytes=packed.length;
       }
       engineStoreMeta={
         version:FORECAST_ENGINE_STORE_VERSION,
