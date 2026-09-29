@@ -7591,60 +7591,124 @@ async function forecastOutcomeWatcher() {
   while(running) {
     await sleep(forecastOutcomeCheckMs);
     if(!forecastRuntime.healthy) continue;
-    const pending=forecastRuntime.journal.pending();
-    if(!pending.length) continue;
 
-    const started=Date.now();
-    const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
-    let observedSymbols=0;
-    let resolvedCount=0;
-    let auditFailures=0;
-
-    for(const symbol of symbols) {
-      if(!running) break;
-      try {
-        const s=await snapshot(symbol);
-        const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
-          symbol,
-          timestamp:Number(s.availableAt),
-          price:Number(s.price),
-          quality:1
-        });
-        observedSymbols++;
-        resolvedCount+=result.resolved.length;
-
-        for(const row of result.evaluations) {
-          const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
-          if(!audit) auditFailures++;
-        }
-      } catch(err) {
-        const msg=err instanceof Error?err.message:String(err);
-        recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
-        console.error('forecast outcome watcher error',symbol,msg);
-      }
-      await sleep(150);
-    }
+    const slotWaitStarted=Date.now();
+    while(running&&activeBackgroundResearchJob) await sleep(250);
+    if(!running) break;
+    const slotWaitMs=Date.now()-slotWaitStarted;
+    activeBackgroundResearchJob='outcome-watch';
 
     try {
-      await persistForecastRuntime('outcome-watch');
-    } catch {}
+      const started=Date.now();
+      const beforeMemory=process.memoryUsage();
+      const admission=evaluateAutoLearnMemoryAdmission({
+        phase:'ISSUE',
+        heapUsedMb:Math.round(beforeMemory.heapUsed/1024/1024),
+        rssMb:Math.round(beforeMemory.rss/1024/1024),
+        externalMb:Math.round(beforeMemory.external/1024/1024),
+        issueHeapMb:autoLearnHeapHeadroomMb,
+        issueRssMb:autoLearnRssHeadroomMb,
+        issueExternalMb:autoLearnExternalHeadroomMb,
+        resumeHeapMb:autoLearnResumeHeapMb,
+        resumeRssMb:autoLearnResumeRssMb,
+        resumeExternalMb:autoLearnResumeExternalMb
+      });
+      if(!admission.allowed){
+        console.warn('forecast outcome watch deferred for memory headroom',JSON.stringify({
+          slotWaitMs,
+          ...admission.memory,
+          exceeded:admission.exceeded,
+          threshold:admission.limits
+        }));
+        recordOperation(observability,{
+          name:'forecast_outcome_watch',
+          ok:true,
+          latencyMs:Date.now()-started,
+          error:'DEFERRED_MEMORY_PRESSURE'
+        });
+        continue;
+      }
 
-    recordOperation(observability,{
-      name:'forecast_outcome_watch',
-      ok:forecastRuntime.healthy&&auditFailures===0,
-      latencyMs:Date.now()-started,
-      error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
-    });
+      const pending=forecastRuntime.journal.pending();
+      if(!pending.length) continue;
 
-    if(resolvedCount){
-      console.log('forecast outcomes resolved',JSON.stringify({
-        resolved:resolvedCount,
-        observedSymbols,
-        pendingBefore:pending.length,
-        pendingAfter:forecastRuntime.journal.pending().length,
-        auditFailures
-      }));
-      await syncFeatureResearch('resolved-outcomes');
+      const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
+      let observedSymbols=0;
+      let resolvedCount=0;
+      let auditFailures=0;
+
+      for(const symbol of symbols) {
+        if(!running) break;
+        try {
+          const s=await snapshot(symbol);
+          const result=observeInstitutionalForecastOutcomePoint(forecastRuntime,{
+            symbol,
+            timestamp:Number(s.availableAt),
+            price:Number(s.price),
+            quality:1
+          });
+          observedSymbols++;
+          resolvedCount+=result.resolved.length;
+
+          for(const row of result.evaluations) {
+            const audit=await appendForecastEvaluationAuditQueued(row.trace,row.evaluation);
+            if(!audit) auditFailures++;
+          }
+        } catch(err) {
+          const msg=err instanceof Error?err.message:String(err);
+          recordError(observability,{scope:'forecast_runtime.outcome_watch',message:msg});
+          console.error('forecast outcome watcher error',symbol,msg);
+        }
+        await sleep(150);
+      }
+
+      try {
+        await persistForecastRuntime('outcome-watch');
+      } catch {}
+
+      const postMemory=process.memoryUsage();
+      const postAdmission=evaluateAutoLearnMemoryAdmission({
+        phase:'ISSUE',
+        heapUsedMb:Math.round(postMemory.heapUsed/1024/1024),
+        rssMb:Math.round(postMemory.rss/1024/1024),
+        externalMb:Math.round(postMemory.external/1024/1024),
+        issueHeapMb:autoLearnHeapHeadroomMb,
+        issueRssMb:autoLearnRssHeadroomMb,
+        issueExternalMb:autoLearnExternalHeadroomMb,
+        resumeHeapMb:autoLearnResumeHeapMb,
+        resumeRssMb:autoLearnResumeRssMb,
+        resumeExternalMb:autoLearnResumeExternalMb
+      });
+
+      recordOperation(observability,{
+        name:'forecast_outcome_watch',
+        ok:forecastRuntime.healthy&&auditFailures===0,
+        latencyMs:Date.now()-started,
+        error:auditFailures?auditFailures+' forecast evaluation audit failure(s)':forecastRuntime.lastError
+      });
+
+      if(resolvedCount){
+        console.log('forecast outcomes resolved',JSON.stringify({
+          resolved:resolvedCount,
+          observedSymbols,
+          pendingBefore:pending.length,
+          pendingAfter:forecastRuntime.journal.pending().length,
+          auditFailures,
+          slotWaitMs,
+          postMemory:postAdmission.memory
+        }));
+        if(postAdmission.allowed){
+          await syncFeatureResearch('resolved-outcomes');
+        }else{
+          console.warn('resolved-outcome feature research deferred for memory headroom',JSON.stringify({
+            ...postAdmission.memory,
+            exceeded:postAdmission.exceeded,
+            threshold:postAdmission.limits
+          }));
+        }
+      }
+    } finally {
+      if(activeBackgroundResearchJob==='outcome-watch') activeBackgroundResearchJob=null;
     }
   }
 }
