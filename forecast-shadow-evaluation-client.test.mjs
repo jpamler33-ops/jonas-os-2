@@ -59,8 +59,15 @@ test('adaptive shadow worker admission requires real serving headroom',()=>{
   assert.equal(forcedStillFailsHard.allowed,false);
   assert.equal(forcedStillFailsHard.reason,'HARD_MEMORY_PRESSURE');
 
+  const forcedExternalFailsHard=evaluateShadowWorkerAdmission({
+    mode:'ON',heapUsedMb:220,rssMb:500,externalMb:170,hardExternalMb:160
+  });
+  assert.equal(forcedExternalFailsHard.allowed,false);
+  assert.equal(forcedExternalFailsHard.reason,'HARD_MEMORY_PRESSURE');
+  assert.equal(forcedExternalFailsHard.limits.hardExternalMb,160);
+
   assert.equal(evaluateShadowWorkerAdmission({mode:'OFF',heapUsedMb:100,rssMb:200}).allowed,false);
-  assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V1');
+  assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2');
 });
 
 
