@@ -84,6 +84,11 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   // Direct production dependencies imported by bot.mjs. Keep the release
   // component identity closed over the serving entrypoint, not just feature subsets.
   'opportunity-allocator.mjs',
+  'strategy-edge-decay.mjs',
+  'evidence-promotion-gate.mjs',
+  'independent-proof-auditor.mjs',
+  'rolling-walk-forward.mjs',
+  'tail-risk-bootstrap.mjs',
   'shadow-leverage-risk.mjs',
   'portfolio-risk-brain.mjs',
   'pit-correlation-engine.mjs',
@@ -121,6 +126,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'expansion-runtime/external-research-provider.mjs',
 
   'forecast-runtime/utils/math.js',
+  'forecast-runtime/forecast/index.js',
   'forecast-runtime/forecast/types.js',
   'forecast-runtime/forecast/calibration.js',
   'forecast-runtime/forecast/reliability.js',
@@ -153,6 +159,10 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
 
   'expansion-runtime/provenance.mjs',
   'expansion-runtime/institutional-expansion.mjs',
+  'expansion-runtime/future-intelligence.mjs',
+  'expansion-runtime/memecoin-intelligence.mjs',
+  'expansion-runtime/narrative-reflexivity.mjs',
+  'expansion-runtime/trader-wallet-intelligence.mjs',
   'expansion-runtime/source-intelligence.mjs',
   'expansion-runtime/event-impact-memory.mjs',
   'expansion-runtime/liquidity-intelligence.mjs',
