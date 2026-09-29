@@ -6166,8 +6166,8 @@ async function handle(update) {
       await ack(q.id,'Superchart '+a.mode);
       return;
     }
-    if (String(data||'').startsWith('superlive:')) {
-      const p=String(data).split(':');
+    if (String(q.data||'').startsWith('superlive:')) {
+      const p=String(q.data).split(':');
       const symbol=p[1],mode=String(p[2]||'PRO').toUpperCase(),interval=String(p[3]||'5m').toLowerCase(),enabled=p[4]==='on';
       const isPhoto=Array.isArray(q.message?.photo)&&q.message.photo.length>0;
       await showSuperchart(chatId,symbol,{mode,interval,messageId:isPhoto?messageId:null,edit:isPhoto,live:enabled});
