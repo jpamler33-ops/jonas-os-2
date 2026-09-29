@@ -1,7 +1,7 @@
 import { AttachmentBuilder, ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, REST, Routes } from 'discord.js';
 import { buildBiggjTradeThesis } from './biggj-visual-intelligence.mjs';
 import { discordComponents, decodeDiscordCallbackCustomId } from './discord-component-ids.mjs';
-import { createSerialDedupeQueue } from './discord-serial-dedupe-queue.mjs';
+import { createSerialDedupeQueue, mapWithConcurrency } from './discord-serial-dedupe-queue.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V4';
 
@@ -565,12 +565,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const visualRefreshQueue=createSerialDedupeQueue({maxSize:64});
   const visualRefreshState=new Map();
   const tradeSyncIntervalMs=Math.max(15000,Number(tradeSyncMs)||20000);
+  const tradeSyncConcurrency=Math.max(1,Math.min(4,Math.floor(Number(process.env.TCX_DISCORD_TRADE_SYNC_CONCURRENCY||3)||3)));
   let schedulerStopped=false;
   let closedFeedInitialized=false;
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -802,16 +803,34 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await c.send({embeds:[{title:'TCX // STATUS CHANGE',description:(changes.join('\n')||'System state changed').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}});
     state.lastAlertAt=Date.now();
   }
-  async function upsertThesisChannelCard(position){
+  function cachedMessage(channel,messageId){
+    if(!channel||!messageId)return null;
+    return channel.messages?.cache?.get?.(String(messageId))||null;
+  }
+  async function resolveMessage(channel,messageId){
+    const cached=cachedMessage(channel,messageId);
+    if(cached)return cached;
+    if(!channel||!messageId)return null;
+    return channel.messages.fetch(String(messageId)).catch(()=>null);
+  }
+  async function resolveChannel(channelId){
+    if(!channelId)return null;
+    return client.channels.cache?.get?.(String(channelId))||client.channels.fetch(String(channelId)).catch(()=>null);
+  }
+  function footerId(message){
+    return String(message?.embeds?.[0]?.footer?.text||'');
+  }
+  function referencedStarterId(message){
+    return String(message?.reference?.messageId||'');
+  }
+  async function upsertThesisChannelCard(position,{recentByFooter=null}={}){
     const channel=channelCache.get('theses'); if(!channel)return null;
     const id=String(position?.positionId||''); if(!id)return null;
     let msg=null;
-    const cached=thesisCards.get(id);
-    if(cached) msg=await channel.messages.fetch(cached).catch(()=>null);
-    if(!msg){
-      const recent=await channel.messages.fetch({limit:50}).catch(()=>null);
-      msg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
-    }
+    const knownId=thesisCards.get(id);
+    if(knownId)msg=cachedMessage(channel,knownId);
+    if(!msg&&recentByFooter)msg=recentByFooter.get('BIGGJ_THESIS:'+id)||null;
+    if(!msg&&knownId)msg=await resolveMessage(channel,knownId);
     if(msg) await msg.edit(biggjThesisPayload(position));
     else msg=await channel.send(biggjThesisPayload(position));
     thesisCards.set(id,msg.id);
@@ -820,13 +839,18 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function ensureTradeThreadVisual(thread,position,prior={}){
     if(!thread||!thread.isTextBased())return prior;
     const id=String(position?.positionId||'');
-    const recent=await thread.messages.fetch({limit:50}).catch(()=>null);
-    let thesisMsg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    let thesisMsg=prior?.thesisMessageId?cachedMessage(thread,prior.thesisMessageId):null;
+    let visualMsg=prior?.visualMessageId?cachedMessage(thread,prior.visualMessageId):null;
+    if(!thesisMsg&&prior?.thesisMessageId)thesisMsg=await resolveMessage(thread,prior.thesisMessageId);
+    if(!visualMsg&&prior?.visualMessageId)visualMsg=await resolveMessage(thread,prior.visualMessageId);
+    if(!thesisMsg||!visualMsg){
+      const recent=await thread.messages.fetch({limit:50}).catch(()=>null);
+      if(!thesisMsg)thesisMsg=recent?.find(m=>m.author?.id===client.user?.id&&footerId(m)==='BIGGJ_THESIS:'+id)||null;
+      if(!visualMsg)visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
+    }
     if(thesisMsg) await thesisMsg.edit(biggjThesisPayload(position));
     else thesisMsg=await thread.send(biggjThesisPayload(position));
 
-    let visualMsg=prior?.visualMessageId?await thread.messages.fetch(prior.visualMessageId).catch(()=>null):null;
-    if(!visualMsg) visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
     if(!visualMsg){
       visualMsg=await thread.send({content:'BIGGJ // TRADE VISUAL\nRendering live market state …',allowedMentions:{parse:[]}});
     }
@@ -843,15 +867,24 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return next;
   }
   async function syncThesisDashboard(positions){
+    const channel=channelCache.get('theses');
     const active=new Set();
-    for(const p of (positions||[]).slice(0,20)){
-      const id=String(p?.positionId||''); if(!id)continue; active.add(id);
-      await upsertThesisChannelCard(p).catch(err=>fail('thesis-card:'+id,err));
+    const rows=(positions||[]).slice(0,20);
+    const recent=channel?await channel.messages.fetch({limit:50}).catch(()=>null):null;
+    const recentByFooter=new Map();
+    for(const msg of recent?.values?.()||[]){
+      if(msg.author?.id!==client.user?.id)continue;
+      const footer=footerId(msg);
+      if(footer&&!recentByFooter.has(footer))recentByFooter.set(footer,msg);
     }
+    await mapWithConcurrency(rows,tradeSyncConcurrency,async p=>{
+      const id=String(p?.positionId||''); if(!id)return;
+      active.add(id);
+      await upsertThesisChannelCard(p,{recentByFooter}).catch(err=>fail('thesis-card:'+id,err));
+    });
     for(const [id,messageId] of [...thesisCards])if(!active.has(id)){
-      const channel=channelCache.get('theses');
       if(channel){
-        const msg=await channel.messages.fetch(messageId).catch(()=>null);
+        const msg=cachedMessage(channel,messageId)||await resolveMessage(channel,messageId);
         if(msg)await msg.edit({content:'',embeds:[...(msg.embeds||[])].map(e=>{const x=e.toJSON();x.description=(x.description||'')+'\n\n**THESIS CLOSED / ARCHIVED**';return x;}),components:[],allowedMentions:{parse:[]}}).catch(()=>null);
       }
       thesisCards.delete(id);
@@ -873,26 +906,47 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await syncThesisDashboard(positions);
     const active=new Set();
     const perms=c.permissionsFor(client.user),canThreads=Boolean(perms?.has(PermissionFlagsBits.CreatePublicThreads)&&perms?.has(PermissionFlagsBits.SendMessagesInThreads));
-    for(const p of positions.slice(0,20)){
-      const id=String(p?.positionId||''); if(!id)continue;
+    const recentLive=await c.messages.fetch({limit:100}).catch(()=>null);
+    const liveByFooter=new Map();
+    const feedByStarter=new Map();
+    for(const msg of recentLive?.values?.()||[]){
+      if(msg.author?.id!==client.user?.id)continue;
+      const footer=footerId(msg);
+      if(footer&&!liveByFooter.has(footer))liveByFooter.set(footer,msg);
+      const starterId=referencedStarterId(msg);
+      if(starterId&&!feedByStarter.has(starterId))feedByStarter.set(starterId,msg);
+    }
+    let activeThreadsPromise=null;
+    const findActiveThread=async id=>{
+      if(!canThreads)return null;
+      if(!activeThreadsPromise)activeThreadsPromise=c.threads.fetchActive().catch(()=>null);
+      const rows=await activeThreadsPromise;
+      return rows?.threads?.find(t=>String(t.name).includes(String(id).slice(-8)))||null;
+    };
+    await mapWithConcurrency(positions.slice(0,20),tradeSyncConcurrency,async p=>{
+      const id=String(p?.positionId||''); if(!id)return;
       active.add(id);
       let card=tradeCards.get(id)||{};
       try{
-        let starter=card.messageId?await c.messages.fetch(card.messageId).catch(()=>null):null;
-        if(!starter){
-          const recent=await c.messages.fetch({limit:50});
-          starter=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id))||null;
-        }
+        let starter=card.messageId?cachedMessage(c,card.messageId):null;
+        if(!starter)starter=liveByFooter.get(id)||null;
+        if(!starter&&card.messageId)starter=await resolveMessage(c,card.messageId);
         if(starter)await starter.edit(shadowTradePayload(p));
         else starter=await c.send(shadowTradePayload(p));
 
-        let feedVisual=card.feedVisualMessageId?await c.messages.fetch(card.feedVisualMessageId).catch(()=>null):null;
+        let feedVisual=card.feedVisualMessageId?cachedMessage(c,card.feedVisualMessageId):null;
+        if(!feedVisual)feedVisual=feedByStarter.get(String(starter.id))||null;
+        if(!feedVisual&&card.feedVisualMessageId)feedVisual=await resolveMessage(c,card.feedVisualMessageId);
         if(!feedVisual){
-          feedVisual=await c.send({content:'BIGGJ // LIVE TRADE VISUAL\nRendering market state …',allowedMentions:{parse:[]}});
-          card.feedVisualMessageId=feedVisual.id;
+          feedVisual=await c.send({
+            content:'BIGGJ // LIVE TRADE VISUAL\nRendering market state …',
+            reply:{messageReference:starter.id,failIfNotExists:false},
+            allowedMentions:{parse:[]}
+          });
         }
+        card.feedVisualMessageId=feedVisual.id;
         const feedVisualKey='feed:'+id;
-        if(feedVisual&&tradeVisualDue(feedVisualKey)){
+        if(tradeVisualDue(feedVisualKey)){
           queueTradeVisual({
             key:feedVisualKey,
             channel:c,
@@ -901,10 +955,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
           });
         }
 
-        let thread=card.threadId?await client.channels.fetch(card.threadId).catch(()=>null):null;
+        let thread=card.threadId?await resolveChannel(card.threadId):null;
         if(canThreads&&!thread){
-          const activeThreads=await c.threads.fetchActive().catch(()=>null);
-          thread=activeThreads?.threads?.find(t=>String(t.name).includes(id.slice(-8)))||null;
+          thread=await findActiveThread(id);
           if(!thread){
             thread=await starter.startThread({name:clip(String(p.symbol||'TRADE').replace('USDT','')+'-'+String(p.side||'').toUpperCase()+'-'+id.slice(-8),90),autoArchiveDuration:1440,reason:'BIGGJ shadow trade intelligence lifecycle'});
             await thread.send({content:'BIGGJ // TRADE ROOM\nPoint-in-time Living Thesis + Visual Intelligence. **SHADOW_ONLY**.',components:marketActionComponents(p.symbol),allowedMentions:{parse:[]}});
@@ -914,16 +967,16 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         if(thread)card=await ensureTradeThreadVisual(thread,p,card);
         tradeCards.set(id,card);
       }catch(err){fail('trade-card:'+id,err);}
-    }
+    });
     for(const [id,card] of [...tradeCards])if(!active.has(id)){
       try{
-        const msg=await c.messages.fetch(card.messageId);
+        const msg=cachedMessage(c,card.messageId)||await resolveMessage(c,card.messageId);
         const embed=msg.embeds?.[0]?.toJSON?.()||{};
         embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();
         await msg.edit({embeds:[embed],components:[],allowedMentions:{parse:[]}});
       }catch{}
       if(card.threadId){
-        const thread=await client.channels.fetch(card.threadId).catch(()=>null);
+        const thread=await resolveChannel(card.threadId);
         if(thread?.isTextBased())await thread.send({content:'BIGGJ // POSITION CLOSED\nFinal replay wird im Closed-Trade-Feed archiviert.',allowedMentions:{parse:[]}}).catch(()=>null);
       }
       visualRefreshQueue.cancel('feed:'+id);

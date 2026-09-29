@@ -6,7 +6,7 @@ import {
   decodeDiscordCallbackCustomId,
   encodeDiscordCallbackCustomId
 } from './discord-component-ids.mjs';
-import { createSerialDedupeQueue } from './discord-serial-dedupe-queue.mjs';
+import { createSerialDedupeQueue, mapWithConcurrency } from './discord-serial-dedupe-queue.mjs';
 
 test('duplicate Telegram callbacks receive unique reversible Discord custom ids',()=>{
   const action='superchart:BTCUSDT:FULL:5m';
@@ -74,4 +74,18 @@ test('serial dedupe queue bounds work and never runs duplicate keys concurrently
   assert.deepEqual(order,['a:start','a:end','b']);
   assert.equal(q.snapshot().depth,0);
   assert.equal(q.snapshot().completed,2);
+});
+
+
+test('bounded async mapper preserves result order and concurrency cap',async()=>{
+  let active=0,maxActive=0;
+  const out=await mapWithConcurrency([1,2,3,4,5],2,async value=>{
+    active++;maxActive=Math.max(maxActive,active);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    active--;
+    return value*10;
+  });
+  assert.deepEqual(out,[10,20,30,40,50]);
+  assert.ok(maxActive<=2);
+  assert.ok(maxActive>=2);
 });
