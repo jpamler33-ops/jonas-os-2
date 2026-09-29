@@ -870,15 +870,53 @@ function trackerArchiveRowForPersistence(record){
   };
 }
 
+function intelligencePersistenceView(service,{externalizeTrackerArchive=false}={}){
+  const trackerRows=[...(service?.tracker?.records?.values?.()??[])];
+  return {
+    version:1,
+    sequence:Number(service?.sequence||0),
+    tracker:{
+      version:1,
+      records:trackerRows.map(record=>({
+        ...record,
+        report:trackerReportForPersistence(record?.report),
+        ...(externalizeTrackerArchive?{issueState:null,revisions:[]}:null)
+      }))
+    },
+    // The save path is synchronous until serialization begins; shallow references
+    // avoid duplicating the bounded audit trail in the serving heap.
+    audit:Array.isArray(service?.audit)
+      ?service.audit.slice(-Math.max(0,Math.floor(Number(service?.maxAuditEvents)||0)))
+      :[]
+  };
+}
+
+function externalizedHotSnapshot(runtime,savedAt=Date.now()){
+  return {
+    version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
+    savedAt,
+    engine:engineSnapshot(runtime.engine),
+    journal:{version:3,entries:runtime.journal.entries},
+    intelligence:intelligencePersistenceView(runtime.intelligence,{externalizeTrackerArchive:true}),
+    issuances:[]
+  };
+}
+
 export async function saveInstitutionalForecastRuntime(runtime){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
   await mkdir(path.dirname(runtime.filePath),{recursive:true});
-  const payload=institutionalForecastRuntimeSnapshot(runtime);
   const externalizeArchives=runtime.snapshotCompression==='gzip';
-  let persistencePayload={
-    ...payload,
-    intelligence:intelligenceForPersistence(payload.intelligence,{externalizeTrackerArchive:externalizeArchives})
-  };
+  // In compressed serving mode, do not materialize a second full copy of
+  // issuances/tracker state before immediately externalizing it to sidecars.
+  const payload=externalizeArchives
+    ?externalizedHotSnapshot(runtime)
+    :institutionalForecastRuntimeSnapshot(runtime);
+  let persistencePayload=externalizeArchives
+    ?payload
+    :{
+      ...payload,
+      intelligence:intelligenceForPersistence(payload.intelligence,{externalizeTrackerArchive:false})
+    };
   const tmp=runtime.filePath+'.tmp-'+process.pid;
   let issuanceStoreMeta=null;
   let trackerArchiveMeta=null;
@@ -976,9 +1014,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       };
     }
     if(externalizeArchives){
-      const trackerRows=Array.isArray(payload?.intelligence?.tracker?.records)
-        ?payload.intelligence.tracker.records
-        :[];
+      const trackerRows=[...(runtime?.intelligence?.tracker?.records?.values?.()??[])];
       const archiveFingerprint=fingerprintJsonArrayStore({
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         arrayKey:'records',
@@ -1036,10 +1072,12 @@ export async function saveInstitutionalForecastRuntime(runtime){
       };
     }
     if(externalizeArchives){
+      const issuanceRows=trimIssuances(runtime.issuances,runtime.maxIssuances);
       const storeFingerprint=fingerprintJsonArrayStore({
         version:FORECAST_ISSUANCE_STORE_VERSION,
         arrayKey:'issuances',
-        rows:payload.issuances
+        rows:issuanceRows,
+        projectRow:issuanceForPersistence
       });
       const storeLogicalBytes=storeFingerprint.logicalBytes;
       const maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
@@ -1062,7 +1100,8 @@ export async function saveInstitutionalForecastRuntime(runtime){
             filePath:storeTmp,
             version:FORECAST_ISSUANCE_STORE_VERSION,
             arrayKey:'issuances',
-            rows:payload.issuances,
+            rows:issuanceRows,
+            projectRow:issuanceForPersistence,
             level:1
           });
           if(streamed.sha256!==storeHash||streamed.logicalBytes!==storeLogicalBytes){
@@ -1079,7 +1118,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
         version:FORECAST_ISSUANCE_STORE_VERSION,
         slot,
         sha256:storeHash,
-        count:payload.issuances.length,
+        count:issuanceRows.length,
         storageBytes:storeBytes,
         logicalBytes:storeLogicalBytes
       };
