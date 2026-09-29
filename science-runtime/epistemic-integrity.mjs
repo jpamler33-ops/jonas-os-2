@@ -87,14 +87,38 @@ function canonicalAuthorityMap(authorities,asOf){
   }
   return map;
 }
-function resolverIndependenceKey(row,authorityMap){
-  const authorityController=authorityMap.get(text(row?.authorityId))||text(row?.authorityControllerId)||'UNKNOWN_AUTHORITY_CONTROLLER';
-  return [
-    text(row?.operatorDomain)||'UNKNOWN_OPERATOR',
-    text(row?.trustDomain)||'UNKNOWN_TRUST',
-    text(row?.controlDomain)||'UNKNOWN_CONTROL',
-    authorityController
-  ].join('|');
+function resolverIndependenceComponents(rows,authorityMap){
+  const xs=Array.isArray(rows)?rows:[];
+  const parent=xs.map((_,i)=>i);
+  const find=i=>parent[i]===i?i:(parent[i]=find(parent[i]));
+  const union=(a,b)=>{a=find(a);b=find(b);if(a!==b) parent[b]=a;};
+  const domains=row=>[
+    'operator:'+ (text(row?.operatorDomain)||'UNKNOWN_OPERATOR'),
+    'trust:'+ (text(row?.trustDomain)||'UNKNOWN_TRUST'),
+    'control:'+ (text(row?.controlDomain)||'UNKNOWN_CONTROL'),
+    'authority:'+ (authorityMap.get(text(row?.authorityId))||text(row?.authorityControllerId)||'UNKNOWN_AUTHORITY_CONTROLLER')
+  ];
+  const owner=new Map();
+  xs.forEach((row,i)=>{
+    for(const token of domains(row)){
+      if(owner.has(token)) union(i,owner.get(token));
+      else owner.set(token,i);
+    }
+  });
+  const components=new Map();
+  xs.forEach((row,i)=>{
+    const root=find(i);
+    const bucket=components.get(root)||[];
+    bucket.push(row);
+    components.set(root,bucket);
+  });
+  return [...components.values()].map(items=>({
+    resolverIds:uniq(items.map(x=>x.resolverId)),
+    operatorDomains:uniq(items.map(x=>x.operatorDomain||'UNKNOWN_OPERATOR')),
+    trustDomains:uniq(items.map(x=>x.trustDomain||'UNKNOWN_TRUST')),
+    controlDomains:uniq(items.map(x=>x.controlDomain||'UNKNOWN_CONTROL')),
+    authorityControllers:uniq(items.map(x=>authorityMap.get(text(x.authorityId))||text(x.authorityControllerId)||'UNKNOWN_AUTHORITY_CONTROLLER'))
+  }));
 }
 function evaluateIdentity(asOf,resolverClaims,authorities,requiredResolverConsensus){
   const authorityMap=canonicalAuthorityMap(authorities,asOf);
@@ -113,13 +137,13 @@ function evaluateIdentity(asOf,resolverClaims,authorities,requiredResolverConsen
     byController.set(controller,bucket);
   }
   const groups=[...byController.entries()].map(([controllerId,rows])=>{
-    const independenceKeys=uniq(rows.map(r=>resolverIndependenceKey(r,authorityMap)));
+    const components=resolverIndependenceComponents(rows,authorityMap);
     const authorityControllers=uniq(rows.map(r=>authorityMap.get(text(r.authorityId))||text(r.authorityControllerId)||'UNKNOWN'));
     return {
       controllerId,
       claims:rows.length,
-      independentClaims:independenceKeys.length,
-      independenceKeys,
+      independentClaims:components.length,
+      components,
       authorityControllers,
       resolverIds:uniq(rows.map(r=>r.resolverId))
     };
