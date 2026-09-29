@@ -74,6 +74,8 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
   const openAt=finite(openedAt,finite(order.updatedAt,finite(order.createdAt,Date.now())));
   const horizonMs=Math.max(60_000,finite(order.strategyMeta?.horizonMs,15*60_000));
   const plan=deriveShadowRiskPlan(order.strategyMeta?.expectedReturn);
+  const plannedStopLossPct=Math.max(.0001,finite(order.strategyMeta?.plannedStopLossPct,plan.stopLossPct));
+  const plannedTakeProfitPct=Math.max(.0001,finite(order.strategyMeta?.plannedTakeProfitPct,plan.takeProfitPct));
   const side=String(order.side).toUpperCase()==='BUY'?'LONG':'SHORT';
   const coreId={
     entryOrderId:String(order.id),
@@ -105,8 +107,8 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     openedAt:openAt,
     horizonMs,
     plannedExitAt:openAt+horizonMs,
-    takeProfitPct:plan.takeProfitPct,
-    stopLossPct:plan.stopLossPct,
+    takeProfitPct:plannedTakeProfitPct,
+    stopLossPct:plannedStopLossPct,
     tradeLifecycleVersion:String(order.strategyMeta?.tradeLifecycleVersion||''),
     setupType:String(order.strategyMeta?.setupType||'UNKNOWN'),
     setupScore:finite(order.strategyMeta?.setupScore),
