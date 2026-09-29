@@ -69,6 +69,9 @@ import {
   BIGGJ_TRADING_POLICY_VERSION
 } from './biggj-trading-policy.mjs';
 import {
+  deriveBiggjStyleExperimentCandidates, BIGGJ_STYLE_EXPERIMENT_VERSION
+} from './biggj-style-experiment-engine.mjs';
+import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
   markShadowPosition, simulateShadowPositionExit, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
@@ -407,6 +410,10 @@ const strategyLeagueBaseNotionalQuote = Math.max(1, Number(process.env.TCX_STRAT
 const strategyLeagueInitialEquity = Math.max(100, Number(process.env.TCX_STRATEGY_LEAGUE_INITIAL_EQUITY || 5000));
 const strategyLeagueMaxOpenPerStrategy = Math.max(1, Math.floor(Number(process.env.TCX_STRATEGY_LEAGUE_MAX_OPEN_PER_STRATEGY || 4) || 4));
 const strategyLeagueMaxOpenPerStrategySymbol = Math.max(1, Math.floor(Number(process.env.TCX_STRATEGY_LEAGUE_MAX_OPEN_PER_STRATEGY_SYMBOL || 1) || 1));
+const biggjStyleExperimentsEnabled = String(process.env.TCX_BIGGJ_STYLE_EXPERIMENTS_ENABLED || '1') !== '0';
+const biggjStyleExperimentBaseNotionalQuote = Math.max(1, Number(process.env.TCX_BIGGJ_STYLE_EXPERIMENT_BASE_NOTIONAL || 20));
+const biggjStyleExperimentMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_BIGGJ_STYLE_EXPERIMENT_MAX_OPEN_TOTAL || 9) || 9));
+const biggjStyleExperimentMaxOpenPerSymbol = Math.max(1, Math.floor(Number(process.env.TCX_BIGGJ_STYLE_EXPERIMENT_MAX_OPEN_PER_SYMBOL || 3) || 3));
 const sorMaxBookAgeMs = Math.max(1000, Number(process.env.TCX_SOR_MAX_BOOK_AGE_MS || 15000));
 const sorBinanceFeeBps = Math.max(0, Number(process.env.TCX_SOR_BINANCE_FEE_BPS || shadowTakerFeeBps));
 const sorOkxFeeBps = Math.max(0, Number(process.env.TCX_SOR_OKX_FEE_BPS || shadowTakerFeeBps));
