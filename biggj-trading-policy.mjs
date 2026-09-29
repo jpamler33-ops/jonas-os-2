@@ -312,7 +312,10 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
   const openedAt=finite(position.openedAt,at);
   const ageMs=Math.max(0,at-openedAt);
   const horizonMs=Math.max(ap.minHorizonMs,finite(position.horizonMs,ap.minHorizonMs));
-  const dynamicCap=Math.max(horizonMs,Math.min(ap.maxHoldMs,horizonMs*lp.maxHoldHorizonMultiplier));
+  const adaptiveHoldMultiplier=clamp(finite(state.adaptiveHoldMultiplier,1),.50,lp.maxHoldHorizonMultiplier);
+  const effectiveReviewHorizonMs=Math.max(ap.reviewIntervalMs,horizonMs*adaptiveHoldMultiplier);
+  const styleMaxHoldMs=Math.max(horizonMs,finite(position.maxHoldMs,ap.maxHoldMs));
+  const dynamicCap=Math.max(effectiveReviewHorizonMs,Math.min(styleMaxHoldMs,effectiveReviewHorizonMs*1.75,ap.maxHoldMs));
   const maxHoldAt=openedAt+dynamicCap;
   const roe=finite(state.marginRoePct,0);
   const stop=Math.abs(finite(position.stopLossPct,.005));
@@ -325,8 +328,9 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
   const result=(action,reason,extra={})=>finalized({
     version:BIGGJ_TRADING_POLICY_VERSION,
     action,reason,
-    ageMs,horizonMs,
+    ageMs,horizonMs,effectiveReviewHorizonMs,adaptiveHoldMultiplier,
     horizonProgress:horizonMs>0?ageMs/horizonMs:0,
+    effectiveHorizonProgress:effectiveReviewHorizonMs>0?ageMs/effectiveReviewHorizonMs:0,
     maxHoldAt,
     thesisHealth:thesis,
     oppositeThesisStrength:opposite,
@@ -349,7 +353,7 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
   if(roe>=target*lp.trailAtTargetFraction)return result('TRAIL','PROFIT_LOCK',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
   if(roe>=target*lp.protectAtTargetFraction)return result('PROTECT','BREAK_EVEN_LOCK',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
 
-  if(ageMs>=horizonMs){
+  if(ageMs>=effectiveReviewHorizonMs){
     if(thesis>=lp.strongThesis&&opposite<=lp.maxOppositeForExtension){
       return result('HOLD','HORIZON_REVIEW_EXTEND',{nextReviewAt:Math.min(maxHoldAt,at+ap.reviewIntervalMs)});
     }
