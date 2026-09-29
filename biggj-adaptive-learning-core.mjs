@@ -19,6 +19,7 @@ function modeWeight(p){
   const mode=token(p?.entryMode,'STANDARD');
   if(mode==='COVERAGE_PROBE')return .35;
   if(mode==='ABSTAIN_PROBE')return .50;
+  if(mode==='STYLE_EXPERIMENT')return .50;
   if(mode==='EXPLORATION')return .65;
   if(mode==='CHALLENGER')return .75;
   return 1;
