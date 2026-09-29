@@ -1,3 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {missionControlSnapshot,renderMissionControlHtml} from './mission-control.mjs';
 test('mission control is explicitly shadow only',()=>{const s=missionControlSnapshot({health:{ok:true}});assert.equal(s.canExecuteLive,false);assert.match(renderMissionControlHtml(s),/SHADOW_ONLY/);});
 test('embedded state cannot inject a script tag',()=>{const h=renderMissionControlHtml(missionControlSnapshot({health:{x:'<script>'}}));assert.ok(!h.includes('"x":"<script>"'));assert.match(h,/"x":"\\u003cscript>"/);});
+
+test('mission control exposes research shadow activity without mixing primary equity',()=>{const s=missionControlSnapshot({portfolio:{openPositions:0,closedTrades:0,equityQuote:10000,netPnlQuote:0,activity:{researchOpenPositions:2,researchClosedTrades:3,researchNetPnlQuote:-1.25},researchPositions:[{symbol:'BTCUSDT',side:'LONG',entryMode:'COVERAGE_PROBE',lastMark:{unrealizedNetPnlQuote:-0.2}}]}});const h=renderMissionControlHtml(s);assert.match(h,/Research open/);assert.match(h,/OPEN RESEARCH \/ LEARNING POSITIONS/);assert.match(h,/COVERAGE_PROBE/);assert.match(h,/Research PnL/);});
