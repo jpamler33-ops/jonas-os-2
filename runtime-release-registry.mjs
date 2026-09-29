@@ -23,6 +23,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'persistence-contracts.mjs',
   'chaos-engineering.mjs',
   'shadow-oms.mjs',
+  'streaming-json-persistence.mjs',
   'autonomous-shadow-trader.mjs',
   'shadow-portfolio-ledger.mjs',
   'shadow-capital-academy.mjs',
