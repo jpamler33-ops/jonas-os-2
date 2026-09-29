@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { sha256, canonicalJson } from './institutional-kernel.mjs';
+import { mkdir, readFile, rename } from 'node:fs/promises';
+import { sha256 } from './institutional-kernel.mjs';
+import { atomicWriteCanonicalObjectWithArray } from './streaming-json-persistence.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
 import { evaluateStrategyEvidence, STRATEGY_EVIDENCE_ENGINE_VERSION } from './strategy-evidence-engine.mjs';
 import {
@@ -436,8 +437,6 @@ export async function saveStrategyLeagueLedger(filePath,ledger,{maxPositions=20_
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
-  const tmp=filePath+'.tmp-'+process.pid;
-  await writeFile(tmp,canonicalJson(body),{encoding:'utf8',mode:0o600});
-  await rename(tmp,filePath);
+  await atomicWriteCanonicalObjectWithArray(filePath,body,{arrayKey:'positions'});
   return body;
 }
