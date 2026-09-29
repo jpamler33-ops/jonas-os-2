@@ -33,7 +33,9 @@ const COMMANDS=[
   {name:'setup',description:'TCX Discord Command Center automatisch einrichten'},
   {name:'terminal',description:'TCX Live-Terminal anzeigen'},
   {name:'system',description:'TCX Systemstatus anzeigen'},
-  {name:'report',description:'Aktuellen Tagesreport anzeigen'}
+  {name:'report',description:'Aktuellen Tagesreport anzeigen'},
+  {name:'academy',description:'BIGGJ Trading Academy öffnen'},
+  {name:'lesson',description:'Trading-Lektion öffnen',options:[{type:3,name:'topic',description:'Thema',required:true,choices:[{name:'1 · Grundlagen',value:'basics'},{name:'2 · Marktstruktur',value:'structure'},{name:'3 · Risiko',value:'risk'},{name:'4 · Liquidität & Volumen',value:'liquidity'},{name:'5 · Setups & Invalidation',value:'setup'},{name:'6 · Journal & Replay',value:'journal'}]}]}
 ];
 
 
@@ -62,6 +64,16 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
     {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen.'}
   ]},
+  {category:'BIGGJ • TRADING ACADEMY',channels:[
+    {name:'academy-start',topic:'Startpunkt für Trading lernen mit BIGGJ. Paper/Shadow only.'},
+    {name:'academy-roadmap',topic:'Klarer Lernpfad von Grundlagen bis Trade Review.'},
+    {name:'academy-lessons',topic:'Trading-Lektionen in einfacher Reihenfolge.'},
+    {name:'academy-chart-training',topic:'Charts lesen und Struktur üben, ohne echte Orders.'},
+    {name:'academy-challenges',topic:'Paper-/Shadow-Challenges und praktische Übungen.'},
+    {name:'academy-glossary',topic:'Trading-Begriffe kurz und verständlich erklärt.'},
+    {name:'academy-progress',topic:'Lernfortschritt, Meilensteine und Checkliste.'},
+    {name:'academy-questions',topic:'Fragen stellen mit sauberem Analyse-Template.'}
+  ]},
   {category:'TCX • SYSTEM',channels:[
     {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
     {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
@@ -80,7 +92,15 @@ const MARKERS=Object.freeze({
   performance:'TCX_DISCORD_V3_PERFORMANCE',
   overview:'TCX_DISCORD_V3_MARKET_OVERVIEW',
   data:'TCX_DISCORD_V3_DATA_HEALTH',
-  theses:'BIGGJ_DISCORD_V4_THESES'
+  theses:'BIGGJ_DISCORD_V4_THESES',
+  academyStart:'BIGGJ_ACADEMY_START_V1',
+  academyRoadmap:'BIGGJ_ACADEMY_ROADMAP_V1',
+  academyLessons:'BIGGJ_ACADEMY_LESSONS_V1',
+  academyChart:'BIGGJ_ACADEMY_CHART_V1',
+  academyChallenges:'BIGGJ_ACADEMY_CHALLENGES_V1',
+  academyGlossary:'BIGGJ_ACADEMY_GLOSSARY_V1',
+  academyProgress:'BIGGJ_ACADEMY_PROGRESS_V1',
+  academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -112,6 +132,216 @@ function biggjThesisPayload(position={}){
     timestamp:new Date().toISOString()
   }],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
 }
+
+function academyLessonPayload(topic='basics'){
+  const lessons={
+    basics:{
+      title:'LEKTION 1 // GRUNDLAGEN',
+      goal:'Verstehen, was du auf einem Chart überhaupt siehst.',
+      body:[
+        '**1. Candle** · Open, High, Low, Close. Eine Candle zeigt nur, was im gewählten Zeitraum passiert ist.',
+        '**2. Bid / Ask** · Käufer bieten, Verkäufer verlangen. Der Abstand heißt Spread.',
+        '**3. Market vs. Limit** · Market priorisiert Ausführung; Limit priorisiert deinen Preis.',
+        '**4. Long / Short** · Long profitiert von steigenden, Short von fallenden Kursen. Beides kann verlieren.',
+        '**5. Hebel** · Verstärkt Gewinn und Verlust. Für die Academy: kein echtes Hebel-Trading.',
+        '',
+        '**Übung:** Öffne BTC 5m und beschreibe nur Fakten: letzter Preisbereich, letzte Hochs/Tiefs, Trend oder Range. Noch keine Prognose.'
+      ]
+    },
+    structure:{
+      title:'LEKTION 2 // MARKTSTRUKTUR',
+      goal:'Trend, Range und Strukturbruch sauber unterscheiden.',
+      body:[
+        '**HH** Higher High · höheres Hoch',
+        '**HL** Higher Low · höheres Tief',
+        '**LH** Lower High · tieferes Hoch',
+        '**LL** Lower Low · tieferes Tief',
+        '',
+        'Aufwärtstrend: typischerweise HH + HL. Abwärtstrend: LH + LL. Dazwischen kann der Markt einfach seitwärts laufen.',
+        '**Wichtig:** Ein einzelner Mini-Bruch ist nicht automatisch ein neuer Trend. Timeframe und Kontext zählen.',
+        '',
+        '**Übung:** Markiere auf einem 15m-Chart die letzten 2 Swing Highs und 2 Swing Lows. Formuliere danach: Trend / Range / unklar.'
+      ]
+    },
+    risk:{
+      title:'LEKTION 3 // RISIKO',
+      goal:'Erst Verlust kontrollieren, dann über Gewinn nachdenken.',
+      body:[
+        '**Invalidation** · Punkt, an dem deine Idee nicht mehr gilt.',
+        '**Stop** · technische Umsetzung einer Verlustgrenze; schützt nicht vor jeder Slippage.',
+        '**R** · ein standardisiertes Risikomaß. +2R bedeutet das Zweifache des zuvor definierten Risikos.',
+        '**R:R** · mögliches Verhältnis von Gewinnziel zu Risiko. Ein hohes R:R macht ein schlechtes Setup nicht automatisch gut.',
+        '',
+        'Für diese Academy gilt: **Paper/Shadow first.** Keine Challenge verlangt echtes Geld.',
+        '',
+        '**Übung:** Nimm einen fiktiven Entry und lege zuerst die Invalidation fest. Erst danach ein Ziel. Begründe beide.'
+      ]
+    },
+    liquidity:{
+      title:'LEKTION 4 // LIQUIDITÄT & VOLUMEN',
+      goal:'Verstehen, wo Orders liegen können und warum Preis dorthin reagiert.',
+      body:[
+        '**Liquidität** · vereinfacht: Bereiche, in denen viele Orders ausführbar sind.',
+        '**Sweep** · Preis handelt kurz durch ein relevantes Hoch/Tief und kehrt zurück.',
+        '**Volume** · zeigt Aktivität, nicht automatisch Käufer- oder Verkäuferüberlegenheit.',
+        '**Open Interest / Liquidationen** · Derivate-Kontext; kann Bewegungen verstärken, ist aber kein alleiniger Entry-Grund.',
+        '',
+        '**Übung:** Finde ein markantes vorheriges Hoch/Tief. Beobachte, ob Preis davor reagiert, es bricht oder nur kurz swept.'
+      ]
+    },
+    setup:{
+      title:'LEKTION 5 // SETUP & INVALIDATION',
+      goal:'Eine überprüfbare These statt Bauchgefühl formulieren.',
+      body:[
+        'Ein Setup braucht mindestens: **Kontext → Trigger → Entry-Idee → Invalidation → Ziel → Gegenargumente**.',
+        '',
+        'Beispielstruktur:',
+        '• Kontext: 1h bullish, 15m Pullback',
+        '• Trigger: lokaler Reclaim',
+        '• Invalidation: unter dem relevanten Swing Low',
+        '• Ziel: nächster plausibler Liquiditäts-/Widerstandsbereich',
+        '• Gegenargument: höherer Timeframe direkt am Widerstand',
+        '',
+        '**Übung:** Schreibe eine These, ohne Wörter wie safe, muss oder garantiert.'
+      ]
+    },
+    journal:{
+      title:'LEKTION 6 // JOURNAL & REPLAY',
+      goal:'Entscheidungsqualität von purem Ergebnis trennen.',
+      body:[
+        'Ein Gewinn kann aus schlechter Entscheidung entstehen. Ein Verlust kann trotz guter Entscheidung auftreten.',
+        'Notiere deshalb: Was wusste ich beim Entry? Warum? Was hätte die These invalidiert? Was änderte sich danach?',
+        '',
+        '**Review-Felder:** Entry-Qualität · Risiko · Thesis · Execution · Exit · Ergebnis · Lernpunkt.',
+        '**BIGGJ Replay:** Nutze Trade-Replays, um nur Informationen zu betrachten, die damals bereits verfügbar waren.',
+        '',
+        '**Übung:** Reviewe einen Shadow-Trade und schreibe 1 Sache, die korrekt war, und 1 Sache, die du beim nächsten Mal anders prüfst.'
+      ]
+    }
+  };
+  const x=lessons[topic]||lessons.basics;
+  return {embeds:[{title:'BIGGJ ACADEMY // '+x.title,description:['**Ziel:** '+x.goal,'',...x.body,'','**Modus: PAPER / SHADOW ONLY · keine echten Orders**'].join('\n'),footer:{text:'BIGGJ_ACADEMY_LESSON:'+topic},timestamp:new Date().toISOString()}],components:academyLessonComponents(),allowedMentions:{parse:[]}};
+}
+function academyLessonComponents(){return [
+  {type:1,components:[
+    {type:2,style:1,label:'1 Grundlagen',custom_id:'dc5:lesson:basics'},
+    {type:2,style:2,label:'2 Struktur',custom_id:'dc5:lesson:structure'},
+    {type:2,style:2,label:'3 Risiko',custom_id:'dc5:lesson:risk'}
+  ]},
+  {type:1,components:[
+    {type:2,style:2,label:'4 Liquidität',custom_id:'dc5:lesson:liquidity'},
+    {type:2,style:2,label:'5 Setup',custom_id:'dc5:lesson:setup'},
+    {type:2,style:2,label:'6 Journal',custom_id:'dc5:lesson:journal'}
+  ]},
+  {type:1,components:[
+    {type:2,style:1,label:'BTC 5m Chart',custom_id:'dc3:chart:BTCUSDT:5m'},
+    {type:2,style:2,label:'BTC Struktur',custom_id:'dc3:structure:BTCUSDT'},
+    {type:2,style:2,label:'BTC Replay',custom_id:'dc3:tradereplay:BTCUSDT'}
+  ]}
+];}
+function academyStaticPayload(kind){
+  const base={allowedMentions:{parse:[]}};
+  if(kind==='start')return {...base,embeds:[{title:'BIGGJ // TRADING ACADEMY',description:[
+    '**Trading lernen, ohne im Profi-System unterzugehen.**',
+    '',
+    'Reihenfolge: **Grundlagen → Struktur → Risiko → Liquidität → Setup → Journal → Praxis**.',
+    'Benutze BIGGJ-Charts zum Beobachten und Üben. In der Academy werden **keine echten Orders** verlangt.',
+    '',
+    '**So startest du:**',
+    '1. Öffne Lektion 1.',
+    '2. Mach die Übung.',
+    '3. Geh erst weiter, wenn du die Begriffe selbst erklären kannst.',
+    '4. Nutze #academy-questions, wenn etwas unklar ist.',
+    '',
+    'Ziel ist nicht, möglichst viele Trades zu machen. Ziel ist, **saubere Entscheidungen erklären zu können**.'
+  ].join('\n'),footer:{text:MARKERS.academyStart},timestamp:new Date().toISOString()}],components:academyLessonComponents()};
+  if(kind==='roadmap')return {...base,embeds:[{title:'BIGGJ ACADEMY // ROADMAP',description:[
+    '**LEVEL 0 · Orientierung** — Candles, Timeframes, Bid/Ask, Orders',
+    '**LEVEL 1 · Structure** — HH/HL/LH/LL, Trend, Range, Break',
+    '**LEVEL 2 · Risk** — Invalidation, Stop, R, R:R, Drawdown',
+    '**LEVEL 3 · Liquidity** — Sweeps, Volumen, Derivate-Kontext',
+    '**LEVEL 4 · Thesis** — Kontext, Trigger, Gegenargumente',
+    '**LEVEL 5 · Execution** — nur Paper/Shadow, keine impulsiven Entries',
+    '**LEVEL 6 · Review** — Journal, Replay, Fehleranalyse',
+    '**LEVEL 7 · BIGGJ** — Ghost Paths, Trade DNA, Evidence, Thesis Health',
+    '',
+    '**Freigaberegel:** Erst zur nächsten Stufe, wenn du die vorige ohne Spickzettel erklären kannst.'
+  ].join('\n'),footer:{text:MARKERS.academyRoadmap},timestamp:new Date().toISOString()}],components:academyLessonComponents()};
+  if(kind==='lessons')return {...base,embeds:[{title:'BIGGJ ACADEMY // LEKTIONEN',description:[
+    '**1 · Grundlagen** — Was zeigt ein Chart?',
+    '**2 · Marktstruktur** — Was macht Preis tatsächlich?',
+    '**3 · Risiko** — Wann ist deine Idee falsch?',
+    '**4 · Liquidität & Volumen** — Wo kann Bewegung entstehen?',
+    '**5 · Setup & Invalidation** — Wie wird aus Beobachtung eine prüfbare These?',
+    '**6 · Journal & Replay** — Wie lernst du aus Entscheidungen?',
+    '',
+    'Benutze die Buttons unten oder den /lesson Command.'
+  ].join('\n'),footer:{text:MARKERS.academyLessons},timestamp:new Date().toISOString()}],components:academyLessonComponents()};
+  if(kind==='chart')return {...base,embeds:[{title:'BIGGJ ACADEMY // CHART TRAINING',description:[
+    '**Immer in derselben Reihenfolge analysieren:**',
+    '1. Timeframe nennen.',
+    '2. Swing Highs / Swing Lows markieren.',
+    '3. Trend / Range / unklar entscheiden.',
+    '4. Relevante Levels markieren.',
+    '5. Zwei mögliche Szenarien formulieren.',
+    '6. Für jedes Szenario sagen, wodurch es ungültig wird.',
+    '7. Erst danach Forecast/Flow/Liquidationen ansehen.',
+    '',
+    '**Anti-Bias-Regel:** BIGGJ nicht zuerst fragen, wohin der Markt geht. Erst eigene Beobachtung schreiben, dann mit BIGGJ vergleichen.'
+  ].join('\n'),footer:{text:MARKERS.academyChart},timestamp:new Date().toISOString()}],components:academyLessonComponents()};
+  if(kind==='challenges')return {...base,embeds:[{title:'BIGGJ ACADEMY // CHALLENGES',description:[
+    '**Challenge 1 · 10 Charts** — nur Trend/Range/unklar klassifizieren.',
+    '**Challenge 2 · 20 Strukturen** — HH/HL/LH/LL korrekt markieren.',
+    '**Challenge 3 · 10 Thesen** — Kontext + Trigger + Invalidation + Gegenargument.',
+    '**Challenge 4 · 20 Shadow-Trades** — kein echtes Geld; jeden Trade vor Entry dokumentieren.',
+    '**Challenge 5 · 10 Replays** — Entscheidung und Ergebnis getrennt bewerten.',
+    '**Challenge 6 · No-FOMO** — 7 Tage lang keinen Trade erzwingen; ABSTAIN zählt als korrekte Entscheidung.',
+    '',
+    '**Bestanden heißt:** Regel eingehalten und Review gemacht — nicht möglichst hoher PnL.'
+  ].join('\n'),footer:{text:MARKERS.academyChallenges},timestamp:new Date().toISOString()}],components:academyLessonComponents()};
+  if(kind==='glossary')return {...base,embeds:[{title:'BIGGJ ACADEMY // GLOSSAR',description:[
+    '**OHLC** · Open, High, Low, Close',
+    '**HH / HL / LH / LL** · Higher High / Higher Low / Lower High / Lower Low',
+    '**Spread** · Abstand zwischen Bid und Ask',
+    '**Liquidity** · verfügbare ausführbare Orders in Preisbereichen',
+    '**Sweep** · kurzes Durchhandeln eines Levels mit möglicher Rückkehr',
+    '**Invalidation** · Punkt, an dem eine These nicht mehr gilt',
+    '**R** · standardisierte Risikoeinheit',
+    '**R:R** · Verhältnis potenzieller Reward zu Risk',
+    '**MFE / MAE** · größter günstiger / ungünstiger Verlauf während eines Trades',
+    '**Drawdown** · Rückgang vom vorherigen Kapitalhoch',
+    '**Regime** · übergeordneter Marktzustand',
+    '**ABSTAIN** · bewusst kein Trade; bei BIGGJ ein vollwertiges Ergebnis'
+  ].join('\n'),footer:{text:MARKERS.academyGlossary},timestamp:new Date().toISOString()}]};
+  if(kind==='progress')return {...base,embeds:[{title:'BIGGJ ACADEMY // PROGRESS',description:[
+    '□ Lektion 1 erklären können',
+    '□ Lektion 2 erklären können',
+    '□ Lektion 3 erklären können',
+    '□ Lektion 4 erklären können',
+    '□ Lektion 5 erklären können',
+    '□ Lektion 6 erklären können',
+    '□ 10 Chart-Klassifikationen',
+    '□ 10 vollständige Thesen',
+    '□ 20 dokumentierte Shadow-Trades',
+    '□ 10 Replays',
+    '',
+    '**Fortschritt wird an Prozessqualität gemessen, nicht an PnL.**',
+    'Du kannst in diesem Channel deine erledigten Punkte und Lernnotizen posten.'
+  ].join('\n'),footer:{text:MARKERS.academyProgress},timestamp:new Date().toISOString()}]};
+  return {...base,embeds:[{title:'BIGGJ ACADEMY // FRAGEN',description:[
+    'Für eine gute Frage benutze dieses Schema:',
+    '',
+    '**Coin / Timeframe:**',
+    '**Was sehe ich objektiv?**',
+    '**Meine These:**',
+    '**Was spricht dagegen?**',
+    '**Wo wäre die These invalidiert?**',
+    '**Was verstehe ich nicht?**',
+    '',
+    'So lernst du Analyse statt nur nach Long oder Short zu fragen.'
+  ].join('\n'),footer:{text:MARKERS.academyQuestions},timestamp:new Date().toISOString()}]};
+}
+
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
 function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**SCHNELLSTART**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/deep BTC\` · Deep Dive','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
@@ -337,7 +567,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -445,6 +675,28 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function findMarked(channel,marker){try{const messages=await channel.messages.fetch({limit:50});return messages.find(m=>m.author?.id===client.user?.id&&hasMarker(m,marker))||null;}catch{return null;}}
   async function upsertMarked(channel,marker,payload){let m=await findMarked(channel,marker);return m?m.edit(payload):channel.send(payload);}
   async function ensureStart(){const c=channelCache.get('start-here');return c?upsertMarked(c,MARKERS.start,startPayload()):null;}
+  async function ensureAcademy(){
+    const specs=[
+      ['academy-start',MARKERS.academyStart,'start'],
+      ['academy-roadmap',MARKERS.academyRoadmap,'roadmap'],
+      ['academy-lessons',MARKERS.academyLessons,'lessons'],
+      ['academy-chart-training',MARKERS.academyChart,'chart'],
+      ['academy-challenges',MARKERS.academyChallenges,'challenges'],
+      ['academy-glossary',MARKERS.academyGlossary,'glossary'],
+      ['academy-progress',MARKERS.academyProgress,'progress'],
+      ['academy-questions',MARKERS.academyQuestions,'questions']
+    ];
+    let ready=0;
+    for(const [name,marker,kind] of specs){
+      const c=channelCache.get(name);
+      if(!c)continue;
+      await upsertMarked(c,marker,academyStaticPayload(kind));
+      ready++;
+    }
+    state.academyPanels=ready;
+    return ready;
+  }
+
   async function refreshTerminal(){const c=channelCache.get('tcx-terminal');if(!c)return null;const m=await upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot()));state.lastRefreshAt=Date.now();return m;}
   async function refreshSystem(){const c=channelCache.get('system-status');return c?upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())):null;}
   async function refreshPerformance(){const c=channelCache.get('performance');return c?upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())):null;}
@@ -671,7 +923,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(maybeDailyReport,60000);
   }
   async function bootstrapV2(){
-    try{const setup=await ensureLayout();await ensureStart();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
+    try{const setup=await ensureLayout();await ensureStart();await ensureAcademy();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
     catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
   }
   async function setupCommand(interaction){
@@ -690,6 +942,15 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const p=[...rows].filter(x=>x?.symbol===symbol&&x?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
     if(!p){await interaction.editReply('Für '+String(symbol||'diesen Markt')+' gibt es gerade keine aktive primäre Shadow-Position.');return;}
     await interaction.editReply(biggjThesisPayload(p));
+  }
+  async function academyCommand(interaction){
+    await interaction.deferReply();
+    await interaction.editReply(academyStaticPayload('start'));
+  }
+  async function lessonCommand(interaction){
+    const topic=String(interaction.options?.getString('topic')||'basics');
+    await interaction.deferReply();
+    await interaction.editReply(academyLessonPayload(topic));
   }
   async function terminalCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordTerminalPayload(await safeMissionSnapshot()));}
   async function systemCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordSystemPayload(await safeMissionSnapshot()));}
@@ -732,6 +993,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='dashboard'||name==='terminal'){await terminalCommand(interaction);return;}
     if(name==='system'){await systemCommand(interaction);return;}
     if(name==='thesis'){await thesisCommand(interaction);return;}
+    if(name==='academy'){await academyCommand(interaction);return;}
+    if(name==='lesson'){await lessonCommand(interaction);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
     const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
@@ -744,6 +1007,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function onButton(interaction){
     if(String(interaction.guildId)!==guildId)return;
     const customId=decodeDiscordCallbackCustomId(interaction.customId);
+    if(customId.startsWith('dc5:lesson:')){
+      const topic=String(customId.split(':')[2]||'basics');
+      await interaction.deferReply();
+      await interaction.editReply(academyLessonPayload(topic));
+      return;
+    }
     if(customId.startsWith('dc4:thesis:')){
       const symbol=normalizeDiscordSymbol(customId.split(':')[2]);
       await interaction.deferReply();
@@ -786,6 +1055,6 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return snapshot();
   }
   async function stop(){schedulerStopped=true;for(const timer of timers){clearInterval(timer);clearTimeout(timer);}timers.clear();client.destroy();state.ready=false;}
-  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size});}
+  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size,academyPanels:state.academyPanels});}
   return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }

@@ -34,3 +34,26 @@ test('BIGGJ V4 contains visual thesis and lifecycle surfaces',()=>{
     'isStringSelectMenu'
   ]) assert.ok(source.includes(required),required);
 });
+
+
+test('BIGGJ Trading Academy is provisioned with curriculum and practice routing',()=>{
+  for(const required of [
+    'BIGGJ • TRADING ACADEMY',
+    'academy-start',
+    'academy-roadmap',
+    'academy-lessons',
+    'academy-chart-training',
+    'academy-challenges',
+    'academy-glossary',
+    'academy-progress',
+    'academy-questions',
+    'academyLessonPayload',
+    'academyLessonComponents',
+    'ensureAcademy',
+    'dc5:lesson:',
+    "name:'academy'",
+    "name:'lesson'"
+  ]) assert.ok(source.includes(required),required);
+  assert.ok(source.includes('PAPER / SHADOW ONLY'));
+  assert.ok(source.includes('keine echten Orders'));
+});
