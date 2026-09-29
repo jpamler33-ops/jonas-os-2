@@ -35,6 +35,12 @@ const classification=v=>{
   if(!EPISTEMIC_CLASSES.includes(s)) throw new Error('invalid epistemic classification '+s);
   return s;
 };
+const optionalHash64=(v,name)=>{
+  if(v==null) return null;
+  const s=text(v).toLowerCase();
+  if(!/^[a-f0-9]{64}$/.test(s)) throw new Error(name+' must be a sha256 hex string');
+  return s;
+};
 const timed=(row,kind,asOf)=>{
   const availableAt=finite(row?.availableAt,kind+'.availableAt');
   if(availableAt>asOf) throw new Error('future '+kind+' blocked');
@@ -292,7 +298,7 @@ export function buildClaimAssumptionGraph({
     version:CLAIM_ASSUMPTION_GRAPH_VERSION,
     subjectId:subject,
     asOf:t,
-    sourceTraceId:sourceTraceId==null?null:text(sourceTraceId),
+    sourceTraceId:optionalHash64(sourceTraceId,'sourceTraceId'),
     nodes:[...nodeMap.values()].sort((a,b)=>a.id.localeCompare(b.id)),
     edges:[...edgeMap.values()].sort((a,b)=>a.from.localeCompare(b.from)||a.to.localeCompare(b.to)||a.relation.localeCompare(b.relation)),
     diagnostics:{
