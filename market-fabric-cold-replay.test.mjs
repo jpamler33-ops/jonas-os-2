@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, verifyNoFutureLeakage } from './deterministic-replay.mjs';
 import { sha256 } from './institutional-kernel.mjs';
-import { sampleArchivedReplayPoints, loadArchivedReplayTail } from './market-fabric-cold-replay.mjs';
+import { sampleArchivedReplayPoints, loadArchivedReplayTail, classifyVerifiedReplayAvailability } from './market-fabric-cold-replay.mjs';
 
 function manifestValue(version,segments){
   const core={version,segments};
@@ -171,4 +171,26 @@ test('corrupted archived segment fails closed before returning replay data',asyn
       /TCX_COLD_REPLAY_/
     );
   }finally{await rm(f.dir,{recursive:true,force:true});}
+});
+
+
+test('replay availability fails closed when archived history cannot be verified',()=>{
+  assert.deepEqual(
+    classifyVerifiedReplayAvailability({primary:null},{archiveAttempted:true,archiveError:'TCX_COLD_REPLAY_COMPRESSED_HASH_MISMATCH'}),
+    {available:false,status:'FAIL_CLOSED',reason:'ARCHIVE_VERIFICATION_FAILED'}
+  );
+});
+
+test('replay availability does not certify an archive state without PRIMARY_MARKET',()=>{
+  assert.deepEqual(
+    classifyVerifiedReplayAvailability({primary:null},{archiveAttempted:true}),
+    {available:false,status:'UNAVAILABLE',reason:'NO_PRIMARY_AT_ASOF'}
+  );
+});
+
+test('replay availability certifies a state only when PRIMARY_MARKET exists',()=>{
+  assert.deepEqual(
+    classifyVerifiedReplayAvailability({primary:{price:123}},{archiveAttempted:true}),
+    {available:true,status:'VERIFIED',reason:null}
+  );
 });
