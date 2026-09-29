@@ -45,6 +45,8 @@ import { createShadowCompetition, refreshShadowCompetitionHypotheses, evaluateSh
 import { createExperimentGovernor, evaluateExperimentGovernor, experimentGovernorSummary, loadExperimentGovernor, saveExperimentGovernor, FORECAST_EXPERIMENT_GOVERNOR_VERSION } from './forecast-experiment-governor.mjs';
 import { openModelCandidateRegistry, modelCandidateRegistrySummary, MODEL_CANDIDATE_REGISTRY_VERSION } from './model-candidate-registry.mjs';
 import { processGovernorPromotionReviews, MODEL_PROMOTION_REVIEW_SERVICE_VERSION } from './model-promotion-review-service.mjs';
+import { loadBuildTestAttestation, DEFAULT_BUILD_ATTESTATION_FILE, BUILD_TEST_ATTESTATION_VERSION } from './build-attestation.mjs';
+import { createModelRollbackPreflight, buildPromotionSoftwareProofs, MODEL_PROMOTION_PROOF_FACTORY_VERSION } from './model-promotion-proof-factory.mjs';
 import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, WALLET_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
 import { buildDerivedResearchIntelligenceFeatures, EXTERNAL_RESEARCH_FEATURE_EXPERIMENTS, DERIVED_INTELLIGENCE_RESEARCH_EXPERIMENTS, PREDICTION_MARKET_RESEARCH_EXPERIMENTS, RESEARCH_INTELLIGENCE_FEATURES_VERSION } from './research-intelligence-features.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
@@ -564,6 +566,15 @@ let experimentGovernorState = await loadExperimentGovernor(experimentGovernorFil
 const modelCandidateRegistryFile=process.env.TCX_MODEL_CANDIDATE_REGISTRY_FILE||'/data/tcx-model-candidate-registry.jsonl';
 const modelCandidateRegistry=await openModelCandidateRegistry(modelCandidateRegistryFile);
 let modelPromotionReviewLastSummary=null;
+const buildAttestationFile=process.env.TCX_BUILD_ATTESTATION_FILE||DEFAULT_BUILD_ATTESTATION_FILE;
+const buildTestAttestationState=await loadBuildTestAttestation(buildAttestationFile,{rootDir:'.'});
+if(!buildTestAttestationState.verification.ok){
+  console.warn('[TCX_BUILD_ATTESTATION_INVALID]',JSON.stringify({
+    version:BUILD_TEST_ATTESTATION_VERSION,
+    file:buildAttestationFile,
+    reasons:buildTestAttestationState.verification.reasons
+  }));
+}
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
 let featureResearchState = await loadFeatureResearch(featureResearchFile);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
@@ -7436,11 +7447,41 @@ async function shadowCompetitionWatcher(){
         if(experimentGovernorState) await saveExperimentGovernor(experimentGovernorFile,experimentGovernorState);
 
         if(experimentGovernorState&&modelCandidateRegistry.healthy&&auditLedger.healthy){
+          const softwareProofsByCandidate={};
+          for(const [candidateId,replayEntry] of Object.entries(result.promotionReplayProofs||{})){
+            if(replayEntry?.ok!==true||!replayEntry?.proof) continue;
+            const live=(shadowCompetitionState?.candidates||[]).find(x=>String(x?.artifact?.candidateId)===String(candidateId));
+            if(!live?.artifact) continue;
+            try{
+              const rollbackPreflight=createModelRollbackPreflight({
+                candidate:live.artifact,
+                incumbentConfig:cfg,
+                releaseRegistry,
+                asOf:Number(replayEntry.proof.generatedAt||Date.now())
+              });
+              const bundle=buildPromotionSoftwareProofs({
+                buildAttestationVerification:buildTestAttestationState.verification,
+                replayProof:replayEntry.proof,
+                rollbackPreflight
+              });
+              softwareProofsByCandidate[candidateId]={
+                testsPassed:bundle.testsPassed,
+                deterministicReplayPassed:bundle.deterministicReplayPassed,
+                rollbackReady:bundle.rollbackReady
+              };
+            }catch(err){
+              console.error('[TCX_MODEL_PROMOTION_PROOF_ERROR]',JSON.stringify({
+                candidateId,
+                error:err instanceof Error?err.message:String(err)
+              }));
+            }
+          }
           const promotionReviews=await processGovernorPromotionReviews({
             governorState:experimentGovernorState,
             competitionState:shadowCompetitionState,
             registry:modelCandidateRegistry,
-            auditLedger
+            auditLedger,
+            softwareProofsByCandidate
           });
           modelPromotionReviewLastSummary={
             generationId:promotionReviews.generationId,
@@ -7455,6 +7496,11 @@ async function shadowCompetitionWatcher(){
           if(promotionReviews.candidates>0){
             console.log('[TCX_MODEL_PROMOTION_REVIEW]',JSON.stringify({
               version:MODEL_PROMOTION_REVIEW_SERVICE_VERSION,
+              proofFactoryVersion:MODEL_PROMOTION_PROOF_FACTORY_VERSION,
+              buildAttestation:{
+                version:BUILD_TEST_ATTESTATION_VERSION,
+                verified:buildTestAttestationState.verification.ok
+              },
               registryVersion:MODEL_CANDIDATE_REGISTRY_VERSION,
               ...modelPromotionReviewLastSummary,
               automaticProductionMutation:false,
@@ -7970,6 +8016,13 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   strategyLeagueHealthy,
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
   modelPromotionReviewService:MODEL_PROMOTION_REVIEW_SERVICE_VERSION,
+  modelPromotionProofFactory:MODEL_PROMOTION_PROOF_FACTORY_VERSION,
+  buildTestAttestation:{
+    version:BUILD_TEST_ATTESTATION_VERSION,
+    verified:buildTestAttestationState.verification.ok,
+    reasons:buildTestAttestationState.verification.reasons,
+    sourceFingerprint:buildTestAttestationState.verification.sourceFingerprint
+  },
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   shadowResearchWorkerAdmission:FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,

@@ -12,6 +12,7 @@ import {
 } from './forecast-experiment-governor.mjs';
 import { sha256 } from './institutional-kernel.mjs';
 import { forecastHistoryProgressAt, forecastHistoryHasAdvanced } from './forecast-shadow-evaluation-client.mjs';
+import { createCandidateDeterministicReplayProof } from './model-promotion-proof-factory.mjs';
 
 function run(input){
   const {
@@ -88,13 +89,41 @@ function run(input){
     governorEvaluated=true;
   }
 
+  const promotionReplayProofs={};
+  if(governor){
+    for(const participant of governor.participants||[]){
+      if(!['PROMOTION_REVIEW_REQUIRED','PROMOTION_CANDIDATE'].includes(String(participant?.status))) continue;
+      const live=(competition?.candidates||[]).find(x=>String(x?.artifact?.candidateId)===String(participant.candidateId));
+      if(!live?.artifact) {
+        promotionReplayProofs[String(participant.candidateId)]={ok:false,error:'CANDIDATE_NOT_FOUND'};
+        continue;
+      }
+      try{
+        const proof=createCandidateDeterministicReplayProof({
+          historyRows:history,
+          incumbentConfig,
+          candidate:live.artifact,
+          asOf:now,
+          minimumTrainCases
+        });
+        promotionReplayProofs[String(participant.candidateId)]={ok:true,proof};
+      }catch(err){
+        promotionReplayProofs[String(participant.candidateId)]={
+          ok:false,
+          error:err instanceof Error?err.message:String(err)
+        };
+      }
+    }
+  }
+
   return {
     competitionState:competition,
     experimentGovernorState:governor,
     summary:shadowCompetitionSummary(competition),
     governorSummary:governor?experimentGovernorSummary(governor):null,
     flags:{initialized,refreshed,evaluated,governorCreated,governorEvaluated},
-    historyRows:history.length
+    historyRows:history.length,
+    promotionReplayProofs
   };
 }
 
