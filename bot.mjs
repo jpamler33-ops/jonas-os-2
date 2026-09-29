@@ -1752,7 +1752,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     notionalQuote:supervisedBudget.notionalQuote,
     minExpectedReturn:isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn,
     minDirectionalProbability:isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability,
-    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
+    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge,
+    horizonSelection:'BIGGJ_POLICY',
+    assetClass
   });
   if(!decision.eligible) return {...decision,placed:false};
   const setup=classifyShadowSetup({expectedReturn:decision.expectedReturn,probabilityEdge:decision.probabilityEdge,regimeConfidence:Number(issuance?.regime?.confidence||issuance?.regimeConfidence||0),stressRobustnessScore:Number(issuance?.stressRobustnessScore||0),assetClass});
@@ -1913,6 +1915,8 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
       forecastFingerprint:decision.forecastFingerprint,
       horizonId:decision.horizonId,
       horizonMs:decision.horizonMs,
+      horizonSelection:decision.horizonSelection,
+      tradingPolicyVersion:decision.tradingPolicyVersion,
       admissionGate:decision.admissionGate,
       expectedReturn:decision.expectedReturn,
       directionalProbability:decision.directionalProbability,
