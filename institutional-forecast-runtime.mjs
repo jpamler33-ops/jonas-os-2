@@ -18,6 +18,10 @@ import {
 import { verifyCanonicalForecastInput } from './forecast-input-adapter.mjs';
 import { createInstitutionalForecastIssuance, verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { createResearchTraceEvaluation } from './research-trace.mjs';
+import {
+  createForecastClaimAssumptionShadowObservation,
+  verifyForecastClaimAssumptionShadowObservation
+} from './forecast-claim-assumption-sidecar.mjs';
 import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
 import { sha256 } from './institutional-kernel.mjs';
 
@@ -1435,7 +1439,28 @@ function evaluationsFromResolved(runtime,resolved){
         version:'V1'
       }
     });
-    evaluations.push({issuanceId:issuance.issuanceId,trace:issuance.trace,evaluation});
+    let claimAssumptionObservation=null;
+    if(issuance.claimAssumptionSidecar){
+      claimAssumptionObservation=createForecastClaimAssumptionShadowObservation(
+        issuance.claimAssumptionSidecar,
+        {
+          horizonId:row.horizonId,
+          maturedAt:row.dueAt,
+          observedAt:row.resolution.resolvedAt,
+          evaluationId:evaluation.evaluationId
+        }
+      );
+      const observationVerification=verifyForecastClaimAssumptionShadowObservation(claimAssumptionObservation);
+      if(!observationVerification.ok){
+        throw new Error('claim-assumption shadow observation invalid: '+observationVerification.reasons.join(','));
+      }
+    }
+    evaluations.push({
+      issuanceId:issuance.issuanceId,
+      trace:issuance.trace,
+      evaluation,
+      claimAssumptionObservation
+    });
   }
   return evaluations;
 }
@@ -1481,6 +1506,38 @@ export function observeInstitutionalForecastRuntime(runtime,{
     revisions:clone(revisions),
     resolved:clone(resolved),
     evaluations:evaluationsFromResolved(runtime,resolved)
+  });
+}
+
+export function forecastClaimAssumptionShadowDataset(runtime,{limit=5_000}={}){
+  if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
+  const max=Math.max(1,Math.floor(Number(limit)||5_000));
+  const rows=[];
+  const seen=new Set();
+  for(const journalRow of runtime?.journal?.all?.()??[]){
+    if(journalRow?.status!=='RESOLVED'||!journalRow?.resolution) continue;
+    for(const linked of evaluationsFromResolved(runtime,[journalRow])){
+      const observation=linked?.claimAssumptionObservation;
+      if(!observation||seen.has(observation.fingerprint)) continue;
+      seen.add(observation.fingerprint);
+      rows.push(observation);
+    }
+  }
+  rows.sort((a,b)=>Number(a.observedAt)-Number(b.observedAt)||String(a.fingerprint).localeCompare(String(b.fingerprint)));
+  const bounded=rows.slice(-max);
+  return deepFreeze({
+    version:'TCX_FORECAST_CLAIM_ASSUMPTION_SHADOW_DATASET_V1',
+    generatedAt:Date.now(),
+    observationCount:bounded.length,
+    totalReconstructibleObservations:rows.length,
+    observations:clone(bounded),
+    persistenceSemantics:'RECONSTRUCTED_FROM_PERSISTED_ISSUANCES_AND_FORECAST_JOURNAL',
+    prospectiveOnly:true,
+    infersAssumptionTruth:false,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
   });
 }
 
@@ -1566,6 +1623,8 @@ export function institutionalForecastRuntimeSummary(runtime){
     journalEntries:runtime?.journal?.all?.().length??0,
     pendingOutcomes:runtime?.journal?.pending?.().length??0,
     issuedForecasts:runtime?.issuances?.length??0,
+    claimAssumptionSidecars:(runtime?.issuances??[]).filter(x=>x?.claimAssumptionSidecar).length,
+    resolvedClaimAssumptionEligible:(runtime?.journal?.all?.()??[]).filter(x=>x?.status==='RESOLVED').length,
     trackedForecasts:runtime?.intelligence?.all?.().length??0,
     probabilityCalibration,
     executionMode:'SHADOW_ONLY',
