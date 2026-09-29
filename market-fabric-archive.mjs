@@ -135,7 +135,7 @@ async function archivedBytesFromManifest(dir,manifest){
 }
 
 async function tryMigrateOneGzipSegment({dir,manifest,manifestPath}){
-  const legacy=manifest.segments.find(x=>codecOf(x)==='gzip'&&!x.brotliCandidateRejectedAt);
+  const legacy=manifest.segments.find(x=>codecOf(x)==='gzip'&&!x.cold&&!x.brotliCandidateRejectedAt);
   if(!legacy) return {manifest,attempted:null};
   const source=path.join(dir,legacy.name);
   const sourceMeta=await stat(source);
@@ -213,6 +213,7 @@ async function tryMigrateOneGzipSegment({dir,manifest,manifestPath}){
 async function tryRecompressOneLegacyBrotliSegment({dir,manifest,manifestPath}){
   const legacy=manifest.segments.find(x=>
     codecOf(x)==='brotli'&&
+    !x.cold&&
     Number(x?.migrationQuality||0)<BROTLI_QUALITY&&
     !x.brotli11CandidateRejectedAt
   );
@@ -316,6 +317,13 @@ export async function archiveMarketFabricSegments({
     const last=await readLastJsonLine(raw);
     const rawSha256=await hashFile(raw);
     const existing=manifest.segments.find(x=>x.sourceName===name);
+    if(existing?.cold){
+      if(rawSha256!==String(existing.rawSha256)||rawMeta.size!==Number(existing.rawBytes)){
+        throw new Error('MARKET_FABRIC_ARCHIVE_COLD_SOURCE_MISMATCH');
+      }
+      await unlink(raw);
+      continue;
+    }
     if(existing){
       const existingPath=path.join(dir,existing.name);
       try{
