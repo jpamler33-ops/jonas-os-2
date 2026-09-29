@@ -2033,11 +2033,63 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     return {...decision,placed:false,reason:'DAILY_SYMBOL_CAP'};
   }
 
-  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,setupMemory:SETUP_PERFORMANCE_MEMORY_VERSION,setupType:setup.setupType,setupScore:setup.score,setupEvidenceStatus:setupEvidence.status,setupEvidenceMultiplier}});
+  const learning=refreshBiggjLearningCache();
+  const styleProfile=BIGGJ_TRADING_STYLES[marketAnalysis.selectedStyle]||BIGGJ_TRADING_STYLES.INTRADAY;
+  const biggjDecision=freezeBiggjTradeDecision(marketAnalysis,{
+    invalidationPrice:structurePlan.invalidationPrice,
+    targetPrice:structurePlan.targetPrice,
+    plannedRewardRisk:structurePlan.rewardRisk,
+    thesisHealth:entryAdmission.evidenceScore,
+    counterThesisStrength,
+    additionalEvidence:{
+      marketPlaybookVersion:BIGGJ_MARKET_PLAYBOOK_VERSION,
+      tradingPolicyVersion:BIGGJ_TRADING_POLICY_VERSION,
+      adaptiveLearningVersion:BIGGJ_ADAPTIVE_LEARNING_VERSION,
+      outcomeMemoryFingerprint:learning.outcomeMemory?.fingerprint||null,
+      holdMemoryFingerprint:learning.holdMemory?.fingerprint||null,
+      strategyExperimentFingerprint:learning.experiments?.fingerprint||null,
+      consistencyScore:learning.consistency?.consistencyScore??null,
+      providerEvidence:biggjPreflight.evidence
+    }
+  });
+  const requestedEntryType=String(marketAnalysis?.entryPlan?.orderIntent||'').toUpperCase();
+  const preferredLimitPrice=Number(marketAnalysis?.entryPlan?.preferredLimitPrice);
+  const useLimit=requestedEntryType==='LIMIT_RETEST'&&Number.isFinite(preferredLimitPrice)&&preferredLimitPrice>0;
+  const shadowEntryType=useLimit?'LIMIT':'MARKET';
+  const frozenPolicy=createFrozenShadowPolicy({
+    policyVersion:'BIGGJ_PRIMARY_ENTRY_POLICY_V1',
+    frozenAt:now,
+    parameters:{
+      strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+      biggjTradingPolicy:BIGGJ_TRADING_POLICY_VERSION,
+      biggjMarketPlaybook:BIGGJ_MARKET_PLAYBOOK_VERSION,
+      biggjAdaptiveLearning:BIGGJ_ADAPTIVE_LEARNING_VERSION,
+      tradingStyle:marketAnalysis.selectedStyle,
+      strategyFamily:marketAnalysis.strategyFamily,
+      horizonSelection:decision.horizonSelection,
+      minHorizonMs:decision.minHorizonMs,
+      maxHorizonMs:decision.maxHorizonMs,
+      opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,
+      leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,
+      leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,
+      portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,
+      correlation:PIT_CORRELATION_ENGINE_VERSION,
+      assetClass,horizonId:decision.horizonId,side:decision.side,
+      admissionGate:decision.admissionGate,academyStage:academy.activeStage,
+      trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,
+      setupMemory:SETUP_PERFORMANCE_MEMORY_VERSION,setupType:setup.setupType,
+      setupScore:setup.score,setupEvidenceStatus:setupEvidence.status,setupEvidenceMultiplier,
+      structureRewardRisk:structurePlan.rewardRisk,
+      entryEvidenceScore:entryAdmission.evidenceScore,
+      entryEvidenceCoverage:entryAdmission.evidenceCoverage,
+      counterThesisStrength
+    }
+  });
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
-    type:'MARKET',
+    type:shadowEntryType,
+    limitPrice:useLimit?preferredLimitPrice:null,
     notionalQuote:leveragedExposureQuote,
     strategyMeta:{
       strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
@@ -2083,7 +2135,29 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
       strategyDnaSamples:opportunityAllocation.samples,
       failureMemoryScore:opportunityAllocation.failureScore,
       assetClass,
-      strategyLane:[decision.symbol,decision.horizonId,decision.side].join(':'),
+      tradingStyle:marketAnalysis.selectedStyle,
+      strategyFamily:marketAnalysis.strategyFamily,
+      strategyLane:[marketAnalysis.selectedStyle,marketAnalysis.strategyFamily,decision.symbol,decision.horizonId,decision.side].join(':'),
+      maxHoldMs:Number(styleProfile.nominalHoldRangeMs?.[1]||decision.horizonMs*2),
+      expectedHoldRangeMs:[...(styleProfile.nominalHoldRangeMs||[])],
+      biggjDecision,
+      biggjDecisionFingerprint:biggjDecision.fingerprint,
+      entryEvidenceScore:entryAdmission.evidenceScore,
+      entryCounterThesisStrength:counterThesisStrength,
+      entryDataTrustScore:marketAnalysis.dataTrustScore,
+      entryFlowState:biggjPreflight.flowAlignment>.15?'ALIGNED':biggjPreflight.flowAlignment<-.15?'OPPOSED':'NEUTRAL',
+      entryStructureState:String(marketAnalysis.marketStructure?.bias||'UNKNOWN'),
+      entryLiquidationState:marketAnalysis.liquidityMap?.latestSweep?.kind||((marketAnalysis.liquidityMap?.observedLiquidationClusters||[]).length?'CLUSTERS_OBSERVED':'NONE'),
+      entryOnchainState:biggjPreflight.evidence.onchainAvailable?'OBSERVED':'UNKNOWN',
+      entryMacroState:biggjPreflight.evidence.macroAvailable?'OBSERVED':'UNKNOWN',
+      plannedStopLossPct:stopDistancePct,
+      plannedTakeProfitPct:targetDistancePct,
+      plannedInvalidationPrice:structurePlan.invalidationPrice,
+      plannedTargetPrice:structurePlan.targetPrice,
+      plannedRewardRisk:structurePlan.rewardRisk,
+      shadowEntryIntent:requestedEntryType,
+      shadowEntryType,
+      shadowPreferredLimitPrice:useLimit?preferredLimitPrice:null,
       academyVersion:SHADOW_CAPITAL_ACADEMY_VERSION,
       academyStage:academy.activeStage,
       academyAchievedLevel:academy.achievedLevel,
@@ -2101,6 +2175,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
       forecastFingerprint:decision.forecastFingerprint,
       horizonId:decision.horizonId,
       horizonMs:decision.horizonMs,
+      horizonSelection:decision.horizonSelection,
+      minHorizonMs:decision.minHorizonMs,
+      maxHorizonMs:decision.maxHorizonMs,
       admissionGate:decision.admissionGate,
       expectedReturn:decision.expectedReturn,
       directionalProbability:decision.directionalProbability,
