@@ -24,3 +24,7 @@ test('alert is compact and evidence focused',()=>{
  const r=makeGlobalEventRecord({id:'e1',sourceId:'wire',actor:'Donald Trump',headline:'Tariff policy announcement',topic:'TARIFF'},s,map,{asOf:1000});
  const msg=renderGlobalEventAlert(r); assert.match(msg,/GLOBAL EVENT/); assert.match(msg,/BTC -0.70%/); assert.doesNotMatch(msg,/SHADOW_ONLY|ABSTAIN|canExecute/);
 });
+
+test('important actor catalog spans political monetary and technology actors',async()=>{const {importantActorCatalog}=await import('./global-event-radar.mjs');const ids=importantActorCatalog().map(x=>x.id);for(const id of ['donald-trump','xi-jinping','jerome-powell','scott-bessent','elon-musk','sam-altman','jensen-huang']) assert.ok(ids.includes(id));});
+test('documented meetings are first-class events',async()=>{const {buildInteractionEvent,prioritizeActorEvent}=await import('./global-event-radar.mjs');const e=buildInteractionEvent({id:'trump-xi',participants:['Donald Trump','Xi Jinping'],interactionType:'MEETING',topics:['TRADE','AI'],headline:'Bilateral meeting',sourceId:'official',availableAt:100});assert.equal(e.eventClass,'PUBLIC_ACTOR_INTERACTION');assert.equal(e.knownActors.every(x=>x.known),true);assert.equal(prioritizeActorEvent(e).notifyEligible,true);});
+test('important actor chatter without market topic is tracked but not notification eligible',async()=>{const {prioritizeActorEvent}=await import('./global-event-radar.mjs');const p=prioritizeActorEvent({actor:'Donald Trump',topic:'CEREMONIAL'});assert.equal(p.track,true);assert.equal(p.notifyEligible,false);});
