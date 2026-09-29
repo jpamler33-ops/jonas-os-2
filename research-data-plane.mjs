@@ -241,6 +241,7 @@ export async function openResearchDataPlane(filePath,{
   let total=0,retainedCount=0,ringPos=0;
   let prev=GENESIS,expectedSeq=1,healthy=true,error=null;
   const countsByDomain={},countsBySource={},countsByFinality={};
+  const sourcePayload=new Map();
   let fileBytes=0;
 
   try{
@@ -273,6 +274,16 @@ export async function openResearchDataPlane(filePath,{
         error='RDP_PREV_HASH_MISMATCH:'+record.seq;
         break;
       }
+      const sourceKey=record.streamKey+'\u0000'+record.domain+'\u0000'+record.source+'\u0000'+record.sourceEventId;
+      const sourceHash=sourceEventPayloadHash(record);
+      const priorSourceHash=sourcePayload.get(sourceKey);
+      if(priorSourceHash&&priorSourceHash!==sourceHash){
+        healthy=false;
+        error='RDP_SOURCE_EVENT_ID_CONFLICT:'+record.sourceEventId;
+        break;
+      }
+      if(!priorSourceHash) sourcePayload.set(sourceKey,sourceHash);
+
       prev=record.recordHash;
       expectedSeq++;
       total++;
@@ -301,10 +312,6 @@ export async function openResearchDataPlane(filePath,{
   }
 
   const dedupe=new Set(records.map(dedupeKey));
-  const sourcePayload=new Map(records.map(x=>[
-    x.streamKey+'\u0000'+x.domain+'\u0000'+x.source+'\u0000'+x.sourceEventId,
-    sourceEventPayloadHash(x)
-  ]));
 
   const hard=Math.max(8*1024*1024,Number(hardBytes)||160*1024*1024);
   const warn=Math.min(hard,Math.max(4*1024*1024,Number(warnBytes)||120*1024*1024));
@@ -350,8 +357,12 @@ export async function appendResearchDataPlane(plane,inputs){
     const sourceKey=record.streamKey+'\u0000'+record.domain+'\u0000'+record.source+'\u0000'+record.sourceEventId;
     const sourcePayloadHash=sourceEventPayloadHash(record);
     const priorPayload=plane.sourcePayload.get(sourceKey)||localSourcePayload.get(sourceKey);
-    if(priorPayload&&priorPayload!==sourcePayloadHash){
-      throw new Error('SOURCE_EVENT_ID_CONFLICT:'+record.sourceEventId);
+    if(priorPayload){
+      if(priorPayload!==sourcePayloadHash){
+        throw new Error('SOURCE_EVENT_ID_CONFLICT:'+record.sourceEventId);
+      }
+      duplicates++;
+      continue;
     }
     if(plane.dedupe.has(key)||localDedupe.has(key)){
       duplicates++;
@@ -396,7 +407,6 @@ export async function appendResearchDataPlane(plane,inputs){
     if(plane.records.length>plane.maxInMemoryRecords){
       const removed=plane.records.shift();
       plane.dedupe.delete(dedupeKey(removed));
-      plane.sourcePayload.delete(removed.streamKey+'\u0000'+removed.domain+'\u0000'+removed.source+'\u0000'+removed.sourceEventId);
     }
     plane.countsByDomain[record.domain]=(plane.countsByDomain[record.domain]||0)+1;
     plane.countsBySource[record.source]=(plane.countsBySource[record.source]||0)+1;
