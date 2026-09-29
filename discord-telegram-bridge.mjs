@@ -81,7 +81,7 @@ function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'�
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
 function percent(value){const n=Number(value);return Number.isFinite(n)?(n*100).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+'%':'—';}
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'TCX // START HERE',description:['**Eine Engine. Zwei Oberflächen.**','Discord ist das Command Center; Telegram bleibt die schnelle mobile Steuerung.','','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/chart BTC\` · Chart','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','\`/system\` · Runtime-Status','','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],allowedMentions:{parse:[]}};}
+function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**SCHNELLSTART**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/deep BTC\` · Deep Dive','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
   return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
@@ -89,7 +89,7 @@ export function buildDiscordTerminalPayload(snapshot={}){
     {name:'Closed Trades',value:String(p?.closedTrades??0),inline:true},{name:'Net PnL',value:money(p?.netPnlQuote),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
     {name:'Forecast Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},{name:'Episodes',value:String(h?.episodeMemory?.total??'—'),inline:true},{name:'Evidence',value:String(h?.evidenceHistory?.total??'—'),inline:true},
     {name:'Execution',value:'SHADOW_ONLY',inline:true},{name:'Live Orders',value:'BLOCKED',inline:true}
-  ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],allowedMentions:{parse:[]}};
+  ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordSystemPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{},oms=h?.shadowOms||{},fabric=h?.marketDataFabric||{},tg=h?.telegramPolling||{};
@@ -98,7 +98,59 @@ export function buildDiscordSystemPayload(snapshot={}){
     {name:'OMS',value:'Active '+String(oms?.active??0)+' · Filled '+String(oms?.filled??0),inline:true},
     {name:'Market Events',value:String(fabric?.events??'—'),inline:true},
     {name:'Safety',value:'ABSTAIN / SHADOW_ONLY',inline:true}
-  ],footer:{text:MARKERS.system},timestamp:new Date().toISOString()}],allowedMentions:{parse:[]}};
+  ],footer:{text:MARKERS.system},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+}
+
+export function buildDiscordPerformancePayload(snapshot={}){
+  const p=snapshot?.portfolio||{};
+  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Simulation / Research · keine echten Orders**',fields:[
+    {name:'Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Net PnL',value:money(p?.netPnlQuote),inline:true},
+    {name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Open',value:String(p?.openPositions??0),inline:true},
+    {name:'Closed',value:String(p?.closedTrades??0),inline:true},
+    {name:'Winrate',value:percent(p?.winRate),inline:true},
+    {name:'Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
+    {name:'Expectancy',value:money(p?.expectancyQuote),inline:true},
+    {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
+  ],footer:{text:MARKERS.performance},timestamp:new Date().toISOString()}],components:[
+    {type:1,components:[
+      {type:2,style:2,label:'Tag',custom_id:'dc3:home:stats_day'},
+      {type:2,style:2,label:'Woche',custom_id:'dc3:home:stats_week'},
+      {type:2,style:2,label:'Monat',custom_id:'dc3:home:stats_month'},
+      {type:2,style:1,label:'Portfolio',custom_id:'dc3:home:portfolio'}
+    ]},
+    marketSelectRow()
+  ],allowedMentions:{parse:[]}};
+}
+export function buildDiscordMarketOverviewPayload(snapshot={}){
+  const p=snapshot?.portfolio||{},h=snapshot?.health||{};
+  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Shadow Positionen: **'+String(p?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+}
+export function buildDiscordDataHealthPayload(snapshot={}){
+  const h=snapshot?.health||{},r=h?.operationalReadiness||{};
+  const hard=Array.isArray(r?.hardReasons)?r.hardReasons:[];
+  const warnings=Array.isArray(r?.warningReasons)?r.warningReasons:[];
+  return {embeds:[{title:'TCX // DATA HEALTH',description:'Point-in-time Research Pipeline',fields:[
+    {name:'Market Fabric',value:yesNo(h?.marketDataFabric?.healthy),inline:true},
+    {name:'Episode Memory',value:yesNo(h?.episodeMemory?.healthy),inline:true},
+    {name:'Evidence Store',value:yesNo(h?.evidenceHistory?.healthy),inline:true},
+    {name:'Forecast Runtime',value:yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY')),inline:true},
+    {name:'Hard Blocks',value:String(hard.length),inline:true},
+    {name:'Warnings',value:String(warnings.length),inline:true},
+    {name:'Current blockers',value:(hard.concat(warnings).slice(0,6).join('\n')||'none').slice(0,1024),inline:false}
+  ],footer:{text:MARKERS.data},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+}
+function closedTradePayload(position={}){
+  const pnl=Number(position?.realizedNetPnlQuote),ret=Number(position?.realizedReturnPct);
+  return {embeds:[{title:'TCX CLOSED · '+String(position?.symbol||'UNKNOWN').replace('USDT','/USDT')+' · '+String(position?.side||'—').toUpperCase(),description:'**CLOSED · SHADOW_ONLY**',fields:[
+    {name:'Entry',value:String(position?.entryPrice??'—'),inline:true},
+    {name:'Exit',value:String(position?.exitPrice??position?.lastMark?.price??'—'),inline:true},
+    {name:'Net PnL',value:Number.isFinite(pnl)?money(pnl):'—',inline:true},
+    {name:'Return',value:Number.isFinite(ret)?percent(ret):'—',inline:true},
+    {name:'Reason',value:String(position?.closeReason||'UNKNOWN'),inline:true},
+    {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true}
+  ],footer:{text:'CLOSED:'+String(position?.positionId||'UNKNOWN')},timestamp:new Date(Number(position?.closedAt)||Date.now()).toISOString()}],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
 }
 function shadowTradePayload(position={}){
   const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT'),side=String(position?.side||'—').toUpperCase();
@@ -106,7 +158,7 @@ function shadowTradePayload(position={}){
   return {embeds:[{title:'TCX SHADOW TRADE · '+symbol+' · '+side,description:'**OPEN · SHADOW_ONLY**',fields:[
     {name:'Entry',value:String(position?.entryPrice??'—'),inline:true},{name:'PnL',value:Number.isFinite(pnl)?money(pnl):'—',inline:true},{name:'Return',value:Number.isFinite(ret)?percent(ret):'—',inline:true},
     {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true},{name:'Horizon',value:String(position?.horizonId||'—'),inline:true},{name:'Mode',value:String(position?.entryMode||'STANDARD'),inline:true}
-  ],footer:{text:String(position?.positionId||'TCX_SHADOW_POSITION')},timestamp:new Date(Number(position?.openedAt)||Date.now()).toISOString()}],allowedMentions:{parse:[]}};
+  ],footer:{text:String(position?.positionId||'TCX_SHADOW_POSITION')},timestamp:new Date(Number(position?.openedAt)||Date.now()).toISOString()}],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
 }
 function berlinParts(){
   const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
