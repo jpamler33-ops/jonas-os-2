@@ -37,6 +37,7 @@ import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisod
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independent-witness-network.mjs';
 import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { rotateVerifiedAuditLedger, verifyAuditLedgerArchive, AUDIT_LEDGER_ROTATION_VERSION } from './audit-ledger-rotation.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
 import { buildRuntimeManifest, openReleaseRegistry, registerRuntimeRelease, verifyReleaseRegistry, releaseRegistrySummary, institutionalRuntimeFiles, RELEASE_REGISTRY_VERSION } from './runtime-release-registry.mjs';
@@ -202,6 +203,10 @@ const marketFabricColdTargetBytes=Math.max(0,Math.min(
 ));
 const marketFabricColdMaxSegmentsPerRun=Math.max(1,Math.min(24,Number(process.env.TCX_MARKET_FABRIC_COLD_MAX_SEGMENTS_PER_RUN||2)));
 const marketFabricColdStore=createS3ColdStoreFromEnv();
+const auditLedgerColdStore=createS3ColdStoreFromEnv({
+  ...process.env,
+  TCX_COLD_PREFIX:process.env.TCX_AUDIT_COLD_PREFIX||((process.env.TCX_COLD_PREFIX||'market-fabric')+'/audit-ledger')
+});
 await cleanupOrphanedPersistenceArtifacts({dataDir:persistenceDataDir});
 let startupStorageInventory=await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
 let startupColdTier=null;
@@ -395,6 +400,13 @@ const researchPlaneMaxMemoryRecords = Math.max(1500, Math.min(5000, Math.floor(N
 const marketFabricMaxMemoryEvents = Math.max(2000, Math.min(8000, Math.floor(Number(process.env.TCX_MARKET_FABRIC_MAX_MEMORY_EVENTS || 4000) || 4000)));
 const auditLedgerMaxMemoryRecords = Math.max(50, Math.min(2000, Math.floor(Number(process.env.TCX_AUDIT_LEDGER_MAX_MEMORY_RECORDS || 500) || 500)));
 const auditLedgerMaxBytes = Math.max(48*1024*1024, Math.min(128*1024*1024, Number(process.env.TCX_AUDIT_LEDGER_MAX_BYTES || 64*1024*1024)));
+const auditLedgerRotateBytes = Math.max(
+  32*1024*1024,
+  Math.min(
+    auditLedgerMaxBytes-8*1024*1024,
+    Number(process.env.TCX_AUDIT_LEDGER_ROTATE_BYTES||Math.floor(auditLedgerMaxBytes*0.70))
+  )
+);
 const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
 const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
 const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
@@ -691,6 +703,36 @@ const auditLedger = await openAuditLedger(auditFile,{
   maxInMemoryRecords:auditLedgerMaxMemoryRecords,
   maxFileBytes:auditLedgerMaxBytes
 });
+const auditArchiveBootVerification=await verifyAuditLedgerArchive(auditFile).catch(err=>({
+  ok:false,
+  error:'AUDIT_ARCHIVE_VERIFY_EXCEPTION',
+  detail:err instanceof Error?err.message:String(err)
+}));
+if(!auditArchiveBootVerification.ok){
+  auditLedger.healthy=false;
+  auditLedger.writeBlocked=true;
+  auditLedger.verification={
+    ok:false,
+    error:auditArchiveBootVerification.error||'AUDIT_ARCHIVE_VERIFICATION_FAILED',
+    detail:auditArchiveBootVerification.detail||auditArchiveBootVerification.segment||null
+  };
+  console.error('[TCX_AUDIT_ARCHIVE_VERIFY_FAILED]',JSON.stringify(auditArchiveBootVerification));
+}else if(auditArchiveBootVerification.segments>0){
+  console.info('[TCX_AUDIT_ARCHIVE_VERIFIED]',JSON.stringify(auditArchiveBootVerification));
+}
+if(auditLedger.healthy&&Number(auditLedger.fileBytes||0)>=auditLedgerRotateBytes){
+  const bootRotation=await rotateVerifiedAuditLedger({
+    ledger:auditLedger,
+    rotateBytes:auditLedgerRotateBytes,
+    coldStore:auditLedgerColdStore
+  });
+  if(bootRotation.rotated){
+    console.info('[TCX_AUDIT_LEDGER_ROTATED]',JSON.stringify({...bootRotation,phase:'startup'}));
+    if(bootRotation.archiveError){
+      console.warn('[TCX_AUDIT_LEDGER_ARCHIVE_DEGRADED]',JSON.stringify({...bootRotation,phase:'startup'}));
+    }
+  }
+}
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
 const marketFabricCheckpointRecovery=await reconcileMarketFabricCheckpointFromArchive(marketFabricFile);
 if(marketFabricCheckpointRecovery.reconciled){
@@ -1151,6 +1193,27 @@ if((forecastSeedAtBoot.addedRows>0||forecastRuntime.migratedFromLegacyPath) && f
   );
 }
 
+async function maybeRotateAuditLedger(reason='append'){
+  if(!auditLedger.healthy||Number(auditLedger.fileBytes||0)<auditLedgerRotateBytes) return null;
+  const rotation=await rotateVerifiedAuditLedger({
+    ledger:auditLedger,
+    rotateBytes:auditLedgerRotateBytes,
+    coldStore:auditLedgerColdStore
+  });
+  if(rotation.rotated){
+    console.info('[TCX_AUDIT_LEDGER_ROTATED]',JSON.stringify({
+      ...rotation,
+      reason,
+      activeFileBytes:Number(auditLedger.fileBytes||0),
+      maxFileBytes:Number(auditLedger.maxFileBytes||0)
+    }));
+    if(rotation.archiveError){
+      console.warn('[TCX_AUDIT_LEDGER_ARCHIVE_DEGRADED]',JSON.stringify({...rotation,reason}));
+    }
+  }
+  return rotation;
+}
+
 function latestEvidenceRecord(symbol) {
   return latestEvidenceSnapshot(evidenceRecords,symbol);
 }
@@ -1180,7 +1243,9 @@ async function appendInstitutionalAudit(kind,payload) {
   auditAppendQueue = auditAppendQueue.then(async()=>{
     if(!auditLedger.healthy) return null;
     try {
-      return await appendAuditRecord(auditLedger,{kind,payload,occurredAt:Date.now()});
+      const record=await appendAuditRecord(auditLedger,{kind,payload,occurredAt:Date.now()});
+      await maybeRotateAuditLedger('institutional-audit');
+      return record;
     } catch(err) {
       auditLedger.healthy=false;
       auditLedger.verification={
@@ -1199,9 +1264,11 @@ async function appendForecastIssuanceAuditQueued(issuance) {
   auditAppendQueue = auditAppendQueue.then(async()=>{
     if(!auditLedger.healthy) return null;
     try {
-      return await appendInstitutionalForecastIssuanceAudit(auditLedger,issuance,{
+      const record=await appendInstitutionalForecastIssuanceAudit(auditLedger,issuance,{
         occurredAt:issuance.generatedAt
       });
+      await maybeRotateAuditLedger('forecast-issuance');
+      return record;
     } catch(err) {
       auditLedger.healthy=false;
       auditLedger.verification={
@@ -1220,9 +1287,11 @@ async function appendForecastEvaluationAuditQueued(trace,evaluation) {
   auditAppendQueue = auditAppendQueue.then(async()=>{
     if(!auditLedger.healthy) return null;
     try {
-      return await appendResearchTraceEvaluationAudit(auditLedger,trace,evaluation,{
+      const record=await appendResearchTraceEvaluationAudit(auditLedger,trace,evaluation,{
         occurredAt:evaluation.observedAt
       });
+      await maybeRotateAuditLedger('forecast-evaluation');
+      return record;
     } catch(err) {
       auditLedger.healthy=false;
       auditLedger.verification={
