@@ -261,7 +261,22 @@ function commandText(interaction){
   }
   if(n==='why_not_trade')return '/why_not_trade';
   if(n==='report')return '/daystats';
-  if(n==='start'||n==='help'||n==='portfolio'||n==='data')return '/'+n;
+  if(n==='help'||n==='portfolio'||n==='data')return '/'+n;
+  return null;
+}
+function callbackDataForCommand(interaction){
+  const n=String(interaction.commandName||'').toLowerCase();
+  const s=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
+  if(n==='radar')return 'terminal:radar';
+  if(!s)return null;
+  if(n==='superchart')return 'superchart:'+s+':PRO:'+(interaction.options?.getString('interval')||'5m');
+  if(n==='deep')return 'deep:'+s;
+  if(n==='why')return 'why:'+s;
+  if(n==='flow')return 'flow:'+s;
+  if(n==='liquidations')return 'liqmap:'+s+':5m';
+  if(n==='xray')return 'xray:'+s;
+  if(n==='events')return 'events:'+s;
+  if(n==='accuracy')return 'accuracy:'+s;
   return null;
 }
 
@@ -273,9 +288,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const contexts=new Map();
   const channelCache=new Map();
   const tradeCards=new Map();
+  const closedPosted=new Set();
   const timers=new Set();
+  let closedFeedInitialized=false;
+  let lastHealthDigest=null;
   let lastDailyReportDate=null;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
   function fail(scope,err){state.lastError=scope+': '+(err instanceof Error?err.message:String(err));try{logger.error('[TCX_DISCORD]',state.lastError);}catch{}}
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
@@ -356,11 +374,20 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function ensureStart(){const c=channelCache.get('start-here');return c?upsertMarked(c,MARKERS.start,startPayload()):null;}
   async function refreshTerminal(){const c=channelCache.get('tcx-terminal');if(!c)return null;const m=await upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot()));state.lastRefreshAt=Date.now();return m;}
   async function refreshSystem(){const c=channelCache.get('system-status');return c?upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())):null;}
+  async function refreshPerformance(){const c=channelCache.get('performance');return c?upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())):null;}
+  async function refreshOverview(){const c=channelCache.get('market-overview');return c?upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())):null;}
+  async function refreshDataHealth(){const c=channelCache.get('data-health');return c?upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())):null;}
   async function latestBotMessage(channel){try{const messages=await channel.messages.fetch({limit:20});return messages.find(m=>m.author?.id===client.user?.id)||null;}catch{return null;}}
   async function refreshCorePanel(channel,callbackData){
     let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
     const chatId=fakeChatId(guildId,channel.id,'panel');
     await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||'')}}});
+    try{
+      const refreshed=await channel.messages.fetch(String(msg.id));
+      const symbol=/:(\w+USDT)(?::|$)/.exec(String(callbackData||''))?.[1]||null;
+      const components=symbol?marketActionComponents(symbol):commandCenterComponents();
+      await refreshed.edit({components,allowedMentions:{parse:[]}});
+    }catch(err){fail('panel-components',err);}
   }
   async function refreshMarketPanels(){
     let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
@@ -371,28 +398,82 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const c=channelCache.get(channelName); if(!c)return false; const chatId=fakeChatId(guildId,c.id,'panel');
     await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
   }
+  function healthDigest(snapshot={}){
+    const h=snapshot?.health||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
+    return JSON.stringify({
+      ready:r?.ready===true,
+      fabric:h?.marketDataFabric?.healthy===true,
+      oms:h?.shadowOms?.healthy===true,
+      forecast:f?.healthy===true||f?.status==='HEALTHY',
+      telegram:!h?.telegramPolling?.lastPollError
+    });
+  }
+  async function syncHealthAlerts(){
+    const snapshot=await safeMissionSnapshot();
+    const digest=healthDigest(snapshot);
+    if(lastHealthDigest==null){lastHealthDigest=digest;return;}
+    if(digest===lastHealthDigest)return;
+    const previous=lastHealthDigest;lastHealthDigest=digest;
+    const c=channelCache.get('alerts');if(!c)return;
+    const now=JSON.parse(digest),before=JSON.parse(previous);
+    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>k+': '+(before[k]?'OK':'CHECK')+' → '+(now[k]?'OK':'CHECK'));
+    await c.send({embeds:[{title:'TCX // STATUS CHANGE',description:(changes.join('\n')||'System state changed').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}});
+    state.lastAlertAt=Date.now();
+  }
   async function syncTradeCards(){
     const c=channelCache.get('live-trades'); if(!c)return;
-    const snapshot=await safeMissionSnapshot(),positions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[],active=new Set();
+    const snapshot=await safeMissionSnapshot();
+    const positions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
+    const recentClosed=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
+    const active=new Set();
     const perms=c.permissionsFor(client.user),canThreads=Boolean(perms?.has(PermissionFlagsBits.CreatePublicThreads)&&perms?.has(PermissionFlagsBits.SendMessagesInThreads));
     for(const p of positions.slice(0,20)){
       const id=String(p?.positionId||''); if(!id)continue; active.add(id); let card=tradeCards.get(id);
       if(card){try{const msg=await c.messages.fetch(card.messageId);await msg.edit(shadowTradePayload(p));continue;}catch{tradeCards.delete(id);}}
       try{
-        const recent=await c.messages.fetch({limit:50});const existing=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id));
+        const recent=await c.messages.fetch({limit:50});
+        const existing=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id));
         const starter=existing||await c.send(shadowTradePayload(p));let threadId=null;
-        if(canThreads)try{const activeThreads=await c.threads.fetchActive();let thread=activeThreads.threads.find(t=>String(t.name).includes(id.slice(-8)));if(!thread){thread=await starter.startThread({name:clip(String(p.symbol||'TRADE').replace('USDT','')+'-'+String(p.side||'').toUpperCase()+'-'+id.slice(-8),90),autoArchiveDuration:1440,reason:'TCX shadow trade lifecycle'});await thread.send({content:'Lifecycle-Thread für diesen **Shadow-Trade**. Keine echte Order.',allowedMentions:{parse:[]}});}threadId=thread?.id||null;}catch(err){fail('trade-thread:'+id,err);}
+        if(canThreads)try{
+          const activeThreads=await c.threads.fetchActive();
+          let thread=activeThreads.threads.find(t=>String(t.name).includes(id.slice(-8)));
+          if(!thread){
+            thread=await starter.startThread({name:clip(String(p.symbol||'TRADE').replace('USDT','')+'-'+String(p.side||'').toUpperCase()+'-'+id.slice(-8),90),autoArchiveDuration:1440,reason:'TCX shadow trade lifecycle'});
+            await thread.send({content:'Lifecycle-Thread für diesen **Shadow-Trade**. Research/Simulation only.',components:marketActionComponents(p.symbol),allowedMentions:{parse:[]}});
+          }
+          threadId=thread?.id||null;
+        }catch(err){fail('trade-thread:'+id,err);}
         tradeCards.set(id,{messageId:starter.id,threadId});
       }catch(err){fail('trade-card:'+id,err);}
     }
-    for(const [id,card] of [...tradeCards])if(!active.has(id)){try{const msg=await c.messages.fetch(card.messageId);const embed=msg.embeds?.[0]?.toJSON?.()||{};embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();await msg.edit({embeds:[embed],allowedMentions:{parse:[]}});}catch{}tradeCards.delete(id);}
+    for(const [id,card] of [...tradeCards])if(!active.has(id)){
+      try{const msg=await c.messages.fetch(card.messageId);const embed=msg.embeds?.[0]?.toJSON?.()||{};embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();await msg.edit({embeds:[embed],components:[],allowedMentions:{parse:[]}});}catch{}
+      tradeCards.delete(id);
+    }
+    if(!closedFeedInitialized){
+      for(const p of recentClosed)if(p?.positionId)closedPosted.add(String(p.positionId));
+      closedFeedInitialized=true;state.closedFeedInitialized=true;
+    }else{
+      const closedChannel=channelCache.get('closed-trades');
+      if(closedChannel){
+        for(const p of [...recentClosed].reverse()){
+          const id=String(p?.positionId||'');if(!id||closedPosted.has(id))continue;
+          await closedChannel.send(closedTradePayload(p));
+          closedPosted.add(id);
+        }
+      }
+    }
+    if(closedPosted.size>300){
+      const keep=new Set(recentClosed.slice(0,100).map(p=>String(p?.positionId||'')).filter(Boolean));
+      closedPosted.clear();for(const id of keep)closedPosted.add(id);
+    }
     state.tradeCards=tradeCards.size;state.lastTradeSyncAt=Date.now();
   }
   async function maybeDailyReport(){const t=berlinParts();if(t.hour===23&&t.minute>=55&&lastDailyReportDate!==t.date){lastDailyReportDate=t.date;try{await dispatchReadCommand('performance','/daystats');}catch(err){fail('daily-report',err);}}}
   function addTimer(fn,ms){const timer=setInterval(()=>void Promise.resolve().then(fn).catch(err=>fail('timer',err)),ms);timer.unref?.();timers.add(timer);}
-  function startSchedulers(){if(timers.size)return;addTimer(refreshTerminal,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshSystem,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshMarketPanels,Math.max(60000,Number(marketRefreshMs)||120000));addTimer(refreshGlobalIntel,180000);addTimer(syncTradeCards,20000);addTimer(maybeDailyReport,60000);}
+  function startSchedulers(){if(timers.size)return;addTimer(refreshTerminal,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshSystem,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshPerformance,60000);addTimer(refreshOverview,90000);addTimer(refreshDataHealth,60000);addTimer(refreshMarketPanels,Math.max(60000,Number(marketRefreshMs)||120000));addTimer(refreshGlobalIntel,180000);addTimer(syncTradeCards,20000);addTimer(syncHealthAlerts,30000);addTimer(maybeDailyReport,60000);}
   async function bootstrapV2(){
-    try{const setup=await ensureLayout();await ensureStart();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards()]);startSchedulers();return setup;}
+    try{const setup=await ensureLayout();await ensureStart();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
     catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
   }
   async function setupCommand(interaction){
@@ -401,7 +482,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const result=await bootstrapV2();
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
-    await interaction.editReply('TCX Discord V2 eingerichtet: '+result.channels+' Channels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    await interaction.editReply('TCX Discord V3 eingerichtet: '+result.channels+' Channels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
   }
   async function terminalCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordTerminalPayload(await safeMissionSnapshot()));}
   async function systemCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordSystemPayload(await safeMissionSnapshot()));}
