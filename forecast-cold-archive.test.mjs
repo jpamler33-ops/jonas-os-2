@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import {
   archiveForecastColdBatch,
   verifyForecastColdSegment,
@@ -29,6 +29,13 @@ test('cold archive writes immutable verified gzip segment and deduplicates exact
   const replay=await archiveForecastColdBatch({dir,issuances,trackerRecords,archivedAt:6000});
   assert.equal(replay.archived,true);
   assert.equal(replay.duplicate,true);
+  assert.equal(replay.verified,true);
+
+  await writeFile(path.join(dir,first.segment.name),Buffer.from('corrupt'));
+  await assert.rejects(
+    ()=>archiveForecastColdBatch({dir,issuances,trackerRecords,archivedAt:7000}),
+    /EXISTING_SEGMENT_VERIFY_FAILED|incorrect header check|unexpected end of file/
+  );
 
   const summary=await forecastColdArchiveSummary(dir);
   assert.equal(summary.healthy,true);
