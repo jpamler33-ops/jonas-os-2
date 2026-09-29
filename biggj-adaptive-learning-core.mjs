@@ -1,7 +1,7 @@
 import { sha256 } from './institutional-kernel.mjs';
 
 export const BIGGJ_ADAPTIVE_LEARNING_VERSION='BIGGJ_ADAPTIVE_LEARNING_V1';
-export const BIGGJ_HOLD_MULTIPLIERS=Object.freeze([0.50,0.75,1.00,1.50,2.00]);
+export const BIGGJ_HOLD_MULTIPLIERS=Object.freeze([0.50,0.75,1.00,1.50,2.00,3.00,4.00,8.00]);
 
 const finite=(v,f=null)=>Number.isFinite(Number(v))?Number(v):f;
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,Number(v)));
@@ -416,9 +416,11 @@ export function selectBiggjAdaptiveHoldPlan(memory,position,current={}){
     .08*(flow-.5)+
     .06*(liquidity-.5)-
     .12*shock;
-  let adjusted=clamp(learned+liveSignal,0.50,2.50);
+  const style=token(position?.tradingStyle,'INTRADAY');
+  const maxMultiplier=style==='SWING'?8:style==='SCALP'?1.5:3;
+  let adjusted=clamp(learned+liveSignal,0.50,maxMultiplier);
   if(thesis<=.35||opposite>=.70||structure<=.30) adjusted=Math.min(adjusted,.75);
-  else if(thesis>=.75&&opposite<=.25&&structure>=.65&&regime>=.60) adjusted=Math.max(adjusted,Math.min(2.50,learned+.25));
+  else if(thesis>=.75&&opposite<=.25&&structure>=.65&&regime>=.60) adjusted=Math.max(adjusted,Math.min(maxMultiplier,learned+.25));
   const mode=adjusted>=1.20?'EXTEND':adjusted<=.85?'SHORTEN':'BASE';
   const confidence=match?clamp(match.effectiveSamples/(match.effectiveSamples+12)):0;
   return finalized({
