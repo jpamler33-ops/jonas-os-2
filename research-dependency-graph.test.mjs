@@ -249,3 +249,90 @@ test('derived source is healthy only when all upstream sources are healthy',()=>
   assert.equal(feature.upstreamSources.length,2);
   assert.equal(verifyResearchDependencyGraph(g).ok,true);
 });
+
+
+test('semantic review degrades only the reviewed feature when source health is otherwise healthy',()=>{
+  const record={
+    seq:1,
+    recordHash:R1,
+    streamKey:'BTCUSDT',
+    domain:'OPTIONS',
+    source:'DERIBIT_PUBLIC_OPTIONS',
+    sourceEventId:'semantic-1',
+    availableAt:1000,
+    validUntil:5000,
+    features:[
+      {id:'research.options.weightedIvPct',value:75},
+      {id:'research.options.openInterestLog',value:12}
+    ],
+    governance:{
+      sourceKey:'OPTIONS:DERIBIT_PUBLIC_OPTIONS',
+      decision:'DEGRADED',
+      sourceStatus:'HEALTHY',
+      usableForResearch:true,
+      reasons:[
+        {code:'SEMANTIC_DISTRIBUTION_SHIFT_REVIEW',id:'research.options.weightedIvPct',value:75}
+      ]
+    }
+  };
+  const g=buildResearchDependencyGraph({
+    plane:plane([record]),
+    governanceSummary:gov([{sourceKey:'OPTIONS:DERIBIT_PUBLIC_OPTIONS',status:'HEALTHY'}]),
+    streamKey:'BTCUSDT',
+    asOf:1500,
+    knowledgeTime:1600,
+    forecastInputFingerprint:H
+  });
+  assert.equal(g.gate,'CAUTION');
+  assert.deepEqual(g.impact.degradedFeatureIds,['research.options.weightedIvPct']);
+  assert.equal(g.impact.healthyFeatures,1);
+  assert.equal(g.impact.degradedFeatures,1);
+  const source=g.nodes.find(x=>x.id==='SOURCE:OPTIONS:DERIBIT_PUBLIC_OPTIONS');
+  assert.equal(source.state,'HEALTHY');
+  assert.deepEqual(source.semanticReviewFeatureIds,['research.options.weightedIvPct']);
+  assert.equal(explainResearchFeatureLineage(g,'research.options.openInterestLog').feature.state,'HEALTHY');
+  assert.equal(explainResearchFeatureLineage(g,'research.options.weightedIvPct').feature.state,'DEGRADED');
+  assert.equal(verifyResearchDependencyGraph(g).ok,true);
+});
+
+test('operationally degraded source still degrades every contributed feature',()=>{
+  const record={
+    seq:1,
+    recordHash:R1,
+    streamKey:'BTCUSDT',
+    domain:'OPTIONS',
+    source:'DERIBIT_PUBLIC_OPTIONS',
+    sourceEventId:'operational-1',
+    availableAt:1000,
+    validUntil:5000,
+    features:[
+      {id:'research.options.weightedIvPct',value:75},
+      {id:'research.options.openInterestLog',value:12}
+    ],
+    governance:{
+      sourceKey:'OPTIONS:DERIBIT_PUBLIC_OPTIONS',
+      decision:'DEGRADED',
+      sourceStatus:'DEGRADED',
+      usableForResearch:true,
+      reasons:[{code:'COMPLETENESS_SLO_BREACH',value:.4,limit:.5}]
+    }
+  };
+  const g=buildResearchDependencyGraph({
+    plane:plane([record]),
+    governanceSummary:gov([{sourceKey:'OPTIONS:DERIBIT_PUBLIC_OPTIONS',status:'DEGRADED'}]),
+    streamKey:'BTCUSDT',
+    asOf:1500,
+    knowledgeTime:1600,
+    forecastInputFingerprint:H
+  });
+  assert.equal(g.gate,'CAUTION');
+  assert.equal(g.impact.healthyFeatures,0);
+  assert.equal(g.impact.degradedFeatures,2);
+  assert.deepEqual(g.impact.degradedFeatureIds,[
+    'research.options.openInterestLog',
+    'research.options.weightedIvPct'
+  ]);
+  const source=g.nodes.find(x=>x.id==='SOURCE:OPTIONS:DERIBIT_PUBLIC_OPTIONS');
+  assert.equal(source.state,'DEGRADED');
+  assert.equal(verifyResearchDependencyGraph(g).ok,true);
+});
