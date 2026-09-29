@@ -5431,11 +5431,13 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   });
   const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
   if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+  markForecastMemory('evidence-history');
 
   const episodeExtraFeatures=episodeVectorExtraFeatures(
     episodeVector({analysis:state.memoryAnalysis,dashboard:state.memoryDashboard}),
     state.availableAt
   );
+  markForecastMemory('episode-features');
   let researchPlaneWrite={ok:researchDataPlane.healthy,appended:0,duplicates:0};
   if(issuanceSource==='TCX_AUTOLEARN_V1'&&researchDataPlane.healthy){
     try{
@@ -5450,6 +5452,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         externalSnapshot:externalResearchSnapshot
       });
       researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
+      markForecastMemory('rdp-append');
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
       recordError(observability,{scope:'research_data_plane.capture',message:msg});
@@ -5465,6 +5468,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     requireGoverned:true,
     blockedSourceKeys:blockedResearchSourceKeys
   });
+  markForecastMemory('rdp-read');
   const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
   markForecastMemory('research-plane');
   const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
