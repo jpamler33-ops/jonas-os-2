@@ -142,7 +142,7 @@ import { createWalletCohortPublicProvider, parseWalletCohorts, walletCohortSnaps
 import { runResearchProviderFanout, RESEARCH_PROVIDER_FANOUT_VERSION } from './research-provider-fanout.mjs';
 import { fetchOfficialOkxPorRegistryStreaming, loadEntityRegistry, saveEntityRegistry, entityRegistrySummary, VERIFIED_ENTITY_REGISTRY_VERSION } from './expansion-runtime/verified-entity-registry.mjs';
 import { buildEntityAddressIndex, createEthereumEntityFlowProvider, loadEntityFlowMemory, saveEntityFlowMemory, observeEntityFlowMemory, scoreEntityFlowSnapshot, entityFlowSnapshotToExtraFeatures, entityFlowMemorySummary, ENTITY_FLOW_ENGINE_VERSION } from './expansion-runtime/entity-flow-engine.mjs';
-import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
+import { openResearchDataPlane, appendResearchDataPlane, preflightResearchDataPlaneInputs, researchFeaturesAsOf, researchDataPlaneSummary, RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
@@ -7496,12 +7496,13 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture'){
     if(!admission.allowed){
       return {ok:false,appended:0,duplicates:0,governed:0,restrictedSources:0,governanceFingerprint:null,reason:admission.reason,storagePressure:admission.state};
     }
+    const preflight=preflightResearchDataPlaneInputs(researchDataPlane,inputs);
     const nextGovernance=structuredClone(researchDataGovernance);
     refreshResearchSourceFreshness(nextGovernance,{
       now:started,
       monitorStartedAt:researchGovernanceMonitorStartedAt
     });
-    const governed=(Array.isArray(inputs)?inputs:[])
+    const governed=preflight.novel
       .map(input=>governResearchSnapshot(nextGovernance,input,{evaluatedAt:started}))
       .filter(Boolean);
     const result=await appendResearchDataPlane(researchDataPlane,governed);
@@ -7525,7 +7526,7 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture'){
     return {
       ok:true,
       appended:result.appended.length,
-      duplicates:result.duplicates,
+      duplicates:preflight.duplicates+result.duplicates,
       governed:governed.length,
       restrictedSources:governanceSummary.quarantinedSources.length,
       governanceFingerprint:governanceSummary.fingerprint
