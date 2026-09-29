@@ -126,6 +126,14 @@ function codecOf(item){
   return 'gzip';
 }
 
+async function archivedBytesFromManifest(dir,manifest){
+  let total=0;
+  for(const item of manifest?.segments||[]){
+    try{total+=(await stat(path.join(dir,item.name))).size;}catch{}
+  }
+  return total;
+}
+
 async function tryMigrateOneGzipSegment({dir,manifest,manifestPath}){
   const legacy=manifest.segments.find(x=>codecOf(x)==='gzip'&&!x.brotliCandidateRejectedAt);
   if(!legacy) return {manifest,attempted:null};
@@ -294,6 +302,8 @@ export async function archiveMarketFabricSegments({
   try{manifest=verifyManifest(JSON.parse(await readFile(manifestPath,'utf8')));}
   catch(e){if(e?.code!=='ENOENT')throw e;}
 
+  let committedArchivedBytes=await archivedBytesFromManifest(dir,manifest);
+  let budgetBlockedSegments=0,budgetBlockedCandidateBytes=0;
   const raws=(await readdir(dir)).filter(n=>n.startsWith(base+'.segment-')&&n.endsWith('.jsonl')).sort();
   for(const name of raws){
     const raw=path.join(dir,name);
@@ -326,6 +336,12 @@ export async function archiveMarketFabricSegments({
       throw new Error('MARKET_FABRIC_ARCHIVE_STREAM_AUDIT_MISMATCH');
     }
     const compressedBytes=(await stat(tmp)).size;
+    if(committedArchivedBytes+compressedBytes>Math.max(0,Number(maxArchivedBytes)||0)){
+      budgetBlockedSegments++;
+      budgetBlockedCandidateBytes+=compressedBytes;
+      await unlink(tmp).catch(()=>{});
+      continue;
+    }
     const compressedSha256=await hashFile(tmp);
     await rename(tmp,target);
     const item={
@@ -344,6 +360,7 @@ export async function archiveMarketFabricSegments({
     const next=manifestValue([...manifest.segments.filter(x=>x.sourceName!==name),item]);
     await atomicManifest(manifestPath,next);
     manifest=next;
+    committedArchivedBytes+=compressedBytes;
     await unlink(raw);
   }
 
@@ -391,6 +408,9 @@ export async function archiveMarketFabricSegments({
     archivedBytes:total,
     budgetBytes:maxArchivedBytes,
     budgetExceeded:total>maxArchivedBytes,
+    budgetBlocked:budgetBlockedSegments>0||total>maxArchivedBytes,
+    budgetBlockedSegments,
+    budgetBlockedCandidateBytes,
     destructiveRetention:false,
     preferredNewCodec:'gzip-9',
     optionalCandidateCodec:'brotli-11',
