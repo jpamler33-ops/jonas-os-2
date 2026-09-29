@@ -28,7 +28,7 @@ import {
   EXTERNAL_RESEARCH_PROVIDER_VERSION
 } from './expansion-runtime/external-research-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V2';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V3';
 
 function finite(v){
   const n=Number(v);
@@ -285,7 +285,7 @@ function entityFlowInput(symbol,snapshot,ingestedAt){
 }
 
 function externalInput({
-  symbol,snapshot,ingestedAt,domain,source,features,ttlMs,finality='OBSERVED',qualityStatus='SOURCE_RESPONSE_COMPLETE'
+  symbol,snapshot,ingestedAt,domain,source,features,ttlMs,finality='OBSERVED',qualityStatus='SOURCE_RESPONSE_COMPLETE',provenanceExtra={}
 }={}){
   if(!snapshot?.ok||!Array.isArray(features)||!features.length) return null;
   const availableAt=finite(snapshot?.availableAt);
@@ -324,9 +324,71 @@ function externalInput({
       upstreamSource:String(snapshot?.source||source),
       upstreamProvenance:snapshot?.provenance||{},
       researchOnly:true,
-      mayExecute:false
+      mayExecute:false,
+      ...provenanceExtra
     }
   });
+}
+
+const FRED_FEATURE_GROUPS=Object.freeze([
+  Object.freeze({source:'FRED_DFF_CURRENT',seriesIds:['DFF'],featureIds:['research.macro.fedFundsPct']}),
+  Object.freeze({source:'FRED_DGS10_CURRENT',seriesIds:['DGS10'],featureIds:['research.macro.us10yPct']}),
+  Object.freeze({source:'FRED_DTWEXBGS_CURRENT',seriesIds:['DTWEXBGS'],featureIds:['research.macro.broadDollarIndex']}),
+  Object.freeze({source:'FRED_WALCL_CURRENT',seriesIds:['WALCL'],featureIds:['research.macro.fedAssetsLog']}),
+  Object.freeze({
+    source:'FRED_DFF_DGS10_DERIVED',
+    seriesIds:['DFF','DGS10'],
+    featureIds:['research.macro.us10yMinusFedFundsPct'],
+    dependencies:['MACRO:FRED_DFF_CURRENT','MACRO:FRED_DGS10_CURRENT']
+  })
+]);
+
+function fredSeriesEventTime(snapshot,seriesIds){
+  const dates=(seriesIds||[])
+    .map(id=>Date.parse(String(snapshot?.series?.[id]?.date||'')))
+    .filter(Number.isFinite);
+  if(dates.length) return Math.min(...dates);
+  return eventTimeOrAvailable(snapshot?.eventTime,finite(snapshot?.availableAt));
+}
+
+function macroInputs(symbol,snapshot,ingestedAt){
+  if(!snapshot?.ok) return [];
+  const all=macroSnapshotToExtraFeatures(snapshot);
+  if(!all.length) return [];
+  const byId=new Map(all.map(x=>[x.id,x]));
+  const transport=String(snapshot?.provenance?.transport||'UNKNOWN');
+  const qualityStatus=snapshot?.provenance?.historicalVintageGuarantee===true?'CURRENT_VINTAGE_CAPTURE':'CURRENT_SERIES_CAPTURE';
+  const rows=[];
+  for(const group of FRED_FEATURE_GROUPS){
+    const features=group.featureIds.map(id=>byId.get(id)).filter(Boolean);
+    if(!features.length) continue;
+    features.expectedCount=group.featureIds.length;
+    const eventTime=fredSeriesEventTime(snapshot,group.seriesIds);
+    const isolatedSnapshot={
+      ...snapshot,
+      eventTime,
+      quality:{...(snapshot?.quality||{}),completeness:features.length/group.featureIds.length}
+    };
+    rows.push(externalInput({
+      symbol,
+      snapshot:isolatedSnapshot,
+      ingestedAt,
+      domain:'MACRO',
+      source:group.source,
+      features,
+      ttlMs:6*60*60_000,
+      qualityStatus,
+      provenanceExtra:{
+        fredTransport:transport,
+        fredSeriesIds:Object.freeze([...group.seriesIds]),
+        ...(group.dependencies?{
+          derived:true,
+          dependencies:Object.freeze([...group.dependencies])
+        }:{})
+      }
+    }));
+  }
+  return rows.filter(Boolean);
 }
 
 function externalInputs(symbol,bundle,ingestedAt){
@@ -335,8 +397,6 @@ function externalInputs(symbol,bundle,ingestedAt){
   coinMetricsFeatures.expectedCount=6;
   const optionsFeatures=deribitOptionsSnapshotToExtraFeatures(bundle.deribitOptions);
   optionsFeatures.expectedCount=5;
-  const macroFeatures=macroSnapshotToExtraFeatures(bundle.macro);
-  macroFeatures.expectedCount=5;
   const predictionFeatures=predictionMarketSnapshotToExtraFeatures(bundle.predictionMarket);
   predictionFeatures.expectedCount=4;
   return [
@@ -348,10 +408,7 @@ function externalInputs(symbol,bundle,ingestedAt){
       symbol,snapshot:bundle.deribitOptions,ingestedAt,domain:'OPTIONS',source:'DERIBIT_PUBLIC_OPTIONS',
       features:optionsFeatures,ttlMs:10*60_000,qualityStatus:'PUBLIC_OPTIONS_SUMMARY'
     }),
-    externalInput({
-      symbol,snapshot:bundle.macro,ingestedAt,domain:'MACRO',source:String(bundle.macro?.source||'FRED_REALTIME_V1'),
-      features:macroFeatures,ttlMs:6*60*60_000,qualityStatus:bundle.macro?.provenance?.historicalVintageGuarantee===true?'CURRENT_VINTAGE_CAPTURE':'CURRENT_SERIES_CAPTURE'
-    }),
+    ...macroInputs(symbol,bundle.macro,ingestedAt),
     externalInput({
       symbol,snapshot:bundle.predictionMarket,ingestedAt,domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',
       features:predictionFeatures,ttlMs:10*60_000,qualityStatus:'CONFIGURED_MARKET_PROBABILITY'
