@@ -58,7 +58,8 @@ export function evaluateShadowWorkerAdmission({
   autoRssMb=620,
   autoExternalMb=96,
   hardHeapMb=300,
-  hardRssMb=900
+  hardRssMb=900,
+  hardExternalMb=160
 }={}){
   const normalized=String(mode||'AUTO').trim().toUpperCase();
   const effectiveMode=['0','OFF','FALSE','DISABLED'].includes(normalized)
@@ -76,13 +77,18 @@ export function evaluateShadowWorkerAdmission({
     autoRssMb:Math.max(1,Number(autoRssMb)||620),
     autoExternalMb:Math.max(1,Number(autoExternalMb)||96),
     hardHeapMb:Math.max(1,Number(hardHeapMb)||300),
-    hardRssMb:Math.max(1,Number(hardRssMb)||900)
+    hardRssMb:Math.max(1,Number(hardRssMb)||900),
+    hardExternalMb:Math.max(1,Number(hardExternalMb)||160)
   };
 
   if(effectiveMode==='OFF'){
     return {allowed:false,mode:effectiveMode,reason:'DISABLED',memory,limits};
   }
-  if(memory.heapUsedMb>=limits.hardHeapMb||memory.rssMb>=limits.hardRssMb){
+  if(
+    memory.heapUsedMb>=limits.hardHeapMb||
+    memory.rssMb>=limits.hardRssMb||
+    memory.externalMb>=limits.hardExternalMb
+  ){
     return {allowed:false,mode:effectiveMode,reason:'HARD_MEMORY_PRESSURE',memory,limits};
   }
   if(effectiveMode==='AUTO'&&(
