@@ -525,6 +525,7 @@ const entityFlowResearchProvider=createEthereumEntityFlowProvider({
   entityIds:entityFlowEntityIds,
   maxBlocks:96,
   batchSize:6,
+  batchConcurrency:Math.max(1,Math.min(6,Number(process.env.TCX_ENTITY_FLOW_BATCH_CONCURRENCY||4))),
   timeoutMs:researchProviderTimeoutMs,
   cacheMs:45000
 });
