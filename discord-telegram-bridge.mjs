@@ -486,13 +486,43 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
   async function terminalCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordTerminalPayload(await safeMissionSnapshot()));}
   async function systemCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordSystemPayload(await safeMissionSnapshot()));}
+  async function startCommand(interaction){await interaction.deferReply();await interaction.editReply(startPayload());}
+
+  async function runCoreCallback(interaction,data){
+    await interaction.deferReply();
+    const placeholder=await interaction.editReply({content:'TCX lädt Analyse …',allowedMentions:{parse:[]}});
+    const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id);
+    const ctx={interaction:interaction,responded:false};
+    contexts.set(chatId,ctx);
+    try{
+      await handleUpdate({
+        update_id:'discord:'+interaction.id,
+        callback_query:{
+          id:'discordcb:'+interaction.id,
+          from:{id:interaction.user.id,username:interaction.user.username},
+          data:String(data||''),
+          message:{message_id:String(placeholder.id),chat:{id:chatId},text:String(placeholder.content||'')}
+        }
+      });
+      if(!ctx.responded){
+        const current=await interaction.fetchReply().catch(()=>null);
+        if(current&&String(current.content||'').includes('TCX lädt Analyse')) await interaction.editReply('TCX hat keine Ausgabe erzeugt.');
+      }
+    }catch(err){
+      fail('v3-callback',err);
+      try{await interaction.editReply('TCX konnte diese Analyse gerade nicht laden.');}catch{}
+    }finally{contexts.delete(chatId);}
+  }
 
   async function onCommand(interaction){
     if(String(interaction.guildId)!==guildId){await interaction.reply({content:'Dieser TCX-Bot ist für einen anderen Server konfiguriert.',ephemeral:true});return;}
     const name=String(interaction.commandName||'').toLowerCase();
     if(name==='setup'){await setupCommand(interaction);return;}
-    if(name==='terminal'){await terminalCommand(interaction);return;}
+    if(name==='start'){await startCommand(interaction);return;}
+    if(name==='dashboard'||name==='terminal'){await terminalCommand(interaction);return;}
     if(name==='system'){await systemCommand(interaction);return;}
+    const callback=callbackDataForCommand(interaction);
+    if(callback){await runCoreCallback(interaction,callback);return;}
     const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
     await interaction.deferReply();
     const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id); const ctx={interaction:interaction,responded:false}; contexts.set(chatId,ctx);
@@ -501,15 +531,33 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     finally{contexts.delete(chatId);}
   }
   async function onButton(interaction){
-    await interaction.deferUpdate(); if(String(interaction.guildId)!==guildId)return;
+    if(String(interaction.guildId)!==guildId)return;
+    const customId=String(interaction.customId||'');
+    if(customId.startsWith('dc3:')){
+      await runCoreCallback(interaction,customId.slice(4));
+      return;
+    }
+    await interaction.deferUpdate();
     const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id); contexts.set(chatId,{interaction:interaction,responded:true});
-    try{await handleUpdate({update_id:'discord:'+interaction.id,callback_query:{id:'discordcb:'+interaction.id,from:{id:interaction.user.id,username:interaction.user.username},data:String(interaction.customId||''),message:{message_id:String(interaction.message.id),chat:{id:chatId},text:String(interaction.message.content||''),...(interaction.message.attachments?.size?{photo:[{}]}:{})}}});}
+    try{await handleUpdate({update_id:'discord:'+interaction.id,callback_query:{id:'discordcb:'+interaction.id,from:{id:interaction.user.id,username:interaction.user.username},data:customId,message:{message_id:String(interaction.message.id),chat:{id:chatId},text:String(interaction.message.content||''),...(interaction.message.attachments?.size?{photo:[{}]}:{})}}});}
     catch(err){fail('button',err);try{await interaction.followUp({content:'TCX konnte diese Aktion gerade nicht ausführen.',ephemeral:true});}catch{}}
     finally{contexts.delete(chatId);}
   }
+  async function onSelect(interaction){
+    if(String(interaction.guildId)!==guildId)return;
+    if(String(interaction.customId||'')!=='dc3:market-select'){await interaction.reply({content:'Unbekannte Auswahl.',ephemeral:true});return;}
+    const symbol=normalizeDiscordSymbol(interaction.values?.[0]);
+    if(!symbol){await interaction.reply({content:'Ungültiger Markt.',ephemeral:true});return;}
+    await runCoreCallback(interaction,'market:'+symbol);
+  }
   client.on(Events.ClientReady,function(readyClient){state.ready=true;state.botUser=readyClient.user?.tag||readyClient.user?.id||null;state.lastReadyAt=Date.now();state.lastError=null;});
   client.on(Events.Error,function(err){fail('client',err);});
-  client.on(Events.InteractionCreate,function(interaction){state.lastInteractionAt=Date.now();if(interaction.isChatInputCommand())void onCommand(interaction);else if(interaction.isButton())void onButton(interaction);});
+  client.on(Events.InteractionCreate,function(interaction){
+    state.lastInteractionAt=Date.now();
+    if(interaction.isChatInputCommand())void onCommand(interaction);
+    else if(interaction.isButton())void onButton(interaction);
+    else if(interaction.isStringSelectMenu())void onSelect(interaction);
+  });
   async function start(){
     await rest.put(Routes.applicationGuildCommands(applicationId,guildId),{body:COMMANDS});state.registered=true;await client.login(token);
     if(!client.isReady())await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('DISCORD_READY_TIMEOUT')),15000);client.once(Events.ClientReady,()=>{clearTimeout(timeout);resolve();});});
