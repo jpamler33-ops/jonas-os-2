@@ -16,10 +16,10 @@ function science(gate='PASS'){
   return {...core,fingerprint:sha256(core)};
 }
 
-function epistemic(){
+function epistemic(candidateId='cand-1'){
   return evaluateEpistemicIntegrity({
     asOf:1000,
-    subjectId:'MODEL:CAND-1',
+    subjectId:'MODEL:'+String(candidateId).toUpperCase(),
     authorities:[
       {authorityId:'AUTH-1',canonicalControllerId:'AUTH-CONTROL-1',observedAt:700,availableAt:710},
       {authorityId:'AUTH-2',canonicalControllerId:'AUTH-CONTROL-2',observedAt:705,availableAt:715}
@@ -157,7 +157,7 @@ test('promotion record verifier detects tampering',()=>{
       executionMode:'SHADOW_ONLY'
     },
     scientificValidity:science('PASS'),
-    epistemicIntegrity:epistemic(),
+    epistemicIntegrity:epistemic('cand-verify'),
     software:{
       testsPassed:true,
       pitLeakagePassed:true,
