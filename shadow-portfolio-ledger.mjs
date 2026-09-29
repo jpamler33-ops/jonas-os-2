@@ -118,6 +118,8 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     issuanceId:String(order.strategyMeta?.issuanceId||''),
     forecastFingerprint:String(order.strategyMeta?.forecastFingerprint||''),
     horizonId:String(order.strategyMeta?.horizonId||''),
+    horizonSelection:String(order.strategyMeta?.horizonSelection||''),
+    tradingPolicyVersion:String(order.strategyMeta?.tradingPolicyVersion||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
     exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
