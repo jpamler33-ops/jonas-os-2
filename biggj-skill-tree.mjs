@@ -1,6 +1,12 @@
 import { sha256 } from './institutional-kernel.mjs';
 import { biggjCapabilityMap } from './biggj-capability-map.mjs';
 import { TCX_PROMOTION_STAGES, TCX_EPISTEMIC_CLASSES } from './tcx-research-os-contract.mjs';
+import {
+  canonicalSkillLeverage,
+  evaluateBiggjSkillDependencyGate,
+  biggjDependencyBottleneckReport,
+  biggjCompositionReadiness
+} from './biggj-skill-dependency-graph.mjs';
 
 export const BIGGJ_SKILL_TREE_VERSION='BIGGJ_SKILL_TREE_V1';
 
@@ -520,26 +526,43 @@ function researchPriority(node){
   const statusNeed={
     UNKNOWN:1,DISCOVERING:.92,LEARNING:.78,TESTING:.62,VALIDATED:.35,TRUSTED:.12,DECAYING:.95,RETIRED:0
   }[node.status]??.6;
-  const dependencyBlock=(node.dependencies||[]).length?Math.min(.20,.04*node.dependencies.length):0;
-  return clamp(.34*node.strategicImpact+.30*node.uncertainty+.26*evidenceDeficit+.10*statusNeed+dependencyBlock);
+  const dynamicDependencyNeed=(node.dependencies||[]).length?Math.min(.08,.02*node.dependencies.length):0;
+  const leverage=canonicalSkillLeverage(node.capabilityId).score;
+  return clamp(
+    .30*node.strategicImpact+
+    .26*node.uncertainty+
+    .22*evidenceDeficit+
+    .08*statusNeed+
+    .14*leverage+
+    dynamicDependencyNeed
+  );
 }
 
 export function buildBiggjResearchQueue(tree,{limit=25}={}){
   verifyTreeShape(tree);
   const rows=tree.nodes
     .filter(x=>x.kind!=='ROOT'&&x.status!=='RETIRED')
-    .map(node=>({
-      skillId:node.skillId,
-      capabilityId:node.capabilityId,
-      rootId:node.rootId,
-      title:node.title,
-      status:node.status,
-      priority:researchPriority(node),
-      question:node.question||defaultQuestion(node),
-      uncertainty:node.uncertainty,
-      independentEpisodes:node.evidenceSummary?.independentEpisodes||0,
-      nextGate:evaluateBiggjSkillProgress(tree,node.skillId).recommendedStatus
-    }))
+    .map(node=>{
+      const leverage=canonicalSkillLeverage(node.capabilityId);
+      const dependencyGate=evaluateBiggjSkillDependencyGate(tree,{skillId:node.skillId,phase:'TESTING'});
+      return {
+        skillId:node.skillId,
+        capabilityId:node.capabilityId,
+        rootId:node.rootId,
+        title:node.title,
+        status:node.status,
+        priority:researchPriority(node),
+        question:node.question||defaultQuestion(node),
+        uncertainty:node.uncertainty,
+        independentEpisodes:node.evidenceSummary?.independentEpisodes||0,
+        nextGate:evaluateBiggjSkillProgress(tree,node.skillId).recommendedStatus,
+        dependencyLeverage:leverage.score,
+        directUnlocks:leverage.directUnlocks,
+        transitiveUnlocks:leverage.transitiveUnlocks,
+        testingDependencyReady:dependencyGate.ready,
+        testingBlockers:dependencyGate.blockers.map(x=>x.dependencyCapabilityId||x.dependencySkillId)
+      };
+    })
     .sort((a,b)=>b.priority-a.priority||b.uncertainty-a.uncertainty||String(a.skillId).localeCompare(String(b.skillId)))
     .slice(0,Math.max(1,Number(limit)||25));
   return finalized({
@@ -601,6 +624,8 @@ export function biggjSkillTreeSnapshot(tree){
     counts,
     researchQueue:buildBiggjResearchQueue(tree,{limit:10}).queue,
     capabilityGaps:biggjCapabilityGapReport(tree).weakestRoots,
+    dependencyBottlenecks:biggjDependencyBottleneckReport(tree,{phase:'TESTING',limit:10}).bottlenecks,
+    compositionReadiness:biggjCompositionReadiness(tree).blocked,
     silentPrimaryMutation:false,
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
