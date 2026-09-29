@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile, readFile, utimes } from 'node:fs/promises';
-import { cleanupOrphanedPersistenceArtifacts } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, classifyStoragePressure, inspectStoragePressure } from './storage-maintenance.mjs';
 
 test('removes only stale known artifacts when canonical exists', async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-storage-'));
@@ -32,4 +32,41 @@ test('keeps artifact if canonical file is missing', async()=>{
   assert.equal(result.removed.length,0);
   assert.equal(result.skipped[0].reason,'CANONICAL_MISSING');
   assert.equal(await readFile(orphan,'utf8'),'partial');
+});
+
+
+test('classifies filesystem pressure from both free bytes and utilization',()=>{
+  const gib=1024*1024*1024;
+  const normal=classifyStoragePressure({totalBytes:gib,availableBytes:300*1024*1024});
+  assert.equal(normal.state,'NORMAL');
+
+  const warn=classifyStoragePressure({
+    totalBytes:gib,availableBytes:90*1024*1024,
+    warnFreeBytes:96*1024*1024,criticalFreeBytes:48*1024*1024,
+    warnUtilization:.95,criticalUtilization:.99
+  });
+  assert.equal(warn.state,'WARN');
+
+  const critical=classifyStoragePressure({
+    totalBytes:gib,availableBytes:40*1024*1024,
+    warnFreeBytes:96*1024*1024,criticalFreeBytes:48*1024*1024,
+    warnUtilization:.95,criticalUtilization:.99
+  });
+  assert.equal(critical.state,'CRITICAL');
+
+  const criticalByRatio=classifyStoragePressure({
+    totalBytes:gib,availableBytes:70*1024*1024,
+    warnFreeBytes:1,criticalFreeBytes:1,
+    warnUtilization:.82,criticalUtilization:.92
+  });
+  assert.equal(criticalByRatio.state,'CRITICAL');
+});
+
+test('inspects a real filesystem without mutating it',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-storage-pressure-'));
+  const pressure=await inspectStoragePressure({dataDir:dir});
+  assert.equal(pressure.ok,true);
+  assert.ok(pressure.totalBytes>0);
+  assert.ok(pressure.availableBytes>=0);
+  assert.ok(['NORMAL','WARN','CRITICAL'].includes(pressure.state));
 });
