@@ -167,7 +167,7 @@ function metadataHeaders(item){
 
 function remoteDescriptor({bucket,key,item,head,verifiedAt,endpoint}){
   return {
-    provider:'RAILWAY_S3',
+    provider:parseEndpoint(endpoint).host.endsWith('.r2.cloudflarestorage.com')?'CLOUDFLARE_R2':'S3_COMPATIBLE',
     bucket,
     key,
     endpointHost:parseEndpoint(endpoint).host,
@@ -181,7 +181,7 @@ function remoteDescriptor({bucket,key,item,head,verifiedAt,endpoint}){
   };
 }
 
-export function createRailwayS3ColdStore({
+export function createS3ColdStore({
   enabled=false,
   bucket,
   region,
@@ -341,7 +341,7 @@ export function createRailwayS3ColdStore({
   function summary(){
     return {
       enabled:active,
-      provider:active?'RAILWAY_S3':null,
+      provider:active?(parseEndpoint(endpoint).host.endsWith('.r2.cloudflarestorage.com')?'CLOUDFLARE_R2':'S3_COMPATIBLE'):null,
       bucket:active?String(bucket):null,
       region:active?String(region):null,
       endpointHost:active?parseEndpoint(endpoint).host:null,
@@ -360,18 +360,18 @@ export function createRailwayS3ColdStore({
   };
 }
 
-export function createRailwayS3ColdStoreFromEnv(env=process.env,{fetchImpl=globalThis.fetch}={}){
+export function createS3ColdStoreFromEnv(env=process.env,{fetchImpl=globalThis.fetch}={}){
   const enabled=truthy(env.TCX_MARKET_FABRIC_COLD_ENABLED);
   const forcePathStyle=env.TCX_COLD_FORCE_PATH_STYLE==null
     ?true
     :truthy(env.TCX_COLD_FORCE_PATH_STYLE);
-  return createRailwayS3ColdStore({
+  return createS3ColdStore({
     enabled,
-    bucket:env.TCX_COLD_BUCKET||env.BUCKET,
-    region:env.TCX_COLD_REGION||env.REGION,
-    endpoint:env.TCX_COLD_ENDPOINT||env.ENDPOINT,
-    accessKeyId:env.TCX_COLD_ACCESS_KEY_ID||env.ACCESS_KEY_ID,
-    secretAccessKey:env.TCX_COLD_SECRET_ACCESS_KEY||env.SECRET_ACCESS_KEY,
+    bucket:env.TCX_COLD_BUCKET||env.R2_BUCKET||env.BUCKET,
+    region:env.TCX_COLD_REGION||env.R2_REGION||env.REGION||'auto',
+    endpoint:env.TCX_COLD_ENDPOINT||env.R2_ENDPOINT||env.ENDPOINT,
+    accessKeyId:env.TCX_COLD_ACCESS_KEY_ID||env.R2_ACCESS_KEY_ID||env.ACCESS_KEY_ID,
+    secretAccessKey:env.TCX_COLD_SECRET_ACCESS_KEY||env.R2_SECRET_ACCESS_KEY||env.SECRET_ACCESS_KEY,
     sessionToken:env.TCX_COLD_SESSION_TOKEN||env.AWS_SESSION_TOKEN||null,
     prefix:env.TCX_COLD_PREFIX||DEFAULT_PREFIX,
     forcePathStyle,
