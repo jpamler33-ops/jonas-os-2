@@ -16,7 +16,7 @@ export const TCX_RESEARCH_OS_LAYERS=Object.freeze([
   Object.freeze({id:'FORECAST_INTELLIGENCE',modules:['institutional-forecast-runtime.mjs','forecast-science-adapter.mjs','forecast-hypothesis-generator.mjs','forecast-learning-center.mjs']}),
   Object.freeze({id:'RESEARCH_TRACE',modules:['research-trace.mjs','institutional-audit-binding.mjs','institutional-kernel.mjs']}),
   Object.freeze({id:'FAILURE_FIRST_KERNEL',modules:['scientific-validity.mjs','science-runtime/research-integrity.mjs','science-runtime/epistemic-integrity.mjs']}),
-  Object.freeze({id:'LEARNING_MEMORY',modules:['episode-memory.mjs','setup-performance-memory.mjs','shadow-trade-quality-learner.mjs','biggj-adaptive-learning-core.mjs']}),
+  Object.freeze({id:'LEARNING_MEMORY',modules:['episode-memory.mjs','setup-performance-memory.mjs','shadow-trade-quality-learner.mjs','biggj-adaptive-learning-core.mjs','biggj-capability-map.mjs','biggj-skill-tree.mjs']}),
   Object.freeze({id:'STRATEGY_CHALLENGERS',modules:['shadow-strategy-league.mjs','learned-challenger-engine.mjs','biggj-style-experiment-engine.mjs','model-candidate-registry.mjs','model-promotion-ladder.mjs']}),
   Object.freeze({id:'SHADOW_OMS_PORTFOLIO',modules:['shadow-oms.mjs','shadow-portfolio-ledger.mjs','portfolio-risk-brain.mjs','shadow-leverage-risk.mjs','multi-venue-shadow-sor.mjs']}),
   Object.freeze({id:'OPERATOR_SURFACE',modules:['telegram-product-ui.mjs','discord-telegram-bridge.mjs']})
