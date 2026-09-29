@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile, readFile, utimes } from 'node:fs/promises';
-import { cleanupOrphanedPersistenceArtifacts, classifyStoragePressure, inspectStoragePressure } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, classifyStoragePressure, classifyStorageWriteAdmission, inspectStoragePressure } from './storage-maintenance.mjs';
 
 test('removes only stale known artifacts when canonical exists', async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-storage-'));
@@ -69,4 +69,17 @@ test('inspects a real filesystem without mutating it',async()=>{
   assert.ok(pressure.totalBytes>0);
   assert.ok(pressure.availableBytes>=0);
   assert.ok(['NORMAL','WARN','CRITICAL'].includes(pressure.state));
+});
+
+
+test('critical storage blocks only high-volume append classes',()=>{
+  const critical={state:'CRITICAL',availableBytes:40*1024*1024,utilization:.93};
+  for(const scope of ['HIGH_VOLUME','MARKET_FABRIC','RESEARCH_DATA_PLANE']){
+    const x=classifyStorageWriteAdmission(critical,{scope});
+    assert.equal(x.allowed,false);
+    assert.equal(x.reason,'STORAGE_CRITICAL_FAIL_CLOSED');
+  }
+  assert.equal(classifyStorageWriteAdmission(critical,{scope:'AUDIT'}).allowed,true);
+  assert.equal(classifyStorageWriteAdmission({state:'WARN'},{scope:'MARKET_FABRIC'}).allowed,true);
+  assert.equal(classifyStorageWriteAdmission({state:'NORMAL'},{scope:'RESEARCH_DATA_PLANE'}).allowed,true);
 });
