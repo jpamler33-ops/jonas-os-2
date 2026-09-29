@@ -333,6 +333,7 @@ const forecastColdMinAgeMs = Math.max(4*60*60_000, Math.min(24*60*60_000, Number
 const researchPlaneMaxMemoryRecords = Math.max(1500, Math.min(5000, Math.floor(Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS || 3000) || 3000)));
 const marketFabricMaxMemoryEvents = Math.max(2000, Math.min(8000, Math.floor(Number(process.env.TCX_MARKET_FABRIC_MAX_MEMORY_EVENTS || 4000) || 4000)));
 const auditLedgerMaxMemoryRecords = Math.max(50, Math.min(2000, Math.floor(Number(process.env.TCX_AUDIT_LEDGER_MAX_MEMORY_RECORDS || 500) || 500)));
+const auditLedgerMaxBytes = Math.max(48*1024*1024, Math.min(128*1024*1024, Number(process.env.TCX_AUDIT_LEDGER_MAX_BYTES || 64*1024*1024)));
 const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
 const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
 const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
@@ -592,7 +593,10 @@ const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-
 const loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
 let evidenceRecords = loadedEvidenceHistory.records;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
-const auditLedger = await openAuditLedger(auditFile,{maxInMemoryRecords:auditLedgerMaxMemoryRecords});
+const auditLedger = await openAuditLedger(auditFile,{
+  maxInMemoryRecords:auditLedgerMaxMemoryRecords,
+  maxFileBytes:auditLedgerMaxBytes
+});
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
 const marketFabricCheckpointRecovery=await reconcileMarketFabricCheckpointFromArchive(marketFabricFile);
 if(marketFabricCheckpointRecovery.reconciled){
@@ -8177,6 +8181,14 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
+  auditLedger:{
+    healthy:auditLedger.healthy,
+    fileBytes:Number(auditLedger.fileBytes||0),
+    maxFileBytes:Number(auditLedger.maxFileBytes||auditLedgerMaxBytes),
+    utilization:Number(auditLedger.maxFileBytes)>0?Number(auditLedger.fileBytes||0)/Number(auditLedger.maxFileBytes):null,
+    writeBlocked:auditLedger.writeBlocked===true,
+    verification:auditLedger.verification
+  },
   modelPromotionReviewService:MODEL_PROMOTION_REVIEW_SERVICE_VERSION,
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
