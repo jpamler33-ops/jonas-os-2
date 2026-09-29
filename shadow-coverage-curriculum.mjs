@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const SHADOW_COVERAGE_CURRICULUM_VERSION='TCX_SHADOW_COVERAGE_CURRICULUM_V1';
+export const SHADOW_COVERAGE_CURRICULUM_VERSION='TCX_SHADOW_COVERAGE_CURRICULUM_V2';
 
 export const DEFAULT_COVERAGE_HORIZONS=Object.freeze([
   Object.freeze({id:'5m',horizonMs:5*60_000,label:'5 Min.'}),
@@ -47,6 +47,24 @@ function horizonMap(issuance){
 }
 function slotStart(now,horizonMs){
   return Math.floor(Number(now)/Number(horizonMs))*Number(horizonMs);
+}
+
+function coveragePriority(calibrationStatus,horizonGate,horizonMs){
+  const calibration=String(calibrationStatus||'UNKNOWN').toUpperCase();
+  const gate=String(horizonGate||'UNKNOWN').toUpperCase();
+  let tier=0,reason='CALIBRATION_COVERAGE_SUFFICIENT';
+  if(['INSUFFICIENT','UNCALIBRATED','UNKNOWN','COLD_START'].includes(calibration)){
+    tier=4;reason='CALIBRATION_DEFICIT';
+  }else if(calibration==='WATCH'){
+    tier=3;reason='CALIBRATION_WATCH';
+  }else if(calibration==='CALIBRATED'&&['ABSTAIN','INSUFFICIENT'].includes(gate)){
+    tier=2;reason='NON_CALIBRATION_BLOCKER_RESEARCH';
+  }
+  return {
+    tier,
+    score:tier*1_000_000_000+Math.max(0,Number(horizonMs)||0),
+    reason
+  };
 }
 
 export function deriveCoverageCurriculumCandidates(issuance,{
@@ -109,6 +127,9 @@ export function deriveCoverageCurriculumCandidates(issuance,{
     const coverageKey='cc_'+sha256(keyCore).slice(0,24);
     if(existing.has(coverageKey)) continue;
 
+    const priority=coveragePriority(calibrationStatus,horizonGate,policy.horizonMs);
+    if(priority.tier<=0) continue;
+
     const side=sideFor(h,p);
     const directionalProbability=side==='BUY'?p.up:p.down;
     const oppositeProbability=side==='BUY'?p.down:p.up;
@@ -133,6 +154,9 @@ export function deriveCoverageCurriculumCandidates(issuance,{
         calibrationStatus==='CALIBRATED'&&['PASS','CAUTION'].includes(horizonGate)
           ?'CALIBRATED'
           :'BOOTSTRAP_RAW_FORECAST',
+      coveragePriorityTier:priority.tier,
+      coveragePriorityScore:priority.score,
+      coveragePriorityReason:priority.reason,
       assetClass:String(assetClass||'CORE').toUpperCase(),
       dataSafety:safety,
       issuanceId:String(issuance.issuanceId||''),
@@ -154,10 +178,15 @@ export function deriveCoverageCurriculumCandidates(issuance,{
     }));
   }
 
+  candidates.sort((a,b)=>
+    Number(b.coveragePriorityScore||0)-Number(a.coveragePriorityScore||0)||
+    String(a.horizonId).localeCompare(String(b.horizonId))
+  );
+
   return freeze({
     version:SHADOW_COVERAGE_CURRICULUM_VERSION,
     candidates,
-    reason:candidates.length?'COVERAGE_SLOTS_DUE':'NO_SAFE_DUE_COVERAGE_SLOT',
+    reason:candidates.length?'COVERAGE_SLOTS_DUE':'CALIBRATION_COVERAGE_SUFFICIENT',
     execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false
   });
 }
