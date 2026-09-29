@@ -26,6 +26,9 @@ test('Discord V3 contains persistent research and lifecycle surfaces',()=>{
     'alerts',
     'syncHealthAlerts',
     'recentClosed',
+    'researchPositions',
+    'Research Open',
+    'Research PnL',
     'isStringSelectMenu'
   ]) assert.ok(source.includes(required),required);
 });
