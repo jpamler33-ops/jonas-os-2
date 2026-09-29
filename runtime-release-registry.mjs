@@ -88,6 +88,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'evidence-promotion-gate.mjs',
   'independent-proof-auditor.mjs',
   'rolling-walk-forward.mjs',
+  'frozen-policy-oos-accumulator.mjs',
   'tail-risk-bootstrap.mjs',
   'shadow-leverage-risk.mjs',
   'portfolio-risk-brain.mjs',
@@ -127,6 +128,9 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
 
   'forecast-runtime/utils/math.js',
   'forecast-runtime/forecast/index.js',
+  'forecast-runtime/forecast/forecast_bot_api.js',
+  'forecast-runtime/forecast/intelligence_telegram.js',
+  'forecast-runtime/forecast/telegram.js',
   'forecast-runtime/forecast/types.js',
   'forecast-runtime/forecast/calibration.js',
   'forecast-runtime/forecast/reliability.js',
