@@ -514,3 +514,26 @@ test('open BIGGJ positions accumulate executable learning timeline samples',()=>
   assert.ok(b.position.learningTimeline.length>=2);
   assert.equal(b.position.learningTimeline.at(-1).fullyExecutable,true);
 });
+
+
+test('style experiment positions are excluded from primary performance',()=>{
+  const e=entry({
+    id:'sh_style_exp',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'BIGGJ_STYLE_EXPERIMENT_ENTRY',
+      entryMode:'STYLE_EXPERIMENT',
+      tradingStyle:'SCALP',
+      strategyFamily:'LIQUIDITY_SWEEP_REVERSAL',
+      styleExperimentKey:'bsx_test'
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  assert.equal(l.positions.length,1);
+  assert.equal(l.positions[0].entryMode,'STYLE_EXPERIMENT');
+  let p=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0}).position;
+  p=closeShadowPosition(p,{reason:'STYLE_HORIZON_REVIEW',at:61_000});
+  l=replaceShadowPortfolioPosition(l,p);
+  assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
+  assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
+});
