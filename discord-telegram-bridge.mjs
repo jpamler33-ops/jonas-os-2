@@ -332,7 +332,7 @@ function callbackDataForCommand(interaction){
   return null;
 }
 
-export function createDiscordTelegramBridge({token,applicationId,guildId,handleUpdate,getMissionControlSnapshot=()=>null,autoSetup=true,refreshMs=60000,marketRefreshMs=120000,logger=console}={}){
+export function createDiscordTelegramBridge({token,applicationId,guildId,handleUpdate,getMissionControlSnapshot=()=>null,autoSetup=true,refreshMs=60000,marketRefreshMs=120000,tradeSyncMs=20000,logger=console}={}){
   token=String(token||'').trim(); applicationId=String(applicationId||'').trim(); guildId=String(guildId||'').trim();
   if(!token||!applicationId||!guildId||typeof handleUpdate!=='function')throw new Error('DISCORD_BRIDGE_CONFIG_INVALID');
   const client=new Client({intents:[GatewayIntentBits.Guilds]});
@@ -343,11 +343,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const thesisCards=new Map();
   const closedPosted=new Set();
   const timers=new Set();
+  const tradeSyncIntervalMs=Math.max(15000,Number(tradeSyncMs)||20000);
+  let schedulerStopped=false;
   let closedFeedInitialized=false;
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -562,6 +564,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       try{logger.warn?.('[TCX_DISCORD_TRADE_SYNC_SKIPPED] previous sync still running');}catch{}
       return;
     }
+    const syncStartedAt=Date.now();
+    state.lastTradeSyncStartedAt=syncStartedAt;
     tradeSyncRunning=true;
     try{
     const snapshot=await safeMissionSnapshot();
@@ -640,14 +644,44 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       const keep=new Set(recentClosed.slice(0,100).map(p=>String(p?.positionId||'')).filter(Boolean));
       closedPosted.clear();for(const id of keep)closedPosted.add(id);
     }
-    state.tradeCards=tradeCards.size;state.lastTradeSyncAt=Date.now();
+    state.tradeCards=tradeCards.size;
     }finally{
+      state.lastTradeSyncAt=Date.now();
+      state.lastTradeSyncDurationMs=Math.max(0,state.lastTradeSyncAt-syncStartedAt);
       tradeSyncRunning=false;
     }
   }
   async function maybeDailyReport(){const t=berlinParts();if(t.hour===23&&t.minute>=55&&lastDailyReportDate!==t.date){lastDailyReportDate=t.date;try{await dispatchReadCommand('performance','/daystats');}catch(err){fail('daily-report',err);}}}
   function addTimer(fn,ms){const timer=setInterval(()=>void Promise.resolve().then(fn).catch(err=>fail('timer',err)),ms);timer.unref?.();timers.add(timer);}
-  function startSchedulers(){if(timers.size)return;addTimer(refreshTerminal,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshSystem,Math.max(30000,Number(refreshMs)||60000));addTimer(refreshPerformance,60000);addTimer(refreshOverview,90000);addTimer(refreshDataHealth,60000);addTimer(refreshMarketPanels,Math.max(60000,Number(marketRefreshMs)||120000));addTimer(refreshGlobalIntel,180000);addTimer(syncTradeCards,20000);addTimer(syncHealthAlerts,30000);addTimer(maybeDailyReport,60000);}
+  function addSerialTimer(fn,ms){
+    const schedule=()=>{
+      if(schedulerStopped)return;
+      const timer=setTimeout(()=>{
+        timers.delete(timer);
+        void Promise.resolve()
+          .then(fn)
+          .catch(err=>fail('timer',err))
+          .finally(schedule);
+      },ms);
+      timer.unref?.();
+      timers.add(timer);
+    };
+    schedule();
+  }
+  function startSchedulers(){
+    if(timers.size)return;
+    schedulerStopped=false;
+    addTimer(refreshTerminal,Math.max(30000,Number(refreshMs)||60000));
+    addTimer(refreshSystem,Math.max(30000,Number(refreshMs)||60000));
+    addTimer(refreshPerformance,60000);
+    addTimer(refreshOverview,90000);
+    addTimer(refreshDataHealth,60000);
+    addTimer(refreshMarketPanels,Math.max(60000,Number(marketRefreshMs)||120000));
+    addTimer(refreshGlobalIntel,180000);
+    addSerialTimer(syncTradeCards,tradeSyncIntervalMs);
+    addTimer(syncHealthAlerts,30000);
+    addTimer(maybeDailyReport,60000);
+  }
   async function bootstrapV2(){
     try{const setup=await ensureLayout();await ensureStart();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshMarketPanels(),refreshGlobalIntel(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
     catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
@@ -763,7 +797,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(autoSetup)await bootstrapV2();
     return snapshot();
   }
-  async function stop(){for(const timer of timers)clearInterval(timer);timers.clear();client.destroy();state.ready=false;}
+  async function stop(){schedulerStopped=true;for(const timer of timers){clearInterval(timer);clearTimeout(timer);}timers.clear();client.destroy();state.ready=false;}
   function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size});}
   return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }

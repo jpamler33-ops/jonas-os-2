@@ -257,6 +257,7 @@ const discordGuildId = String(process.env.DISCORD_GUILD_ID || '').trim();
 const discordAutoSetup = String(process.env.DISCORD_AUTO_SETUP || '1') !== '0';
 const discordRefreshMs = Math.max(30000, Number(process.env.DISCORD_REFRESH_MS || 60000));
 const discordMarketRefreshMs = Math.max(60000, Number(process.env.DISCORD_MARKET_REFRESH_MS || 120000));
+const discordTradeSyncMs = Math.max(15000, Number(process.env.DISCORD_TRADE_SYNC_MS || 20000));
 let discordBridge = null;
 
 const telegramApi = `https://api.telegram.org/bot${token}`;
@@ -6828,6 +6829,7 @@ if(discordToken && discordApplicationId && discordGuildId){
     autoSetup:discordAutoSetup,
     refreshMs:discordRefreshMs,
     marketRefreshMs:discordMarketRefreshMs,
+    tradeSyncMs:discordTradeSyncMs,
     logger:console
   });
 }
