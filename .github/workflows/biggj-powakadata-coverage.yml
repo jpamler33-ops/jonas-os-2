@@ -1,0 +1,23 @@
+name: BIGGJ PowakaData Coverage
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit exact BTCUSDT CSV
+        run: node biggj/run-powakadata-coverage.mjs
+      - name: Verify safety
+        run: node -e "const r=require('./biggj-powakadata-coverage.json');if(r.canExecuteLive!==false||r.mode!=='SHADOW_ONLY')process.exit(1);console.log(r.decision)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: biggj-powakadata-coverage-${{ github.run_id }}
+          path: biggj-powakadata-coverage.json
+          retention-days: 90
