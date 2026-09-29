@@ -1,6 +1,7 @@
 import { AttachmentBuilder, ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, REST, Routes } from 'discord.js';
+import { buildBiggjTradeThesis } from './biggj-visual-intelligence.mjs';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='TCX_DISCORD_COMMAND_CENTER_V3';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V4';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -18,6 +19,7 @@ const COMMANDS=[
   {name:'events',description:'Structure Events öffnen',options:[symbolOption()]},
   {name:'accuracy',description:'Forecast Accuracy öffnen',options:[symbolOption()]},
   {name:'radar',description:'TCX Super Radar öffnen'},
+  {name:'thesis',description:'BIGGJ Living Thesis für einen aktiven Shadow-Trade',options:[symbolOption()]},
   {name:'structure',description:'Marktstruktur anzeigen',options:[symbolOption()]},
   {name:'portfolio',description:'Shadow-Portfolio anzeigen'},
   {name:'stats',description:'Shadow-Performance anzeigen',options:[{type:3,name:'period',description:'Zeitraum',required:false,choices:[{name:'Tag',value:'day'},{name:'Woche',value:'week'},{name:'Monat',value:'month'}]}]},
@@ -50,7 +52,8 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
     {name:'global-intel',topic:'Global Events und Markt-Kontext aus TCX.'},
     {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'},
-    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'}
+    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'},
+    {name:'theses',topic:'BIGGJ Living Theses, Ghost Paths und Trade DNA für aktive Shadow-Trades.'}
   ]},
   {category:'TCX • SHADOW',channels:[
     {name:'live-trades',topic:'Offene TCX Shadow-Trades. Keine echten Orders.'},
@@ -75,7 +78,8 @@ const MARKERS=Object.freeze({
   system:'TCX_DISCORD_V3_SYSTEM',
   performance:'TCX_DISCORD_V3_PERFORMANCE',
   overview:'TCX_DISCORD_V3_MARKET_OVERVIEW',
-  data:'TCX_DISCORD_V3_DATA_HEALTH'
+  data:'TCX_DISCORD_V3_DATA_HEALTH',
+  theses:'BIGGJ_DISCORD_V4_THESES'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
