@@ -328,8 +328,9 @@ export function refreshResearchSourceFreshness(state,{now=Date.now(),monitorStar
 }
 
 export function quarantinedResearchSourceKeys(state){
+  const activeContracts=new Set(RESEARCH_SOURCE_CONTRACTS.map(x=>sourceContractKey(x.domain,x.source)));
   return Object.freeze(Object.entries(state?.sources||{})
-    .filter(([,x])=>x?.status==='QUARANTINED')
+    .filter(([key,x])=>activeContracts.has(key)&&x?.status==='QUARANTINED')
     .map(([key])=>key)
     .sort());
 }
