@@ -4,7 +4,9 @@ import {
   runForecastShadowEvaluationWorker,
   FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
+  AUTOLEARN_MEMORY_ADMISSION_VERSION,
   evaluateShadowWorkerAdmission,
+  evaluateAutoLearnMemoryAdmission,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced
 } from './forecast-shadow-evaluation-client.mjs';
@@ -59,4 +61,52 @@ test('adaptive shadow worker admission requires real serving headroom',()=>{
 
   assert.equal(evaluateShadowWorkerAdmission({mode:'OFF',heapUsedMb:100,rssMb:200}).allowed,false);
   assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V1');
+});
+
+
+test('autolearn admission blocks external-memory pressure even when heap and rss look safe',()=>{
+  const r=evaluateAutoLearnMemoryAdmission({
+    phase:'ISSUE',
+    heapUsedMb:240,
+    rssMb:610,
+    externalMb:69,
+    issueHeapMb:320,
+    issueRssMb:720,
+    issueExternalMb:64
+  });
+  assert.equal(r.allowed,false);
+  assert.deepEqual(r.exceeded,['EXTERNAL']);
+  assert.equal(r.reason,'MEMORY_PRESSURE');
+  assert.equal(AUTOLEARN_MEMORY_ADMISSION_VERSION,'TCX_AUTOLEARN_MEMORY_ADMISSION_V1');
+});
+
+test('autolearn resume uses lower hysteresis thresholds',()=>{
+  const issue=evaluateAutoLearnMemoryAdmission({
+    phase:'ISSUE',
+    heapUsedMb:270,
+    rssMb:610,
+    externalMb:45,
+    issueHeapMb:320,
+    issueRssMb:720,
+    issueExternalMb:64,
+    resumeHeapMb:280,
+    resumeRssMb:620,
+    resumeExternalMb:48
+  });
+  assert.equal(issue.allowed,true);
+
+  const resume=evaluateAutoLearnMemoryAdmission({
+    phase:'RESUME',
+    heapUsedMb:281,
+    rssMb:610,
+    externalMb:45,
+    issueHeapMb:320,
+    issueRssMb:720,
+    issueExternalMb:64,
+    resumeHeapMb:280,
+    resumeRssMb:620,
+    resumeExternalMb:48
+  });
+  assert.equal(resume.allowed,false);
+  assert.deepEqual(resume.exceeded,['HEAP']);
 });
