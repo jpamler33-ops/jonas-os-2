@@ -7,6 +7,7 @@ import { VENUE_QUALITY_MEMORY_SCHEMA_VERSION } from './venue-quality-memory.mjs'
 import { INSTITUTIONAL_FORECAST_RUNTIME_VERSION } from './institutional-forecast-runtime.mjs';
 import { RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 import { RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
+import { MODEL_CANDIDATE_REGISTRY_VERSION } from './model-candidate-registry.mjs';
 
 export const PERSISTENCE_CONTRACTS_VERSION='TCX_PERSISTENCE_CONTRACTS_V1';
 
@@ -100,6 +101,16 @@ const CONTRACTS=Object.freeze([
     legacySchemas:[],
     criticality:'BLOCK',
     corruptionPolicy:'FAIL_CLOSED'
+  }),
+  Object.freeze({
+    id:'MODEL_CANDIDATE_REGISTRY',
+    format:'HASH_CHAIN_JSONL_FSYNC',
+    env:'TCX_MODEL_CANDIDATE_REGISTRY_FILE',
+    defaultPath:'/data/tcx-model-candidate-registry.jsonl',
+    schema:MODEL_CANDIDATE_REGISTRY_VERSION,
+    legacySchemas:[],
+    criticality:'DEGRADE',
+    corruptionPolicy:'FAIL_CLOSED_MODEL_PROMOTION_DEGRADE_SERVING'
   }),
   Object.freeze({
     id:'RESEARCH_DATA_PLANE',
