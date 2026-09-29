@@ -212,3 +212,38 @@ test('retired derivative aggregate quarantine is ignored by active contract summ
   const summary=researchDataGovernanceSummary(state,{now:2_000_000});
   assert.equal(summary.quarantinedSources.includes('DERIVATIVES:BINANCE_OKX_PUBLIC_DERIVATIVES'),false);
 });
+
+
+test('retired aggregate FRED quarantine is ignored after per-series contract migration',()=>{
+  const state=createResearchDataGovernanceState({
+    createdAt:2_000_000,
+    sources:{
+      'MACRO:FRED_GRAPH_CSV_CURRENT':{
+        key:'MACRO:FRED_GRAPH_CSV_CURRENT',
+        domain:'MACRO',
+        source:'FRED_GRAPH_CSV_CURRENT',
+        status:'QUARANTINED',
+        firstSeenAt:1,
+        lastSeenAt:1,
+        lastAvailableAt:1,
+        lastDecision:'QUARANTINE',
+        consecutiveViolations:1039,
+        consecutiveHealthy:0,
+        totalSnapshots:1039,
+        totalViolations:1039,
+        totalRejected:0,
+        totalQuarantined:1037,
+        totalSemanticReviews:0,
+        lastReasons:[{code:'PUBLICATION_LAG_SLO_BREACH'}],
+        publicationLagMs:[406513498],
+        ingestLagMs:[347466],
+        completeness:[1]
+      }
+    }
+  });
+  assert.equal(quarantinedResearchSourceKeys(state).includes('MACRO:FRED_GRAPH_CSV_CURRENT'),false);
+  const summary=researchDataGovernanceSummary(state,{now:2_000_000});
+  assert.equal(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_GRAPH_CSV_CURRENT'),false);
+  assert.ok(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_DFF_CURRENT'));
+  assert.ok(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_WALCL_CURRENT'));
+});
