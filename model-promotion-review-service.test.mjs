@@ -148,6 +148,9 @@ function fixture(){
     a,wf,evidence,
     competitionState:{
       status:'ACTIVE',
+      dataCutoffAt:900,
+      incumbentConfigHash:sha256({incumbent:true}),
+      parentReleaseId:'rel-1',
       candidates:[{blueprintId:'STRONG',artifact:a,lastEvaluation:wf}]
     },
     governorState:{
@@ -311,4 +314,90 @@ test('queue processes review-required candidates and keeps them shadow-only',asy
   assert.equal(out.failed,0);
   assert.equal(out.productionMutationPerformed,false);
   assert.equal(out.canExecute,false);
+});
+
+
+test('future-dated Alpha.76 evidence cannot move the review boundary forward',()=>{
+  const f=fixture();
+  const future=epistemic(f.a.candidateId);
+  const tampered=structuredClone(future);
+  tampered.asOf=1301;
+  const {fingerprint,...rest}=tampered;
+  tampered.fingerprint=sha256(rest);
+  assert.throws(()=>buildModelPromotionReview({
+    governorState:f.governorState,
+    competitionState:f.competitionState,
+    candidateId:f.a.candidateId,
+    epistemicIntegrity:tampered,
+    reviewedAt:1300
+  }),/PROMOTION_REVIEW_FUTURE_EVIDENCE:EPISTEMIC_ASOF/);
+});
+
+test('future-dated software proof is rejected before canonical evaluation',()=>{
+  const f=fixture();
+  assert.throws(()=>buildModelPromotionReview({
+    governorState:f.governorState,
+    competitionState:f.competitionState,
+    candidateId:f.a.candidateId,
+    reviewedAt:1300,
+    softwareProofs:{
+      testsPassed:{value:true,asOf:1301},
+      deterministicReplayPassed:{value:true,asOf:1250},
+      rollbackReady:{value:true,asOf:1250}
+    }
+  }),/PROMOTION_REVIEW_FUTURE_EVIDENCE:SOFTWARE_PROOF_TESTSPASSED/);
+});
+
+test('governor evidence must be bound to the exact walk-forward metrics',()=>{
+  const f=fixture();
+  const original=f.governorState.evidencePacks[0];
+  const core={
+    ...original,
+    metrics:{
+      ...original.metrics,
+      candidate:{...original.metrics.candidate,brier:.01}
+    }
+  };
+  delete core.evidenceId;
+  f.governorState.evidencePacks[0]={...core,evidenceId:sha256(core)};
+  assert.throws(()=>buildModelPromotionReview({
+    governorState:f.governorState,
+    competitionState:f.competitionState,
+    candidateId:f.a.candidateId,
+    reviewedAt:1300
+  }),/PROMOTION_REVIEW_EVIDENCE_WALK_FORWARD_MISMATCH/);
+});
+
+test('experiment cutoff and champion lineage must match the frozen candidate lineage',()=>{
+  const f=fixture();
+  const original=f.governorState.evidencePacks[0];
+  const core={...original,championReleaseId:'different-release'};
+  delete core.evidenceId;
+  f.governorState.evidencePacks[0]={...core,evidenceId:sha256(core)};
+  assert.throws(()=>buildModelPromotionReview({
+    governorState:f.governorState,
+    competitionState:f.competitionState,
+    candidateId:f.a.candidateId,
+    reviewedAt:1300
+  }),/PROMOTION_REVIEW_CHAMPION_RELEASE_MISMATCH/);
+});
+
+test('complete evidence still passes when all proof times are inside review boundary',()=>{
+  const f=fixture();
+  const review=buildModelPromotionReview({
+    governorState:f.governorState,
+    competitionState:f.competitionState,
+    candidateId:f.a.candidateId,
+    epistemicIntegrity:epistemic(f.a.candidateId),
+    reviewedAt:1300,
+    softwareProofs:{
+      testsPassed:{value:true,asOf:1250},
+      deterministicReplayPassed:{value:true,asOf:1255},
+      rollbackReady:{value:true,asOf:1260}
+    }
+  });
+  assert.equal(review.reviewedAt,1300);
+  assert.equal(review.evaluation.decision,'PROMOTE_CANDIDATE');
+  assert.equal(review.automaticProductionMutation,false);
+  assert.equal(review.canExecute,false);
 });
