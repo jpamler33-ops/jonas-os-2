@@ -82,13 +82,18 @@ test('take profit and stop loss triggers are deterministic',()=>{
   assert.equal(loss.trigger,'STOP_LOSS');
 });
 
-test('horizon closes even without TP or SL',()=>{
+test('primary horizon is a review point, not an automatic exit',()=>{
   const p=shadowPositionFromEntryOrder(entry());
-  const m=markShadowPosition(p,book({bid:100.1}),{at:61_000,feeBps:0});
-  assert.equal(m.trigger,'HORIZON_EXIT');
-  const closed=closeShadowPosition(m.position,{reason:m.trigger,at:61_000});
+  const atHorizon=markShadowPosition(p,book({bid:100.1}),{at:61_000,feeBps:0});
+  assert.equal(atHorizon.trigger,null);
+  assert.equal(atHorizon.lifecyclePolicyVersion,'BIGGJ_TRADING_POLICY_V1');
+  assert.notEqual(atHorizon.lifecycle.action,'EXIT');
+
+  const maxHold=markShadowPosition(atHorizon.position,book({bid:100.1}),{at:2_252_000,feeBps:0});
+  assert.equal(maxHold.trigger,'MAX_HOLD_EXIT');
+  const closed=closeShadowPosition(maxHold.position,{reason:maxHold.trigger,at:2_252_000});
   assert.equal(closed.status,'CLOSED');
-  assert.equal(closed.closeReason,'HORIZON_EXIT');
+  assert.equal(closed.closeReason,'MAX_HOLD_EXIT');
 });
 
 test('insufficient exit depth does not close position',()=>{
