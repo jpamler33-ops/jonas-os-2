@@ -136,6 +136,13 @@ import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } 
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
 import {
+  archiveForecastColdBatch,
+  forecastColdArchiveSummary,
+  planForecastHotCompaction,
+  applyForecastHotCompaction,
+  FORECAST_COLD_ARCHIVE_VERSION
+} from './forecast-cold-archive.mjs';
+import {
   openInstitutionalForecastRuntime,
   saveInstitutionalForecastRuntime,
   seedInstitutionalForecastRuntimeFromEpisodes,
@@ -246,6 +253,10 @@ const forecastJournalMaxEntries = Math.max(1000, Math.min(3000, Math.floor(Numbe
 const forecastAuditMaxEvents = Math.max(200, Math.floor(Number(process.env.TCX_FORECAST_AUDIT_MAX_EVENTS || 1000) || 1000));
 const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_ISSUANCES || 1500) || 1500));
 const forecastMaxTracked = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_TRACKED || 1200) || 1200));
+const forecastHotIssuances = Math.max(200, Math.min(800, Math.floor(Number(process.env.TCX_FORECAST_HOT_ISSUANCES || 400) || 400)));
+const forecastHotTracked = Math.max(200, Math.min(800, Math.floor(Number(process.env.TCX_FORECAST_HOT_TRACKED || 400) || 400)));
+const forecastColdBatchThreshold = Math.max(50, Math.min(300, Math.floor(Number(process.env.TCX_FORECAST_COLD_BATCH_THRESHOLD || 100) || 100)));
+const forecastColdMinAgeMs = Math.max(4*60*60_000, Math.min(24*60*60_000, Number(process.env.TCX_FORECAST_COLD_MIN_AGE_MS || 6*60*60_000)));
 const researchPlaneMaxMemoryRecords = Math.max(1500, Math.min(5000, Math.floor(Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS || 3000) || 3000)));
 const marketFabricMaxMemoryEvents = Math.max(2000, Math.min(8000, Math.floor(Number(process.env.TCX_MARKET_FABRIC_MAX_MEMORY_EVENTS || 4000) || 4000)));
 const auditLedgerMaxMemoryRecords = Math.max(50, Math.min(2000, Math.floor(Number(process.env.TCX_AUDIT_LEDGER_MAX_MEMORY_RECORDS || 500) || 500)));
@@ -449,6 +460,45 @@ const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFi
   maxIntervalCalibrationRows:Math.max(300,Math.floor(Number(process.env.TCX_FORECAST_MAX_INTERVAL_ROWS||1200))),
   maxDriftRows:Math.max(500,Math.floor(Number(process.env.TCX_FORECAST_MAX_DRIFT_ROWS||1500)))
 });
+const forecastColdArchiveDir=process.env.TCX_FORECAST_COLD_ARCHIVE_DIR||forecastRuntimeFile+'.cold';
+let forecastColdArchiveState=await forecastColdArchiveSummary(forecastColdArchiveDir);
+
+async function compactForecastRuntimeToCold(reason='maintenance'){
+  const plan=planForecastHotCompaction(forecastRuntime,{
+    now:Date.now(),
+    maxHotIssuances:forecastHotIssuances,
+    maxHotTracked:forecastHotTracked,
+    batchThreshold:forecastColdBatchThreshold,
+    minColdAgeMs:forecastColdMinAgeMs
+  });
+  if(!plan.coldIssuances.length&&!plan.coldTrackerRecords.length){
+    return {changed:false,reason:'NO_DUE_COLD_ROWS',before:plan.before,after:plan.before,archive:null};
+  }
+  try{
+    const archive=await archiveForecastColdBatch({
+      dir:forecastColdArchiveDir,
+      issuances:plan.coldIssuances,
+      trackerRecords:plan.coldTrackerRecords,
+      archivedAt:Date.now()
+    });
+    const applied=applyForecastHotCompaction(forecastRuntime,plan);
+    forecastColdArchiveState=await forecastColdArchiveSummary(forecastColdArchiveDir);
+    console.info('[TCX_FORECAST_COLD_ARCHIVE]',JSON.stringify({
+      version:FORECAST_COLD_ARCHIVE_VERSION,
+      reason,
+      archived:{issuances:archive.issuances,trackerRecords:archive.trackerRecords,duplicate:archive.duplicate===true},
+      removed:{issuances:applied.removedIssuances,trackerRecords:applied.removedTrackerRecords},
+      hot:applied.after,
+      cold:forecastColdArchiveState
+    }));
+    return {changed:applied.removedIssuances>0||applied.removedTrackerRecords>0,before:plan.before,after:applied.after,archive};
+  }catch(err){
+    const message=err instanceof Error?err.message:String(err);
+    console.error('[TCX_FORECAST_COLD_ARCHIVE_ERROR]',JSON.stringify({reason,error:message}));
+    return {changed:false,reason:'ARCHIVE_FAILED',before:plan.before,after:plan.before,error:message,archive:null};
+  }
+}
+const forecastBootColdCompaction=await compactForecastRuntimeToCold('startup');
 const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
@@ -701,6 +751,7 @@ async function flushForecastRuntimePersistence(force=false){
   forecastRuntimePersistRunning=(async()=>{
     const started=Date.now();
     try{
+      const coldCompaction=await compactForecastRuntimeToCold(reason);
       const snapshotMeta=await saveInstitutionalForecastRuntime(forecastRuntime);
       forecastRuntime.lastError=null;
       forecastRuntimePersistLastAt=Date.now();
@@ -722,7 +773,13 @@ async function flushForecastRuntimePersistence(force=false){
         engineStore:snapshotMeta?.engineStore??null,
         journalStore:snapshotMeta?.journalStore??null,
         persistenceManifest:snapshotMeta?.persistenceManifest??null,
-        componentProfile:snapshotMeta?.componentProfile??null
+        componentProfile:snapshotMeta?.componentProfile??null,
+        coldCompaction:coldCompaction?.changed?{
+          before:coldCompaction.before,
+          after:coldCompaction.after,
+          archivedIssuances:coldCompaction.archive?.issuances||0,
+          archivedTrackerRecords:coldCompaction.archive?.trackerRecords||0
+        }:null
       }));
       return true;
     }catch(err){
@@ -7781,6 +7838,15 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     audit:forecastAuditMaxEvents,
     issuances:forecastMaxIssuances,
     tracked:forecastMaxTracked,
+    hotIssuances:forecastHotIssuances,
+    hotTracked:forecastHotTracked,
+    coldBatchThreshold:forecastColdBatchThreshold,
+    coldMinAgeMs:forecastColdMinAgeMs,
+    coldArchive:forecastColdArchiveState,
+    bootColdCompaction:forecastBootColdCompaction?.changed?{
+      before:forecastBootColdCompaction.before,
+      after:forecastBootColdCompaction.after
+    }:null,
     researchPlane:researchPlaneMaxMemoryRecords,
     calibration:forecastRuntime.engine.calibration.maxRows,
     reliability:forecastRuntime.engine.reliability.maxRows,
