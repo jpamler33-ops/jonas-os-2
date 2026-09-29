@@ -3,18 +3,60 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-09-29T06:22:07.497Z",
-  "chain": [],
+  "updatedAt": "2026-09-29T06:25:23.120Z",
+  "chain": [
+    {
+      "schema": "BIGGJ_FORWARD_OBSERVATION_V1",
+      "provider": "OKX",
+      "symbol": "BTCUSDT",
+      "sourceTimestamp": "2026-09-29T06:24:26.941Z",
+      "ingestTimestamp": "2026-09-29T06:25:22.658Z",
+      "values": {
+        "funding_rate": 0.0000429093499114,
+        "mark_price": 83804.7,
+        "open_interest": 2816737.7700000093,
+        "open_interest_ccy": 28167.377700000092
+      },
+      "sha256": "32f15c8d9e9f5f0355caf4bba6cc6457d1810cdb975bf819b5d0288488e85366",
+      "prevChainSha256": "GENESIS",
+      "chainSha256": "50ea16f33f362842efc97b49cb32aeda39ba15cf55d58feb24ceb3ec08175610"
+    },
+    {
+      "schema": "BIGGJ_FORWARD_OBSERVATION_V1",
+      "provider": "KRAKEN_FUTURES",
+      "symbol": "PF_XBTUSD",
+      "sourceTimestamp": "2026-09-29T06:00:00.000Z",
+      "ingestTimestamp": "2026-09-29T06:25:22.907Z",
+      "values": {
+        "funding_rate": 0.453362119282944,
+        "open_interest": 2206.7978
+      },
+      "sha256": "5b06c3f1c891148dae559cda0af3b3d7b6820e1eae47dc51a4a444990a4b47be",
+      "prevChainSha256": "50ea16f33f362842efc97b49cb32aeda39ba15cf55d58feb24ceb3ec08175610",
+      "chainSha256": "a529dd922321510894f053901c4aa2ba85b682f875e86d19849e4d78486babbd"
+    }
+  ],
   "summary": {
-    "count": 0,
-    "first": null,
-    "last": null,
-    "providers": [],
-    "features": {},
-    "chainHead": null
+    "count": 2,
+    "first": "2026-09-29T06:24:26.941Z",
+    "last": "2026-09-29T06:00:00.000Z",
+    "providers": [
+      "KRAKEN_FUTURES",
+      "OKX"
+    ],
+    "features": {
+      "funding_rate": 2,
+      "mark_price": 1,
+      "open_interest": 2,
+      "open_interest_ccy": 1
+    },
+    "chainHead": "a529dd922321510894f053901c4aa2ba85b682f875e86d19849e4d78486babbd"
   },
   "lastCollection": {
-    "providers": [],
+    "providers": [
+      "OKX",
+      "KRAKEN_FUTURES"
+    ],
     "errors": [
       {
         "provider": "binance",
