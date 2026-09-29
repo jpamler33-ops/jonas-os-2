@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_DEPENDENCY_GRAPH_VERSION='TCX_RESEARCH_DEPENDENCY_GRAPH_V1';
+export const RESEARCH_DEPENDENCY_GRAPH_VERSION='TCX_RESEARCH_DEPENDENCY_GRAPH_V2';
 
 const HEX64=/^[a-f0-9]{64}$/i;
 const SOURCE_BLOCKING=new Set(['QUARANTINED','FAILED','REJECTED']);
@@ -75,26 +75,47 @@ function sourceStatusLookup(governanceSummary,knowledgeTime){
   }
   return {usable,updatedAt,byKey};
 }
-function sourceAssessment(record,currentStatus,requireGoverned){
+function sourceAssessment(record,currentStatus,requireGoverned,dependencyRows=[]){
   const governance=record?.governance||null;
   const decision=cleanStatus(governance?.decision,'UNGOVERNED');
   const recordStatus=cleanStatus(governance?.sourceStatus,'UNOBSERVED');
   const status=cleanStatus(currentStatus||recordStatus,recordStatus);
   const ungoverned=!governance;
+  const dependencyBlocked=(dependencyRows||[]).some(x=>x.state==='BLOCKED');
+  const dependencyDegraded=!dependencyBlocked&&(dependencyRows||[]).some(x=>x.state==='DEGRADED');
   const blocked=
     (requireGoverned&&ungoverned)||
     SOURCE_BLOCKING.has(status)||
     DECISION_BLOCKING.has(decision)||
-    governance?.usableForResearch===false;
-  const degraded=!blocked&&(SOURCE_DEGRADED.has(status)||decision==='DEGRADED');
+    governance?.usableForResearch===false||
+    dependencyBlocked;
+  const degraded=!blocked&&(SOURCE_DEGRADED.has(status)||decision==='DEGRADED'||dependencyDegraded);
   return {
     status,
     decision,
     governed:!ungoverned,
     usable:!blocked,
     degraded,
+    dependencyBlocked,
+    dependencyDegraded,
+    dependencies:Object.freeze((dependencyRows||[]).map(x=>Object.freeze({...x}))),
     state:blocked?'BLOCKED':degraded?'DEGRADED':'HEALTHY'
   };
+}
+
+function derivedDependencyRows(record,statusView){
+  const deps=uniqueSorted(Array.isArray(record?.provenance?.dependencies)?record.provenance.dependencies:[]);
+  return deps.map(sourceKey=>{
+    const known=statusView.usable?statusView.byKey.get(sourceKey):null;
+    const status=cleanStatus(known,'UNOBSERVED');
+    const observed=known!=null;
+    const state=!observed||SOURCE_BLOCKING.has(status)
+      ?'BLOCKED'
+      :SOURCE_DEGRADED.has(status)
+        ?'DEGRADED'
+        :'HEALTHY';
+    return Object.freeze({sourceKey,status,observed,state});
+  });
 }
 function factorState(featureStates){
   const xs=featureStates||[];
@@ -158,10 +179,12 @@ export function buildResearchDependencyGraph({
   const edgeMap=new Map();
   const featureContributors=new Map();
   const factorFeatures=new Map();
+  const derivedSourceDependencies=[];
 
   for(const {record,row,sourceKey} of latestBySourceFeature.values()){
     const currentStatus=statusView.byKey.get(sourceKey)||null;
-    const assessment=sourceAssessment(record,currentStatus,requireGoverned===true);
+    const dependencyRows=derivedDependencyRows(record,statusView);
+    const assessment=sourceAssessment(record,currentStatus,requireGoverned===true,dependencyRows);
     const sourceNodeId='SOURCE:'+sourceKey;
     const obsNodeId=observationId(record);
     const featureNodeId='FEATURE:'+String(row.id);
@@ -174,8 +197,13 @@ export function buildResearchDependencyGraph({
       domain:String(record.domain||'').toUpperCase(),
       source:String(record.source||''),
       status:assessment.status,
-      state:assessment.state
+      state:assessment.state,
+      upstreamSourceKeys:Object.freeze(assessment.dependencies.map(x=>x.sourceKey)),
+      upstreamState:assessment.dependencyBlocked?'BLOCKED':assessment.dependencyDegraded?'DEGRADED':assessment.dependencies.length?'HEALTHY':'NONE'
     });
+    if(assessment.dependencies.length){
+      derivedSourceDependencies.push({derivedSourceNodeId:sourceNodeId,dependencies:assessment.dependencies});
+    }
     addNode(nodeMap,{
       id:obsNodeId,
       type:'OBSERVATION',
@@ -210,13 +238,37 @@ export function buildResearchDependencyGraph({
       value:Number(row.value),
       state:assessment.state,
       usable:assessment.usable,
-      degraded:assessment.degraded
+      degraded:assessment.degraded,
+      dependencies:assessment.dependencies
     });
     featureContributors.set(String(row.id),list);
 
     const factorList=factorFeatures.get(String(record.domain||'UNKNOWN').toUpperCase())||[];
     if(!factorList.includes(String(row.id))) factorList.push(String(row.id));
     factorFeatures.set(String(record.domain||'UNKNOWN').toUpperCase(),factorList);
+  }
+
+  for(const derived of derivedSourceDependencies){
+    for(const dependency of derived.dependencies){
+      const depNodeId='SOURCE:'+dependency.sourceKey;
+      if(!nodeMap.has(depNodeId)){
+        const split=String(dependency.sourceKey).indexOf(':');
+        const domain=split>=0?String(dependency.sourceKey).slice(0,split):'UNKNOWN';
+        const source=split>=0?String(dependency.sourceKey).slice(split+1):String(dependency.sourceKey);
+        addNode(nodeMap,{
+          id:depNodeId,
+          type:'SOURCE',
+          sourceKey:dependency.sourceKey,
+          domain,
+          source,
+          status:dependency.status,
+          state:dependency.state,
+          upstreamSourceKeys:Object.freeze([]),
+          upstreamState:'NONE'
+        });
+      }
+      addEdge(edgeMap,depNodeId,derived.derivedSourceNodeId,'DERIVES_SOURCE');
+    }
   }
 
   const featureStates=new Map();
@@ -292,7 +344,14 @@ export function buildResearchDependencyGraph({
   const edges=[...edgeMap.values()].sort((a,b)=>a.from.localeCompare(b.from)||a.to.localeCompare(b.to)||a.relation.localeCompare(b.relation));
   const blockedFeatureIds=featureIds.filter(id=>featureStates.get(id)==='BLOCKED');
   const degradedFeatureIds=featureIds.filter(id=>featureStates.get(id)==='DEGRADED');
-  const impactedSourceKeys=uniqueSorted([...featureContributors.values()].flat().filter(x=>x.state!=='HEALTHY').map(x=>x.sourceKey));
+  const impactedSourceKeys=uniqueSorted(
+    [...featureContributors.values()].flat()
+      .filter(x=>x.state!=='HEALTHY')
+      .flatMap(x=>[
+        x.sourceKey,
+        ...(x.dependencies||[]).filter(d=>d.state!=='HEALTHY').map(d=>d.sourceKey)
+      ])
+  );
 
   const core={
     version:RESEARCH_DEPENDENCY_GRAPH_VERSION,
@@ -396,7 +455,10 @@ export function verifyResearchDependencyGraph(graph){
       if(!ids.has(edge.from)||!ids.has(edge.to)) reasons.push('EDGE_ORPHAN');
       const from=graph.nodes.find(x=>x.id===edge.from);
       const to=graph.nodes.find(x=>x.id===edge.to);
-      if(from&&to&&NODE_RANK[from.type]>=NODE_RANK[to.type]) reasons.push('EDGE_LAYER_ORDER');
+      if(from&&to){
+        const sameLayerDerived=edge.relation==='DERIVES_SOURCE'&&from.type==='SOURCE'&&to.type==='SOURCE';
+        if(!sameLayerDerived&&NODE_RANK[from.type]>=NODE_RANK[to.type]) reasons.push('EDGE_LAYER_ORDER');
+      }
     }
     const expected=sha256(graphCore(graph));
     if(String(graph?.fingerprint||'')!==expected) reasons.push('FINGERPRINT');
@@ -415,6 +477,10 @@ export function explainResearchFeatureLineage(graph,featureId){
   const observations=(graph.nodes||[]).filter(n=>obsIds.includes(n.id));
   const sourceIds=(graph.edges||[]).filter(e=>obsIds.includes(e.to)&&e.relation==='PRODUCED').map(e=>e.from);
   const sources=(graph.nodes||[]).filter(n=>sourceIds.includes(n.id));
+  const upstreamSourceIds=(graph.edges||[])
+    .filter(e=>sourceIds.includes(e.to)&&e.relation==='DERIVES_SOURCE')
+    .map(e=>e.from);
+  const upstreamSources=(graph.nodes||[]).filter(n=>upstreamSourceIds.includes(n.id));
   const factorIds=(graph.edges||[]).filter(e=>e.from===featureNodeId&&e.relation==='ROLLS_UP_TO_FACTOR').map(e=>e.to);
   const factors=(graph.nodes||[]).filter(n=>factorIds.includes(n.id));
   const forecastIds=(graph.edges||[]).filter(e=>factorIds.includes(e.from)&&e.relation==='INFORMS_FORECAST').map(e=>e.to);
@@ -423,6 +489,7 @@ export function explainResearchFeatureLineage(graph,featureId){
     feature,
     observations:Object.freeze(observations),
     sources:Object.freeze(sources),
+    upstreamSources:Object.freeze(upstreamSources),
     factors:Object.freeze(factors),
     forecasts:Object.freeze(forecasts),
     execution:'SHADOW_ONLY',

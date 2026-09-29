@@ -28,7 +28,7 @@ import {
   EXTERNAL_RESEARCH_PROVIDER_VERSION
 } from './expansion-runtime/external-research-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V1';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V2';
 
 function finite(v){
   const n=Number(v);
@@ -44,26 +44,42 @@ function makeSourceEventId(parts){
   return sha256(parts);
 }
 
-function derivativesInput(symbol,snapshot,ingestedAt){
-  const features=derivativesSnapshotToExtraFeatures(snapshot);
-  if(!features.length) return null;
-  const availableAt=finite(snapshot?.availableAt);
-  if(availableAt==null) return null;
-  const publishedAt=Math.max(
-    finite(snapshot?.binance?.publishedAt)||0,
-    finite(snapshot?.okx?.publishedAt)||0
-  )||availableAt;
-  const sourceCount=Math.max(0,Number(snapshot?.witness?.sourceCount||0));
+const BINANCE_DERIVATIVE_FEATURES=new Set([
+  'research.derivatives.fundingRate',
+  'research.derivatives.premiumPct',
+  'research.derivatives.openInterestUsd',
+  'research.derivatives.openInterestDelta5m',
+  'research.derivatives.globalLongShortRatio',
+  'research.derivatives.takerBuySellRatio'
+]);
+const OKX_DERIVATIVE_FEATURES=new Set([
+  'research.derivatives.okxFundingRate',
+  'research.derivatives.okxOpenInterestUsd'
+]);
+const CROSS_VENUE_DERIVATIVE_FEATURES=new Set([
+  'research.derivatives.fundingRateVenueSpread'
+]);
+
+function derivativeVenueInput({
+  symbol,
+  ingestedAt,
+  availableAt,
+  source,
+  publishedAt,
+  features,
+  expectedFeatureCount,
+  status,
+  provenance={}
+}={}){
+  if(!Array.isArray(features)||!features.length) return null;
+  const completeness=Math.max(0,Math.min(1,features.length/Math.max(1,Number(expectedFeatureCount)||features.length)));
   return createResearchFeatureSnapshot({
     streamKey:symbol,
     domain:'DERIVATIVES',
-    source:'BINANCE_OKX_PUBLIC_DERIVATIVES',
+    source,
     sourceVersion:DERIVATIVES_PUBLIC_PROVIDER_VERSION,
     sourceEventId:makeSourceEventId({
-      symbol,
-      availableAt,
-      binancePublishedAt:snapshot?.binance?.publishedAt||null,
-      okxPublishedAt:snapshot?.okx?.publishedAt||null,
+      symbol,source,availableAt,publishedAt,
       features:features.map(x=>[x.id,x.value])
     }),
     eventTime:eventTimeOrAvailable(publishedAt,availableAt),
@@ -72,21 +88,72 @@ function derivativesInput(symbol,snapshot,ingestedAt){
     ttlMs:10*60_000,
     finality:'OBSERVED',
     quality:{
-      completeness:Math.max(0,Math.min(1,sourceCount/2)),
-      sourceCount,
-      expectedSourceCount:2,
-      status:sourceCount>=2?'MULTI_SOURCE':'PARTIAL_SOURCE'
+      completeness,
+      sourceCount:1,
+      expectedSourceCount:1,
+      status
     },
     features,
     provenance:{
       adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
       providerVersion:DERIVATIVES_PUBLIC_PROVIDER_VERSION,
-      binancePresent:Boolean(snapshot?.binance),
-      okxPresent:Boolean(snapshot?.okx),
-      witnessSourceCount:sourceCount,
-      researchOnly:true
+      venueIsolated:true,
+      researchOnly:true,
+      ...provenance
     }
   });
+}
+
+function derivativesInputs(symbol,snapshot,ingestedAt){
+  const availableAt=finite(snapshot?.availableAt);
+  if(availableAt==null) return [];
+  const all=derivativesSnapshotToExtraFeatures(snapshot);
+  if(!all.length) return [];
+
+  const binanceFeatures=all.filter(x=>BINANCE_DERIVATIVE_FEATURES.has(x.id));
+  const okxFeatures=all.filter(x=>OKX_DERIVATIVE_FEATURES.has(x.id));
+  const crossFeatures=all.filter(x=>CROSS_VENUE_DERIVATIVE_FEATURES.has(x.id));
+
+  const rows=[
+    snapshot?.binance?derivativeVenueInput({
+      symbol,ingestedAt,availableAt,
+      source:'BINANCE_USDM_PUBLIC',
+      publishedAt:snapshot.binance.publishedAt,
+      features:binanceFeatures,
+      expectedFeatureCount:BINANCE_DERIVATIVE_FEATURES.size,
+      status:'BINANCE_PUBLIC_DERIVATIVES',
+      provenance:{venue:'BINANCE',upstreamSource:String(snapshot.binance.source||'BINANCE_USDM_PUBLIC')}
+    }):null,
+    snapshot?.okx?derivativeVenueInput({
+      symbol,ingestedAt,availableAt,
+      source:'OKX_PUBLIC',
+      publishedAt:snapshot.okx.publishedAt,
+      features:okxFeatures,
+      expectedFeatureCount:OKX_DERIVATIVE_FEATURES.size,
+      status:'OKX_PUBLIC_DERIVATIVES',
+      provenance:{venue:'OKX',upstreamSource:String(snapshot.okx.source||'OKX_PUBLIC')}
+    }):null
+  ];
+
+  if(snapshot?.binance&&snapshot?.okx&&crossFeatures.length){
+    rows.push(derivativeVenueInput({
+      symbol,ingestedAt,availableAt,
+      source:'BINANCE_OKX_DERIVED',
+      publishedAt:Math.max(
+        finite(snapshot.binance.publishedAt)||0,
+        finite(snapshot.okx.publishedAt)||0
+      )||availableAt,
+      features:crossFeatures,
+      expectedFeatureCount:CROSS_VENUE_DERIVATIVE_FEATURES.size,
+      status:'CROSS_VENUE_DERIVED',
+      provenance:{
+        derived:true,
+        dependencies:['DERIVATIVES:BINANCE_USDM_PUBLIC','DERIVATIVES:OKX_PUBLIC'],
+        venuePair:['BINANCE','OKX']
+      }
+    }));
+  }
+  return rows.filter(Boolean);
 }
 
 function liquidationInput(symbol,snapshot,ingestedAt){
@@ -346,7 +413,7 @@ export function buildResearchDataPlaneSnapshots({
   if(!/^[A-Z0-9]{2,18}USDT$/.test(s)) throw new Error('invalid research data plane symbol');
   if(t==null) throw new Error('ingestedAt must be finite');
   return [
-    derivativesInput(s,derivativesSnapshot,t),
+    ...derivativesInputs(s,derivativesSnapshot,t),
     liquidationInput(s,liquidationSnapshot,t),
     onchainInput(s,onchainSnapshot,t),
     entityFlowInput(s,entityFlowSnapshot,t),

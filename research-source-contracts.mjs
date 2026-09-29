@@ -1,9 +1,11 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V1';
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V2';
 
 const contracts=[
-  {id:'DERIVATIVES_MULTI_VENUE',domain:'DERIVATIVES',source:'BINANCE_OKX_PUBLIC_DERIVATIVES',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'BINANCE_USDM_DERIVATIVES',domain:'DERIVATIVES',source:'BINANCE_USDM_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'OKX_PUBLIC_DERIVATIVES',domain:'DERIVATIVES',source:'OKX_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'DERIVATIVES_CROSS_VENUE_SPREAD',domain:'DERIVATIVES',source:'BINANCE_OKX_DERIVED',minCompleteness:1,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'BYBIT_LIQUIDATION_STREAM',domain:'LIQUIDATION',source:'BYBIT_PUBLIC_ALL_LIQUIDATION',minCompleteness:.8,maxPublicationLagMs:120000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'BITCOIN_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'MEMPOOL_SPACE_PUBLIC',minCompleteness:1,maxPublicationLagMs:1200000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'ETHEREUM_PUBLIC_ONCHAIN',domain:'ONCHAIN',source:'ETHEREUM_PUBLIC_RPC',minCompleteness:1,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
