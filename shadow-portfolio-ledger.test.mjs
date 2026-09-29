@@ -98,13 +98,43 @@ test('insufficient exit depth does not close position',()=>{
   assert.equal(m.position.lastMark.fullyExecutable,false);
 });
 
-test('entry reconciliation is idempotent',()=>{
+test('entry reconciliation is idempotent and zero-copy when unchanged',()=>{
   const l=createEmptyShadowPortfolioLedger();
   const a=reconcileShadowPortfolioEntries(l,[entry()],{now:2000});
   const b=reconcileShadowPortfolioEntries(a.ledger,[entry()],{now:3000});
   assert.equal(a.added,1);
+  assert.equal(a.copyMode,'COPY_ON_WRITE');
   assert.equal(b.added,0);
+  assert.equal(b.copyMode,'HOT_NOOP');
+  assert.equal(b.ledger,a.ledger);
   assert.equal(b.ledger.positions.length,1);
+});
+
+test('portfolio reconciliation structurally shares historical positions',()=>{
+  const first=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[entry()],{now:2000}).ledger;
+  const historical=first.positions[0];
+  const secondOrder=entry({id:'sh_entry_2',createdAt:3000,updatedAt:3000});
+  const next=reconcileShadowPortfolioEntries(first,[secondOrder],{now:3000});
+  assert.equal(next.changed,true);
+  assert.equal(next.ledger.positions.length,2);
+  assert.equal(next.ledger.positions[0],historical);
+  assert.notEqual(next.ledger,first);
+});
+
+test('position replacement copies only the positions array and replacement',()=>{
+  const ledger=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[
+    entry(),
+    entry({id:'sh_entry_2'})
+  ],{now:2000}).ledger;
+  const untouched=ledger.positions[0];
+  const target=ledger.positions[1];
+  const replacement={...target,lastMark:{markedAt:3000,fullyExecutable:true}};
+  const next=replaceShadowPortfolioPosition(ledger,replacement);
+  assert.notEqual(next,ledger);
+  assert.notEqual(next.positions,ledger.positions);
+  assert.equal(next.positions[0],untouched);
+  assert.notEqual(next.positions[1],replacement);
+  assert.deepEqual(next.positions[1].lastMark,replacement.lastMark);
 });
 
 test('portfolio summary calculates win rate profit factor and drawdown',()=>{
