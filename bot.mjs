@@ -3,6 +3,8 @@ import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSI
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
+import { createS3ColdStoreFromEnv, MARKET_FABRIC_COLD_STORE_VERSION } from './market-fabric-cold-store.mjs';
+import { offloadMarketFabricArchive, MARKET_FABRIC_COLD_TIER_VERSION } from './market-fabric-cold-tier.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
@@ -173,8 +175,37 @@ const persistenceDataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_
 const storageWarnFreeBytes=Math.max(32*1024*1024,Number(process.env.TCX_STORAGE_WARN_FREE_BYTES||96*1024*1024));
 const storageCriticalFreeBytes=Math.max(16*1024*1024,Math.min(storageWarnFreeBytes,Number(process.env.TCX_STORAGE_CRITICAL_FREE_BYTES||48*1024*1024)));
 const marketFabricArchiveBudgetBytes=Math.max(16*1024*1024,Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||80*1024*1024));
+const marketFabricColdTargetBytes=Math.max(0,Math.min(
+  marketFabricArchiveBudgetBytes,
+  Number(process.env.TCX_MARKET_FABRIC_COLD_TARGET_BYTES||32*1024*1024)
+));
+const marketFabricColdMaxSegmentsPerRun=Math.max(1,Math.min(24,Number(process.env.TCX_MARKET_FABRIC_COLD_MAX_SEGMENTS_PER_RUN||2)));
+const marketFabricColdStore=createS3ColdStoreFromEnv();
 await cleanupOrphanedPersistenceArtifacts({dataDir:persistenceDataDir});
-const startupStorageInventory=await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
+let startupStorageInventory=await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
+let startupColdTier=null;
+if(marketFabricColdStore.enabled){
+  try{
+    startupColdTier=await offloadMarketFabricArchive({
+      filePath:process.env.TCX_MARKET_FABRIC_FILE||persistenceDataDir+'/tcx-market-events.jsonl',
+      coldStore:marketFabricColdStore,
+      maxLocalBytes:marketFabricArchiveBudgetBytes,
+      targetLocalBytes:marketFabricColdTargetBytes,
+      maxSegmentsPerRun:marketFabricColdMaxSegmentsPerRun
+    });
+    console.info('[TCX_MARKET_FABRIC_COLD_TIER]',JSON.stringify({...startupColdTier,phase:'startup'}));
+    if(startupColdTier.offloadedSegments>0){
+      startupStorageInventory=await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
+    }
+  }catch(err){
+    console.error('[TCX_MARKET_FABRIC_COLD_TIER_FAILED]',JSON.stringify({
+      phase:'startup',
+      error:err instanceof Error?err.message:String(err),
+      provider:marketFabricColdStore.summary?.()||null,
+      destructiveRetention:false
+    }));
+  }
+}
 const startupStoragePressure=await inspectStoragePressure({
   dataDir:persistenceDataDir,
   warnFreeBytes:storageWarnFreeBytes,
@@ -752,6 +783,9 @@ try {
       mechanismEngine:'MTL_V1',
       witnessNetwork:'IWN_V1',
       marketDataFabric:MARKET_DATA_FABRIC_VERSION,
+      marketFabricArchive:MARKET_FABRIC_ARCHIVE_VERSION,
+      marketFabricColdStore:MARKET_FABRIC_COLD_STORE_VERSION,
+      marketFabricColdTier:MARKET_FABRIC_COLD_TIER_VERSION,
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
@@ -6611,20 +6645,50 @@ async function maintainMarketFabric(){
   if(Date.now()-marketFabricLastMaintenanceAt<marketFabricMaintenanceMs) return;
   marketFabricLastMaintenanceAt=Date.now();
   marketFabricMaintenanceQueue=marketFabricMaintenanceQueue.then(async()=>{
-    const storagePressure=await inspectStoragePressure({
+    let storagePressure=await inspectStoragePressure({
       dataDir:persistenceDataDir,
       warnFreeBytes:storageWarnFreeBytes,
       criticalFreeBytes:storageCriticalFreeBytes
     });
     const configuredRotateBytes=Math.max(16*1024*1024,Number(process.env.TCX_MARKET_FABRIC_ROTATE_BYTES||80*1024*1024));
+    let coldTier=null;
+    if(marketFabricColdStore.enabled){
+      try{
+        coldTier=await offloadMarketFabricArchive({
+          filePath:marketFabricFile,
+          coldStore:marketFabricColdStore,
+          maxLocalBytes:marketFabricArchiveBudgetBytes,
+          targetLocalBytes:marketFabricColdTargetBytes,
+          maxSegmentsPerRun:marketFabricColdMaxSegmentsPerRun
+        });
+        if(coldTier.offloadedSegments>0||coldTier.verifiedExisting>0){
+          console.info('[TCX_MARKET_FABRIC_COLD_TIER]',JSON.stringify({...coldTier,phase:'maintenance'}));
+        }
+      }catch(err){
+        console.error('[TCX_MARKET_FABRIC_COLD_TIER_FAILED]',JSON.stringify({
+          phase:'maintenance',
+          error:err instanceof Error?err.message:String(err),
+          provider:marketFabricColdStore.summary?.()||null,
+          destructiveRetention:false
+        }));
+      }
+    }
     if(storagePressure.state==='CRITICAL'){
-      console.error('[TCX_MARKET_FABRIC_MAINTENANCE_DEFERRED]',JSON.stringify({
-        ...storagePressure,
-        reason:'CRITICAL_STORAGE_NO_TEMP_FILE_RISK',
-        archiveBudgetBytes:marketFabricArchiveBudgetBytes,
-        destructiveRetention:false
-      }));
-      return;
+      storagePressure=await inspectStoragePressure({
+        dataDir:persistenceDataDir,
+        warnFreeBytes:storageWarnFreeBytes,
+        criticalFreeBytes:storageCriticalFreeBytes
+      });
+      if(storagePressure.state==='CRITICAL'){
+        console.error('[TCX_MARKET_FABRIC_MAINTENANCE_DEFERRED]',JSON.stringify({
+          ...storagePressure,
+          reason:'CRITICAL_STORAGE_NO_TEMP_FILE_RISK',
+          archiveBudgetBytes:marketFabricArchiveBudgetBytes,
+          coldTier,
+          destructiveRetention:false
+        }));
+        return;
+      }
     }
     const pressureRotateBytes=storagePressure.state==='CRITICAL'
       ?16*1024*1024
@@ -6674,6 +6738,7 @@ async function maintainMarketFabric(){
     if(rotation.rotated||archive.migratedSegments||archive.recompressedSegments||archive.budgetBlocked||archive.budgetExceeded){
       console.info('[TCX_MARKET_FABRIC_RUNTIME_ARCHIVE]',JSON.stringify({
         ...archive,
+        coldTier,
         writeAdmission:marketFabricArchiveBudgetBlocked?'BLOCKED':'ALLOWED'
       }));
     }
