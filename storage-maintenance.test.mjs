@@ -80,6 +80,12 @@ test('critical storage blocks only high-volume append classes',()=>{
     assert.equal(x.reason,'STORAGE_CRITICAL_FAIL_CLOSED');
   }
   assert.equal(classifyStorageWriteAdmission(critical,{scope:'AUDIT'}).allowed,true);
-  assert.equal(classifyStorageWriteAdmission({state:'WARN'},{scope:'MARKET_FABRIC'}).allowed,true);
+  const warnFabric=classifyStorageWriteAdmission({state:'WARN',availableBytes:90*1024*1024,utilization:.81},{scope:'MARKET_FABRIC'});
+  assert.equal(warnFabric.allowed,false);
+  assert.equal(warnFabric.reason,'STORAGE_WARN_BACKPRESSURE');
+  const warnResearch=classifyStorageWriteAdmission({state:'WARN'},{scope:'RESEARCH_DATA_PLANE'});
+  assert.equal(warnResearch.allowed,false);
+  assert.equal(warnResearch.reason,'STORAGE_WARN_BACKPRESSURE');
+  assert.equal(classifyStorageWriteAdmission({state:'WARN'},{scope:'AUDIT'}).allowed,true);
   assert.equal(classifyStorageWriteAdmission({state:'NORMAL'},{scope:'RESEARCH_DATA_PLANE'}).allowed,true);
 });
