@@ -510,12 +510,27 @@ if(entityRegistryRefreshEnabled){
 }else if(!entityRegistry){
   entityRegistryRefreshError='LIVE_REFRESH_DISABLED_BY_CONFIG';
 }
+const entityRegistryServingSummary=entityRegistrySummary(entityRegistry);
 const entityFlowAddressIndex=buildEntityAddressIndex(entityRegistry||{entries:[]},{
   chain:'ETHEREUM',
   allowedEntityTypes:['EXCHANGE'],
   requireOfficialSource:true
 });
 const entityFlowEntityIds=[...entityFlowAddressIndex.entityMeta.keys()];
+// The serving process only needs the compact ETH index after startup. Release
+// the full multi-chain proof-of-reserves registry object graph so BTC/SOL rows
+// do not remain resident for the lifetime of the process.
+entityRegistry=null;
+console.info('[TCX_ENTITY_REGISTRY_HOT_SET_RELEASED]',JSON.stringify({
+  registry:entityRegistryServingSummary,
+  servingIndex:{
+    chain:entityFlowAddressIndex.chain,
+    addressCount:entityFlowAddressIndex.addressCount,
+    entityCount:entityFlowAddressIndex.entityCount,
+    rejected:entityFlowAddressIndex.rejected
+  },
+  retainedFullRegistry:false
+}));
 const entityFlowMemoryFile=process.env.TCX_ENTITY_FLOW_MEMORY_FILE||'/data/tcx-entity-flow-memory.json';
 let entityFlowMemory=await loadEntityFlowMemory(entityFlowMemoryFile);
 const entityFlowResearchProvider=createEthereumEntityFlowProvider({
