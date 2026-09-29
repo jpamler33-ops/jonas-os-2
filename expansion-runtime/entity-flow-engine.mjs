@@ -363,14 +363,28 @@ export function createEthereumEntityFlowProvider({
     if(!force&&cache&&requestedAt-cache.cachedAt<=Math.max(0,Number(cacheMs)||0)){
       return structuredClone(cache.value);
     }
-    const finalized=await rpc(fetchImpl,rpcUrl,'eth_getBlockByNumber',['finalized',true],{timeoutMs});
+    let finalized=await rpc(fetchImpl,rpcUrl,'eth_getBlockByNumber',['finalized',true],{timeoutMs});
     if(!finalized?.number||!finalized?.timestamp) throw new Error('FINALIZED_BLOCK_UNAVAILABLE');
     const head=hexNumber(finalized.number);
     const headTs=hexNumber(finalized.timestamp)*1000;
     if(!Number.isFinite(head)||!Number.isFinite(headTs)) throw new Error('FINALIZED_BLOCK_INVALID');
 
-    const blocks=[finalized];
     const oldestNeeded=headTs-Math.max(...windows.map(x=>Number(x.ms)||0))-60_000;
+    const events=[];
+    const seenEventIds=new Set();
+    const appendCompactEvents=rows=>{
+      for(const event of Array.isArray(rows)?rows:[]){
+        if(!event||seenEventIds.has(event.eventId)) continue;
+        seenEventIds.add(event.eventId);
+        events.push(event);
+      }
+    };
+    appendCompactEvents(classifyEvmNativeBlocks([finalized],addressIndex));
+    // The finalized full block is no longer needed after classification.
+    // Release it before historical batch RPCs begin.
+    finalized=null;
+    let blocksScanned=1;
+
     const numbers=[];
     for(let n=head-1;n>=0&&numbers.length<Math.max(1,Number(maxBlocks)||96);n--) numbers.push(n);
 
@@ -378,22 +392,33 @@ export function createEthereumEntityFlowProvider({
     const concurrency=Math.max(1,Math.min(6,Math.floor(Number(batchConcurrency)||4)));
     const chunks=[];
     for(let i=0;i<numbers.length;i+=step) chunks.push(numbers.slice(i,i+step));
-    const batchRows=await mapConcurrent(chunks,concurrency,chunk=>
-      rpcBatch(fetchImpl,rpcUrl,chunk.map(n=>({
+
+    // Keep RPC concurrency, but compact each completed batch before mapConcurrent
+    // retains its result. This bounds full block/transaction residency to the
+    // currently active batches instead of retaining the whole 96-block window.
+    const batchSummaries=await mapConcurrent(chunks,concurrency,async chunk=>{
+      const rows=await rpcBatch(fetchImpl,rpcUrl,chunk.map(n=>({
         method:'eth_getBlockByNumber',
         params:['0x'+n.toString(16),true]
-      })),{timeoutMs})
-    );
-    for(const rows of batchRows){
+      })),{timeoutMs});
+      const accepted=[];
       for(const block of rows){
         if(!block?.timestamp) continue;
         const ts=hexNumber(block.timestamp)*1000;
         if(Number.isFinite(ts)&&ts<oldestNeeded) continue;
-        blocks.push(block);
+        accepted.push(block);
       }
+      return {
+        blocksScanned:accepted.length,
+        events:classifyEvmNativeBlocks(accepted,addressIndex)
+      };
+    });
+    for(const summary of batchSummaries){
+      blocksScanned+=Number(summary?.blocksScanned||0);
+      appendCompactEvents(summary?.events);
     }
-
-    const events=classifyEvmNativeBlocks(blocks,addressIndex);
+    events.sort((a,b)=>(a.blockTimestamp||0)-(b.blockTimestamp||0)||String(a.txHash).localeCompare(String(b.txHash)));
+    const maxResidentFullBlocksBound=Math.max(1,Math.min(numbers.length,step*concurrency));
     const entitiesOut={};
     for(const entityId of entities){
       entitiesOut[entityId]={};
@@ -414,9 +439,11 @@ export function createEthereumEntityFlowProvider({
       availableAt:requestedAt,
       finalizedBlockNumber:head,
       finalizedBlockTimestamp:headTs,
-      blocksScanned:blocks.length,
+      blocksScanned,
       batchRequests:chunks.length,
       batchConcurrency:concurrency,
+      streamingClassification:true,
+      maxResidentFullBlocksBound,
       classifiedEvents:events.length,
       addressCount:addressIndex.addressCount,
       entityCount:addressIndex.entityCount,
