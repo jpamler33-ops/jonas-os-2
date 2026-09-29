@@ -109,7 +109,7 @@ test('wallet cohort RPC aborts within configured timeout',async()=>{
   const now=2_000_000;
   const p=createWalletCohortPublicProvider({
     cohorts:[{id:'sol-timeout',chain:'SOLANA',symbol:'SOLUSDT',addresses:['ADDR1']}],
-    timeoutMs:25,
+    timeoutMs:60,
     now:()=>now,
     fetchImpl:async(_url,opts)=>new Promise((_resolve,reject)=>{
       opts.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true});
