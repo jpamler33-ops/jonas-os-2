@@ -1394,6 +1394,13 @@ export function issueInstitutionalForecast(runtime,{
   });
 
   const prior=runtime.issuances.find(x=>x.issuanceId===issuance.issuanceId);
+  if(
+    prior?.claimAssumptionSidecar?.fingerprint&&
+    issuance?.claimAssumptionSidecar?.fingerprint&&
+    prior.claimAssumptionSidecar.fingerprint!==issuance.claimAssumptionSidecar.fingerprint
+  ){
+    throw new Error('duplicate issuance claim-assumption sidecar mismatch');
+  }
   if(!prior){
     runtime.issuances.push(clone(issuance));
     runtime.issuances=trimIssuances(runtime.issuances,runtime.maxIssuances);
@@ -1402,7 +1409,10 @@ export function issueInstitutionalForecast(runtime,{
   return deepFreeze({
     forecastId:raw.forecastId,
     issuance:prior??issuance,
-    duplicate:Boolean(prior)
+    duplicate:Boolean(prior),
+    claimAssumptionSidecarStatus:prior
+      ?(prior.claimAssumptionSidecar?'MATCHED_EXISTING':'LEGACY_MISSING')
+      :'CREATED'
   });
 }
 
