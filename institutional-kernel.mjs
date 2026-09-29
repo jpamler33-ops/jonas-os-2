@@ -290,11 +290,12 @@ export function verifyLedgerRecords(records){
   return {ok:true,count:records.length,tailHash:prev,lastSeq:expectedSeq-1};
 }
 
-export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
+export async function openAuditLedger(filePath,{maxInMemoryRecords=1000,maxFileBytes=64*1024*1024}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
   const keep=Math.max(1,Math.floor(Number(maxInMemoryRecords)||1000));
+  const maxBytes=Math.max(1,Math.floor(Number(maxFileBytes)||64*1024*1024));
   const ring=new Array(keep);
-  let retainedCount=0,ringPos=0,total=0;
+  let retainedCount=0,ringPos=0,total=0,fileBytes=0;
   const identityIndex=new Map();
   let prev=GENESIS,expectedSeq=1;
   let healthy=true,error=null,detail=null;
@@ -305,6 +306,7 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
     let lineNo=0;
     for await(const line of rl){
       lineNo++;
+      fileBytes+=Buffer.byteLength(line,'utf8')+1;
       if(!line.trim()) continue;
       let record;
       try{record=JSON.parse(line);}
@@ -347,6 +349,9 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
         tailHash:GENESIS,
         totalRecords:0,
         maxInMemoryRecords:keep,
+        maxFileBytes:maxBytes,
+        fileBytes,
+        writeBlocked:false,
         identityIndex,
         records:[]
       };
@@ -373,6 +378,9 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
       tailHash:GENESIS,
       totalRecords:total,
       maxInMemoryRecords:keep,
+      maxFileBytes:maxBytes,
+      fileBytes,
+      writeBlocked:true,
       identityIndex,
       records:[]
     };
@@ -381,14 +389,20 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
   const records=total<=keep
     ?ring.slice(0,retainedCount)
     :[...ring.slice(ringPos),...ring.slice(0,ringPos)];
+  const writeBlocked=fileBytes>=maxBytes;
   return {
     filePath,
-    healthy:true,
-    verification:{ok:true,count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length},
+    healthy:!writeBlocked,
+    verification:writeBlocked
+      ?{ok:false,error:'LEDGER_SIZE_LIMIT',detail:'audit ledger reached configured byte cap',count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length}
+      :{ok:true,count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length},
     seq:expectedSeq-1,
     tailHash:prev,
     totalRecords:total,
     maxInMemoryRecords:keep,
+    maxFileBytes:maxBytes,
+    fileBytes,
+    writeBlocked,
     identityIndex,
     records
   };
@@ -404,7 +418,28 @@ export async function appendAuditRecord(ledger,{kind,payload,occurredAt=Date.now
     payload
   });
   const record={...core,recordHash:sha256(core)};
-  await appendFile(ledger.filePath,canonicalJson(record)+'\n',{encoding:'utf8',mode:0o600});
+  const serialized=canonicalJson(record)+'\n';
+  const nextFileBytes=Math.max(0,Number(ledger.fileBytes)||0)+Buffer.byteLength(serialized,'utf8');
+  const maxFileBytes=Math.max(1,Number(ledger.maxFileBytes)||64*1024*1024);
+  if(nextFileBytes>maxFileBytes){
+    ledger.healthy=false;
+    ledger.writeBlocked=true;
+    ledger.verification={
+      ok:false,
+      error:'LEDGER_SIZE_LIMIT',
+      detail:'audit ledger byte cap would be exceeded',
+      count:Number(ledger.seq||0),
+      lastSeq:Number(ledger.seq||0),
+      tailHash:String(ledger.tailHash||GENESIS),
+      retainedRecords:Array.isArray(ledger.records)?ledger.records.length:0
+    };
+    const err=new Error('AUDIT_LEDGER_SIZE_LIMIT');
+    err.code='AUDIT_LEDGER_SIZE_LIMIT';
+    throw err;
+  }
+  await appendFile(ledger.filePath,serialized,{encoding:'utf8',mode:0o600});
+  ledger.fileBytes=nextFileBytes;
+  ledger.writeBlocked=false;
   ledger.seq=record.seq;
   ledger.tailHash=record.recordHash;
   if(!ledger.identityIndex) ledger.identityIndex=new Map();
@@ -441,7 +476,10 @@ export function ledgerTailSummary(ledger){
     healthy:ledger?.healthy===true,
     seq:Number(ledger?.seq||0),
     tailHash:String(ledger?.tailHash||GENESIS),
-    filePath:String(ledger?.filePath||'')
+    filePath:String(ledger?.filePath||''),
+    fileBytes:Number(ledger?.fileBytes||0),
+    maxFileBytes:Number(ledger?.maxFileBytes||0),
+    writeBlocked:ledger?.writeBlocked===true
   };
 }
 
