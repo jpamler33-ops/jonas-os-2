@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import {
   biggjCapabilityMap,
   BIGGJ_CAPABILITY_ROOTS,
-  BIGGJ_SEED_CAPABILITIES
+  BIGGJ_SEED_CAPABILITIES,
+  BIGGJ_ARCHITECTURE_PLANES,
+  BIGGJ_ROOT_PLANE_MAP,
+  rootIdsByArchitecturePlane
 } from './biggj-capability-map.mjs';
 import {
   createBiggjSkillTree,
+  reconcileBiggjSkillTreeWithCapabilityMap,
   proposeBiggjChildSkill,
   recordBiggjSkillEvidence,
   evaluateBiggjSkillProgress,
@@ -26,6 +30,76 @@ test('capability map encodes the 100k mission as an external target, never as a 
   assert.equal(map.invariants.canExecuteLive,false);
   assert.ok(BIGGJ_CAPABILITY_ROOTS.length>=12);
   assert.ok(BIGGJ_SEED_CAPABILITIES.length>=60);
+});
+
+test('first-principles V2 adds the missing cognitive, economic and platform roots without weakening safety',()=>{
+  const map=biggjCapabilityMap();
+  assert.equal(map.version,'BIGGJ_CAPABILITY_MAP_V2');
+  assert.equal(BIGGJ_ARCHITECTURE_PLANES.length,6);
+  assert.equal(map.architecturePlanes.length,6);
+  assert.ok(BIGGJ_CAPABILITY_ROOTS.length>=22);
+  assert.ok(BIGGJ_CAPABILITY_ROOTS.every(x=>typeof x.plane==='string'&&x.plane.length>0));
+  assert.ok(BIGGJ_SEED_CAPABILITIES.every(x=>typeof x.plane==='string'&&x.plane.length>0));
+
+  const requiredRoots=[
+    'WORLD_STATE_MODEL',
+    'PARTICIPANT_GAME_THEORY',
+    'OPPORTUNITY_DECISION',
+    'CAPITAL_CAPACITY_ECONOMICS',
+    'META_COGNITION',
+    'RELIABILITY_SECURITY_OPERATIONS',
+    'HUMAN_OVERSIGHT_CONTROL'
+  ];
+  for(const id of requiredRoots){
+    const root=BIGGJ_CAPABILITY_ROOTS.find(x=>x.id===id);
+    assert.ok(root,'missing root '+id);
+    assert.equal(root.plane,BIGGJ_ROOT_PLANE_MAP[id]);
+  }
+
+  const requiredSkills=[
+    'CANONICAL_WORLD_STATE',
+    'INCENTIVE_CONSTRAINT_INFERENCE',
+    'EXPECTED_UTILITY_DECISION',
+    'EDGE_CAPACITY_CURVE',
+    'RULE_DOMINANCE_AUDIT',
+    'FAIL_CLOSED_DEGRADATION',
+    'HUMAN_APPROVAL_GATE'
+  ];
+  for(const id of requiredSkills) assert.ok(BIGGJ_SEED_CAPABILITIES.some(x=>x.id===id),'missing skill '+id);
+
+  assert.ok(rootIdsByArchitecturePlane('LEARNING_EVOLUTION_PLANE').includes('META_COGNITION'));
+  assert.ok(rootIdsByArchitecturePlane('PLATFORM_OPERATOR_PLANE').includes('RELIABILITY_SECURITY_OPERATIONS'));
+  assert.equal(map.invariants.execution,'SHADOW_ONLY');
+  assert.equal(map.invariants.canExecuteLive,false);
+  assert.equal(map.invariants.silentPrimaryMutation,false);
+});
+
+test('V1-like persisted trees reconcile to V2 without rewriting evidence or promotion history',()=>{
+  const current=createBiggjSkillTree({asOf:1_000_000});
+  const legacy=structuredClone(current);
+  legacy.capabilityMapVersion='BIGGJ_CAPABILITY_MAP_V1';
+  legacy.capabilityMapFingerprint='legacy-map-fingerprint';
+  legacy.nodes=legacy.nodes.filter(x=>
+    x.skillId!=='root:WORLD_STATE_MODEL' &&
+    x.skillId!=='seed:CANONICAL_WORLD_STATE'
+  );
+  const preserved=legacy.nodes.find(x=>x.capabilityId==='STYLE_SELECTION');
+  const preservedUpdatedAt=preserved.updatedAt;
+  preserved.evidence=[{evidenceId:'legacy-evidence',statement:'must survive migration'}];
+  legacy.promotions=[{transitionId:'legacy-promotion'}];
+
+  const next=reconcileBiggjSkillTreeWithCapabilityMap(legacy,{asOf:2_000_000});
+  assert.equal(next.capabilityMapVersion,'BIGGJ_CAPABILITY_MAP_V2');
+  assert.ok(next.nodes.some(x=>x.skillId==='root:WORLD_STATE_MODEL'));
+  assert.ok(next.nodes.some(x=>x.skillId==='seed:CANONICAL_WORLD_STATE'));
+  assert.deepEqual(next.nodes.find(x=>x.capabilityId==='STYLE_SELECTION').evidence,preserved.evidence);
+  assert.equal(next.nodes.find(x=>x.capabilityId==='STYLE_SELECTION').updatedAt,preservedUpdatedAt);
+  assert.deepEqual(next.promotions,[{transitionId:'legacy-promotion'}]);
+  assert.equal(next.migrations.at(-1).evidenceRewritten,false);
+  assert.equal(next.migrations.at(-1).promotionHistoryRewritten,false);
+  assert.equal(next.migrations.at(-1).productionMutationPerformed,false);
+  assert.equal(next.execution,'SHADOW_ONLY');
+  assert.equal(next.canExecuteLive,false);
 });
 
 test('skill tree seeds every canonical capability without granting trust',()=>{
