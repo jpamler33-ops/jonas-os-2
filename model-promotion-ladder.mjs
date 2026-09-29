@@ -28,6 +28,9 @@ function hash64(v,name){
   return s.toLowerCase();
 }
 function bool(v){return v===true;}
+function normalizedSubject(v){
+  return String(v??'').trim().toUpperCase().replace(/^MODEL:/,'');
+}
 function deepFreeze(v){
   if(v&&typeof v==='object'&&!Object.isFrozen(v)){
     Object.freeze(v);
@@ -100,6 +103,11 @@ export function evaluateModelPromotion({
   }else if(!epistemicCheck.ok){
     hardFailures.push('EPISTEMIC_INTEGRITY_INTEGRITY_FAILED');
   }else{
+    const epistemicAsOf=finite(epistemicIntegrity.asOf,'epistemicIntegrity.asOf');
+    const subjectMatches=normalizedSubject(epistemicIntegrity.subjectId)===normalizedSubject(candidateId);
+    if(epistemicAsOf>t) hardFailures.push('EPISTEMIC_REPORT_FROM_FUTURE');
+    if(epistemicAsOf<createdAt) holds.push('EPISTEMIC_REPORT_PREDATES_CANDIDATE');
+    if(!subjectMatches) hardFailures.push('EPISTEMIC_SUBJECT_MISMATCH');
     if(epistemicIntegrity.gate!=='PASS') holds.push('EPISTEMIC_INTEGRITY_NOT_PASS');
     if(epistemicIntegrity.identificationStatus!=='IDENTIFIED') holds.push('EPISTEMIC_IDENTIFICATION_NOT_COMPLETE');
     if(epistemicIntegrity.identity?.status!=='RESOLVED') holds.push('EPISTEMIC_IDENTITY_NOT_RESOLVED');
