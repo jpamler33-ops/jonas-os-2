@@ -1599,12 +1599,14 @@ async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,
   return order;
 }
 
-async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={}){
+async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,portfolioPrepared=false}={}){
   const now=Date.now();
-  const preReconcile=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
-  if(preReconcile.changed){
-    shadowPortfolioLedger=preReconcile.ledger;
-    await persistShadowPortfolio('pre-auto-trade-reconcile');
+  if(!portfolioPrepared){
+    const preReconcile=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+    if(preReconcile.changed){
+      shadowPortfolioLedger=preReconcile.ledger;
+      await persistShadowPortfolio('pre-auto-trade-reconcile');
+    }
   }
   if(!autoShadowTradingEnabled){
     return {placed:false,eligible:false,reason:'AUTO_SHADOW_DISABLED',execution:'SHADOW_ONLY'};
@@ -1843,7 +1845,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false}={})
 }
 
 
-async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,autoResult=null}={}){
+async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,autoResult=null,portfolioPrepared=false}={}){
   const now=Date.now();
   if(!mandatoryShadowDiscoveryEnabled){
     return {placed:false,eligible:false,reason:'MANDATORY_DISCOVERY_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
@@ -1862,10 +1864,12 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     return {placed:false,eligible:false,reason:'DISCOVERY_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
 
-  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
-  if(reconciled.changed){
-    shadowPortfolioLedger=reconciled.ledger;
-    await persistShadowPortfolio('pre-mandatory-discovery-reconcile');
+  if(!portfolioPrepared){
+    const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+    if(reconciled.changed){
+      shadowPortfolioLedger=reconciled.ledger;
+      await persistShadowPortfolio('pre-mandatory-discovery-reconcile');
+    }
   }
 
   const explorationOrders=shadowOrders
@@ -1963,7 +1967,7 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
 }
 
 
-async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false}={}){
+async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfolioPrepared=false}={}){
   const now=Date.now();
   if(!coverageCurriculumEnabled){
     return {placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
@@ -1972,10 +1976,12 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false}={}){
     return {placed:0,eligible:0,reason:'COVERAGE_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
 
-  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
-  if(reconciled.changed){
-    shadowPortfolioLedger=reconciled.ledger;
-    await persistShadowPortfolio('pre-coverage-curriculum-reconcile');
+  if(!portfolioPrepared){
+    const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+    if(reconciled.changed){
+      shadowPortfolioLedger=reconciled.ledger;
+      await persistShadowPortfolio('pre-coverage-curriculum-reconcile');
+    }
   }
 
   const existingCoverageKeys=[
@@ -2085,7 +2091,7 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false}={}){
   };
 }
 
-async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,regimeContext=null}={}){
+async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,regimeContext=null,portfolioPrepared=false}={}){
   const now=Date.now();
   if(!learnedChallengerEnabled){
     return {placed:0,eligible:0,reason:'LEARNED_CHALLENGER_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
@@ -2093,10 +2099,12 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
   if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
     return {placed:0,eligible:0,reason:'LEARNED_CHALLENGER_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
-  const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
-  if(reconciled.changed){
-    shadowPortfolioLedger=reconciled.ledger;
-    await persistShadowPortfolio('pre-learned-challenger-reconcile');
+  if(!portfolioPrepared){
+    const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+    if(reconciled.changed){
+      shadowPortfolioLedger=reconciled.ledger;
+      await persistShadowPortfolio('pre-learned-challenger-reconcile');
+    }
   }
 
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
@@ -5883,10 +5891,41 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
 
   const issuance=issued.issuance;
   const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
+
+  // One portfolio reconciliation per AutoLearn issuance. Orders placed below are
+  // already durably persisted in the Shadow OMS; the portfolio watcher will
+  // materialize new positions after the action batch. This avoids repeatedly
+  // serializing/cloning the multi-megabyte portfolio ledger inside one forecast.
+  let shadowActionPortfolioPrepared=false;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      const prepared=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});
+      if(prepared.changed){
+        shadowPortfolioLedger=prepared.ledger;
+        await persistShadowPortfolio('pre-shadow-action-batch');
+      }
+      shadowActionPortfolioPrepared=true;
+      markForecastMemory('shadow-action-hot-set');
+      if(prepared.changed){
+        console.log('[TCX_SHADOW_ACTION_HOT_SET]',JSON.stringify({
+          added:prepared.added,
+          copyMode:prepared.copyMode||'UNKNOWN',
+          positions:shadowPortfolioLedger.positions?.length||0,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'shadow_action_hot_set',message:msg});
+      console.error('[TCX_SHADOW_ACTION_HOT_SET_FAILED]',msg);
+    }
+  }
+
   let autoShadowTrade=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
-      autoShadowTrade=await maybePlaceAutonomousShadowTrade(issuance,{auditHealthy:auditHealthyAfter});
+      autoShadowTrade=await maybePlaceAutonomousShadowTrade(issuance,{auditHealthy:auditHealthyAfter,portfolioPrepared:shadowActionPortfolioPrepared});
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
       autoShadowTrade={placed:false,eligible:false,reason:'AUTO_SHADOW_ERROR'};
@@ -5897,7 +5936,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let coverageCurriculumRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     try{
-      coverageCurriculumRun=await maybePlaceCoverageCurriculum(issuance,{auditHealthy:auditHealthyAfter});
+      coverageCurriculumRun=await maybePlaceCoverageCurriculum(issuance,{auditHealthy:auditHealthyAfter,portfolioPrepared:shadowActionPortfolioPrepared});
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
       coverageCurriculumRun={placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_ERROR'};
@@ -5910,7 +5949,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     try{
       mandatoryDiscoveryRun=await maybePlaceMandatoryShadowDiscovery(issuance,{
         auditHealthy:auditHealthyAfter,
-        autoResult:autoShadowTrade
+        autoResult:autoShadowTrade,
+        portfolioPrepared:shadowActionPortfolioPrepared
       });
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
@@ -5936,7 +5976,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       });
       learnedChallengerRun=await maybePlaceLearnedChallengerTrades(issuance,{
         auditHealthy:auditHealthyAfter,
-        regimeContext
+        regimeContext,
+        portfolioPrepared:shadowActionPortfolioPrepared
       });
     }catch(err){
       const msg=err instanceof Error?err.message:String(err);
