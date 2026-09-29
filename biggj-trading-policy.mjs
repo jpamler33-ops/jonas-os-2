@@ -18,7 +18,7 @@ export const DEFAULT_BIGGJ_TRADING_POLICY=freeze({
   CORE:{
     minHorizonMs:60*60_000,
     maxForecastHorizonMs:3*60*60_000,
-    maxHoldMs:6*60*60_000,
+    maxHoldMs:3*24*60*60_000,
     reviewIntervalMs:15*60_000,
     minDirectionalProbability:.58,
     minProbabilityEdge:.10,
@@ -29,7 +29,7 @@ export const DEFAULT_BIGGJ_TRADING_POLICY=freeze({
   MEME:{
     minHorizonMs:15*60_000,
     maxForecastHorizonMs:60*60_000,
-    maxHoldMs:2*60*60_000,
+    maxHoldMs:6*60*60_000,
     reviewIntervalMs:5*60_000,
     minDirectionalProbability:.62,
     minProbabilityEdge:.14,
@@ -312,7 +312,9 @@ export function evaluateBiggjPositionLifecycle(position={},state={},{
   const openedAt=finite(position.openedAt,at);
   const ageMs=Math.max(0,at-openedAt);
   const horizonMs=Math.max(ap.minHorizonMs,finite(position.horizonMs,ap.minHorizonMs));
-  const adaptiveHoldMultiplier=clamp(finite(state.adaptiveHoldMultiplier,1),.50,lp.maxHoldHorizonMultiplier);
+  const style=String(position.tradingStyle||'INTRADAY').toUpperCase();
+  const styleMultiplierCap=style==='SWING'?16:style==='SCALP'?1.5:3;
+  const adaptiveHoldMultiplier=clamp(finite(state.adaptiveHoldMultiplier,1),.50,Math.max(lp.maxHoldHorizonMultiplier,styleMultiplierCap));
   const effectiveReviewHorizonMs=Math.max(ap.reviewIntervalMs,horizonMs*adaptiveHoldMultiplier);
   const styleMaxHoldMs=Math.max(horizonMs,finite(position.maxHoldMs,ap.maxHoldMs));
   const dynamicCap=Math.max(effectiveReviewHorizonMs,Math.min(styleMaxHoldMs,effectiveReviewHorizonMs*1.75,ap.maxHoldMs));
