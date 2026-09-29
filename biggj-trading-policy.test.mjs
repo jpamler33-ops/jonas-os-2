@@ -6,6 +6,7 @@ import {
   routeBiggjStrategy,
   evaluateBiggjEntryAdmission,
   deriveBiggjShadowRiskBudget,
+  deriveBiggjThesisEvidence,
   evaluateBiggjPositionLifecycle
 } from './biggj-trading-policy.mjs';
 
@@ -191,4 +192,111 @@ test('risk budget is stop-aware, capped and baseline unlevered',()=>{
   assert.equal(x.leverage,1);
   assert.equal(x.execution,'SHADOW_ONLY');
   assert.equal(x.canExecuteLive,false);
+});
+
+
+function reviewPosition(overrides={}){
+  return {
+    symbol:'BTCUSDT',
+    side:'LONG',
+    assetClass:'CORE',
+    horizonId:'1h',
+    horizonMs:60*60_000,
+    openedAt:1_000_000,
+    tradingPolicyVersion:'BIGGJ_TRADING_POLICY_V1',
+    ...overrides
+  };
+}
+
+function reviewIssuance(overrides={}){
+  const generatedAt=2_000_000;
+  return {
+    issuanceId:'iss_review_1',
+    symbol:'BTCUSDT',
+    generatedAt,
+    probabilityDisplayAllowed:true,
+    trace:{safety:{state:'NORMAL'}},
+    forecastFingerprint:'f'.repeat(64),
+    forecast:{horizons:[horizon('1h',60*60_000,{direction:'UP',up:.78,down:.12,flat:.10,expectedReturn:.01})]},
+    ...overrides
+  };
+}
+
+test('live thesis evidence binds same-symbol same-horizon calibrated PIT forecast',()=>{
+  const x=deriveBiggjThesisEvidence(
+    reviewPosition(),
+    reviewIssuance(),
+    {at:2_100_000}
+  );
+  assert.equal(x.trusted,true);
+  assert.equal(x.reason,'THESIS_EVIDENCE_TRUSTED');
+  assert.equal(x.thesisHealth,.78);
+  assert.equal(x.oppositeThesisStrength,.12);
+  assert.equal(x.issuanceId,'iss_review_1');
+  assert.equal(x.execution,'SHADOW_ONLY');
+  assert.equal(x.canExecuteLive,false);
+});
+
+test('live thesis evidence maps short thesis to down probability',()=>{
+  const x=deriveBiggjThesisEvidence(
+    reviewPosition({side:'SHORT'}),
+    reviewIssuance({
+      forecast:{horizons:[horizon('1h',60*60_000,{direction:'DOWN',up:.14,down:.74,flat:.12,expectedReturn:-.01})]}
+    }),
+    {at:2_100_000}
+  );
+  assert.equal(x.trusted,true);
+  assert.equal(x.thesisHealth,.74);
+  assert.equal(x.oppositeThesisStrength,.14);
+});
+
+test('future forecast can never influence an earlier position mark',()=>{
+  const x=deriveBiggjThesisEvidence(
+    reviewPosition(),
+    reviewIssuance({generatedAt:3_000_000}),
+    {at:2_900_000}
+  );
+  assert.equal(x.trusted,false);
+  assert.equal(x.reason,'FUTURE_FORECAST_REJECTED');
+  assert.equal(x.thesisHealth,null);
+});
+
+test('stale forecast is withheld instead of extending thesis',()=>{
+  const x=deriveBiggjThesisEvidence(
+    reviewPosition(),
+    reviewIssuance({generatedAt:1_000_000}),
+    {at:1_000_000+46*60_000}
+  );
+  assert.equal(x.trusted,false);
+  assert.equal(x.reason,'FORECAST_STALE');
+});
+
+test('degraded forecast safety cannot become lifecycle thesis evidence',()=>{
+  const x=deriveBiggjThesisEvidence(
+    reviewPosition(),
+    reviewIssuance({trace:{safety:{state:'DEGRADED'}}}),
+    {at:2_100_000}
+  );
+  assert.equal(x.trusted,false);
+  assert.equal(x.reason,'FORECAST_SAFETY_NOT_NORMAL');
+});
+
+test('un-calibrated or hidden horizon probabilities are withheld',()=>{
+  const base=reviewIssuance();
+  const h={...base.forecast.horizons[0],calibration:{status:'INSUFFICIENT'}};
+  const uncalibrated=deriveBiggjThesisEvidence(
+    reviewPosition(),
+    {...base,forecast:{horizons:[h]}},
+    {at:2_100_000}
+  );
+  assert.equal(uncalibrated.trusted,false);
+  assert.equal(uncalibrated.reason,'HORIZON_NOT_CALIBRATED');
+
+  const hidden=deriveBiggjThesisEvidence(
+    reviewPosition(),
+    {...base,probabilityDisplayAllowed:false},
+    {at:2_100_000}
+  );
+  assert.equal(hidden.trusted,false);
+  assert.equal(hidden.reason,'PROBABILITY_NOT_ADMITTED');
 });

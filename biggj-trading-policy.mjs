@@ -303,6 +303,106 @@ export function deriveBiggjShadowRiskBudget({
   });
 }
 
+export function deriveBiggjThesisEvidence(position={},issuance=null,{
+  at=Date.now(),
+  policy=DEFAULT_BIGGJ_TRADING_POLICY
+}={}){
+  const ap=assetPolicy(position.assetClass||'CORE',policy);
+  const reviewAt=finite(at,Date.now());
+  const base={
+    version:BIGGJ_TRADING_POLICY_VERSION,
+    symbol:String(position.symbol||'').toUpperCase(),
+    horizonId:String(position.horizonId||''),
+    assetClass:String(position.assetClass||'CORE').toUpperCase(),
+    reviewedAt:reviewAt,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  const unavailable=(reason,extra={})=>finalized({
+    ...base,
+    trusted:false,
+    reason,
+    thesisHealth:null,
+    oppositeThesisStrength:null,
+    ...extra
+  });
+
+  if(String(position.tradingPolicyVersion||'')!==BIGGJ_TRADING_POLICY_VERSION){
+    return unavailable('POSITION_POLICY_MISMATCH');
+  }
+  if(!issuance||typeof issuance!=='object') return unavailable('FORECAST_MISSING');
+
+  const symbol=String(issuance.symbol||'').toUpperCase();
+  if(symbol!==base.symbol) return unavailable('FORECAST_SYMBOL_MISMATCH',{forecastSymbol:symbol});
+
+  const generatedAt=finite(issuance.generatedAt,finite(issuance.asOf));
+  if(generatedAt==null) return unavailable('FORECAST_TIME_MISSING');
+  if(generatedAt>reviewAt) return unavailable('FUTURE_FORECAST_REJECTED',{generatedAt,forecastAgeMs:generatedAt-reviewAt});
+
+  const maxForecastAgeMs=Math.max(20*60_000,Number(ap.reviewIntervalMs||0)*3);
+  const forecastAgeMs=Math.max(0,reviewAt-generatedAt);
+  if(forecastAgeMs>maxForecastAgeMs){
+    return unavailable('FORECAST_STALE',{generatedAt,forecastAgeMs,maxForecastAgeMs});
+  }
+
+  const safetyState=String(issuance.trace?.safety?.state||'UNKNOWN').toUpperCase();
+  if(safetyState!=='NORMAL'){
+    return unavailable('FORECAST_SAFETY_NOT_NORMAL',{generatedAt,forecastAgeMs,safetyState,maxForecastAgeMs});
+  }
+  if(issuance.probabilityDisplayAllowed!==true){
+    return unavailable('PROBABILITY_NOT_ADMITTED',{generatedAt,forecastAgeMs,safetyState,maxForecastAgeMs});
+  }
+
+  const horizons=Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[];
+  const horizon=horizons.find(h=>String(h?.horizonId||'')===base.horizonId);
+  if(!horizon) return unavailable('MATCHING_HORIZON_MISSING',{generatedAt,forecastAgeMs,safetyState,maxForecastAgeMs});
+
+  const gate=String(horizon.gate||'UNKNOWN').toUpperCase();
+  if(!['PASS','CAUTION'].includes(gate)){
+    return unavailable('HORIZON_NOT_ADMITTED',{generatedAt,forecastAgeMs,safetyState,gate,maxForecastAgeMs});
+  }
+  const calibrationStatus=String(horizon.calibration?.status||'UNKNOWN').toUpperCase();
+  if(calibrationStatus!=='CALIBRATED'){
+    return unavailable('HORIZON_NOT_CALIBRATED',{generatedAt,forecastAgeMs,safetyState,gate,calibrationStatus,maxForecastAgeMs});
+  }
+  if(horizon.display?.probabilityDisplayAllowed!==true){
+    return unavailable('HORIZON_PROBABILITY_NOT_ADMITTED',{generatedAt,forecastAgeMs,safetyState,gate,calibrationStatus,maxForecastAgeMs});
+  }
+
+  const direction=String(horizon.direction||'UNKNOWN').toUpperCase();
+  if(!['UP','DOWN'].includes(direction)){
+    return unavailable('HORIZON_DIRECTION_NOT_ACTIONABLE',{generatedAt,forecastAgeMs,safetyState,gate,calibrationStatus,direction,maxForecastAgeMs});
+  }
+  const p=probabilities(horizon);
+  const up=finite(p.up),down=finite(p.down),flat=finite(p.flat);
+  if(up==null||down==null||flat==null){
+    return unavailable('PROBABILITY_VECTOR_INVALID',{generatedAt,forecastAgeMs,safetyState,gate,calibrationStatus,direction,maxForecastAgeMs});
+  }
+
+  const side=String(position.side||'').toUpperCase();
+  if(!['LONG','SHORT'].includes(side)) return unavailable('POSITION_SIDE_INVALID');
+  const thesisHealth=side==='LONG'?up:down;
+  const oppositeThesisStrength=side==='LONG'?down:up;
+
+  return finalized({
+    ...base,
+    trusted:true,
+    reason:'THESIS_EVIDENCE_TRUSTED',
+    issuanceId:String(issuance.issuanceId||''),
+    forecastFingerprint:String(issuance.forecastFingerprint||issuance.forecast?.fingerprint||''),
+    generatedAt,
+    forecastAgeMs,
+    maxForecastAgeMs,
+    safetyState,
+    gate,
+    calibrationStatus,
+    direction,
+    thesisHealth:clamp(thesisHealth),
+    oppositeThesisStrength:clamp(oppositeThesisStrength),
+    flatProbability:clamp(flat)
+  });
+}
+
 export function evaluateBiggjPositionLifecycle(position={},state={},{
   policy=DEFAULT_BIGGJ_TRADING_POLICY
 }={}){

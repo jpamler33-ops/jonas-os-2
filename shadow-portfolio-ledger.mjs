@@ -250,7 +250,7 @@ export function simulateShadowPositionExit(position,book,{feeBps=10}={}){
   };
 }
 
-export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
+export function markShadowPosition(position,book,{at=Date.now(),feeBps=10,lifecycleState=null}={}){
   if(String(position?.status||'')!=='OPEN') return {position,trigger:null,changed:false};
   const exit=simulateShadowPositionExit(position,book,{feeBps});
   const markAt=finite(at,Date.now());
@@ -285,13 +285,23 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
   }else if(biggjPrimaryLane){
-    lifecycle=evaluateBiggjPositionLifecycle(position,{
+    const evidence=lifecycleState&&typeof lifecycleState==='object'?lifecycleState:null;
+    const lifecycleInput={
       marginRoePct:ret,
       at:markAt,
       trustedExecutableBook:true,
-      hardStopReached:false,
-      structureInvalidationConfirmed:false
-    });
+      hardStopReached:evidence?.hardStopReached===true,
+      structureInvalidationConfirmed:evidence?.structureInvalidationConfirmed===true
+    };
+    if(
+      evidence?.trusted===true&&
+      Number.isFinite(Number(evidence.thesisHealth))&&
+      Number.isFinite(Number(evidence.oppositeThesisStrength))
+    ){
+      lifecycleInput.thesisHealth=Number(evidence.thesisHealth);
+      lifecycleInput.oppositeThesisStrength=Number(evidence.oppositeThesisStrength);
+    }
+    lifecycle=evaluateBiggjPositionLifecycle(position,lifecycleInput);
     if(lifecycle.action==='EXIT'){
       trigger=lifecycle.reason==='TARGET_THESIS_EXHAUSTED'&&ret>=Math.abs(Number(position.takeProfitPct)||0)
         ?'TAKE_PROFIT'
@@ -306,7 +316,10 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
     position:{
       ...next,
       lifecycle,
-      lifecyclePolicyVersion:biggjPrimaryLane?BIGGJ_TRADING_POLICY_VERSION:String(position.lifecyclePolicyVersion||'')
+      lifecyclePolicyVersion:biggjPrimaryLane?BIGGJ_TRADING_POLICY_VERSION:String(position.lifecyclePolicyVersion||''),
+      lifecycleEvidence:biggjPrimaryLane&&lifecycleState&&typeof lifecycleState==='object'
+        ?JSON.parse(JSON.stringify(lifecycleState))
+        :(position.lifecycleEvidence??null)
     },
     trigger,
     changed:true,
