@@ -414,16 +414,20 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function refreshOverview(){const c=channelCache.get('market-overview');return c?upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())):null;}
   async function refreshDataHealth(){const c=channelCache.get('data-health');return c?upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())):null;}
   async function latestBotMessage(channel){try{const messages=await channel.messages.fetch({limit:20});return messages.find(m=>m.author?.id===client.user?.id)||null;}catch{return null;}}
-  async function refreshCorePanel(channel,callbackData){
-    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
+  async function renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto=false}={}){
     const chatId=fakeChatId(guildId,channel.id,'panel');
-    await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||'')}}});
+    await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||''),...((forcePhoto||msg.attachments?.size)?{photo:[{}]}:{})}}});
     try{
       const refreshed=await channel.messages.fetch(String(msg.id));
       const symbol=/:(\w+USDT)(?::|$)/.exec(String(callbackData||''))?.[1]||null;
       const components=symbol?marketActionComponents(symbol):commandCenterComponents();
       await refreshed.edit({components,allowedMentions:{parse:[]}});
-    }catch(err){fail('panel-components',err);}
+      return refreshed;
+    }catch(err){fail('panel-components',err);return null;}
+  }
+  async function refreshCorePanel(channel,callbackData){
+    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
+    return renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto:Boolean(msg.attachments?.size)});
   }
   async function refreshMarketPanels(){
     let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
