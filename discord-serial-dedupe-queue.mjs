@@ -35,3 +35,21 @@ export function createSerialDedupeQueue({maxSize=64}={}){
     snapshot(){return {pending:pending.size,runningKey,depth:pending.size+(runningKey===null?0:1),completed,failed,maxSize:cap};}
   };
 }
+
+
+export async function mapWithConcurrency(items,concurrency,worker){
+  const rows=Array.isArray(items)?items:[];
+  if(typeof worker!=='function')throw new TypeError('worker required');
+  const limit=Math.max(1,Math.min(rows.length||1,Math.floor(Number(concurrency)||1)));
+  const results=new Array(rows.length);
+  let cursor=0;
+  async function run(){
+    while(true){
+      const index=cursor++;
+      if(index>=rows.length)return;
+      results[index]=await worker(rows[index],index);
+    }
+  }
+  await Promise.all(Array.from({length:limit},()=>run()));
+  return results;
+}
