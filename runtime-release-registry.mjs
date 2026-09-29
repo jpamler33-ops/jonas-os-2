@@ -47,6 +47,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'telegram-update-dispatcher.mjs',
   'telegram-read-command-handlers.mjs',
   'telegram-mutation-command-handlers.mjs',
+  'discord-telegram-bridge.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];

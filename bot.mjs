@@ -112,6 +112,7 @@ import { createTelegramCommandRouter, TELEGRAM_COMMAND_ROUTER_VERSION } from './
 import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './telegram-read-command-handlers.mjs';
 import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } from './telegram-mutation-command-handlers.mjs';
 import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } from './telegram-update-dispatcher.mjs';
+import { createDiscordTelegramBridge, isDiscordChatId } from './discord-telegram-bridge.mjs';
 import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
@@ -215,6 +216,10 @@ async function storageWriteAdmission(scope){
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
+const discordToken = String(process.env.DISCORD_BOT_TOKEN || '').trim();
+const discordApplicationId = String(process.env.DISCORD_APPLICATION_ID || '').trim();
+const discordGuildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+let discordBridge = null;
 
 const telegramApi = `https://api.telegram.org/bot${token}`;
 const configuredBinanceBases = process.env.TCX_BINANCE_REST_BASES || process.env.TCX_BINANCE_REST_BASE || '';
@@ -1245,7 +1250,11 @@ let offset = 0;
 let running = true;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const permitted = chatId => allowedChats.size === 0 || allowedChats.has(String(chatId));
+const permitted = chatId => {
+  const key=String(chatId);
+  if(discordGuildId && isDiscordChatId(key,discordGuildId)) return true;
+  return allowedChats.size === 0 || allowedChats.has(key);
+};
 const fmt = (n, max=2) => Number(n).toLocaleString('de-DE', { maximumFractionDigits:max });
 const symbolOk = symbol => /^[A-Z0-9]{2,18}USDT$/.test(symbol);
 
@@ -2304,6 +2313,7 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
 }
 
 async function tg(method, body) {
+  if(discordBridge?.handlesTelegramCall(method,body)) return discordBridge.telegramCall(method,body);
   const timeoutMs=method==='getUpdates'?telegramLongPollTimeoutMs:telegramApiTimeoutMs;
   const res = await fetch(`${telegramApi}/${method}`, {
     method:'POST',
@@ -2321,6 +2331,7 @@ async function tg(method, body) {
 }
 
 async function tgMultipart(method, fields, fileField, fileName, fileBuffer, mime="image/png") {
+  if(discordBridge?.handlesTelegramCall(method,fields)) return discordBridge.telegramMultipart(method,fields,fileField,fileName,fileBuffer,mime);
   const form = new FormData();
   for (const [key,value] of Object.entries(fields)) {
     form.append(key, typeof value === "string" ? value : JSON.stringify(value));
@@ -6526,6 +6537,16 @@ async function handle(update) {
   }
 }
 
+if(discordToken && discordApplicationId && discordGuildId){
+  discordBridge=createDiscordTelegramBridge({
+    token:discordToken,
+    applicationId:discordApplicationId,
+    guildId:discordGuildId,
+    handleUpdate:handle,
+    logger:console
+  });
+}
+
 const telegramUpdateDispatcher=createTelegramUpdateDispatcher({
   handle,
   timeoutMs:telegramUpdateTimeoutMs,
@@ -7958,7 +7979,8 @@ function missionControlData(){
   institutionalForecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
-  telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError}
+  telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
+  discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
  const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now:Date.now(),runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN'&&p.entryMode!=='EXPLORATION').length,openDiscoveryPositions:countOpenDiscoveryPositions(shadowPortfolioLedger?.positions||[])}});
@@ -8031,6 +8053,7 @@ const server = http.createServer((req,res) => {
         apiTimeoutMs:telegramApiTimeoutMs,
         longPollTimeoutMs:telegramLongPollTimeoutMs
       },
+      discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'},
       alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
       institutionalKernel:{
         version:INSTITUTIONAL_KERNEL_VERSION,
@@ -8209,6 +8232,7 @@ async function gracefulShutdown(signal) {
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
   await persistShadowOms(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
+  try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0),5000).unref();
 }
@@ -8219,6 +8243,14 @@ liquidationResearchStream.start();
 await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
 const me = await tg('getMe',{});
+if(discordBridge){
+  try{
+    await discordBridge.start();
+    console.log('[TCX_DISCORD_READY]',JSON.stringify(discordBridge.snapshot()));
+  }catch(err){
+    console.error('[TCX_DISCORD_START_ERROR]',err instanceof Error?err.message:String(err));
+  }
+}
 const persistenceSmoke=runPersistenceSmokeTest();
 console.log('[TCX_PERSISTENCE_SMOKE]',JSON.stringify(persistenceSmoke));
 const startupReadiness=currentOperationalReadiness();
