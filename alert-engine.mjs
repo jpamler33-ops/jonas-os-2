@@ -270,3 +270,42 @@ export function requiredContext(alert){
   }
   return out;
 }
+
+
+export const SETUP_PHASES=Object.freeze(["WATCHING","APPROACHING","BREAK_PENDING","CONFIRMED","RETEST","ENTRY_READY","INVALIDATED"]);
+const SETUP_PHASE_RANK=Object.freeze(Object.fromEntries(SETUP_PHASES.map((p,i)=>[p,i])));
+
+export function createSetupTransitionState({setupId,phase="WATCHING",now=Date.now(),expiresAt=null}={}){
+  const id=String(setupId||"").trim(),p=String(phase||"WATCHING").toUpperCase();
+  if(!id) throw new Error("setupId required");
+  if(!(p in SETUP_PHASE_RANK)) throw new Error("invalid setup phase");
+  return {setupId:id,phase:p,lastNotifiedPhase:null,updatedAt:Number(now),expiresAt:expiresAt==null?null:Number(expiresAt)};
+}
+
+export function advanceSetupTransition(state,nextPhase,{now=Date.now()}={}){
+  const s=state&&typeof state==="object"?{...state}:null;
+  if(!s?.setupId) throw new Error("setup transition state required");
+  const next=String(nextPhase||"").toUpperCase(),t=Number(now);
+  if(!(next in SETUP_PHASE_RANK)) throw new Error("invalid setup phase");
+  if(Number.isFinite(Number(s.expiresAt))&&t>=Number(s.expiresAt)){
+    const changed=s.phase!=="INVALIDATED";
+    return {changed,notify:changed&&s.lastNotifiedPhase!=="INVALIDATED",reason:"EXPIRED",state:{...s,phase:"INVALIDATED",lastNotifiedPhase:changed?"INVALIDATED":s.lastNotifiedPhase,updatedAt:t}};
+  }
+  if(next!=="INVALIDATED"&&SETUP_PHASE_RANK[next]<SETUP_PHASE_RANK[s.phase]) return {changed:false,notify:false,reason:"REGRESSION_SUPPRESSED",state:{...s,updatedAt:t}};
+  if(next===s.phase) return {changed:false,notify:false,reason:"DUPLICATE_PHASE",state:{...s,updatedAt:t}};
+  const notify=!["WATCHING","BREAK_PENDING"].includes(next)&&s.lastNotifiedPhase!==next;
+  return {changed:true,notify,reason:"PHASE_ADVANCED",state:{...s,phase:next,lastNotifiedPhase:notify?next:s.lastNotifiedPhase,updatedAt:t}};
+}
+
+export function formatSetupTransitionAlert({symbol,direction,phase,price,level,confidence=null,reasons=[],invalidation=null}={}){
+  const sym=String(symbol||"").replace(/USDT$/,""),dir=String(direction||"").toUpperCase(),p=String(phase||"").toUpperCase();
+  const title=p==="ENTRY_READY"?"SETUP BEREIT":p==="CONFIRMED"?"BREAK BESTÄTIGT":p==="RETEST"?"RETEST BESTÄTIGT":p==="INVALIDATED"?"SETUP INVALIDIERT":"SETUP UPDATE";
+  const lines=["📍 "+sym+" · "+dir+" · "+title];
+  if(Number.isFinite(Number(price))) lines.push("Preis: "+Number(price));
+  if(Number.isFinite(Number(level))) lines.push("Level: "+Number(level));
+  if(Number.isFinite(Number(confidence))) lines.push("Confidence: "+Math.round(Number(confidence)*100)+"%");
+  const clean=(Array.isArray(reasons)?reasons:[]).map(x=>String(x).trim()).filter(Boolean).slice(0,4);
+  if(clean.length) lines.push("Bestätigung: "+clean.join(" · "));
+  if(Number.isFinite(Number(invalidation))) lines.push("Invalidation: "+Number(invalidation));
+  return lines.join("\n");
+}
