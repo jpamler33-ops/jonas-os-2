@@ -5,6 +5,7 @@ import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive,
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { createS3ColdStoreFromEnv, MARKET_FABRIC_COLD_STORE_VERSION } from './market-fabric-cold-store.mjs';
 import { offloadMarketFabricArchive, MARKET_FABRIC_COLD_TIER_VERSION } from './market-fabric-cold-tier.mjs';
+import { sampleArchivedReplayPoints, loadArchivedReplayTail, MARKET_FABRIC_COLD_REPLAY_VERSION } from './market-fabric-cold-replay.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
@@ -789,6 +790,7 @@ try {
       marketFabricArchive:MARKET_FABRIC_ARCHIVE_VERSION,
       marketFabricColdStore:MARKET_FABRIC_COLD_STORE_VERSION,
       marketFabricColdTier:MARKET_FABRIC_COLD_TIER_VERSION,
+      marketFabricColdReplay:MARKET_FABRIC_COLD_REPLAY_VERSION,
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
@@ -4951,7 +4953,11 @@ async function showFabric(chatId) {
   return tg('sendMessage',{chat_id:chatId,text:text.slice(0,4096)});
 }
 
-function recentReplayPoints(symbol,{limit=8}={}) {
+const replayArchivePointCache=new Map();
+
+async function recentReplayPoints(symbol,{limit=8}={}) {
+  const want=Math.max(1,Math.min(12,Math.floor(Number(limit)||8)));
+  const hotLimit=Math.min(4,want);
   const rows=(marketFabric.events||[])
     .filter(e=>
       e?.kind==='PRIMARY_MARKET' &&
@@ -4959,17 +4965,47 @@ function recentReplayPoints(symbol,{limit=8}={}) {
       Number.isFinite(Number(e?.availableAt))
     )
     .sort((a,b)=>Number(b.availableAt)-Number(a.availableAt));
-  const out=[];
+  const hot=[];
   const seen=new Set();
   for(const e of rows){
     const at=Number(e.availableAt);
     const bucket=Math.floor(at/60000);
     if(seen.has(bucket)) continue;
     seen.add(bucket);
-    out.push(at);
-    if(out.length>=limit) break;
+    hot.push(at);
+    if(hot.length>=hotLimit) break;
   }
-  return out;
+
+  if(hot.length>=want) return hot.slice(0,want);
+  const before=hot.length?Math.min(...hot):Date.now();
+  const cacheKey=String(symbol).toUpperCase()+':'+Math.floor(before/60000)+':'+want;
+  const cached=replayArchivePointCache.get(cacheKey);
+  if(cached&&Date.now()-cached.at<5*60*1000){
+    return [...hot,...cached.points].filter((x,i,a)=>a.indexOf(x)===i).sort((a,b)=>b-a).slice(0,want);
+  }
+
+  try{
+    const archive=await sampleArchivedReplayPoints({
+      filePath:marketFabricFile,
+      coldStore:marketFabricColdStore,
+      symbol,
+      before,
+      limit:want-hot.length,
+      maxSegments:3
+    });
+    replayArchivePointCache.set(cacheKey,{at:Date.now(),points:archive.points});
+    while(replayArchivePointCache.size>32){
+      replayArchivePointCache.delete(replayArchivePointCache.keys().next().value);
+    }
+    return [...hot,...archive.points].filter((x,i,a)=>a.indexOf(x)===i).sort((a,b)=>b-a).slice(0,want);
+  }catch(err){
+    console.error('[TCX_COLD_REPLAY_POINTS_FAILED]',JSON.stringify({
+      symbol,
+      error:err instanceof Error?err.message:String(err),
+      failClosed:true
+    }));
+    return hot.slice(0,want);
+  }
 }
 
 function replayMenuKeyboard(symbol,points) {
@@ -4978,9 +5014,10 @@ function replayMenuKeyboard(symbol,points) {
     rows.push(points.slice(i,i+2).map(at=>{
       const label=new Intl.DateTimeFormat('de-DE',{
         timeZone:'Europe/Berlin',
+        day:'2-digit',
+        month:'2-digit',
         hour:'2-digit',
-        minute:'2-digit',
-        second:'2-digit'
+        minute:'2-digit'
       }).format(new Date(at));
       return {
         text:'⏪ '+label,
@@ -4996,7 +5033,7 @@ function replayMenuKeyboard(symbol,points) {
 }
 
 async function showReplayMenu(chatId,messageId,symbol) {
-  const points=recentReplayPoints(symbol,{limit:8});
+  const points=await recentReplayPoints(symbol,{limit:8});
   const text=points.length
     ? [
         '🎬 TCX REPLAY · '+symbol.replace('USDT','/USDT'),'',
@@ -5018,7 +5055,37 @@ async function showReplayMenu(chatId,messageId,symbol) {
 }
 
 async function showReplay(chatId,symbol,asOf,messageId=null) {
-  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  let source='HOT';
+  let archiveMeta=null;
+  let archiveError=null;
+  let state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+
+  if(!state.primary){
+    try{
+      archiveMeta=await loadArchivedReplayTail({
+        filePath:marketFabricFile,
+        coldStore:marketFabricColdStore,
+        symbol,
+        asOf,
+        limit:12000,
+        maxSegments:24
+      });
+      state=reconstructInstitutionalState(
+        [...archiveMeta.events,...(marketFabric.events||[])],
+        {symbol,asOf}
+      );
+      source=archiveMeta.coldSegments>0?'ARCHIVE · R2 VERIFIED':'ARCHIVE · LOCAL VERIFIED';
+    }catch(err){
+      archiveError=err instanceof Error?err.message:String(err);
+      console.error('[TCX_COLD_REPLAY_FAILED]',JSON.stringify({
+        symbol,
+        asOf,
+        error:archiveError,
+        failClosed:true
+      }));
+    }
+  }
+
   const s=replaySummary(state);
   const primary=state.primary;
   const witness=state.witness;
@@ -5026,9 +5093,17 @@ async function showReplay(chatId,symbol,asOf,messageId=null) {
     '⏪ TCX Deterministic Replay · '+symbol.replace('USDT','/USDT'),
     '',
     'Replay: '+DETERMINISTIC_REPLAY_VERSION,
+    'Cold archive: '+MARKET_FABRIC_COLD_REPLAY_VERSION,
+    'Source: '+source,
     'asOf: '+new Date(asOf).toISOString(),
     'Hash: '+s.replayHash.slice(0,20)+'…',
     'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    ...(archiveMeta?[
+      'Archive verify: PASS · segments '+archiveMeta.scannedSegments+' · R2 '+archiveMeta.coldSegments
+    ]:[]),
+    ...(archiveError&&!primary?[
+      'Archive verify: FAIL_CLOSED · '+archiveError.slice(0,120)
+    ]:[]),
     '',
     'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
     'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
@@ -5037,6 +5112,7 @@ async function showReplay(chatId,symbol,asOf,messageId=null) {
     ...Object.entries(s.candleCounts).map(([tf,n])=>'• '+tf+': '+n),
     '',
     'Replay nutzt ausschließlich Events mit event.availableAt <= asOf.',
+    'Cold-Daten werden verifiziert gelesen und nicht dauerhaft zurückkopiert.',
     'Action: ABSTAIN / SHADOW_ONLY'
   ].join('\n');
   const payload={
@@ -8156,7 +8232,10 @@ const server = http.createServer((req,res) => {
         file:marketFabricFile
       },
       deterministicReplay:{
-        version:DETERMINISTIC_REPLAY_VERSION
+        version:DETERMINISTIC_REPLAY_VERSION,
+        coldArchiveReplayVersion:MARKET_FABRIC_COLD_REPLAY_VERSION,
+        coldArchiveEnabled:marketFabricColdStore.enabled,
+        coldArchiveProvider:marketFabricColdStore.summary?.()||null
       },
       observability:{
         version:OBSERVABILITY_VERSION,
