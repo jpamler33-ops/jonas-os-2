@@ -125,15 +125,18 @@ test('external data hub snapshots enter the governed research plane',()=>{
       }
     }
   });
-  assert.deepEqual(rows.map(x=>x.domain),['NETWORK_METRICS','OPTIONS','MACRO','PREDICTION_MARKET']);
+  assert.deepEqual(rows.map(x=>x.domain),['NETWORK_METRICS','OPTIONS','MACRO','MACRO','MACRO','MACRO','MACRO','PREDICTION_MARKET']);
   assert.ok(rows.find(x=>x.domain==='NETWORK_METRICS').features.some(x=>x.id==='research.coinmetrics.mvrv'&&x.value===2.5));
   assert.ok(rows.find(x=>x.domain==='OPTIONS').features.some(x=>x.id==='research.options.putCallOiRatio'&&x.value===.7));
-  assert.ok(rows.find(x=>x.domain==='MACRO').features.some(x=>x.id==='research.macro.us10yMinusFedFundsPct'&&x.value===-1));
+  assert.ok(rows.find(x=>x.source==='FRED_DFF_DGS10_DERIVED').features.some(x=>x.id==='research.macro.us10yMinusFedFundsPct'&&x.value===-1));
+  assert.deepEqual(rows.find(x=>x.source==='FRED_DFF_DGS10_DERIVED').provenance.dependencies,[
+    'MACRO:FRED_DFF_CURRENT','MACRO:FRED_DGS10_CURRENT'
+  ]);
   assert.ok(rows.find(x=>x.domain==='PREDICTION_MARKET').features.some(x=>x.id==='research.prediction.yesProbability'&&x.value===.63));
 });
 
 
-test('FRED CSV fallback preserves source lineage in the research plane',()=>{
+test('FRED macro series are isolated by cadence and retain transport lineage',()=>{
   const rows=buildResearchDataPlaneSnapshots({
     symbol:'BTCUSDT',
     ingestedAt:2_000_000,
@@ -141,13 +144,29 @@ test('FRED CSV fallback preserves source lineage in the research plane',()=>{
       macro:{
         ok:true,source:'FRED_GRAPH_CSV_CURRENT',eventTime:1_900_000,availableAt:1_999_900,
         metrics:{fedFundsPct:5,us10yPct:4,broadDollarIndex:120,fedAssets:7000},
+        series:{
+          DFF:{date:'2026-09-25'},
+          DGS10:{date:'2026-09-25'},
+          DTWEXBGS:{date:'2026-09-25'},
+          WALCL:{date:'2026-09-24'}
+        },
         quality:{completeness:1},
         provenance:{transport:'FRED_GRAPH_CSV',historicalVintageGuarantee:false}
       }
     }
   });
-  assert.equal(rows.length,1);
-  assert.equal(rows[0].domain,'MACRO');
-  assert.equal(rows[0].source,'FRED_GRAPH_CSV_CURRENT');
-  assert.equal(rows[0].quality.status,'CURRENT_SERIES_CAPTURE');
+  assert.equal(rows.length,5);
+  assert.deepEqual(rows.map(x=>x.source),[
+    'FRED_DFF_CURRENT',
+    'FRED_DGS10_CURRENT',
+    'FRED_DTWEXBGS_CURRENT',
+    'FRED_WALCL_CURRENT',
+    'FRED_DFF_DGS10_DERIVED'
+  ]);
+  assert.ok(rows.every(x=>x.domain==='MACRO'&&x.quality.completeness===1));
+  assert.ok(rows.every(x=>x.provenance.fredTransport==='FRED_GRAPH_CSV'));
+  assert.equal(rows.find(x=>x.source==='FRED_WALCL_CURRENT').features[0].id,'research.macro.fedAssetsLog');
+  assert.deepEqual(rows.find(x=>x.source==='FRED_DFF_DGS10_DERIVED').provenance.dependencies,[
+    'MACRO:FRED_DFF_CURRENT','MACRO:FRED_DGS10_CURRENT'
+  ]);
 });
