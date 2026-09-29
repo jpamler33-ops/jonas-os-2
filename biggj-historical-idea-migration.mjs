@@ -251,6 +251,11 @@ const RULES=Object.freeze([
   mapping(/MULTI MARKET PORTFOLIO|MULTI SYMBOL SIMULTANEOUS/,'CORRELATION_CONCENTRATION','CAPABILITY','MERGE_INTO_CANON','Simultaneous markets are governed through portfolio correlation/concentration.'),
   mapping(/STRATEGY LEAGUE/,'VERSIONED_CANDIDATES','GOVERNANCE','MERGE_INTO_CANON','Strategy League is the challenger/candidate system.'),
   mapping(/DAILY STATISTICS|WEEKLY STATISTICS|MONTHLY STATISTICS/,'SKILL_TREE_VIEW','OPERATOR_VIEW','KEEP_AS_OPERATOR_FEATURE','Periodic performance summaries are operator surfaces.'),
+  mapping(/COLLECTIVE RESEARCH PROTOCOL/,'EXPERIMENT_DESIGN','RESEARCH_METHOD','MERGE_INTO_CANON','Collaborative research remains a governed experiment/review protocol rather than independent evidence.'),
+  mapping(/COUNCIL SELECTION IS SYNTHETIC|DIVERSITY AWARE COUNCIL BALLOTS/ ,null,'SIMULATION_RESEARCH','SIMULATION_ONLY','Synthetic council mechanics are not market-core evidence.'),
+  mapping(/LAZY EXISTENCE.*FULL SIMULATION|CHATGPT CANNOT BE WOKEN BY THE PWA/ ,null,'SIMULATION_RESEARCH','RETIRE_FROM_BIGGJ_CORE','Historical living-world/PWA runtime constraints are outside the current BIGGJ market core.'),
+  mapping(/DEPENDENCY AWARE TECHNOLOGY TREE/,'CHILD_SKILL_DISCOVERY','OPERATOR_VIEW','KEEP_AS_OPERATOR_FEATURE','Preserve the dependency-aware tree as an operator view over the governed skill graph.'),
+
   mapping(/META COGNITION/,'SELF_MODEL','CAPABILITY','MERGE_INTO_CANON','Meta-cognition is represented through the self-model and meta-audit skills.'),
 
   mapping(/RESEARCH TRACE|FORECAST LEDGER|EVIDENCE HISTORY|FORECAST HISTORY/,'RESEARCH_TRACE_VIEW','OPERATOR_VIEW','MERGE_INTO_CANON','History/ledger concepts consolidate into auditable research trace.'),
