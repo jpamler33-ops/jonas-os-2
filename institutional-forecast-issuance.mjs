@@ -3,6 +3,10 @@ import { createCanonicalForecast, verifyCanonicalForecast } from './forecast-con
 import { verifyScientificValidity } from './scientific-validity.mjs';
 import { evaluateInstitutionalAdmission, verifyInstitutionalAdmission } from './institutional-admission.mjs';
 import { createResearchTrace, verifyResearchTrace } from './research-trace.mjs';
+import {
+  createForecastClaimAssumptionSidecar,
+  verifyForecastClaimAssumptionSidecar
+} from './forecast-claim-assumption-sidecar.mjs';
 
 export const INSTITUTIONAL_FORECAST_ISSUANCE_VERSION='TCX_INSTITUTIONAL_FORECAST_ISSUANCE_V1';
 
@@ -122,6 +126,18 @@ export function createInstitutionalForecastIssuance({
   const tv=verifyResearchTrace(trace);
   if(!tv.ok) throw new Error('research trace verification failed');
 
+  const claimAssumptionSidecar=createForecastClaimAssumptionSidecar({
+    input,
+    forecast,
+    scientificValidity,
+    admission,
+    traceId:trace.traceId,
+    generatedAt:issuedAt,
+    declarations:traceContext?.claimAssumptionDeclarations??null
+  });
+  const cav=verifyForecastClaimAssumptionSidecar(claimAssumptionSidecar);
+  if(!cav.ok) throw new Error('claim-assumption sidecar verification failed: '+cav.reasons.join(','));
+
   const core={
     version:INSTITUTIONAL_FORECAST_ISSUANCE_VERSION,
     symbol:String(input.symbol).toUpperCase(),
@@ -145,7 +161,8 @@ export function createInstitutionalForecastIssuance({
     forecast,
     scientificValidity:structuredClone(scientificValidity),
     admission,
-    trace
+    trace,
+    claimAssumptionSidecar
   });
 }
 
@@ -165,6 +182,15 @@ export function verifyInstitutionalForecastIssuance(value){
     if(!sv.ok) reasons.push('SCIENCE_INVALID');
     if(!av.ok) reasons.push('ADMISSION_INVALID');
     if(!tv.ok) reasons.push('TRACE_INVALID');
+
+    if(value?.claimAssumptionSidecar!=null){
+      const cv=verifyForecastClaimAssumptionSidecar(value.claimAssumptionSidecar);
+      if(!cv.ok) reasons.push('CLAIM_ASSUMPTION_SIDECAR_INVALID');
+      if(value.claimAssumptionSidecar.forecastFingerprint!==value?.forecast?.fingerprint) reasons.push('CLAIM_ASSUMPTION_FORECAST_LINK_MISMATCH');
+      if(value.claimAssumptionSidecar.scienceFingerprint!==value?.scientificValidity?.fingerprint) reasons.push('CLAIM_ASSUMPTION_SCIENCE_LINK_MISMATCH');
+      if(value.claimAssumptionSidecar.admissionFingerprint!==value?.admission?.fingerprint) reasons.push('CLAIM_ASSUMPTION_ADMISSION_LINK_MISMATCH');
+      if(value.claimAssumptionSidecar.traceId!==value?.trace?.traceId) reasons.push('CLAIM_ASSUMPTION_TRACE_LINK_MISMATCH');
+    }
 
     if(value?.forecastFingerprint!==value?.forecast?.fingerprint) reasons.push('FORECAST_FINGERPRINT_LINK_MISMATCH');
     if(value?.scienceFingerprint!==value?.scientificValidity?.fingerprint) reasons.push('SCIENCE_FINGERPRINT_LINK_MISMATCH');
