@@ -31,8 +31,14 @@ test('adapters normalize derivatives, liquidation, onchain and entity flow snaps
       }}
     }
   });
-  assert.equal(rows.length,4);
-  assert.deepEqual(rows.map(x=>x.domain),['DERIVATIVES','LIQUIDATION','ONCHAIN','ENTITY_FLOW']);
+  assert.equal(rows.length,6);
+  assert.deepEqual(rows.map(x=>x.domain),['DERIVATIVES','DERIVATIVES','DERIVATIVES','LIQUIDATION','ONCHAIN','ENTITY_FLOW']);
+  assert.deepEqual(rows.filter(x=>x.domain==='DERIVATIVES').map(x=>x.source),[
+    'BINANCE_USDM_PUBLIC','OKX_PUBLIC','BINANCE_OKX_DERIVED'
+  ]);
+  assert.equal(rows.find(x=>x.source==='BINANCE_USDM_PUBLIC').quality.completeness,1);
+  assert.equal(rows.find(x=>x.source==='OKX_PUBLIC').quality.completeness,1);
+  assert.equal(rows.find(x=>x.source==='BINANCE_OKX_DERIVED').quality.completeness,1);
   const entity=rows.find(x=>x.domain==='ENTITY_FLOW');
   assert.equal(entity.finality,'FINALIZED');
   assert.equal(entity.provenance.coverage,'BOUNDED_VERIFIED_ADDRESS_SAMPLE');
@@ -52,20 +58,45 @@ test('weak or unavailable snapshots are omitted instead of fabricated',()=>{
   assert.deepEqual(rows,[]);
 });
 
-test('derivatives completeness records partial witness coverage',()=>{
+test('derivatives venue isolation keeps healthy venue usable when peer venue is absent',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    derivativesSnapshot:{
+      ok:true,availableAt:1_999_900,
+      binance:{
+        fundingRate:.0001,premiumPct:.001,openInterestUsd:1000,
+        openInterestDelta5m:.01,globalLongShortRatio:1.1,takerBuySellRatio:1.2,
+        publishedAt:1_999_800
+      },
+      okx:null,
+      witness:{sourceCount:1}
+    }
+  });
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].source,'BINANCE_USDM_PUBLIC');
+  assert.equal(rows[0].quality.completeness,1);
+  assert.equal(rows[0].quality.status,'BINANCE_PUBLIC_DERIVATIVES');
+  assert.equal(rows.some(x=>x.source==='BINANCE_OKX_DERIVED'),false);
+});
+
+test('cross venue spread is emitted only when both venues contribute',()=>{
   const rows=buildResearchDataPlaneSnapshots({
     symbol:'BTCUSDT',
     ingestedAt:2_000_000,
     derivativesSnapshot:{
       ok:true,availableAt:1_999_900,
       binance:{fundingRate:.0001,publishedAt:1_999_800},
-      okx:null,
-      witness:{sourceCount:1}
+      okx:{fundingRate:.0002,openInterestUsd:900,publishedAt:1_999_700},
+      witness:{sourceCount:2}
     }
   });
-  assert.equal(rows.length,1);
-  assert.equal(rows[0].quality.completeness,.5);
-  assert.equal(rows[0].quality.status,'PARTIAL_SOURCE');
+  const spread=rows.find(x=>x.source==='BINANCE_OKX_DERIVED');
+  assert.ok(spread);
+  assert.deepEqual(spread.features.map(x=>x.id),['research.derivatives.fundingRateVenueSpread']);
+  assert.deepEqual(spread.provenance.dependencies,[
+    'DERIVATIVES:BINANCE_USDM_PUBLIC','DERIVATIVES:OKX_PUBLIC'
+  ]);
 });
 
 
