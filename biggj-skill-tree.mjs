@@ -202,7 +202,6 @@ export function reconcileBiggjSkillTreeWithCapabilityMap(tree,{asOf=Date.now()}=
   const core=cloneTree(tree);
   const beforeVersion=core.capabilityMapVersion||null;
   const beforeFingerprint=core.capabilityMapFingerprint||null;
-  const existing=new Set(core.nodes.map(x=>String(x.skillId)));
   const added=[];
   const metadataUpdated=[];
 
@@ -211,14 +210,12 @@ export function reconcileBiggjSkillTreeWithCapabilityMap(tree,{asOf=Date.now()}=
     const current=core.nodes.find(x=>String(x.skillId)===skillId);
     if(!current){
       core.nodes.push({...seedNode(cap,t),skillId,parentSkillId:null});
-      existing.add(skillId);
       added.push(skillId);
       continue;
     }
     const desiredPlane=cap.plane||null;
     if(current.plane!==desiredPlane){
       current.plane=desiredPlane;
-      current.updatedAt=Math.max(Number(current.updatedAt||0),t);
       metadataUpdated.push(skillId);
     }
   }
@@ -228,14 +225,12 @@ export function reconcileBiggjSkillTreeWithCapabilityMap(tree,{asOf=Date.now()}=
     const current=core.nodes.find(x=>String(x.skillId)===seeded.skillId);
     if(!current){
       core.nodes.push(seeded);
-      existing.add(seeded.skillId);
       added.push(seeded.skillId);
       continue;
     }
     const desiredPlane=cap.plane||null;
     if(current.plane!==desiredPlane){
       current.plane=desiredPlane;
-      current.updatedAt=Math.max(Number(current.updatedAt||0),t);
       metadataUpdated.push(seeded.skillId);
     }
   }
