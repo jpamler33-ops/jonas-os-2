@@ -570,7 +570,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncMessageCacheHits:0,tradeSyncMessageFetches:0,tradeSyncRecoveryScans:0,tradeSyncChannelCacheHits:0,tradeSyncChannelFetches:0,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -584,6 +584,30 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       };
       logger.error('[TCX_DISCORD]',JSON.stringify(detail));
     }catch{}
+  }
+  function cachedTradeSyncMessage(channel,id){
+    if(!id)return null;
+    const msg=channel?.messages?.cache?.get?.(String(id))||null;
+    if(msg)state.tradeSyncMessageCacheHits++;
+    return msg;
+  }
+  async function tradeSyncMessageById(channel,id,{remote=true}={}){
+    if(!id)return null;
+    const cached=cachedTradeSyncMessage(channel,id);
+    if(cached||!remote)return cached;
+    state.tradeSyncMessageFetches++;
+    return channel?.messages?.fetch?.(String(id)).catch(()=>null)||null;
+  }
+  async function tradeSyncRecentMessages(channel,{limit=50}={}){
+    state.tradeSyncRecoveryScans++;
+    return channel?.messages?.fetch?.({limit}).catch(()=>null)||null;
+  }
+  async function tradeSyncChannelById(id){
+    if(!id)return null;
+    const cached=client.channels.cache?.get?.(String(id))||null;
+    if(cached){state.tradeSyncChannelCacheHits++;return cached;}
+    state.tradeSyncChannelFetches++;
+    return client.channels.fetch(String(id)).catch(()=>null);
   }
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
@@ -806,10 +830,10 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const channel=channelCache.get('theses'); if(!channel)return null;
     const id=String(position?.positionId||''); if(!id)return null;
     let msg=null;
-    const cached=thesisCards.get(id);
-    if(cached) msg=await channel.messages.fetch(cached).catch(()=>null);
+    const messageId=thesisCards.get(id);
+    if(messageId) msg=await tradeSyncMessageById(channel,messageId);
     if(!msg){
-      const recent=await channel.messages.fetch({limit:50}).catch(()=>null);
+      const recent=await tradeSyncRecentMessages(channel,{limit:50});
       msg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
     }
     if(msg) await msg.edit(biggjThesisPayload(position));
@@ -820,19 +844,30 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function ensureTradeThreadVisual(thread,position,prior={}){
     if(!thread||!thread.isTextBased())return prior;
     const id=String(position?.positionId||'');
-    const recent=await thread.messages.fetch({limit:50}).catch(()=>null);
-    let thesisMsg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    let recent=null;
+    let thesisMsg=prior?.thesisMessageId?await tradeSyncMessageById(thread,prior.thesisMessageId):null;
+    if(!thesisMsg){
+      recent=await tradeSyncRecentMessages(thread,{limit:50});
+      thesisMsg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    }
     if(thesisMsg) await thesisMsg.edit(biggjThesisPayload(position));
     else thesisMsg=await thread.send(biggjThesisPayload(position));
 
-    let visualMsg=prior?.visualMessageId?await thread.messages.fetch(prior.visualMessageId).catch(()=>null):null;
-    if(!visualMsg) visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
-    if(!visualMsg){
+    const visualKey='thread:'+id;
+    const due=tradeVisualDue(visualKey);
+    let visualMsg=prior?.visualMessageId?cachedTradeSyncMessage(thread,prior.visualMessageId):null;
+    if(due&&prior?.visualMessageId&&!visualMsg){
+      visualMsg=await tradeSyncMessageById(thread,prior.visualMessageId);
+    }
+    if(!visualMsg&&(!prior?.visualMessageId||due)){
+      if(!recent)recent=await tradeSyncRecentMessages(thread,{limit:50});
+      visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
+    }
+    if(!visualMsg&&(!prior?.visualMessageId||due)){
       visualMsg=await thread.send({content:'BIGGJ // TRADE VISUAL\nRendering live market state …',allowedMentions:{parse:[]}});
     }
-    const next={...prior,thesisMessageId:thesisMsg?.id||null,visualMessageId:visualMsg?.id||null};
-    const visualKey='thread:'+id;
-    if(visualMsg&&tradeVisualDue(visualKey)){
+    const next={...prior,thesisMessageId:thesisMsg?.id||null,visualMessageId:visualMsg?.id||prior?.visualMessageId||null};
+    if(visualMsg&&due){
       queueTradeVisual({
         key:visualKey,
         channel:thread,
@@ -865,6 +900,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     }
     const syncStartedAt=Date.now();
     state.lastTradeSyncStartedAt=syncStartedAt;
+    state.tradeSyncMessageCacheHits=0;
+    state.tradeSyncMessageFetches=0;
+    state.tradeSyncRecoveryScans=0;
+    state.tradeSyncChannelCacheHits=0;
+    state.tradeSyncChannelFetches=0;
     tradeSyncRunning=true;
     try{
     const snapshot=await safeMissionSnapshot();
@@ -878,21 +918,25 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       active.add(id);
       let card=tradeCards.get(id)||{};
       try{
-        let starter=card.messageId?await c.messages.fetch(card.messageId).catch(()=>null):null;
+        let starter=card.messageId?await tradeSyncMessageById(c,card.messageId):null;
         if(!starter){
-          const recent=await c.messages.fetch({limit:50});
-          starter=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id))||null;
+          const recent=await tradeSyncRecentMessages(c,{limit:50});
+          starter=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id))||null;
         }
         if(starter)await starter.edit(shadowTradePayload(p));
         else starter=await c.send(shadowTradePayload(p));
 
-        let feedVisual=card.feedVisualMessageId?await c.messages.fetch(card.feedVisualMessageId).catch(()=>null):null;
-        if(!feedVisual){
+        const feedVisualKey='feed:'+id;
+        const feedVisualDue=tradeVisualDue(feedVisualKey);
+        let feedVisual=card.feedVisualMessageId?cachedTradeSyncMessage(c,card.feedVisualMessageId):null;
+        if(feedVisualDue&&card.feedVisualMessageId&&!feedVisual){
+          feedVisual=await tradeSyncMessageById(c,card.feedVisualMessageId);
+        }
+        if(!feedVisual&&(!card.feedVisualMessageId||feedVisualDue)){
           feedVisual=await c.send({content:'BIGGJ // LIVE TRADE VISUAL\nRendering market state …',allowedMentions:{parse:[]}});
           card.feedVisualMessageId=feedVisual.id;
         }
-        const feedVisualKey='feed:'+id;
-        if(feedVisual&&tradeVisualDue(feedVisualKey)){
+        if(feedVisual&&feedVisualDue){
           queueTradeVisual({
             key:feedVisualKey,
             channel:c,
@@ -901,8 +945,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
           });
         }
 
-        let thread=card.threadId?await client.channels.fetch(card.threadId).catch(()=>null):null;
+        let thread=card.threadId?await tradeSyncChannelById(card.threadId):null;
         if(canThreads&&!thread){
+          state.tradeSyncRecoveryScans++;
           const activeThreads=await c.threads.fetchActive().catch(()=>null);
           thread=activeThreads?.threads?.find(t=>String(t.name).includes(id.slice(-8)))||null;
           if(!thread){
@@ -917,13 +962,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     }
     for(const [id,card] of [...tradeCards])if(!active.has(id)){
       try{
-        const msg=await c.messages.fetch(card.messageId);
+        const msg=await tradeSyncMessageById(c,card.messageId);
         const embed=msg.embeds?.[0]?.toJSON?.()||{};
         embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();
         await msg.edit({embeds:[embed],components:[],allowedMentions:{parse:[]}});
       }catch{}
       if(card.threadId){
-        const thread=await client.channels.fetch(card.threadId).catch(()=>null);
+        const thread=await tradeSyncChannelById(card.threadId);
         if(thread?.isTextBased())await thread.send({content:'BIGGJ // POSITION CLOSED\nFinal replay wird im Closed-Trade-Feed archiviert.',allowedMentions:{parse:[]}}).catch(()=>null);
       }
       visualRefreshQueue.cancel('feed:'+id);
