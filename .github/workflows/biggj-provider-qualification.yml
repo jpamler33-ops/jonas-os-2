@@ -1,0 +1,25 @@
+name: BIGGJ Provider Qualification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test BIGGJ stack
+        run: node --test biggj/*.test.mjs
+      - name: Qualify free derivatives providers
+        run: node biggj/run-provider-qualification.mjs
+      - name: Verify safety
+        run: node -e "const r=require('./biggj-provider-qualification.json');if(r.canExecuteLive!==false||r.mode!=='SHADOW_ONLY')process.exit(1);console.log(r.providers)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: biggj-provider-qualification-${{ github.run_id }}
+          path: biggj-provider-qualification.json
+          retention-days: 90
