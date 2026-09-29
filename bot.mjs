@@ -115,10 +115,12 @@ import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } fr
 import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
+  evaluateAutoLearnMemoryAdmission,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced,
   FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
-  FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION
+  FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
+  AUTOLEARN_MEMORY_ADMISSION_VERSION
 } from './forecast-shadow-evaluation-client.mjs';
 import { normalizeVenueBook, buildShadowSmartRoute, summarizeVenueQuality, SHADOW_SOR_VERSION, SHADOW_SOR_CAPABILITIES } from './multi-venue-shadow-sor.mjs';
 import { loadVenueQualityMemory, saveVenueQualityMemory, createVenueQualityObservations, appendVenueQualityObservations, matureVenueQualityObservation, estimateVenueQuality, venueQualitySummary, VENUE_QUALITY_MEMORY_VERSION, VENUE_QUALITY_MEMORY_CAPABILITIES } from './venue-quality-memory.mjs';
@@ -242,9 +244,12 @@ const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FOR
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
 const autoLearnHeapHeadroomMb = Math.max(280, Math.min(360, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 320)));
 const autoLearnRssHeadroomMb = Math.max(620, Math.min(820, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 720)));
+const autoLearnExternalHeadroomMb = Math.max(32, Math.min(160, Number(process.env.TCX_AUTOLEARN_EXTERNAL_HEADROOM_MB || 64)));
 const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 1) || 1)));
 const autoLearnInterIssueMs = Math.max(2000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 8000)));
 const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || 280)));
+const autoLearnResumeRssMb = Math.max(450, Math.min(autoLearnRssHeadroomMb-40, Number(process.env.TCX_AUTOLEARN_RESUME_RSS_MB || 620)));
+const autoLearnResumeExternalMb = Math.max(16, Math.min(autoLearnExternalHeadroomMb-8, Number(process.env.TCX_AUTOLEARN_RESUME_EXTERNAL_MB || 48)));
 const autoLearnMemoryBackoffMs = Math.max(30000, Math.min(180000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 90000)));
 const servingGuardHeapMb = Math.max(260, Math.min(380, Number(process.env.TCX_SERVING_GUARD_HEAP_MB || 330)));
 const servingGuardRssMb = Math.max(550, Math.min(900, Number(process.env.TCX_SERVING_GUARD_RSS_MB || 720)));
@@ -7143,15 +7148,31 @@ async function autoLearnForecastWatcher() {
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
+        const externalMb=Math.round(memory.external/1024/1024);
+        const memoryAdmission=evaluateAutoLearnMemoryAdmission({
+          phase:'ISSUE',
+          heapUsedMb,
+          rssMb,
+          externalMb,
+          issueHeapMb:autoLearnHeapHeadroomMb,
+          issueRssMb:autoLearnRssHeadroomMb,
+          issueExternalMb:autoLearnExternalHeadroomMb,
+          resumeHeapMb:autoLearnResumeHeapMb,
+          resumeRssMb:autoLearnResumeRssMb,
+          resumeExternalMb:autoLearnResumeExternalMb
+        });
         // Each issuance may scan research history and write bounded state.
-        // Leave headroom for transient parsing/serialization instead of
-        // letting background learning consume the serving process heap.
-        if(heapUsedMb>=autoLearnHeapHeadroomMb||rssMb>=autoLearnRssHeadroomMb){
+        // Leave headroom for transient parsing/serialization and native/buffer
+        // allocations instead of letting background learning pressure serving.
+        if(!memoryAdmission.allowed){
           deferred++;
           memoryPressure=true;
           console.warn('autolearn forecast deferred for memory headroom',JSON.stringify({
-            symbol,heapUsedMb,rssMb,historyRows:forecastRuntime.engine.historySize(),
-            threshold:{heapUsedMb:autoLearnHeapHeadroomMb,rssMb:autoLearnRssHeadroomMb}
+            symbol,
+            ...memoryAdmission.memory,
+            exceeded:memoryAdmission.exceeded,
+            historyRows:forecastRuntime.engine.historySize(),
+            threshold:memoryAdmission.limits
           }));
           break;
         }
@@ -7269,7 +7290,24 @@ async function autoLearnForecastWatcher() {
       }));
       await sleep(autoLearnMemoryBackoffMs);
       const after=process.memoryUsage();
-      if(Math.round(after.heapUsed/1024/1024)>autoLearnResumeHeapMb){
+      const resumeAdmission=evaluateAutoLearnMemoryAdmission({
+        phase:'RESUME',
+        heapUsedMb:Math.round(after.heapUsed/1024/1024),
+        rssMb:Math.round(after.rss/1024/1024),
+        externalMb:Math.round(after.external/1024/1024),
+        issueHeapMb:autoLearnHeapHeadroomMb,
+        issueRssMb:autoLearnRssHeadroomMb,
+        issueExternalMb:autoLearnExternalHeadroomMb,
+        resumeHeapMb:autoLearnResumeHeapMb,
+        resumeRssMb:autoLearnResumeRssMb,
+        resumeExternalMb:autoLearnResumeExternalMb
+      });
+      if(!resumeAdmission.allowed){
+        console.warn('autolearn remains deferred after memory backoff',JSON.stringify({
+          ...resumeAdmission.memory,
+          exceeded:resumeAdmission.exceeded,
+          threshold:resumeAdmission.limits
+        }));
         await sleep(autoLearnSweepMs);
         continue;
       }
