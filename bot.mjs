@@ -818,6 +818,7 @@ try {
       stateValidity:STATE_VALIDITY_VERSION,
       researchLifecycle:RESEARCH_LIFECYCLE_VERSION,
       marketDataProvider:MARKET_DATA_PROVIDER_VERSION,
+      researchProviderFanout:RESEARCH_PROVIDER_FANOUT_VERSION,
       telegramCommandRouter:TELEGRAM_COMMAND_ROUTER_VERSION,
       telegramReadCommands:TELEGRAM_READ_COMMANDS_VERSION,
       telegramMutationCommands:TELEGRAM_MUTATION_COMMANDS_VERSION,
