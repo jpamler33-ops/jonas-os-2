@@ -189,12 +189,15 @@ const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_O
 const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
-const autoLearnHeapHeadroomMb = Math.max(320, Math.min(400, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 360)));
-const autoLearnRssHeadroomMb = Math.max(650, Math.min(850, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 760)));
-const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(6, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 3) || 3)));
-const autoLearnInterIssueMs = Math.max(1000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 4000)));
-const autoLearnResumeHeapMb = Math.max(260, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || 320)));
-const autoLearnMemoryBackoffMs = Math.max(15000, Math.min(120000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 45000)));
+const autoLearnHeapHeadroomMb = Math.max(280, Math.min(360, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 320)));
+const autoLearnRssHeadroomMb = Math.max(620, Math.min(820, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 720)));
+const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 1) || 1)));
+const autoLearnInterIssueMs = Math.max(2000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 8000)));
+const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || 280)));
+const autoLearnMemoryBackoffMs = Math.max(30000, Math.min(180000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 90000)));
+const servingGuardHeapMb = Math.max(260, Math.min(380, Number(process.env.TCX_SERVING_GUARD_HEAP_MB || 330)));
+const servingGuardRssMb = Math.max(550, Math.min(900, Number(process.env.TCX_SERVING_GUARD_RSS_MB || 720)));
+const servingGuardExternalMb = Math.max(24, Math.min(160, Number(process.env.TCX_SERVING_GUARD_EXTERNAL_MB || 64)));
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
@@ -284,6 +287,18 @@ const markets = requestedSymbols.map(symbol => ({
   icon: MARKET_META[symbol]?.[0] || '•',
   label: MARKET_META[symbol]?.[1] || symbol.replace('USDT','')
 }));
+
+function servingMemoryPressure(){
+  const m=process.memoryUsage();
+  const heapUsedMb=Math.round(m.heapUsed/1024/1024);
+  const rssMb=Math.round(m.rss/1024/1024);
+  const externalMb=Math.round(m.external/1024/1024);
+  return {
+    pressured:heapUsedMb>=servingGuardHeapMb||rssMb>=servingGuardRssMb||externalMb>=servingGuardExternalMb,
+    heapUsedMb,rssMb,externalMb,
+    thresholds:{heapUsedMb:servingGuardHeapMb,rssMb:servingGuardRssMb,externalMb:servingGuardExternalMb}
+  };
+}
 
 const sessions = new Map();
 const witnessCache = new Map();
@@ -5486,7 +5501,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   }
   let learnedChallengerRun=null;
-  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+  if(issuanceSource==='TCX_AUTOLEARN_V1'&&issuance.gate!=='ABSTAIN'){
     try{
       const regimeContext=deriveShadowRegimeFingerprint({
         regimeId:String(input.regimeId||state.memoryDashboard?.regime||'UNKNOWN'),
@@ -5512,7 +5527,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   }
   let strategyLeagueRun=null;
-  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+  if(issuanceSource==='TCX_AUTOLEARN_V1'&&issuance.gate!=='ABSTAIN'){
     try{
       strategyLeagueRun=await maybePlaceStrategyLeagueTrades(issuance,{auditHealthy:auditHealthyAfter});
     }catch(err){
@@ -6437,6 +6452,7 @@ async function shadowOmsWatcher() {
   while(running){
     await sleep(shadowWatchMs);
     if(!shadowOmsHealthy) continue;
+    if(servingMemoryPressure().pressured) continue;
     const started=Date.now();
     let changed=false;
     try {
@@ -6530,6 +6546,7 @@ async function shadowPortfolioWatcher(){
   while(running){
     await sleep(shadowPortfolioWatchMs);
     if(!shadowPortfolioHealthy||!shadowOmsHealthy) continue;
+    if(servingMemoryPressure().pressured) continue;
     const started=Date.now();
     let changed=false,opened=0,closed=0;
     try{
@@ -6657,6 +6674,7 @@ async function strategyLeagueWatcher(){
   while(running){
     await sleep(strategyLeagueWatchMs);
     if(!strategyLeagueEnabled||!strategyLeagueHealthy||!shadowOmsHealthy) continue;
+    if(servingMemoryPressure().pressured) continue;
     const started=Date.now();
     let changed=false,opened=0,closed=0;
     try{
@@ -6742,6 +6760,7 @@ async function venueQualityWatcher() {
   while(running){
     await sleep(vqmWatchMs);
     if(!venueQualityHealthy || !venueQualityRecords.length) continue;
+    if(servingMemoryPressure().pressured) continue;
     const started=Date.now();
     let changed=false,observed=0,missed=0;
     try {
@@ -7271,6 +7290,7 @@ async function forecastOutcomeWatcher() {
 
 async function episodeWatcher() {
   while(running) {
+    if(servingMemoryPressure().pressured){ await sleep(30000); continue; }
     while(running&&activeBackgroundResearchJob) await sleep(250);
     if(!running) break;
     activeBackgroundResearchJob='episode-sweep';
