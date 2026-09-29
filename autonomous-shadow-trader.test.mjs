@@ -88,3 +88,54 @@ test('strategy horizon selection can prefer strongest edge or longest horizon',(
   assert.equal(edge.horizonId,'1h');
   assert.equal(longest.horizonId,'1h');
 });
+
+
+test('BIGGJ policy selection rejects sub-hour CORE primary horizon and selects strongest eligible 1h+',()=>{
+  const x=issuance();
+  x.forecast={horizons:[
+    {...x.forecast.horizons[0],horizonId:'15m',horizonMs:900_000,expectedReturn:0.012,
+      probabilities:{up:0.82,down:0.08,flat:0.10},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:0.82,down:0.08,flat:0.10}}
+    },
+    {...x.forecast.horizons[0],horizonId:'1h',horizonMs:3_600_000,expectedReturn:0.007,
+      probabilities:{up:0.70,down:0.18,flat:0.12},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:0.70,down:0.18,flat:0.12}}
+    },
+    {...x.forecast.horizons[0],horizonId:'3h',horizonMs:10_800_000,expectedReturn:0.009,
+      probabilities:{up:0.67,down:0.20,flat:0.13},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:0.67,down:0.20,flat:0.13}}
+    }
+  ]};
+  const d=deriveAutonomousShadowTrade(x,{
+    now:1_030_000,
+    horizonSelection:'BIGGJ_POLICY',
+    assetClass:'CORE'
+  });
+  assert.equal(d.eligible,true);
+  assert.equal(d.horizonId,'1h');
+  assert.equal(d.horizonSelection,'BIGGJ_POLICY');
+  assert.equal(d.assetClass,'CORE');
+  assert.equal(d.tradingPolicyVersion,'BIGGJ_TRADING_POLICY_V1');
+});
+
+test('BIGGJ policy selection fails closed when CORE has no eligible primary horizon',()=>{
+  const d=deriveAutonomousShadowTrade(issuance(),{
+    now:1_030_000,
+    horizonSelection:'BIGGJ_POLICY',
+    assetClass:'CORE'
+  });
+  assert.equal(d.eligible,false);
+  assert.equal(d.reason,'NO_PRIMARY_HORIZON');
+  assert.equal(d.tradingPolicyVersion,'BIGGJ_TRADING_POLICY_V1');
+});
+
+test('BIGGJ MEME policy can use calibrated 15m horizon',()=>{
+  const d=deriveAutonomousShadowTrade(issuance(),{
+    now:1_030_000,
+    horizonSelection:'BIGGJ_POLICY',
+    assetClass:'MEME'
+  });
+  assert.equal(d.eligible,true);
+  assert.equal(d.horizonId,'15m');
+  assert.equal(d.assetClass,'MEME');
+});
