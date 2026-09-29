@@ -30,7 +30,8 @@ export const REQUIRED_BUILD_TEST_SCRIPTS=Object.freeze([
   'test:data-plane',
   'test:data-lineage',
   'test:epistemic',
-  'test:promotion-review'
+  'test:promotion-review',
+  'test:promotion-proof'
 ]);
 
 async function fileHashes(rootDir,files){
