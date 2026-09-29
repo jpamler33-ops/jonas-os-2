@@ -186,7 +186,7 @@ let startupColdTier=null;
 if(marketFabricColdStore.enabled){
   try{
     startupColdTier=await offloadMarketFabricArchive({
-      filePath:process.env.TCX_MARKET_FABRIC_FILE||'/data/tcx-market-events.jsonl',
+      filePath:process.env.TCX_MARKET_FABRIC_FILE||persistenceDataDir+'/tcx-market-events.jsonl',
       coldStore:marketFabricColdStore,
       maxLocalBytes:marketFabricArchiveBudgetBytes,
       targetLocalBytes:marketFabricColdTargetBytes,
@@ -6621,7 +6621,7 @@ async function maintainMarketFabric(){
   if(Date.now()-marketFabricLastMaintenanceAt<marketFabricMaintenanceMs) return;
   marketFabricLastMaintenanceAt=Date.now();
   marketFabricMaintenanceQueue=marketFabricMaintenanceQueue.then(async()=>{
-    const storagePressure=await inspectStoragePressure({
+    let storagePressure=await inspectStoragePressure({
       dataDir:persistenceDataDir,
       warnFreeBytes:storageWarnFreeBytes,
       criticalFreeBytes:storageCriticalFreeBytes
@@ -6649,14 +6649,22 @@ async function maintainMarketFabric(){
         }));
       }
     }
-    if(storagePressure.state==='CRITICAL'&&!marketFabricColdStore.enabled){
-      console.error('[TCX_MARKET_FABRIC_MAINTENANCE_DEFERRED]',JSON.stringify({
-        ...storagePressure,
-        reason:'CRITICAL_STORAGE_NO_TEMP_FILE_RISK',
-        archiveBudgetBytes:marketFabricArchiveBudgetBytes,
-        destructiveRetention:false
-      }));
-      return;
+    if(storagePressure.state==='CRITICAL'){
+      storagePressure=await inspectStoragePressure({
+        dataDir:persistenceDataDir,
+        warnFreeBytes:storageWarnFreeBytes,
+        criticalFreeBytes:storageCriticalFreeBytes
+      });
+      if(storagePressure.state==='CRITICAL'){
+        console.error('[TCX_MARKET_FABRIC_MAINTENANCE_DEFERRED]',JSON.stringify({
+          ...storagePressure,
+          reason:'CRITICAL_STORAGE_NO_TEMP_FILE_RISK',
+          archiveBudgetBytes:marketFabricArchiveBudgetBytes,
+          coldTier,
+          destructiveRetention:false
+        }));
+        return;
+      }
     }
     const pressureRotateBytes=storagePressure.state==='CRITICAL'
       ?16*1024*1024
