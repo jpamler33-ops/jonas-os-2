@@ -71,7 +71,7 @@ import {
 import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
-  markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
+  markShadowPosition, simulateShadowPositionExit, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
   shadowPortfolioPeriodStats, shadowPortfolioStatistics,
   SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
 } from './shadow-portfolio-ledger.mjs';
