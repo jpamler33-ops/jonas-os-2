@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure } from './storage-maintenance.mjs';
-import { rotateVerifiedMarketFabric, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
+import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
@@ -463,6 +463,10 @@ let evidenceRecords = loadedEvidenceHistory.records;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
 const auditLedger = await openAuditLedger(auditFile,{maxInMemoryRecords:auditLedgerMaxMemoryRecords});
 const marketFabricFile = process.env.TCX_MARKET_FABRIC_FILE || '/data/tcx-market-events.jsonl';
+const marketFabricCheckpointRecovery=await reconcileMarketFabricCheckpointFromArchive(marketFabricFile);
+if(marketFabricCheckpointRecovery.reconciled){
+  console.warn('[TCX_MARKET_FABRIC_CHECKPOINT_RECONCILED]',JSON.stringify(marketFabricCheckpointRecovery));
+}
 let marketFabric = await openMarketDataFabric(marketFabricFile,{maxInMemoryEvents:marketFabricMaxMemoryEvents});
 if(marketFabric.healthy){
   const rotation=await rotateVerifiedMarketFabric({filePath:marketFabricFile,maxBytes:Number(process.env.TCX_MARKET_FABRIC_ROTATE_BYTES||220*1024*1024),verification:marketFabric.verification});
@@ -6377,11 +6381,29 @@ async function maintainMarketFabric(){
         destructiveRetention:false
       }));
     }
-    const rotation=await rotateVerifiedMarketFabric({filePath:marketFabricFile,maxBytes:effectiveRotateBytes,verification:marketFabric.verification});
-    if(rotation.rotated){
-      console.info('[TCX_MARKET_FABRIC_RUNTIME_ROTATED]',JSON.stringify({lastSeq:rotation.lastSeq,archivedBytes:rotation.archivedBytes,segment:rotation.archivedSegment}));
-      marketFabric=await openMarketDataFabric(marketFabricFile,{maxInMemoryEvents:marketFabricMaxMemoryEvents});
-    }
+
+    let rotation={rotated:false,reason:'NOT_ATTEMPTED'};
+    marketFabricAppendQueue=marketFabricAppendQueue.then(async()=>{
+      if(!marketFabric?.healthy) return {rotated:false,reason:'FABRIC_UNHEALTHY'};
+      rotation=await rotateVerifiedMarketFabric({
+        filePath:marketFabricFile,
+        maxBytes:effectiveRotateBytes,
+        verification:marketFabric.verification
+      });
+      if(rotation.rotated){
+        console.info('[TCX_MARKET_FABRIC_RUNTIME_ROTATED]',JSON.stringify({
+          lastSeq:rotation.lastSeq,
+          archivedBytes:rotation.archivedBytes,
+          segment:rotation.archivedSegment
+        }));
+        marketFabric=await openMarketDataFabric(marketFabricFile,{maxInMemoryEvents:marketFabricMaxMemoryEvents});
+      }else if(rotation.reason==='VERIFICATION_STALE'){
+        console.error('[TCX_MARKET_FABRIC_ROTATION_BLOCKED_STALE_VERIFICATION]',JSON.stringify(rotation));
+      }
+      return rotation;
+    });
+    rotation=await marketFabricAppendQueue;
+
     const archive=await archiveMarketFabricSegments({
       filePath:marketFabricFile,
       maxArchivedBytes:Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||80*1024*1024),

@@ -17,6 +17,11 @@ test('market data fabric appends fsynced hash-chained events and verifies',async
   const r=await appendMarketEvents(fabric,[input(),input({sourceEventId:'2',eventTime:1200,availableAt:1300,ingestedAt:1300,payload:{x:2}})]);
   assert.equal(r.appended.length,2);
   assert.equal(fabric.seq,2);
+  assert.equal(fabric.verification.ok,true);
+  assert.equal(fabric.verification.lastSeq,2);
+  assert.equal(fabric.verification.tailHash,fabric.tailHash);
+  assert.equal(fabric.verification.count,2);
+  assert.ok(fabric.verification.lastValidByteOffset>0);
   assert.equal(verifyMarketEventChain(fabric.events).ok,true);
   const reopened=await openMarketDataFabric(file);
   assert.equal(reopened.healthy,true);
