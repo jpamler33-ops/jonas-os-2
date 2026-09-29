@@ -1751,8 +1751,8 @@ async function buildBiggjRuntimeMarketAnalysis(issuance){
   const flowAlignment=directionSign*rawFlow;
   const oiDelta=Number(derivatives?.binance?.openInterestDelta5m);
   const openInterestExpansion=Number.isFinite(oiDelta)?biggjClamp(oiDelta/.03,-1,1):0;
-  const dataTrustScore=auditLedger.healthy&&marketFabric.healthy&&researchGovernanceHealthy?.95:
-    auditLedger.healthy&&marketFabric.healthy?.78:.45;
+  const dataTrustScore=auditLedger.healthy&&marketFabric.healthy&&researchGovernanceHealthy ? .95 :
+    auditLedger.healthy&&marketFabric.healthy ? .78 : .45;
   const analysis=buildBiggjPreTradeAnalysis({
     symbol,asOf:now,candlesByTf,orderBook:book,liquidation,forecast:issuance?.forecast||null,
     dataTrustScore,flowAlignment,openInterestExpansion,macroAlignment:0,onchainAlignment:0
@@ -1781,7 +1781,7 @@ function biggjEntryComponents({analysis,setupEvidence,rewardRisk}){
     regimeFit:biggjClamp(Number(analysis?.styleScore||0)),
     flowConfirmation:biggjClamp(.5+flow*.5),
     liquidityQuality:Number.isFinite(spread)?biggjClamp(1-spread/maxSpread):.35,
-    setupMemory:setupEvidence?.status==='SUPPORTED'?.85:setupEvidence?.status==='WATCH'?.35:.55,
+    setupMemory:setupEvidence?.status==='SUPPORTED' ? .85 : setupEvidence?.status==='WATCH' ? .35 : .55,
     riskRewardQuality:biggjClamp(Number(rewardRisk||0)/3),
     dataTrust:biggjClamp(Number(analysis?.dataTrustScore||0))
   };
@@ -1790,12 +1790,12 @@ function biggjCurrentThesisState(position,analysis){
   const side=String(position?.side||'UNKNOWN').toUpperCase();
   const currentSide=String(analysis?.side||'UNKNOWN').toUpperCase();
   const bias=String(analysis?.marketStructure?.bias||'MIXED').toUpperCase();
-  const forecastAlignment=currentSide===side?.90:currentSide==='UNKNOWN'?.45:.10;
+  const forecastAlignment=currentSide===side ? .90 : currentSide==='UNKNOWN' ? .45 : .10;
   const structureAlignment=
-    side==='LONG'?(bias==='BULLISH'?.90:bias==='BEARISH'?.12:.50):
-    side==='SHORT'?(bias==='BEARISH'?.90:bias==='BULLISH'?.12:.50):.40;
-  const styleMatch=String(analysis?.selectedStyle||'')===String(position?.tradingStyle||'')?.85:.55;
-  const strategyMatch=String(analysis?.strategyFamily||'')===String(position?.strategyFamily||'')?.85:.50;
+    side==='LONG' ? (bias==='BULLISH' ? .90 : bias==='BEARISH' ? .12 : .50) :
+    side==='SHORT' ? (bias==='BEARISH' ? .90 : bias==='BULLISH' ? .12 : .50) : .40;
+  const styleMatch=String(analysis?.selectedStyle||'')===String(position?.tradingStyle||'') ? .85 : .55;
+  const strategyMatch=String(analysis?.strategyFamily||'')===String(position?.strategyFamily||'') ? .85 : .50;
   const spread=Number(analysis?.microstructure?.spreadBps);
   const maxSpread=BIGGJ_TRADING_STYLES?.[position?.tradingStyle]?.maxSpreadBps||20;
   const liquidityHealth=Number.isFinite(spread)?biggjClamp(1-spread/maxSpread):.35;
@@ -1900,7 +1900,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
   const setupMemory=buildSetupPerformanceMemory(shadowPortfolioLedger);
   const setupEvidence=setupEvidenceFor(setupMemory,{setupType:setup.setupType,assetClass,symbol:decision.symbol,side:decision.side,horizonId:decision.horizonId,regimeKey:String(issuance?.regime?.id||issuance?.regimeId||'UNKNOWN')});
   if(setupEvidence.status==='DECAYING') return {...decision,placed:false,reason:'SETUP_EVIDENCE_DECAYING',setup,setupEvidence,execution:'SHADOW_ONLY'};
-  const setupEvidenceMultiplier=setupEvidence.status==='SUPPORTED'&&setupEvidence.all.trades>=20&&Number(setupEvidence.recent.expectancyQuote)>0?1.10:setupEvidence.status==='WATCH'?.75:1;
+  const setupEvidenceMultiplier=setupEvidence.status==='SUPPORTED'&&setupEvidence.all.trades>=20&&Number(setupEvidence.recent.expectancyQuote)>0
+    ?1.10
+    :setupEvidence.status==='WATCH'?.75:1;
   const strategyDnaMemory=buildStrategyDnaMemory(shadowPortfolioLedger);
   const opportunityAllocation=allocateShadowOpportunity(strategyDnaMemory,{
     ...decision,assetClass,symbol:decision.symbol
@@ -1908,25 +1910,71 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
   if(opportunityAllocation.blocked){
     return {...decision,placed:false,reason:'FAILURE_MEMORY_AVOID',opportunityAllocation};
   }
+
+  const counterThesisStrength=biggjClamp((marketAnalysis.counterEvidence||[]).length*.12,0,.85);
+  const entryComponents=biggjEntryComponents({analysis:marketAnalysis,setupEvidence,rewardRisk:structurePlan.rewardRisk});
+  const entryAdmission=evaluateBiggjEntryAdmission({
+    assetClass,
+    dataSafetyState:String(issuance?.trace?.safety?.state||'UNKNOWN'),
+    executableLiquidity:biggjPreflight.evidence.orderBookAvailable===true,
+    portfolioBlocked:false,
+    setupMemoryStatus:setupEvidence.status,
+    setupType:setup.setupType,
+    structureInvalidationDefined:true,
+    plannedRewardRisk:structurePlan.rewardRisk,
+    counterThesisStrength,
+    horizon:{
+      eligible:true,
+      directionalProbability:decision.directionalProbability,
+      probabilityEdge:decision.probabilityEdge,
+      expectedReturn:decision.expectedReturn
+    },
+    components:entryComponents
+  });
+  if(!entryAdmission.admitted){
+    return {
+      ...decision,placed:false,reason:'BIGGJ_ENTRY_ADMISSION_'+entryAdmission.admission,
+      entryAdmission,structurePlan,
+      tradingStyle:marketAnalysis.selectedStyle,
+      strategyFamily:marketAnalysis.strategyFamily,
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    };
+  }
+
+  const stopDistancePct=Math.abs(Number(structurePlan.entryPrice)-Number(structurePlan.invalidationPrice))/Number(structurePlan.entryPrice);
+  const targetDistancePct=Math.abs(Number(structurePlan.targetPrice)-Number(structurePlan.entryPrice))/Number(structurePlan.entryPrice);
+  const riskBudget=deriveBiggjShadowRiskBudget({
+    equityQuote:portfolioNow.equityQuote,
+    assetClass,
+    entryScore:entryAdmission.evidenceScore,
+    stopDistancePct,
+    portfolioMultiplier:1
+  });
   const leverageLab=buildLeverageCounterfactualLab(shadowPortfolioLedger);
-  const requestedShadowLeverage=leverageLab.evidenceReady
-    ? Math.min(isMeme?2:3,leverageLab.suggestedShadowLeverage)
-    : 1;
+  const requestedShadowLeverage=1;
   const leverageRisk=evaluateShadowLeverageRisk({
     requestedLeverage:requestedShadowLeverage,
     assetClass,
     volatilityPct:Math.max(.005,Math.abs(Number(decision.expectedReturn)||0)*2),
-    stopDistancePct:Math.max(.01,Math.abs(Number(decision.expectedReturn)||0)*1.5),
+    stopDistancePct,
     drawdownPct:Number(academy?.rolling?.maxDrawdownPct||training?.rolling?.maxDrawdownPct||0),
     portfolioCorrelation:.5,
-    fundingRate8h:0,
+    fundingRate8h:Number(biggjPreflight?.derivatives?.binance?.fundingRate||0),
     expectedHoldingHours:Math.max(1,Number(decision.horizonMs||3600000)/3600000),
     stressMovePct:isMeme?.10:.06
   });
   if(!leverageRisk.approved){
     return {...decision,placed:false,reason:'LEVERAGE_RISK_BLOCK',opportunityAllocation,leverageRisk};
   }
-  const marginQuote=opportunityAllocation.notionalQuote*setupEvidenceMultiplier;
+  const learnedSizing=opportunityAllocation.notionalQuote*setupEvidenceMultiplier;
+  const marginQuote=Math.max(0,Math.min(
+    learnedSizing,
+    Number(riskBudget.notionalQuote||0),
+    Number(supervisedBudget.notionalQuote||learnedSizing)
+  ));
+  if(!(marginQuote>=1)){
+    return {...decision,placed:false,reason:'BIGGJ_RISK_BUDGET_TOO_SMALL',riskBudget,entryAdmission,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
   const requestedLeveragedExposureQuote=marginQuote*leverageRisk.allowedLeverage;
   let correlationModel=null;
   const openRiskSymbols=[...new Set((shadowPortfolioLedger?.positions||[]).filter(p=>p?.status==='OPEN').map(p=>String(p.symbol||'')).filter(Boolean))];
