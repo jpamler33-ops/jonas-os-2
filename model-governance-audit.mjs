@@ -1,11 +1,11 @@
-import { appendAuditRecord } from './institutional-kernel.mjs';
+import { appendAuditRecord, findAuditRecordIdentity } from './institutional-kernel.mjs';
 import { verifyModelPromotionEvaluation, verifyModelPromotionRecord } from './model-promotion-ladder.mjs';
 import { verifyModelReleaseBinding, verifyModelRollbackDrill } from './model-release-binding.mjs';
 
 export const MODEL_GOVERNANCE_AUDIT_VERSION='TCX_MODEL_GOVERNANCE_AUDIT_V1';
 
 function existing(ledger,kind,idField,id){
-  return ledger?.records?.find(r=>r?.kind===kind&&r?.payload?.[idField]===id)||null;
+  return findAuditRecordIdentity(ledger,{kind,idField,id});
 }
 async function appendIdempotent(ledger,{kind,idField,id,payload,occurredAt}){
   if(!ledger?.healthy) throw new Error('Audit ledger unhealthy: fail closed');

@@ -84,6 +84,7 @@ export function evaluateModelPromotion({
   const hardFailures=[];
   const holds=[];
 
+  const softwareProofStatus={};
   for(const [name,value] of Object.entries({
     TESTS_PASSED:software?.testsPassed,
     PIT_LEAKAGE_PASSED:software?.pitLeakagePassed,
@@ -92,7 +93,14 @@ export function evaluateModelPromotion({
     RELEASE_MANIFEST_BOUND:software?.releaseManifestBound,
     ROLLBACK_READY:software?.rollbackReady
   })){
-    if(!bool(value)) hardFailures.push(name);
+    if(value===true) softwareProofStatus[name]='PASSED';
+    else if(value===false){
+      softwareProofStatus[name]='FAILED';
+      hardFailures.push(name);
+    }else{
+      softwareProofStatus[name]='MISSING';
+      holds.push(name+'_PROOF_REQUIRED');
+    }
   }
 
   if(!scienceCheck.ok) hardFailures.push('SCIENTIFIC_VALIDITY_INTEGRITY_FAILED');
@@ -175,12 +183,13 @@ export function evaluateModelPromotion({
       meaningfulImprovement
     },
     software:{
-      testsPassed:bool(software?.testsPassed),
-      pitLeakagePassed:bool(software?.pitLeakagePassed),
-      temporalOosPassed:bool(software?.temporalOosPassed),
-      deterministicReplayPassed:bool(software?.deterministicReplayPassed),
-      releaseManifestBound:bool(software?.releaseManifestBound),
-      rollbackReady:bool(software?.rollbackReady)
+      testsPassed:software?.testsPassed===true,
+      pitLeakagePassed:software?.pitLeakagePassed===true,
+      temporalOosPassed:software?.temporalOosPassed===true,
+      deterministicReplayPassed:software?.deterministicReplayPassed===true,
+      releaseManifestBound:software?.releaseManifestBound===true,
+      rollbackReady:software?.rollbackReady===true,
+      proofStatus:softwareProofStatus
     },
     science:{
       integrity:scienceCheck.ok?'VALID':'INVALID',
