@@ -278,12 +278,13 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
   const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
   const legacyLifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
   const entryMode=String(position.entryMode||'STANDARD').toUpperCase();
-  const primaryLane=!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(entryMode)&&position.horizonOnlyExit!==true;
+  const primaryMode=!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(entryMode)&&position.horizonOnlyExit!==true;
+  const biggjPrimaryLane=primaryMode&&String(position.tradingPolicyVersion||'')===BIGGJ_TRADING_POLICY_VERSION;
   let lifecycle=legacyLifecycle;
 
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
-  }else if(primaryLane){
+  }else if(biggjPrimaryLane){
     lifecycle=evaluateBiggjPositionLifecycle(position,{
       marginRoePct:ret,
       at:markAt,
@@ -305,7 +306,7 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
     position:{
       ...next,
       lifecycle,
-      lifecyclePolicyVersion:primaryLane?BIGGJ_TRADING_POLICY_VERSION:String(position.lifecyclePolicyVersion||'')
+      lifecyclePolicyVersion:biggjPrimaryLane?BIGGJ_TRADING_POLICY_VERSION:String(position.lifecyclePolicyVersion||'')
     },
     trigger,
     changed:true,
