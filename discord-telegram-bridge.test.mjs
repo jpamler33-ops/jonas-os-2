@@ -6,6 +6,7 @@ import {
   decodeDiscordCallbackCustomId,
   encodeDiscordCallbackCustomId
 } from './discord-component-ids.mjs';
+import { createSerialDedupeQueue } from './discord-telegram-bridge.mjs';
 
 test('duplicate Telegram callbacks receive unique reversible Discord custom ids',()=>{
   const action='superchart:BTCUSDT:FULL:5m';
@@ -43,4 +44,34 @@ test('duplicate callback alias round-trips payloads',()=>{
 
 test('ordinary Discord ids pass through unchanged',()=>{
   assert.equal(decodeDiscordCallbackCustomId('dc3:market:BTCUSDT'),'dc3:market:BTCUSDT');
+});
+
+
+test('serial dedupe queue bounds work and never runs duplicate keys concurrently',async()=>{
+  const q=createSerialDedupeQueue({maxSize:2});
+  const order=[];
+  let release;
+  const blocker=new Promise(resolve=>{release=resolve;});
+
+  assert.equal(q.enqueue('a',async()=>{order.push('a:start');await blocker;order.push('a:end');}),true);
+  assert.equal(q.enqueue('a',async()=>{}),false);
+  assert.equal(q.enqueue('b',async()=>{order.push('b');}),true);
+  assert.equal(q.enqueue('c',async()=>{}),false);
+
+  const first=q.drainOne();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(q.snapshot().runningKey,'a');
+  assert.equal(q.enqueue('a',async()=>{}),false);
+  assert.equal((await q.drainOne()).reason,'BUSY');
+
+  release();
+  const firstResult=await first;
+  assert.equal(firstResult.ok,true);
+  assert.deepEqual(order,['a:start','a:end']);
+
+  const secondResult=await q.drainOne();
+  assert.equal(secondResult.ok,true);
+  assert.deepEqual(order,['a:start','a:end','b']);
+  assert.equal(q.snapshot().depth,0);
+  assert.equal(q.snapshot().completed,2);
 });
