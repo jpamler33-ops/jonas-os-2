@@ -99,7 +99,7 @@ import {
   buildAdversarialStressLab, stressDecisionForRule, adversarialStressSummary,
   ADVERSARIAL_STRESS_LAB_VERSION
 } from './adversarial-stress-lab.mjs';
-import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, parseProductCallback } from './telegram-product-ui.mjs';
+import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, globalIntelKeyboard, renderGlobalIntelFeed, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
@@ -3141,6 +3141,12 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
   if(section==='STATS_ALL') return showShadowTradeStats(chatId,messageId,'ALL');
   if(section==='MORE') return showPremiumMore(chatId,messageId);
+  if(section==='NEWS') {
+    return deliverTelegramTextCard(tg,chatId,messageId,{
+      text:renderGlobalIntelFeed([],{filter:'TOP'}),
+      reply_markup:globalIntelKeyboard('TOP')
+    });
+  }
   if(section==='PROOF') { const p=buildTcxProofReport(shadowPortfolioLedger), icon=p.status==='ROBUST'?'🟢':p.status==='EMERGING'?'🟡':'⚪', wf=p.walkForward.validationMode==='FROZEN_POLICY_OOS'?'🟢 Frozen OOS':'🟡 Replay only'; const body=['🧾 TCX PROOF CENTER','',icon+' EVIDENZSTATUS   '+p.status,'PRÜFUNGEN       '+p.passedChecks+'/'+p.totalChecks,'TRADES          '+p.evidence.trades,'FORWARD TRADES  '+p.evidence.forwardTrades,'','VALIDIERUNG','Walk-Forward     '+wf,'Tail Risk        '+(p.tailRisk.passed?'🟢 bestanden':'🟡 nicht bestanden'),'Independent Audit '+(p.audit.passed?'🟢 bestanden':'🟡 nicht bestanden'),'Regime-Breite   '+p.regimes.distinct+' Regimes · '+p.regimes.matureCells+' reif','','RISIKO','Max Drawdown     '+(Number.isFinite(p.evidence.maxDrawdownPct)?fmt(p.evidence.maxDrawdownPct*100,1)+'%':'—'),'Stress p95 DD    '+(Number.isFinite(p.tailRisk.p95DrawdownPct)?fmt(p.tailRisk.p95DrawdownPct*100,1)+'%':'—'),'','ROBUST verlangt echte eingefrorene Out-of-Sample-Policy-Evidenz.','Status ist kein Profitversprechen und keine Live-Freigabe.','ABSTAIN / SHADOW_ONLY']; return deliverTelegramTextCard(tg,chatId,messageId,{text:body.join('\n'),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:proof'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],[{text:'🏠 Command Center',callback_data:'home'}]]}}); }
 
   let text='';
