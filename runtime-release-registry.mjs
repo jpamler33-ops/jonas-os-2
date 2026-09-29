@@ -20,6 +20,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'mechanism-transition-engine.mjs',
   'independent-witness-network.mjs',
   'institutional-kernel.mjs',
+  'audit-ledger-rotation.mjs',
   'market-data-fabric.mjs',
   'deterministic-replay.mjs',
   'observability.mjs',
