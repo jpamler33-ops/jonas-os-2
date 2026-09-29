@@ -531,6 +531,17 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         if(starter)await starter.edit(shadowTradePayload(p));
         else starter=await c.send(shadowTradePayload(p));
 
+        let feedVisual=card.feedVisualMessageId?await c.messages.fetch(card.feedVisualMessageId).catch(()=>null):null;
+        const feedVisualDue=!card.feedVisualAt||Date.now()-Number(card.feedVisualAt)>120000;
+        if(!feedVisual){
+          feedVisual=await c.send({content:'BIGGJ // LIVE TRADE VISUAL\nRendering market state …',allowedMentions:{parse:[]}});
+          await renderCoreIntoMessage(c,feedVisual,'superchart:'+String(p.symbol)+':FULL:5m',{forcePhoto:true});
+          card.feedVisualMessageId=feedVisual.id;card.feedVisualAt=Date.now();
+        }else if(feedVisualDue){
+          await renderCoreIntoMessage(c,feedVisual,'superchart:'+String(p.symbol)+':FULL:5m',{forcePhoto:true});
+          card.feedVisualAt=Date.now();
+        }
+
         let thread=card.threadId?await client.channels.fetch(card.threadId).catch(()=>null):null;
         if(canThreads&&!thread){
           const activeThreads=await c.threads.fetchActive().catch(()=>null);
