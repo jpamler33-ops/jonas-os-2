@@ -72,6 +72,7 @@ function observationWeight(row){
     return String(row?.coverageEvidenceTier||'').toUpperCase()==='CALIBRATED'?.50:.25;
   }
   if(mode==='ABSTAIN_PROBE') return .50;
+  if(mode==='STYLE_EXPERIMENT') return .50;
   if(mode==='EXPLORATION') return .75;
   return 1;
 }
