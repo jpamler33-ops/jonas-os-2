@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import { evidenceRecord } from './core.mjs';import { benchmarkSteps,ablationCompare } from './benchmark.mjs';
+const evidence=[evidenceRecord({source:'x',eventTime:'2026-01-01T00:00:00Z',availableAt:'2026-01-01T00:00:00Z',payload:{}})];
+const mk=(m,d,o)=>({asOf:`2026-01-01T00:0${m}:00Z`,evidence,claim:'x',direction:d,priorConfidence:.9,support:1,directionalEdge:d,expectedReturnPct:d*.01,outcomeReturnPct:o});
+test('benchmark exposes honest reference models',()=>{const r=benchmarkSteps([mk(1,1,.02),mk(2,-1,-.01),mk(3,1,-.01)]);assert.equal(r.n,3);assert.equal(r.baselines.random.meanBrier,.25);assert.ok(r.biggj.meanBrier>=0);assert.ok(r.biggj.tradeFrequency>=0&&r.biggj.tradeFrequency<=1);});
+test('ablation reports marginal delta instead of declaring improvement',()=>{const base=[mk(1,1,.02),mk(2,-1,-.01)];const alt=[mk(1,1,.02),mk(2,1,-.01)];const r=ablationCompare({BASE:base,ALT:alt});assert.equal(r.BASE.deltaVsBaseBrier,0);assert.ok(Number.isFinite(r.ALT.deltaVsBaseBrier));});
