@@ -189,8 +189,10 @@ const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_O
 const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
-const autoLearnHeapHeadroomMb = Math.max(360, Math.min(480, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 430)));
-const autoLearnRssHeadroomMb = Math.max(700, Math.min(950, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 850)));
+const autoLearnHeapHeadroomMb = Math.max(320, Math.min(400, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 360)));
+const autoLearnRssHeadroomMb = Math.max(650, Math.min(850, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 760)));
+const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(6, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 3) || 3)));
+const autoLearnInterIssueMs = Math.max(1000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 4000)));
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
@@ -6917,6 +6919,7 @@ async function autoLearnForecastWatcher() {
       try{
       for(const symbol of autoLearnSymbols){
         if(!running) break;
+        if(issued>=autoLearnMaxIssuedPerSweep){ deferred++; break; }
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -7005,7 +7008,7 @@ async function autoLearnForecastWatcher() {
           recordError(observability,{scope:'forecast_runtime.autolearn',message:msg});
           console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
         }
-        await sleep(250);
+        await sleep(autoLearnInterIssueMs);
       }
       }finally{
         if(activeBackgroundResearchJob==='autolearn') activeBackgroundResearchJob=null;
@@ -7023,6 +7026,8 @@ async function autoLearnForecastWatcher() {
         symbols:autoLearnSymbols.length,
         nextSweepMs:autoLearnSweepMs,
         forecastIntervalMs:autoLearnForecastMs,
+        maxIssuedPerSweep:autoLearnMaxIssuedPerSweep,
+        interIssueMs:autoLearnInterIssueMs,
         memory:(()=>{const m=process.memoryUsage();return {
           heapUsedMb:Math.round(m.heapUsed/1024/1024),
           heapTotalMb:Math.round(m.heapTotal/1024/1024),
