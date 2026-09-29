@@ -128,35 +128,55 @@ export function leaguePositionFromEntryOrder(order,{openedAt=null}={}){
 }
 
 export function reconcileStrategyLeagueEntries(ledger,orders,{now=Date.now()}={}){
-  const next=ledger?.version===SHADOW_STRATEGY_LEAGUE_VERSION
-    ? structuredClone(ledger)
-    : createEmptyStrategyLeagueLedger();
-  const known=new Set(next.positions.map(p=>String(p.entryOrderId)));
-  let added=0;
+  const validLedger=ledger?.version===SHADOW_STRATEGY_LEAGUE_VERSION;
+  const current=validLedger?ledger:createEmptyStrategyLeagueLedger();
+  const positions=Array.isArray(current.positions)?current.positions:[];
+  const known=new Set(positions.map(p=>String(p.entryOrderId)));
+  const additions=[];
+
   for(const order of Array.isArray(orders)?orders:[]){
     if(String(order?.strategyMeta?.role||'').toUpperCase()!=='LEAGUE_ENTRY') continue;
     if(known.has(String(order.id))) continue;
     if(!(finite(order.fillBase)>EPS)||!(finite(order.avgFillPrice)>0)) continue;
     try{
-      const p=leaguePositionFromEntryOrder(order,{
+      additions.push(leaguePositionFromEntryOrder(order,{
         openedAt:finite(order.updatedAt,finite(order.createdAt,now))
-      });
-      next.positions.push(p);
+      }));
       known.add(String(order.id));
-      added++;
     }catch{}
   }
-  if(added) next.updatedAt=Number(now);
-  return {ledger:next,added,changed:added>0};
+
+  if(additions.length===0){
+    return {ledger:current,added:0,changed:false,copyMode:'HOT_NOOP'};
+  }
+
+  return {
+    ledger:{
+      ...current,
+      positions:[...positions,...additions],
+      updatedAt:Number(now),
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    },
+    added:additions.length,
+    changed:true,
+    copyMode:'COPY_ON_WRITE'
+  };
 }
 
 export function replaceStrategyLeaguePosition(ledger,position){
-  const next=structuredClone(ledger);
-  const i=next.positions.findIndex(p=>p.positionId===position.positionId);
+  const positions=Array.isArray(ledger?.positions)?ledger.positions:[];
+  const i=positions.findIndex(p=>p.positionId===position.positionId);
   if(i<0) throw new Error('LEAGUE_POSITION_NOT_FOUND');
-  next.positions[i]=structuredClone(position);
-  next.updatedAt=Date.now();
-  return next;
+  const nextPositions=positions.slice();
+  nextPositions[i]=structuredClone(position);
+  return {
+    ...ledger,
+    positions:nextPositions,
+    updatedAt:Date.now(),
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
 }
 
 function strategyAccount(ledger,strategyId,{asOf=Date.now()}={}){
