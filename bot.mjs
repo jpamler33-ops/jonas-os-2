@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
-import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
@@ -154,8 +154,16 @@ import {
 } from './institutional-audit-binding.mjs';
 
 const persistenceDataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data';
+const storageWarnFreeBytes=Math.max(32*1024*1024,Number(process.env.TCX_STORAGE_WARN_FREE_BYTES||96*1024*1024));
+const storageCriticalFreeBytes=Math.max(16*1024*1024,Math.min(storageWarnFreeBytes,Number(process.env.TCX_STORAGE_CRITICAL_FREE_BYTES||48*1024*1024)));
 await cleanupOrphanedPersistenceArtifacts({dataDir:persistenceDataDir});
 await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
+const startupStoragePressure=await inspectStoragePressure({
+  dataDir:persistenceDataDir,
+  warnFreeBytes:storageWarnFreeBytes,
+  criticalFreeBytes:storageCriticalFreeBytes
+});
+console.info('[TCX_STORAGE_PRESSURE]',JSON.stringify({...startupStoragePressure,phase:'startup'}));
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -6348,7 +6356,28 @@ async function maintainMarketFabric(){
   if(Date.now()-marketFabricLastMaintenanceAt<marketFabricMaintenanceMs) return;
   marketFabricLastMaintenanceAt=Date.now();
   marketFabricMaintenanceQueue=marketFabricMaintenanceQueue.then(async()=>{
-    const rotation=await rotateVerifiedMarketFabric({filePath:marketFabricFile,maxBytes:Number(process.env.TCX_MARKET_FABRIC_ROTATE_BYTES||80*1024*1024),verification:marketFabric.verification});
+    const storagePressure=await inspectStoragePressure({
+      dataDir:persistenceDataDir,
+      warnFreeBytes:storageWarnFreeBytes,
+      criticalFreeBytes:storageCriticalFreeBytes
+    });
+    const configuredRotateBytes=Math.max(16*1024*1024,Number(process.env.TCX_MARKET_FABRIC_ROTATE_BYTES||80*1024*1024));
+    const pressureRotateBytes=storagePressure.state==='CRITICAL'
+      ?16*1024*1024
+      :storagePressure.state==='WARN'
+        ?32*1024*1024
+        :configuredRotateBytes;
+    const effectiveRotateBytes=Math.min(configuredRotateBytes,pressureRotateBytes);
+    if(storagePressure.state!=='NORMAL'){
+      console.warn('[TCX_STORAGE_PRESSURE]',JSON.stringify({
+        ...storagePressure,
+        phase:'market-fabric-maintenance',
+        configuredRotateBytes,
+        effectiveRotateBytes,
+        destructiveRetention:false
+      }));
+    }
+    const rotation=await rotateVerifiedMarketFabric({filePath:marketFabricFile,maxBytes:effectiveRotateBytes,verification:marketFabric.verification});
     if(rotation.rotated){
       console.info('[TCX_MARKET_FABRIC_RUNTIME_ROTATED]',JSON.stringify({lastSeq:rotation.lastSeq,archivedBytes:rotation.archivedBytes,segment:rotation.archivedSegment}));
       marketFabric=await openMarketDataFabric(marketFabricFile,{maxInMemoryEvents:marketFabricMaxMemoryEvents});
