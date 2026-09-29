@@ -241,4 +241,54 @@ test('provider scans block batches with bounded concurrency',async()=>{
   assert.ok(maxInFlight<=3);
   assert.equal(s.batchConcurrency,3);
   assert.equal(s.batchRequests,6);
+  assert.equal(s.streamingClassification,true);
+  assert.equal(s.maxResidentFullBlocksBound,9);
+  assert.ok(s.maxResidentFullBlocksBound<s.blocksScanned);
+});
+
+
+test('streaming classification preserves cross-batch event ordering and dedupe semantics',async()=>{
+  const idx=buildEntityAddressIndex(registry());
+  const finalizedTs=3_000_000;
+  const fetchImpl=async(_url,opts)=>{
+    const req=JSON.parse(opts.body);
+    if(!Array.isArray(req)){
+      return {
+        ok:true,status:200,
+        async text(){return JSON.stringify({jsonrpc:'2.0',id:1,result:block(200,finalizedTs,[
+          tx('0xfinal',OUTSIDE,OKX_A,5)
+        ])});}
+      };
+    }
+    const rows=req.map(r=>{
+      const n=parseInt(r.params[0],16);
+      const age=(200-n)*12_000;
+      const transactions=n===199
+        ?[tx('0xdup',OKX_A,OUTSIDE,1)]
+        :n===198
+          ?[tx('0xolder',OUTSIDE,OKX_A,2)]
+          :[];
+      return {jsonrpc:'2.0',id:r.id,result:block(n,finalizedTs-age,transactions)};
+    });
+    return {ok:true,status:200,async text(){return JSON.stringify(rows);}};
+  };
+  const provider=createEthereumEntityFlowProvider({
+    fetchImpl,
+    rpcUrl:'https://eth.local',
+    addressIndex:idx,
+    entityIds:['OKX'],
+    maxBlocks:12,
+    batchSize:2,
+    batchConcurrency:2,
+    now:()=>3_100_000,
+    cacheMs:0
+  });
+  const s=await provider.fetchSnapshot({force:true});
+  assert.equal(s.ok,true);
+  assert.equal(s.streamingClassification,true);
+  assert.equal(s.maxResidentFullBlocksBound,4);
+  assert.equal(s.entities.OKX['5m'].inflowEth,7);
+  assert.equal(s.entities.OKX['5m'].outflowEth,1);
+  assert.equal(s.entities.OKX['5m'].netExternalEth,6);
+  assert.equal(s.restrictions.finalizedBlocksOnly,true);
 });
