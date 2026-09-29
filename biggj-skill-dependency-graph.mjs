@@ -102,7 +102,7 @@ export const BIGGJ_ROOT_DEPENDENCIES=deepFreeze([
   rootEdge('PROMOTION_GOVERNANCE','META_COGNITION','HARD','Promotion should know if model or research monoculture is distorting confidence.'),
   rootEdge('PROMOTION_GOVERNANCE','RELIABILITY_SECURITY_OPERATIONS','GUARD','Promotion evidence must be reproducible and operationally trustworthy.'),
   rootEdge('PROMOTION_GOVERNANCE','HUMAN_OVERSIGHT_CONTROL','GUARD','Governed transitions may require explicit operator authority.'),
-  rootEdge('HUMAN_OVERSIGHT_CONTROL','RELIABILITY_SECURITY_OPERATIONS','HARD','Controls and freezes require trustworthy operational state.'),
+  rootEdge('HUMAN_OVERSIGHT_CONTROL','RELIABILITY_SECURITY_OPERATIONS','SUPPORT','Operational health improves oversight, but operator authority must remain available during degraded state.'),
   rootEdge('EXPLAINABILITY_OPERATOR','EVIDENCE_INTELLIGENCE','HARD','Explanations require provenance rather than narrative reconstruction.'),
   rootEdge('EXPLAINABILITY_OPERATOR','FAILURE_UNCERTAINTY','HARD','Operator views must show blockers, unknowns and invalidation.'),
   rootEdge('EXPLAINABILITY_OPERATOR','META_COGNITION','SUPPORT','Operator surfaces should expose BIGGJ self-observation when available.')
@@ -140,7 +140,7 @@ export const BIGGJ_SKILL_DEPENDENCIES=deepFreeze([
   edge('FORCED_FLOW','CONSTRAINT_MAP','HARD','Forced actions require a binding constraint.'),
   edge('FORCED_FLOW','DERIVATIVES_INTELLIGENCE','SUPPORT','Derivatives telemetry can strengthen forced-flow evidence.'),
   edge('LIQUIDITY_ELASTICITY','CANONICAL_WORLD_STATE','HARD','Elasticity is conditional on current liquidity state.'),
-  edge('LIQUIDITY_ELASTICITY','LIQUIDITY_MAP','SUPPORT','Execution-level liquidity maps improve elasticity estimation.'),
+  edge('LIQUIDITY_MAP','LIQUIDITY_ELASTICITY','SUPPORT','Mechanism-level liquidity elasticity can enrich the downstream execution liquidity map.'),
 
   edge('PARTICIPANT_CLASSIFICATION','CANONICAL_WORLD_STATE','HARD','Participant archetypes are inferred from state and behavior.'),
   edge('PARTICIPANT_CLASSIFICATION','PROVENANCE_CHAIN','HARD','Classification evidence must remain inspectable.'),
@@ -178,7 +178,7 @@ export const BIGGJ_SKILL_DEPENDENCIES=deepFreeze([
   edge('FAILURE_MODE_DISCOVERY','UNCERTAINTY_DECOMPOSITION','HARD','Residual uncertainty guides failure search.'),
   edge('UNKNOWN_UNKNOWN_PROBES','FAILURE_MODE_DISCOVERY','HARD','Unknown-unknown probes originate from unexplained failures.'),
   edge('NEGATIVE_KNOWLEDGE','DETERMINISTIC_REPLAY','HARD','No-edge contexts require reproducible comparison.'),
-  edge('NEGATIVE_KNOWLEDGE','DECISION_QUALITY_VS_OUTCOME','HARD','Negative knowledge must separate process from realized luck.'),
+  edge('NEGATIVE_KNOWLEDGE','FAILURE_MODE_DISCOVERY','HARD','No-edge contexts should emerge from repeated reproducible failure modes rather than realized losses alone.'),
 
   edge('NO_TRADE_BASELINE','DETERMINISTIC_REPLAY','HARD','No-trade opportunity cost requires a reproducible baseline.'),
   edge('OPPORTUNITY_DISCOVERY','CANONICAL_WORLD_STATE','HARD','Search requires comparable market states.'),
@@ -288,7 +288,6 @@ export const BIGGJ_SKILL_DEPENDENCIES=deepFreeze([
   edge('CHANGE_REVIEW','VERSIONED_CANDIDATES','HARD','Material changes need immutable versions.'),
   edge('HUMAN_APPROVAL_GATE','CHANGE_REVIEW','HARD','Approval requires an inspectable change.'),
   edge('HUMAN_APPROVAL_GATE','REPRODUCIBLE_PROMOTION_AUDIT','GUARD','Approval cannot substitute for failed scientific evidence.'),
-  edge('EMERGENCY_FREEZE','SERVICE_HEALTH_OBSERVABILITY','HARD','Emergency control needs trustworthy health state.'),
   edge('OPERATOR_OVERRIDE_AUDIT','PERMISSION_BOUNDARIES','HARD','Override authority must be explicit.'),
   edge('OPERATOR_OVERRIDE_AUDIT','PROVENANCE_CHAIN','HARD','Override records require immutable provenance.'),
   edge('MISSION_CONSTRAINT_MONITOR','SELF_MODEL','HARD','Mission drift requires visibility into actual system behavior.'),
