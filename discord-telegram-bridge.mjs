@@ -163,17 +163,26 @@ export function buildDiscordMarketOverviewPayload(snapshot={}){
   return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Primary offen: **'+String(p?.openPositions??0)+'**','Research offen: **'+String(research?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordDataHealthPayload(snapshot={}){
-  const h=snapshot?.health||{},r=h?.operationalReadiness||{};
+  const h=snapshot?.health||{},r=h?.operationalReadiness||{},coverage=h?.researchCoverage||{};
   const hard=Array.isArray(r?.hardReasons)?r.hardReasons:[];
   const warnings=Array.isArray(r?.warningReasons)?r.warningReasons:[];
+  const topSources=(Array.isArray(coverage?.topBlockedSources)?coverage.topBlockedSources:[])
+    .slice(0,6).map(x=>'• '+String(x.id)+' · '+String(x.count)).join('\n')||'none';
+  const worst=(Array.isArray(coverage?.worstSymbols)?coverage.worstSymbols:[])
+    .slice(0,6).map(x=>'• '+String(x.symbol)+' · '+String(x.status)+' · '+Math.round(Number(x.coverage||0)*100)+'% · '+String(x.blockedFeatures||0)+' blocked').join('\n')||'none';
   return {embeds:[{title:'TCX // DATA HEALTH',description:'Point-in-time Research Pipeline',fields:[
     {name:'Market Fabric',value:yesNo(h?.marketDataFabric?.healthy),inline:true},
     {name:'Episode Memory',value:yesNo(h?.episodeMemory?.healthy),inline:true},
     {name:'Evidence Store',value:yesNo(h?.evidenceHistory?.healthy),inline:true},
     {name:'Forecast Runtime',value:yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY')),inline:true},
+    {name:'Research Coverage',value:Number.isFinite(Number(coverage?.averageCoverage))?Math.round(Number(coverage.averageCoverage)*100)+'%':'—',inline:true},
+    {name:'Blocked Features',value:String(coverage?.blockedFeatures??'—'),inline:true},
     {name:'Hard Blocks',value:String(hard.length),inline:true},
     {name:'Warnings',value:String(warnings.length),inline:true},
-    {name:'Current blockers',value:(hard.concat(warnings).slice(0,6).join('\n')||'none').slice(0,1024),inline:false}
+    {name:'Coverage State',value:'Healthy '+String(coverage?.healthy??0)+' · Degraded '+String(coverage?.degraded??0)+' · Blocked '+String(coverage?.blocked??0),inline:false},
+    {name:'Top Research Blockers',value:topSources.slice(0,1024),inline:false},
+    {name:'Worst Coverage',value:worst.slice(0,1024),inline:false},
+    {name:'Current Runtime Blockers',value:(hard.concat(warnings).slice(0,6).join('\n')||'none').slice(0,1024),inline:false}
   ],footer:{text:MARKERS.data},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 function closedTradePayload(position={}){

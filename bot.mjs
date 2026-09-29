@@ -146,6 +146,7 @@ import { openResearchDataPlane, appendResearchDataPlane, researchFeaturesAsOf, r
 import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
+import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
@@ -441,6 +442,7 @@ const sessions = new Map();
 const witnessCache = new Map();
 const radarCache = new Map();
 const researchAlertContextCache = new Map();
+const researchCoverageDiagnostics = new Map();
 const observability = createObservability({sampleLimit:500});
 const tradeDiscoveryDiagnostics=createTradeDiscoveryDiagnostics({maxSymbols:32});
 const marketDataProvider=createMarketDataProvider({
@@ -832,7 +834,8 @@ try {
       forecastConfigHash:sha256(forecastRuntime.engine.configSnapshot()),
       forecastProduct:FORECAST_PRODUCT_VERSION,
       researchDataPlane:RESEARCH_DATA_PLANE_VERSION,
-      researchDataGovernance:RESEARCH_DATA_GOVERNANCE_VERSION
+      researchDataGovernance:RESEARCH_DATA_GOVERNANCE_VERSION,
+      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -5781,6 +5784,25 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       forecastInputFingerprint:input.inputFingerprint,
       requireGoverned:true
     });
+    const coverageDiagnostic=buildResearchCoverageDiagnostic(
+      researchDependencyGraph,
+      researchGovernanceView,
+      {symbol,observedAt:Date.now()}
+    );
+    researchCoverageDiagnostics.set(symbol,coverageDiagnostic);
+    if(coverageDiagnostic.status!=='HEALTHY'){
+      console.log('[TCX_RESEARCH_COVERAGE_DOCTOR]',JSON.stringify({
+        symbol:coverageDiagnostic.symbol,
+        status:coverageDiagnostic.status,
+        gate:coverageDiagnostic.gate,
+        coverage:coverageDiagnostic.coverage,
+        blockedFeatures:coverageDiagnostic.blockedFeatures,
+        degradedFeatures:coverageDiagnostic.degradedFeatures,
+        impactedSourceKeys:coverageDiagnostic.impactedSourceKeys.slice(0,8),
+        blockedFeatureIds:coverageDiagnostic.blockedFeatureIds.slice(0,12),
+        graphReasons:coverageDiagnostic.graphReasons.slice(0,8)
+      }));
+    }
   }catch(err){
     recordError(observability,{
       scope:'research_dependency_graph.build',
@@ -8264,6 +8286,8 @@ function currentOperationalReadiness(){
 }
 
 function missionControlData(){
+ const now=Date.now();
+ const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
  const health={
   ok:true,
   operationalReadiness:currentOperationalReadiness(),
@@ -8273,10 +8297,10 @@ function missionControlData(){
   institutionalForecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
+  researchCoverage,
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
- const now=Date.now();
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];

@@ -126,6 +126,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'telegram-ui-runtime.mjs',
   'forecast-cold-archive.mjs',
   'research-dependency-graph.mjs',
+  'research-coverage-doctor.mjs',
   'research-intelligence-features.mjs',
   'research-provider-fanout.mjs',
   'model-promotion-review-service.mjs',

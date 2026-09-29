@@ -354,7 +354,8 @@ export function researchDataGovernanceSummary(state,{now=Date.now()}={}){
       lastDecision:src?.lastDecision??null,
       consecutiveViolations:Number(src?.consecutiveViolations||0),
       consecutiveHealthy:Number(src?.consecutiveHealthy||0),
-      semanticReviews:Number(src?.totalSemanticReviews||0)
+      semanticReviews:Number(src?.totalSemanticReviews||0),
+      lastReasons:Object.freeze((Array.isArray(src?.lastReasons)?src.lastReasons:[]).map(cleanReason).slice(-8))
     });
   }
   const catalog=researchFeatureCatalogManifest();
