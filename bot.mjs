@@ -269,7 +269,14 @@ const shadowCompetitionWorkerMode=['0','OFF','FALSE','DISABLED'].includes(shadow
 const shadowCompetitionServingWorkerEnabled=shadowCompetitionWorkerMode!=='OFF';
 const shadowCompetitionAutoHeapMb=Math.max(220,Math.min(280,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_HEAP_MB||260)));
 const shadowCompetitionAutoRssMb=Math.max(450,Math.min(700,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_RSS_MB||620)));
-const shadowCompetitionAutoExternalMb=Math.max(32,Math.min(128,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_EXTERNAL_MB||96)));
+const shadowCompetitionAutoExternalMb=Math.max(24,Math.min(
+  servingGuardExternalMb,
+  Number(process.env.TCX_SHADOW_COMPETITION_AUTO_EXTERNAL_MB||servingGuardExternalMb)
+));
+const shadowCompetitionHardExternalMb=Math.max(
+  servingGuardExternalMb,
+  Math.min(256,Number(process.env.TCX_SHADOW_COMPETITION_HARD_EXTERNAL_MB||160))
+);
 const shadowCompetitionHistoryRows=Math.max(500,Math.min(2000,Math.floor(Number(process.env.TCX_SHADOW_COMPETITION_HISTORY_ROWS||1200)||1200)));
 const configuredReplicaCount = Math.max(1, Math.floor(Number(process.env.TCX_REPLICA_COUNT || 1) || 1));
 const persistentStorageMounted = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.TCX_PERSISTENCE_CONFIRMED === '1');
@@ -7285,8 +7292,11 @@ async function autoLearnForecastWatcher() {
       console.log('autolearn memory backoff',JSON.stringify({
         delayMs:autoLearnMemoryBackoffMs,
         resumeHeapMb:autoLearnResumeHeapMb,
+        resumeRssMb:autoLearnResumeRssMb,
+        resumeExternalMb:autoLearnResumeExternalMb,
         heapUsedMb:Math.round(before.heapUsed/1024/1024),
-        rssMb:Math.round(before.rss/1024/1024)
+        rssMb:Math.round(before.rss/1024/1024),
+        externalMb:Math.round(before.external/1024/1024)
       }));
       await sleep(autoLearnMemoryBackoffMs);
       const after=process.memoryUsage();
@@ -7375,7 +7385,8 @@ async function shadowCompetitionWatcher(){
           autoRssMb:shadowCompetitionAutoRssMb,
           autoExternalMb:shadowCompetitionAutoExternalMb,
           hardHeapMb:300,
-          hardRssMb:900
+          hardRssMb:900,
+          hardExternalMb:shadowCompetitionHardExternalMb
         });
         shadowCompetitionWorkerLastDecision={...admission,at:Date.now()};
         if(!admission.allowed){
@@ -7973,6 +7984,17 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   telegramDispatcher:TELEGRAM_UPDATE_DISPATCHER_VERSION,
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   shadowResearchWorkerAdmission:FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
+  autoLearnMemoryAdmission:AUTOLEARN_MEMORY_ADMISSION_VERSION,
+  backgroundMemoryLimits:{
+    autoLearn:{
+      issue:{heapUsedMb:autoLearnHeapHeadroomMb,rssMb:autoLearnRssHeadroomMb,externalMb:autoLearnExternalHeadroomMb},
+      resume:{heapUsedMb:autoLearnResumeHeapMb,rssMb:autoLearnResumeRssMb,externalMb:autoLearnResumeExternalMb}
+    },
+    shadowWorker:{
+      auto:{heapUsedMb:shadowCompetitionAutoHeapMb,rssMb:shadowCompetitionAutoRssMb,externalMb:shadowCompetitionAutoExternalMb},
+      hard:{heapUsedMb:300,rssMb:900,externalMb:shadowCompetitionHardExternalMb}
+    }
+  },
   shadowResearchWorkerMode:shadowCompetitionWorkerMode,
   shadowResearchWorkerState:shadowCompetitionServingWorkerEnabled?(shadowCompetitionWorkerMode==='AUTO'?'ADAPTIVE':'ENABLED'):'DISABLED',
   coverageCurriculum:coverageCurriculumEnabled?'ENABLED':'DISABLED',
