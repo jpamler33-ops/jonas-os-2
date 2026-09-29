@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import readline from 'node:readline';
 
@@ -32,6 +32,58 @@ function indexAuditIdentity(index,record){
     idField,
     id:String(id)
   });
+}
+
+export const AUDIT_LEDGER_CHECKPOINT_VERSION='TCX_AUDIT_LEDGER_CHECKPOINT_V1';
+
+function auditCheckpointCore(value){
+  const core={...value};
+  delete core.fingerprint;
+  return core;
+}
+
+async function readAuditLedgerCheckpoint(filePath){
+  try{
+    const value=JSON.parse(await readFile(filePath+'.checkpoint.json','utf8'));
+    if(value?.version!==AUDIT_LEDGER_CHECKPOINT_VERSION) throw new Error('AUDIT_LEDGER_CHECKPOINT_VERSION_UNSUPPORTED');
+    if(value?.fingerprint!==sha256(auditCheckpointCore(value))) throw new Error('AUDIT_LEDGER_CHECKPOINT_FINGERPRINT_MISMATCH');
+    const seq=Number(value.seq);
+    const totalRecords=Number(value.totalRecords);
+    if(!Number.isInteger(seq)||seq<0||!Number.isInteger(totalRecords)||totalRecords<seq) throw new Error('AUDIT_LEDGER_CHECKPOINT_SEQUENCE_INVALID');
+    if(typeof value.tailHash!=='string'||value.tailHash.length!==64) throw new Error('AUDIT_LEDGER_CHECKPOINT_TAIL_INVALID');
+    const tail=Array.isArray(value.retainedRecords)?value.retainedRecords:[];
+    if(tail.length){
+      let previous=null;
+      for(const record of tail){
+        if(record.payloadHash!==sha256(record.payload)) throw new Error('AUDIT_LEDGER_CHECKPOINT_PAYLOAD_HASH_MISMATCH');
+        if(record.recordHash!==hashLedgerRecord(record)) throw new Error('AUDIT_LEDGER_CHECKPOINT_RECORD_HASH_MISMATCH');
+        if(previous&&record.prevHash!==previous.recordHash) throw new Error('AUDIT_LEDGER_CHECKPOINT_TAIL_CHAIN_MISMATCH');
+        previous=record;
+      }
+      const last=tail[tail.length-1];
+      if(Number(last.seq)!==seq||String(last.recordHash)!==String(value.tailHash)) throw new Error('AUDIT_LEDGER_CHECKPOINT_TAIL_MISMATCH');
+    }else if(seq!==0){
+      throw new Error('AUDIT_LEDGER_CHECKPOINT_TAIL_MISSING');
+    }
+    return value;
+  }catch(err){
+    if(err?.code==='ENOENT') return null;
+    throw err;
+  }
+}
+
+function seedAuditIdentityIndex(index,rows){
+  for(const row of Array.isArray(rows)?rows:[]){
+    if(!row?.kind||!row?.idField||row?.id===undefined||row?.id===null) continue;
+    index.set(auditIdentityKey(row.kind,row.idField,row.id),{
+      seq:Number(row.seq),
+      recordHash:String(row.recordHash||''),
+      occurredAt:Number(row.occurredAt),
+      kind:String(row.kind),
+      idField:String(row.idField),
+      id:String(row.id)
+    });
+  }
 }
 
 export function findAuditRecordIdentity(ledger,{kind,idField,id}={}){
@@ -295,9 +347,40 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000,maxFileB
   const keep=Math.max(1,Math.floor(Number(maxInMemoryRecords)||1000));
   const maxBytes=Math.max(1,Math.floor(Number(maxFileBytes)||64*1024*1024));
   const ring=new Array(keep);
-  let retainedCount=0,ringPos=0,total=0,fileBytes=0;
+  let retainedCount=0,ringPos=0,fileBytes=0;
   const identityIndex=new Map();
-  let prev=GENESIS,expectedSeq=1;
+
+  let checkpoint=null;
+  try{
+    checkpoint=await readAuditLedgerCheckpoint(filePath);
+  }catch(err){
+    return {
+      filePath,
+      healthy:false,
+      verification:{ok:false,error:'LEDGER_CHECKPOINT_FAILURE',detail:err instanceof Error?err.message:String(err)},
+      seq:0,
+      tailHash:GENESIS,
+      totalRecords:0,
+      maxInMemoryRecords:keep,
+      maxFileBytes:maxBytes,
+      fileBytes:0,
+      writeBlocked:true,
+      identityIndex,
+      records:[],
+      archiveCheckpoint:null
+    };
+  }
+
+  seedAuditIdentityIndex(identityIndex,checkpoint?.identities);
+  for(const record of (checkpoint?.retainedRecords||[]).slice(-keep)){
+    ring[ringPos]=record;
+    ringPos=(ringPos+1)%keep;
+    retainedCount=Math.min(retainedCount+1,keep);
+  }
+
+  let prev=String(checkpoint?.tailHash||GENESIS);
+  let expectedSeq=Number(checkpoint?.seq||0)+1;
+  let total=Number(checkpoint?.totalRecords||checkpoint?.seq||0);
   let healthy=true,error=null,detail=null;
 
   try{
@@ -340,33 +423,23 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000,maxFileB
       total++;
     }
   }catch(err){
-    if(err?.code==='ENOENT'){
+    if(err?.code!=='ENOENT'){
       return {
         filePath,
-        healthy:true,
-        verification:{ok:true,count:0,tailHash:GENESIS,lastSeq:0,retainedRecords:0},
-        seq:0,
-        tailHash:GENESIS,
-        totalRecords:0,
+        healthy:false,
+        verification:{ok:false,error:'LEDGER_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
+        seq:expectedSeq-1,
+        tailHash:prev,
+        totalRecords:total,
         maxInMemoryRecords:keep,
         maxFileBytes:maxBytes,
         fileBytes,
-        writeBlocked:false,
+        writeBlocked:true,
         identityIndex,
-        records:[]
+        records:[],
+        archiveCheckpoint:checkpoint
       };
     }
-    return {
-      filePath,
-      healthy:false,
-      verification:{ok:false,error:'LEDGER_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
-      seq:0,
-      tailHash:GENESIS,
-      totalRecords:0,
-      maxInMemoryRecords:keep,
-      identityIndex,
-      records:[]
-    };
   }
 
   if(!healthy){
@@ -374,28 +447,31 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000,maxFileB
       filePath,
       healthy:false,
       verification:{ok:false,error:error||'LEDGER_READ_OR_PARSE_FAILURE',detail},
-      seq:0,
-      tailHash:GENESIS,
+      seq:expectedSeq-1,
+      tailHash:prev,
       totalRecords:total,
       maxInMemoryRecords:keep,
       maxFileBytes:maxBytes,
       fileBytes,
       writeBlocked:true,
       identityIndex,
-      records:[]
+      records:[],
+      archiveCheckpoint:checkpoint
     };
   }
 
-  const records=total<=keep
+  const records=total<=keep&&Number(checkpoint?.seq||0)===0
     ?ring.slice(0,retainedCount)
-    :[...ring.slice(ringPos),...ring.slice(0,ringPos)];
+    :retainedCount<keep
+      ?ring.slice(0,retainedCount)
+      :[...ring.slice(ringPos),...ring.slice(0,ringPos)];
   const writeBlocked=fileBytes>=maxBytes;
   return {
     filePath,
     healthy:!writeBlocked,
     verification:writeBlocked
-      ?{ok:false,error:'LEDGER_SIZE_LIMIT',detail:'audit ledger reached configured byte cap',count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length}
-      :{ok:true,count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length},
+      ?{ok:false,error:'LEDGER_SIZE_LIMIT',detail:'audit ledger reached configured active-segment byte cap',count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length}
+      :{ok:true,count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length,archivedSegments:Number(checkpoint?.archivedSegments?.length||0)},
     seq:expectedSeq-1,
     tailHash:prev,
     totalRecords:total,
@@ -404,7 +480,8 @@ export async function openAuditLedger(filePath,{maxInMemoryRecords=1000,maxFileB
     fileBytes,
     writeBlocked,
     identityIndex,
-    records
+    records,
+    archiveCheckpoint:checkpoint
   };
 }
 
