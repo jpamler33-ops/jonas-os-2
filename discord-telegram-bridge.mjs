@@ -460,6 +460,55 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await c.send({embeds:[{title:'TCX // STATUS CHANGE',description:(changes.join('\n')||'System state changed').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}});
     state.lastAlertAt=Date.now();
   }
+  async function upsertThesisChannelCard(position){
+    const channel=channelCache.get('theses'); if(!channel)return null;
+    const id=String(position?.positionId||''); if(!id)return null;
+    let msg=null;
+    const cached=thesisCards.get(id);
+    if(cached) msg=await channel.messages.fetch(cached).catch(()=>null);
+    if(!msg){
+      const recent=await channel.messages.fetch({limit:50}).catch(()=>null);
+      msg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    }
+    if(msg) await msg.edit(biggjThesisPayload(position));
+    else msg=await channel.send(biggjThesisPayload(position));
+    thesisCards.set(id,msg.id);
+    return msg;
+  }
+  async function ensureTradeThreadVisual(thread,position,prior={}){
+    if(!thread||!thread.isTextBased())return prior;
+    const id=String(position?.positionId||'');
+    const recent=await thread.messages.fetch({limit:50}).catch(()=>null);
+    let thesisMsg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    if(thesisMsg) await thesisMsg.edit(biggjThesisPayload(position));
+    else thesisMsg=await thread.send(biggjThesisPayload(position));
+
+    let visualMsg=prior?.visualMessageId?await thread.messages.fetch(prior.visualMessageId).catch(()=>null):null;
+    if(!visualMsg) visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
+    const now=Date.now(),due=!prior?.lastVisualAt||now-Number(prior.lastVisualAt)>120000;
+    if(!visualMsg){
+      visualMsg=await thread.send({content:'BIGGJ // TRADE VISUAL\nRendering live market state …',allowedMentions:{parse:[]}});
+      await renderCoreIntoMessage(thread,visualMsg,'superchart:'+String(position.symbol)+':FULL:5m',{forcePhoto:true});
+    }else if(due){
+      await renderCoreIntoMessage(thread,visualMsg,'superchart:'+String(position.symbol)+':FULL:5m',{forcePhoto:true});
+    }
+    return {...prior,thesisMessageId:thesisMsg?.id||null,visualMessageId:visualMsg?.id||null,lastVisualAt:now};
+  }
+  async function syncThesisDashboard(positions){
+    const active=new Set();
+    for(const p of (positions||[]).slice(0,20)){
+      const id=String(p?.positionId||''); if(!id)continue; active.add(id);
+      await upsertThesisChannelCard(p).catch(err=>fail('thesis-card:'+id,err));
+    }
+    for(const [id,messageId] of [...thesisCards])if(!active.has(id)){
+      const channel=channelCache.get('theses');
+      if(channel){
+        const msg=await channel.messages.fetch(messageId).catch(()=>null);
+        if(msg)await msg.edit({content:'',embeds:[...(msg.embeds||[])].map(e=>{const x=e.toJSON();x.description=(x.description||'')+'\n\n**THESIS CLOSED / ARCHIVED**';return x;}),components:[],allowedMentions:{parse:[]}}).catch(()=>null);
+      }
+      thesisCards.delete(id);
+    }
+  }
   async function syncTradeCards(){
     const c=channelCache.get('live-trades'); if(!c)return;
     const snapshot=await safeMissionSnapshot();
