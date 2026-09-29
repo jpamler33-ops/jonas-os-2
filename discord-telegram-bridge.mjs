@@ -83,10 +83,11 @@ function percent(value){const n=Number(value);return Number.isFinite(n)?(n*100).
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
 function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**SCHNELLSTART**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/deep BTC\` · Deep Dive','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
-  const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
+  const h=snapshot?.health||{},p=snapshot?.portfolio||{},a=p?.activity||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
   return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
-    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'Open Shadow',value:String(p?.openPositions??0),inline:true},{name:'Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Closed Trades',value:String(p?.closedTrades??0),inline:true},{name:'Net PnL',value:money(p?.netPnlQuote),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'Primary Open',value:String(p?.openPositions??0),inline:true},{name:'Research Open',value:String(a?.researchOpenPositions??0),inline:true},
+    {name:'Primary Equity',value:money(p?.equityQuote),inline:true},{name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},{name:'Research PnL',value:money(a?.researchNetPnlQuote),inline:true},
+    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},{name:'Research Closed',value:String(a?.researchClosedTrades??0),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
     {name:'Forecast Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},{name:'Episodes',value:String(h?.episodeMemory?.total??'—'),inline:true},{name:'Evidence',value:String(h?.evidenceHistory?.total??'—'),inline:true},
     {name:'Execution',value:'SHADOW_ONLY',inline:true},{name:'Live Orders',value:'BLOCKED',inline:true}
   ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
@@ -102,14 +103,17 @@ export function buildDiscordSystemPayload(snapshot={}){
 }
 
 export function buildDiscordPerformancePayload(snapshot={}){
-  const p=snapshot?.portfolio||{};
-  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Simulation / Research · keine echten Orders**',fields:[
-    {name:'Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Net PnL',value:money(p?.netPnlQuote),inline:true},
-    {name:'Return',value:percent(p?.returnPct),inline:true},
-    {name:'Open',value:String(p?.openPositions??0),inline:true},
-    {name:'Closed',value:String(p?.closedTrades??0),inline:true},
+  const p=snapshot?.portfolio||{},a=p?.activity||{};
+  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance + getrennte Research/Learning-Aktivität · keine echten Orders**',fields:[
+    {name:'Primary Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},
+    {name:'Primary Return',value:percent(p?.returnPct),inline:true},
+    {name:'Primary Open',value:String(p?.openPositions??0),inline:true},
+    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},
     {name:'Winrate',value:percent(p?.winRate),inline:true},
+    {name:'Research Open',value:String(a?.researchOpenPositions??0),inline:true},
+    {name:'Research Closed',value:String(a?.researchClosedTrades??0),inline:true},
+    {name:'Research PnL',value:money(a?.researchNetPnlQuote),inline:true},
     {name:'Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
     {name:'Expectancy',value:money(p?.expectancyQuote),inline:true},
     {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
@@ -124,8 +128,8 @@ export function buildDiscordPerformancePayload(snapshot={}){
   ],allowedMentions:{parse:[]}};
 }
 export function buildDiscordMarketOverviewPayload(snapshot={}){
-  const p=snapshot?.portfolio||{},h=snapshot?.health||{};
-  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Shadow Positionen: **'+String(p?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+  const p=snapshot?.portfolio||{},a=p?.activity||{},h=snapshot?.health||{};
+  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Primary Positionen: **'+String(p?.openPositions??0)+'**','Research/Learning Positionen: **'+String(a?.researchOpenPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordDataHealthPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{};
@@ -149,7 +153,8 @@ function closedTradePayload(position={}){
     {name:'Net PnL',value:Number.isFinite(pnl)?money(pnl):'—',inline:true},
     {name:'Return',value:Number.isFinite(ret)?percent(ret):'—',inline:true},
     {name:'Reason',value:String(position?.closeReason||'UNKNOWN'),inline:true},
-    {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true}
+    {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true},
+    {name:'Mode',value:String(position?.entryMode||'STANDARD'),inline:true}
   ],footer:{text:'CLOSED:'+String(position?.positionId||'UNKNOWN')},timestamp:new Date(Number(position?.closedAt)||Date.now()).toISOString()}],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
 }
 function shadowTradePayload(position={}){
@@ -423,8 +428,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function syncTradeCards(){
     const c=channelCache.get('live-trades'); if(!c)return;
     const snapshot=await safeMissionSnapshot();
-    const positions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
-    const recentClosed=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
+    const primaryPositions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
+    const researchPositions=Array.isArray(snapshot?.portfolio?.researchPositions)?snapshot.portfolio.researchPositions:[];
+    const primaryClosed=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
+    const researchClosed=Array.isArray(snapshot?.portfolio?.researchRecentClosed)?snapshot.portfolio.researchRecentClosed:[];
+    const positions=[...new Map([...primaryPositions,...researchPositions].filter(p=>p?.positionId).map(p=>[String(p.positionId),p])).values()];
+    const recentClosed=[...new Map([...primaryClosed,...researchClosed].filter(p=>p?.positionId).map(p=>[String(p.positionId),p])).values()]
+      .sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0));
     const active=new Set();
     const perms=c.permissionsFor(client.user),canThreads=Boolean(perms?.has(PermissionFlagsBits.CreatePublicThreads)&&perms?.has(PermissionFlagsBits.SendMessagesInThreads));
     for(const p of positions.slice(0,20)){
