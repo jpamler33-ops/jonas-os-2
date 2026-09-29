@@ -62,7 +62,7 @@ import {
   shadowPortfolioPeriodStats, shadowPortfolioStatistics,
   SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
 } from './shadow-portfolio-ledger.mjs';
-import { deriveBiggjThesisEvidence, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
+import { deriveBiggjThesisEvidence, deriveBiggjPrimaryLeveragePolicy, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
 import {
   evaluateShadowCapitalAcademy, academyTradeBudget,
   SHADOW_CAPITAL_ACADEMY_VERSION
@@ -1772,9 +1772,13 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     return {...decision,placed:false,reason:'FAILURE_MEMORY_AVOID',opportunityAllocation};
   }
   const leverageLab=buildLeverageCounterfactualLab(shadowPortfolioLedger);
-  const requestedShadowLeverage=leverageLab.evidenceReady
-    ? Math.min(isMeme?2:3,leverageLab.suggestedShadowLeverage)
+  const leverageExperimentSuggestion=leverageLab.evidenceReady
+    ? Math.min(isMeme?2:3,Number(leverageLab.suggestedShadowLeverage)||1)
     : 1;
+  const primaryLeveragePolicy=deriveBiggjPrimaryLeveragePolicy({
+    suggestedLeverage:leverageExperimentSuggestion
+  });
+  const requestedShadowLeverage=primaryLeveragePolicy.requestedLeverage;
   const leverageRisk=evaluateShadowLeverageRisk({
     requestedLeverage:requestedShadowLeverage,
     assetClass,
@@ -1848,7 +1852,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     return {...decision,placed:false,reason:'DAILY_SYMBOL_CAP'};
   }
 
-  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,setupMemory:SETUP_PERFORMANCE_MEMORY_VERSION,setupType:setup.setupType,setupScore:setup.score,setupEvidenceStatus:setupEvidence.status,setupEvidenceMultiplier}});
+  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,tradingPolicyVersion:decision.tradingPolicyVersion,horizonSelection:decision.horizonSelection,primaryLeveragePolicy:primaryLeveragePolicy.leveragePolicy,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,setupMemory:SETUP_PERFORMANCE_MEMORY_VERSION,setupType:setup.setupType,setupScore:setup.score,setupEvidenceStatus:setupEvidence.status,setupEvidenceMultiplier}});
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
@@ -1875,6 +1879,10 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
       leverageLabEvidenceReady:leverageLab.evidenceReady,
       leverageLabSamples:leverageLab.samples,
       leverageLabSuggested:leverageLab.suggestedShadowLeverage,
+      primaryLeveragePolicyVersion:primaryLeveragePolicy.version,
+      primaryLeveragePolicy:primaryLeveragePolicy.leveragePolicy,
+      leverageExperimentSuggested:primaryLeveragePolicy.suggestedResearchLeverage,
+      leverageExperimentDisposition:primaryLeveragePolicy.suggestionDisposition,
       leverage:leverageRisk.allowedLeverage,
       marginQuote:effectiveMarginQuote,
       requestedMarginQuote:marginQuote,
@@ -1933,6 +1941,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     marginQuote:effectiveMarginQuote,
     requestedMarginQuote:marginQuote,
     leverage:leverageRisk.allowedLeverage,
+    leveragePolicy:primaryLeveragePolicy.leveragePolicy,
+    leverageExperimentSuggested:primaryLeveragePolicy.suggestedResearchLeverage,
+    leverageExperimentDisposition:primaryLeveragePolicy.suggestionDisposition,
     portfolioRiskMultiplier:portfolioRisk.multiplier,
     portfolioRiskReasons:portfolioRisk.reasons,
     opportunityScore:opportunityAllocation.score,
@@ -1957,7 +1968,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     orderId:order.id,
     execution:'SHADOW_ONLY'
   }));
-  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,leverageLab,portfolioRisk,marginQuote:effectiveMarginQuote,requestedMarginQuote:marginQuote,leveragedExposureQuote};
+  return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,leverageLab,primaryLeveragePolicy,portfolioRisk,marginQuote:effectiveMarginQuote,requestedMarginQuote:marginQuote,leveragedExposureQuote};
 }
 
 

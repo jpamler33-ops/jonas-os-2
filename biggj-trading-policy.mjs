@@ -267,6 +267,21 @@ export function evaluateBiggjEntryAdmission({
   });
 }
 
+export function deriveBiggjPrimaryLeveragePolicy({suggestedLeverage=1}={}){
+  const suggested=Math.max(1,finite(suggestedLeverage,1));
+  return finalized({
+    version:BIGGJ_TRADING_POLICY_VERSION,
+    leveragePolicy:'PRIMARY_BASELINE_UNLEVERED',
+    requestedLeverage:1,
+    allowedLeverage:1,
+    suggestedResearchLeverage:suggested,
+    suggestionDisposition:suggested>1?'RESEARCH_ONLY':'BASELINE_MATCH',
+    experimentOnly:suggested>1,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  });
+}
+
 export function deriveBiggjShadowRiskBudget({
   equityQuote,
   assetClass='CORE',
