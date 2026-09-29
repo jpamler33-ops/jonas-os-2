@@ -86,7 +86,7 @@ test('primary horizon is a review point, not an automatic exit',()=>{
   const p=shadowPositionFromEntryOrder(entry());
   const atHorizon=markShadowPosition(p,book({bid:100.1}),{at:61_000,feeBps:0});
   assert.equal(atHorizon.trigger,null);
-  assert.equal(atHorizon.lifecyclePolicyVersion,'BIGGJ_TRADING_POLICY_V1');
+  assert.equal(atHorizon.position.lifecyclePolicyVersion,'BIGGJ_TRADING_POLICY_V1');
   assert.notEqual(atHorizon.lifecycle.action,'EXIT');
 
   const maxHold=markShadowPosition(atHorizon.position,book({bid:100.1}),{at:2_252_000,feeBps:0});
