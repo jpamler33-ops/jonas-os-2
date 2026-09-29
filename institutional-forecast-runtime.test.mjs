@@ -779,3 +779,24 @@ test('analogue diversity selection is outcome-blind',()=>{
   const b=selectIndependenceAwareAnalogs(make(true),{topK:6,windowMs:5*60_000,minIndependentEpisodes:3});
   assert.deepEqual(a.rows.map(x=>x.row.id),b.rows.map(x=>x.row.id));
 });
+
+
+test('gzip sidecar hashing is stable when a live journal row changes between serializations',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-stable-stream-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  r.snapshotProfilePending=false;
+  let reads=0;
+  const row={};
+  Object.defineProperty(row,'unstable',{
+    enumerable:true,
+    get(){ reads+=1; return reads; }
+  });
+  r.journal.entries.push(row);
+
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.equal(meta.journalStore.count,1);
+  assert.equal(r.healthy,true);
+  assert.equal(r.lastError,null);
+  assert.equal(reads,1);
+});
