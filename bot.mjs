@@ -99,7 +99,7 @@ import {
   buildAdversarialStressLab, stressDecisionForRule, adversarialStressSummary,
   ADVERSARIAL_STRESS_LAB_VERSION
 } from './adversarial-stress-lab.mjs';
-import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, globalIntelKeyboard, renderGlobalIntelFeed, parseProductCallback } from './telegram-product-ui.mjs';
+import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, deepDiveKeyboard, globalIntelKeyboard, renderGlobalIntelFeed, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
@@ -5928,6 +5928,26 @@ async function handle(update) {
     if (a.kind === 'HOME_SECTION') {
       await showHomeSection(chatId,messageId,a.section);
       await ack(q.id);
+      return;
+    }
+    if (a.kind === 'DEEP_DIVE') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      const text=[
+        'TCX // DEEP DIVE · '+a.symbol.replace('USDT','/USDT'),
+        '━━━━━━━━━━━━━━━━━━━━',
+        'ANALYSE-ZENTRALE',
+        '',
+        'Chart · MTF · Flow · Liquidation',
+        'Confluence · X-Ray · Events · Accuracy · Alerts',
+        '',
+        'Wähle eine Analyseebene.',
+        '',
+        'SHADOW_ONLY · REAL ORDERS BLOCKED'
+      ].join('\n');
+      await deliverTelegramTextCard(tg,chatId,textMessageId,{text,reply_markup:deepDiveKeyboard(a.symbol)});
+      await ack(q.id,'Deep Dive geöffnet');
       return;
     }
     if (a.kind === 'WHY') {

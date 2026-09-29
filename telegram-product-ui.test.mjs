@@ -5,6 +5,7 @@ import {
   homeKeyboard,
   marketsKeyboard,
   marketProductKeyboard,
+  deepDiveKeyboard,
   marketCardText,
   parseProductCallback,
   assertTelegramKeyboardSafe
@@ -36,6 +37,7 @@ test("all product keyboards satisfy Telegram callback limit",()=>{
   assert.equal(assertTelegramKeyboardSafe(homeKeyboard()),true);
   assert.equal(assertTelegramKeyboardSafe(marketsKeyboard(markets,1)),true);
   assert.equal(assertTelegramKeyboardSafe(marketProductKeyboard("BTCUSDT",{live:true,isFavorite:true})),true);
+  assert.equal(assertTelegramKeyboardSafe(deepDiveKeyboard("BTCUSDT")),true);
 });
 
 test("product callbacks are deterministic",()=>{
@@ -46,6 +48,7 @@ test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("home:academy"),{kind:"HOME_SECTION",section:"ACADEMY"});
   assert.deepEqual(parseProductCallback("home:coach"),{kind:"HOME_SECTION",section:"COACH"});
   assert.deepEqual(parseProductCallback("home:league"),{kind:"HOME_SECTION",section:"LEAGUE"});
+  assert.deepEqual(parseProductCallback("deep:BTCUSDT"),{kind:"DEEP_DIVE",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("forecast:BTCUSDT"),{kind:"FORECAST",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("xray:BTCUSDT"),{kind:"XRAY",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("mtf:BTCUSDT"),{kind:"MTF_MATRIX",symbol:"BTCUSDT"});
