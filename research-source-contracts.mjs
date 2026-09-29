@@ -18,7 +18,7 @@ const contracts=[
   {id:'FRED_WALCL_CURRENT',domain:'MACRO',source:'FRED_WALCL_CURRENT',minCompleteness:1,maxPublicationLagMs:864000000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_DFF_DGS10_DERIVED',domain:'MACRO',source:'FRED_DFF_DGS10_DERIVED',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'POLYMARKET_CONFIGURED',domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
-  {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},
+  {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:1800000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},
   {id:'PUBLIC_WALLET_COHORT',domain:'WALLET_COHORT',source:'PUBLIC_WALLET_COHORT_RPC',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null}
 ].map(x=>Object.freeze({...x}));
 
