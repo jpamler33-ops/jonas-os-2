@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   runForecastShadowEvaluationWorker,
   FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
+  FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
+  evaluateShadowWorkerAdmission,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced
 } from './forecast-shadow-evaluation-client.mjs';
@@ -35,4 +37,26 @@ test('shadow evaluation runs out-of-band and returns bounded state',async()=>{
   assert.equal(result.experimentGovernorState,null);
   assert.ok(ticks.length>0);
   assert.equal(FORECAST_SHADOW_EVALUATION_WORKER_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1');
+});
+
+
+test('adaptive shadow worker admission requires real serving headroom',()=>{
+  const healthy=evaluateShadowWorkerAdmission({mode:'AUTO',heapUsedMb:196,rssMb:359,externalMb:4});
+  assert.equal(healthy.allowed,true);
+  assert.equal(healthy.reason,'MEMORY_HEADROOM_AVAILABLE');
+
+  const adaptiveBlock=evaluateShadowWorkerAdmission({mode:'AUTO',heapUsedMb:270,rssMb:500,externalMb:4});
+  assert.equal(adaptiveBlock.allowed,false);
+  assert.equal(adaptiveBlock.reason,'ADAPTIVE_MEMORY_PRESSURE');
+
+  const externalBlock=evaluateShadowWorkerAdmission({mode:'AUTO',heapUsedMb:220,rssMb:500,externalMb:110});
+  assert.equal(externalBlock.allowed,false);
+  assert.equal(externalBlock.reason,'ADAPTIVE_MEMORY_PRESSURE');
+
+  const forcedStillFailsHard=evaluateShadowWorkerAdmission({mode:'ON',heapUsedMb:310,rssMb:500,externalMb:4});
+  assert.equal(forcedStillFailsHard.allowed,false);
+  assert.equal(forcedStillFailsHard.reason,'HARD_MEMORY_PRESSURE');
+
+  assert.equal(evaluateShadowWorkerAdmission({mode:'OFF',heapUsedMb:100,rssMb:200}).allowed,false);
+  assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V1');
 });
