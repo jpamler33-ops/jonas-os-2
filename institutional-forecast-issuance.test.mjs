@@ -105,3 +105,41 @@ test('missing trace provenance fails closed during issuance',()=>{
     traceContext:bad,generatedAt:1010
   }),/sha256/);
 });
+
+
+test('trace preserves concrete institutional hard and soft safety reasons',()=>{
+  const x=createInstitutionalForecastIssuance({
+    input:input(),forecastReport:report(),scientificValidity:science('PASS'),
+    dataSafety:{
+      state:'DEGRADED',
+      hardReasons:[],
+      softReasons:['STRICT_WITNESS_NOT_SATISFIED','HIGH_NOVELTY']
+    },
+    researchValidity:{status:'VALID'},
+    traceContext:ctx(),generatedAt:1010
+  });
+  assert.equal(x.trace.safety.state,'DEGRADED');
+  assert.ok(x.trace.safety.reasons.includes('STRICT_WITNESS_NOT_SATISFIED'));
+  assert.ok(x.trace.safety.reasons.includes('HIGH_NOVELTY'));
+  assert.ok(x.trace.safety.reasons.includes('DATA_DEGRADED'));
+  assert.equal(x.executionMode,'SHADOW_ONLY');
+  assert.equal(x.canExecute,false);
+  assert.equal(verifyInstitutionalForecastIssuance(x).ok,true);
+});
+
+test('trace safety reasons are de-duplicated without changing admission',()=>{
+  const x=createInstitutionalForecastIssuance({
+    input:input(),forecastReport:report(),scientificValidity:science('PASS'),
+    dataSafety:{
+      state:'DEGRADED',
+      softReasons:['HIGH_CONTRADICTION','HIGH_CONTRADICTION'],
+      warnings:['HIGH_CONTRADICTION']
+    },
+    researchValidity:{status:'VALID'},
+    traceContext:ctx(),generatedAt:1010
+  });
+  assert.equal(x.gate,'CAUTION');
+  assert.equal(x.trace.safety.reasons.filter(x=>x==='HIGH_CONTRADICTION').length,1);
+  assert.equal(x.executionMode,'SHADOW_ONLY');
+  assert.equal(x.canExecute,false);
+});
