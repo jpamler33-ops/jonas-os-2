@@ -6,6 +6,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 
 import { sha256 } from './institutional-kernel.mjs';
 import { evaluateModelPromotion, createModelPromotionRecord } from './model-promotion-ladder.mjs';
+import { evaluateEpistemicIntegrity } from './science-runtime/epistemic-integrity.mjs';
 import {
   openModelCandidateRegistry,
   registerModelCandidate,
@@ -24,6 +25,46 @@ function science(){
     executionMode:'SHADOW_ONLY',action:'ABSTAIN',canExecute:false
   };
   return {...core,fingerprint:sha256(core)};
+}
+
+function epistemic(){
+  return evaluateEpistemicIntegrity({
+    asOf:1000,
+    subjectId:'MODEL:CAND-1',
+    authorities:[
+      {authorityId:'AUTH-1',canonicalControllerId:'AUTH-CONTROL-1',observedAt:700,availableAt:710},
+      {authorityId:'AUTH-2',canonicalControllerId:'AUTH-CONTROL-2',observedAt:705,availableAt:715}
+    ],
+    resolverClaims:[
+      {
+        canonicalControllerId:'CTRL-1',resolverId:'RESOLVER-1',authorityId:'AUTH-1',
+        operatorDomain:'OP-1',trustDomain:'TRUST-1',controlDomain:'CONTROL-1',
+        signed:true,signatureValid:true,observedAt:800,availableAt:810,provenanceIds:['L1']
+      },
+      {
+        canonicalControllerId:'CTRL-1',resolverId:'RESOLVER-2',authorityId:'AUTH-2',
+        operatorDomain:'OP-2',trustDomain:'TRUST-2',controlDomain:'CONTROL-2',
+        signed:true,signatureValid:true,observedAt:820,availableAt:830,provenanceIds:['L2']
+      }
+    ],
+    claims:[{claimId:'CLAIM-1',assumptionIds:['A1'],evidenceIds:['E1','E2'],required:true}],
+    assumptions:[{assumptionId:'A1'}],
+    dependencies:[],
+    lineageFacts:[
+      {id:'L1',classification:'OBSERVED',parentIds:[],observedAt:600,availableAt:610},
+      {id:'L2',classification:'OBSERVED',parentIds:[],observedAt:620,availableAt:630}
+    ],
+    discoveryChannels:[
+      {channelId:'DISC-1',controllerId:'DISC-CONTROL-1',lineageIds:['L1'],observedAt:850,availableAt:860},
+      {channelId:'DISC-2',controllerId:'DISC-CONTROL-2',lineageIds:['L2'],observedAt:855,availableAt:865}
+    ],
+    evidence:[
+      {evidenceId:'E1',classification:'OBSERVED',observedAt:700,availableAt:720,provenanceIds:['L1']},
+      {evidenceId:'E2',classification:'OBSERVED',observedAt:730,availableAt:740,provenanceIds:['L2']},
+      {evidenceId:'ECAL',classification:'OBSERVED',observedAt:750,availableAt:760,provenanceIds:['L1','L2']}
+    ],
+    coverage:{observedLineages:2,expectedLineages:2,minimumCoverage:.8,calibrated:true,calibrationEvidenceId:'ECAL'}
+  });
 }
 
 function candidate(){
@@ -47,6 +88,7 @@ function promotionEvaluation(){
       source:'OFFLINE_BUILDER'
     },
     scientificValidity:science(),
+    epistemicIntegrity:epistemic(),
     software:{
       testsPassed:true,pitLeakagePassed:true,temporalOosPassed:true,
       deterministicReplayPassed:true,releaseManifestBound:true,rollbackReady:true
