@@ -82,12 +82,28 @@ test('take profit and stop loss triggers are deterministic',()=>{
   assert.equal(loss.trigger,'STOP_LOSS');
 });
 
-test('primary horizon is a review point, not an automatic exit',()=>{
+test('legacy primary position preserves frozen horizon exit behavior',()=>{
   const p=shadowPositionFromEntryOrder(entry());
-  const atHorizon=markShadowPosition(p,book({bid:100.1}),{at:61_000,feeBps:0});
+  const m=markShadowPosition(p,book({bid:100.1}),{at:61_000,feeBps:0});
+  assert.equal(m.trigger,'HORIZON_EXIT');
+  assert.equal(m.position.lifecyclePolicyVersion,'');
+});
+
+test('BIGGJ primary horizon is a review point, not an automatic exit',()=>{
+  const e=entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingPolicyVersion:'BIGGJ_TRADING_POLICY_V1',
+      horizonSelection:'BIGGJ_POLICY',
+      horizonMs:15*60_000,
+      horizonId:'15m'
+    }
+  });
+  const p=shadowPositionFromEntryOrder(e);
+  const atHorizon=markShadowPosition(p,book({bid:100.1}),{at:901_000,feeBps:0});
   assert.equal(atHorizon.trigger,null);
   assert.equal(atHorizon.position.lifecyclePolicyVersion,'BIGGJ_TRADING_POLICY_V1');
-  assert.notEqual(atHorizon.lifecycle.action,'EXIT');
+  assert.ok(['REVIEW','PROTECT','HOLD'].includes(atHorizon.lifecycle.action));
 
   const maxHold=markShadowPosition(atHorizon.position,book({bid:100.1}),{at:2_252_000,feeBps:0});
   assert.equal(maxHold.trigger,'MAX_HOLD_EXIT');
