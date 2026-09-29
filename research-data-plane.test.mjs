@@ -8,6 +8,7 @@ import {
   createResearchFeatureSnapshot,
   openResearchDataPlane,
   appendResearchDataPlane,
+  preflightResearchDataPlaneInputs,
   researchFeaturesAsOf,
   researchDataPlaneSummary
 } from './research-data-plane.mjs';
@@ -299,4 +300,42 @@ test('source event identity survives in-memory record eviction',async()=>{
     /SOURCE_EVENT_ID_CONFLICT:evicted-source-event/
   );
   assert.equal(p.seq,1);
+});
+
+
+test('source-event preflight removes cached duplicates before governance without weakening conflicts',async()=>{
+  const p=await plane();
+  const original=snap({
+    sourceEventId:'cached-source-event',
+    availableAt:1_001_000,
+    ingestedAt:1_001_100
+  });
+  await appendResearchDataPlane(p,[original]);
+
+  // A later capture of the same cached upstream event has a newer local
+  // ingestedAt, but the upstream event identity/payload is unchanged.
+  const cachedAgain=Object.freeze({...original,ingestedAt:1_090_000});
+  const duplicate=preflightResearchDataPlaneInputs(p,[cachedAgain]);
+  assert.equal(duplicate.duplicates,1);
+  assert.equal(duplicate.novel.length,0);
+
+  const changed=snap({
+    sourceEventId:'cached-source-event',
+    availableAt:1_001_000,
+    ingestedAt:1_090_000,
+    features:[{id:'research.onchain.eth.baseFeeGwei',value:9}]
+  });
+  assert.throws(
+    ()=>preflightResearchDataPlaneInputs(p,[changed]),
+    /SOURCE_EVENT_ID_CONFLICT:cached-source-event/
+  );
+  assert.equal(p.seq,1);
+});
+
+test('source-event preflight deduplicates repeated events inside one capture batch',async()=>{
+  const p=await plane();
+  const input=snap({sourceEventId:'batch-duplicate'});
+  const result=preflightResearchDataPlaneInputs(p,[input,input]);
+  assert.equal(result.novel.length,1);
+  assert.equal(result.duplicates,1);
 });
