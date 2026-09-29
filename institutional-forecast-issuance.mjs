@@ -94,12 +94,14 @@ export function createInstitutionalForecastIssuance({
     science:scientificValidity,
     safety:{
       state:safetyState(dataSafety?.state??dataSafety?.gate),
-      reasons:[
+      reasons:[...new Set([
+        ...cloneList(dataSafety?.hardReasons),
+        ...cloneList(dataSafety?.softReasons),
         ...cloneList(dataSafety?.reasons),
         ...cloneList(dataSafety?.errors),
         ...cloneList(dataSafety?.warnings),
         ...admission.reasons.filter(x=>x.startsWith('DATA_'))
-      ],
+      ].map(String))],
       execution:'SHADOW_ONLY',
       canExecute:false
     },
