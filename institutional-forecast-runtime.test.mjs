@@ -605,6 +605,11 @@ test('gzip persistence externalizes tracker issue-state and revision history los
   assert.equal(meta.trackerArchive.recordCount,1);
   assert.equal(meta.trackerArchive.revisionCount,2);
   assert.ok(meta.trackerArchive.storageBytes<meta.trackerArchive.logicalBytes);
+  const trackerSidecar=file+'.tracker.'+meta.trackerArchive.slot+'.json.gz';
+  const logicalTracker=gunzipSync(await readFile(trackerSidecar)).toString('utf8');
+  assert.equal(Buffer.byteLength(logicalTracker),meta.trackerArchive.logicalBytes);
+  assert.equal(sha256(logicalTracker),meta.trackerArchive.sha256);
+  assert.equal(JSON.parse(logicalTracker).records.length,1);
 
   const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
   const persisted=main.intelligence.tracker.records[0];
