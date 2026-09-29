@@ -1,6 +1,7 @@
 import { AttachmentBuilder, ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, REST, Routes } from 'discord.js';
+import { buildBiggjTradeThesis } from './biggj-visual-intelligence.mjs';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='TCX_DISCORD_COMMAND_CENTER_V3';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V4';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -18,6 +19,7 @@ const COMMANDS=[
   {name:'events',description:'Structure Events öffnen',options:[symbolOption()]},
   {name:'accuracy',description:'Forecast Accuracy öffnen',options:[symbolOption()]},
   {name:'radar',description:'TCX Super Radar öffnen'},
+  {name:'thesis',description:'BIGGJ Living Thesis für einen aktiven Shadow-Trade',options:[symbolOption()]},
   {name:'structure',description:'Marktstruktur anzeigen',options:[symbolOption()]},
   {name:'portfolio',description:'Shadow-Portfolio anzeigen'},
   {name:'stats',description:'Shadow-Performance anzeigen',options:[{type:3,name:'period',description:'Zeitraum',required:false,choices:[{name:'Tag',value:'day'},{name:'Woche',value:'week'},{name:'Monat',value:'month'}]}]},
@@ -50,7 +52,8 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
     {name:'global-intel',topic:'Global Events und Markt-Kontext aus TCX.'},
     {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'},
-    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'}
+    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'},
+    {name:'theses',topic:'BIGGJ Living Theses, Ghost Paths und Trade DNA für aktive Shadow-Trades.'}
   ]},
   {category:'TCX • SHADOW',channels:[
     {name:'live-trades',topic:'Offene TCX Shadow-Trades. Keine echten Orders.'},
@@ -75,11 +78,39 @@ const MARKERS=Object.freeze({
   system:'TCX_DISCORD_V3_SYSTEM',
   performance:'TCX_DISCORD_V3_PERFORMANCE',
   overview:'TCX_DISCORD_V3_MARKET_OVERVIEW',
-  data:'TCX_DISCORD_V3_DATA_HEALTH'
+  data:'TCX_DISCORD_V3_DATA_HEALTH',
+  theses:'BIGGJ_DISCORD_V4_THESES'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
 function percent(value){const n=Number(value);return Number.isFinite(n)?(n*100).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+'%':'—';}
+function pct0(value){const n=Number(value);return Number.isFinite(n)?Math.round(Math.max(0,Math.min(1,n))*100)+'%':'—';}
+function bar10(value){const n=Number(value);if(!Number.isFinite(n))return '░░░░░░░░░░';const x=Math.round(Math.max(0,Math.min(1,n))*10);return '█'.repeat(x)+'░'.repeat(10-x);}
+function biggjThesisPayload(position={}){
+  const t=buildBiggjTradeThesis(position,{asOf:Date.now()});
+  const ghost=t.hypotheses.map(x=>bar10(x.support)+' '+pct0(x.support)+' · '+x.label).join('\n');
+  const dna=t.tradeDna.map(x=>bar10(x.value)+' '+pct0(x.value)+' · '+x.label).join('\n');
+  const why=t.whyNow.slice(0,6).map(x=>'• **'+x.id+'** · '+x.state+' · '+x.detail).join('\n');
+  const levels=t.levels||{};
+  const fmtPrice=v=>Number.isFinite(Number(v))?String(Number(v).toFixed(8)).replace(/0+$/,'').replace(/\.$/,''):'—';
+  return {embeds:[{
+    title:'BIGGJ // LIVING THESIS · '+t.symbol.replace('USDT','/USDT'),
+    description:'**'+t.side+' · '+t.status+' · '+t.setupType+'**\nThesis `'+t.thesisId+'`\n\nTHESIS HEALTH  '+bar10(t.thesisHealth)+' **'+pct0(t.thesisHealth)+'**',
+    fields:[
+      {name:'Ghost Paths',value:(ghost||'No calibrated path support available').slice(0,1024),inline:false},
+      {name:'Trade DNA',value:(dna||'No trade DNA inputs available').slice(0,1024),inline:false},
+      {name:'Why Now?',value:(why||'No point-in-time thesis inputs available').slice(0,1024),inline:false},
+      {name:'Entry',value:fmtPrice(levels.entryPrice),inline:true},
+      {name:'Stop',value:fmtPrice(levels.stopPrice),inline:true},
+      {name:'Target',value:fmtPrice(levels.takeProfitPrice),inline:true},
+      {name:'Known Beliefs',value:String(t.knownBeliefs)+'/6',inline:true},
+      {name:'Novelty',value:String(t.novelty),inline:true},
+      {name:'Epistemic',value:'Point-in-time shadow state',inline:true}
+    ],
+    footer:{text:'BIGGJ_THESIS:'+t.positionId},
+    timestamp:new Date().toISOString()
+  }],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
+}
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
 function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**SCHNELLSTART**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/deep BTC\` · Deep Dive','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
@@ -197,7 +228,8 @@ function marketActionComponents(symbol){
       {type:2,style:1,label:'SuperChart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
       {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s},
       {type:2,style:2,label:'Warum?',custom_id:'dc3:why:'+s},
-      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:'+s}
+      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:'+s},
+      {type:2,style:1,label:'Living Thesis',custom_id:'dc4:thesis:'+s}
     ]},
     {type:1,components:[
       {type:2,style:2,label:'Flow',custom_id:'dc3:flow:'+s},
@@ -292,12 +324,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const contexts=new Map();
   const channelCache=new Map();
   const tradeCards=new Map();
+  const thesisCards=new Map();
   const closedPosted=new Set();
   const timers=new Set();
   let closedFeedInitialized=false;
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
   function fail(scope,err){state.lastError=scope+': '+(err instanceof Error?err.message:String(err));try{logger.error('[TCX_DISCORD]',state.lastError);}catch{}}
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
@@ -382,16 +415,20 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function refreshOverview(){const c=channelCache.get('market-overview');return c?upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())):null;}
   async function refreshDataHealth(){const c=channelCache.get('data-health');return c?upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())):null;}
   async function latestBotMessage(channel){try{const messages=await channel.messages.fetch({limit:20});return messages.find(m=>m.author?.id===client.user?.id)||null;}catch{return null;}}
-  async function refreshCorePanel(channel,callbackData){
-    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
+  async function renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto=false}={}){
     const chatId=fakeChatId(guildId,channel.id,'panel');
-    await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||'')}}});
+    await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||''),...((forcePhoto||msg.attachments?.size)?{photo:[{}]}:{})}}});
     try{
       const refreshed=await channel.messages.fetch(String(msg.id));
       const symbol=/:(\w+USDT)(?::|$)/.exec(String(callbackData||''))?.[1]||null;
       const components=symbol?marketActionComponents(symbol):commandCenterComponents();
       await refreshed.edit({components,allowedMentions:{parse:[]}});
-    }catch(err){fail('panel-components',err);}
+      return refreshed;
+    }catch(err){fail('panel-components',err);return null;}
+  }
+  async function refreshCorePanel(channel,callbackData){
+    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
+    return renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto:Boolean(msg.attachments?.size)});
   }
   async function refreshMarketPanels(){
     let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
@@ -424,34 +461,112 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await c.send({embeds:[{title:'TCX // STATUS CHANGE',description:(changes.join('\n')||'System state changed').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}});
     state.lastAlertAt=Date.now();
   }
+  async function upsertThesisChannelCard(position){
+    const channel=channelCache.get('theses'); if(!channel)return null;
+    const id=String(position?.positionId||''); if(!id)return null;
+    let msg=null;
+    const cached=thesisCards.get(id);
+    if(cached) msg=await channel.messages.fetch(cached).catch(()=>null);
+    if(!msg){
+      const recent=await channel.messages.fetch({limit:50}).catch(()=>null);
+      msg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    }
+    if(msg) await msg.edit(biggjThesisPayload(position));
+    else msg=await channel.send(biggjThesisPayload(position));
+    thesisCards.set(id,msg.id);
+    return msg;
+  }
+  async function ensureTradeThreadVisual(thread,position,prior={}){
+    if(!thread||!thread.isTextBased())return prior;
+    const id=String(position?.positionId||'');
+    const recent=await thread.messages.fetch({limit:50}).catch(()=>null);
+    let thesisMsg=recent?.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')==='BIGGJ_THESIS:'+id))||null;
+    if(thesisMsg) await thesisMsg.edit(biggjThesisPayload(position));
+    else thesisMsg=await thread.send(biggjThesisPayload(position));
+
+    let visualMsg=prior?.visualMessageId?await thread.messages.fetch(prior.visualMessageId).catch(()=>null):null;
+    if(!visualMsg) visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
+    const now=Date.now(),due=!prior?.lastVisualAt||now-Number(prior.lastVisualAt)>120000;
+    if(!visualMsg){
+      visualMsg=await thread.send({content:'BIGGJ // TRADE VISUAL\nRendering live market state …',allowedMentions:{parse:[]}});
+      await renderCoreIntoMessage(thread,visualMsg,'superchart:'+String(position.symbol)+':FULL:5m',{forcePhoto:true});
+    }else if(due){
+      await renderCoreIntoMessage(thread,visualMsg,'superchart:'+String(position.symbol)+':FULL:5m',{forcePhoto:true});
+    }
+    return {...prior,thesisMessageId:thesisMsg?.id||null,visualMessageId:visualMsg?.id||null,lastVisualAt:now};
+  }
+  async function syncThesisDashboard(positions){
+    const active=new Set();
+    for(const p of (positions||[]).slice(0,20)){
+      const id=String(p?.positionId||''); if(!id)continue; active.add(id);
+      await upsertThesisChannelCard(p).catch(err=>fail('thesis-card:'+id,err));
+    }
+    for(const [id,messageId] of [...thesisCards])if(!active.has(id)){
+      const channel=channelCache.get('theses');
+      if(channel){
+        const msg=await channel.messages.fetch(messageId).catch(()=>null);
+        if(msg)await msg.edit({content:'',embeds:[...(msg.embeds||[])].map(e=>{const x=e.toJSON();x.description=(x.description||'')+'\n\n**THESIS CLOSED / ARCHIVED**';return x;}),components:[],allowedMentions:{parse:[]}}).catch(()=>null);
+      }
+      thesisCards.delete(id);
+    }
+  }
   async function syncTradeCards(){
     const c=channelCache.get('live-trades'); if(!c)return;
     const snapshot=await safeMissionSnapshot();
     const positions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
     const recentClosed=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
+    await syncThesisDashboard(positions);
     const active=new Set();
     const perms=c.permissionsFor(client.user),canThreads=Boolean(perms?.has(PermissionFlagsBits.CreatePublicThreads)&&perms?.has(PermissionFlagsBits.SendMessagesInThreads));
     for(const p of positions.slice(0,20)){
-      const id=String(p?.positionId||''); if(!id)continue; active.add(id); let card=tradeCards.get(id);
-      if(card){try{const msg=await c.messages.fetch(card.messageId);await msg.edit(shadowTradePayload(p));continue;}catch{tradeCards.delete(id);}}
+      const id=String(p?.positionId||''); if(!id)continue;
+      active.add(id);
+      let card=tradeCards.get(id)||{};
       try{
-        const recent=await c.messages.fetch({limit:50});
-        const existing=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id));
-        const starter=existing||await c.send(shadowTradePayload(p));let threadId=null;
-        if(canThreads)try{
-          const activeThreads=await c.threads.fetchActive();
-          let thread=activeThreads.threads.find(t=>String(t.name).includes(id.slice(-8)));
+        let starter=card.messageId?await c.messages.fetch(card.messageId).catch(()=>null):null;
+        if(!starter){
+          const recent=await c.messages.fetch({limit:50});
+          starter=recent.find(m=>m.author?.id===client.user?.id&&m.embeds?.some(e=>String(e?.footer?.text||'')===id))||null;
+        }
+        if(starter)await starter.edit(shadowTradePayload(p));
+        else starter=await c.send(shadowTradePayload(p));
+
+        let feedVisual=card.feedVisualMessageId?await c.messages.fetch(card.feedVisualMessageId).catch(()=>null):null;
+        const feedVisualDue=!card.feedVisualAt||Date.now()-Number(card.feedVisualAt)>120000;
+        if(!feedVisual){
+          feedVisual=await c.send({content:'BIGGJ // LIVE TRADE VISUAL\nRendering market state …',allowedMentions:{parse:[]}});
+          await renderCoreIntoMessage(c,feedVisual,'superchart:'+String(p.symbol)+':FULL:5m',{forcePhoto:true});
+          card.feedVisualMessageId=feedVisual.id;card.feedVisualAt=Date.now();
+        }else if(feedVisualDue){
+          await renderCoreIntoMessage(c,feedVisual,'superchart:'+String(p.symbol)+':FULL:5m',{forcePhoto:true});
+          card.feedVisualAt=Date.now();
+        }
+
+        let thread=card.threadId?await client.channels.fetch(card.threadId).catch(()=>null):null;
+        if(canThreads&&!thread){
+          const activeThreads=await c.threads.fetchActive().catch(()=>null);
+          thread=activeThreads?.threads?.find(t=>String(t.name).includes(id.slice(-8)))||null;
           if(!thread){
-            thread=await starter.startThread({name:clip(String(p.symbol||'TRADE').replace('USDT','')+'-'+String(p.side||'').toUpperCase()+'-'+id.slice(-8),90),autoArchiveDuration:1440,reason:'TCX shadow trade lifecycle'});
-            await thread.send({content:'Lifecycle-Thread für diesen **Shadow-Trade**. Research/Simulation only.',components:marketActionComponents(p.symbol),allowedMentions:{parse:[]}});
+            thread=await starter.startThread({name:clip(String(p.symbol||'TRADE').replace('USDT','')+'-'+String(p.side||'').toUpperCase()+'-'+id.slice(-8),90),autoArchiveDuration:1440,reason:'BIGGJ shadow trade intelligence lifecycle'});
+            await thread.send({content:'BIGGJ // TRADE ROOM\nPoint-in-time Living Thesis + Visual Intelligence. **SHADOW_ONLY**.',components:marketActionComponents(p.symbol),allowedMentions:{parse:[]}});
           }
-          threadId=thread?.id||null;
-        }catch(err){fail('trade-thread:'+id,err);}
-        tradeCards.set(id,{messageId:starter.id,threadId});
+        }
+        card={...card,messageId:starter.id,threadId:thread?.id||card.threadId||null};
+        if(thread)card=await ensureTradeThreadVisual(thread,p,card);
+        tradeCards.set(id,card);
       }catch(err){fail('trade-card:'+id,err);}
     }
     for(const [id,card] of [...tradeCards])if(!active.has(id)){
-      try{const msg=await c.messages.fetch(card.messageId);const embed=msg.embeds?.[0]?.toJSON?.()||{};embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();await msg.edit({embeds:[embed],components:[],allowedMentions:{parse:[]}});}catch{}
+      try{
+        const msg=await c.messages.fetch(card.messageId);
+        const embed=msg.embeds?.[0]?.toJSON?.()||{};
+        embed.description='**CLOSED · SHADOW_ONLY**';embed.timestamp=new Date().toISOString();
+        await msg.edit({embeds:[embed],components:[],allowedMentions:{parse:[]}});
+      }catch{}
+      if(card.threadId){
+        const thread=await client.channels.fetch(card.threadId).catch(()=>null);
+        if(thread?.isTextBased())await thread.send({content:'BIGGJ // POSITION CLOSED\nFinal replay wird im Closed-Trade-Feed archiviert.',allowedMentions:{parse:[]}}).catch(()=>null);
+      }
       tradeCards.delete(id);
     }
     if(!closedFeedInitialized){
@@ -463,6 +578,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         for(const p of [...recentClosed].reverse()){
           const id=String(p?.positionId||'');if(!id||closedPosted.has(id))continue;
           await closedChannel.send(closedTradePayload(p));
+          const visual=await closedChannel.send({content:'BIGGJ // FINAL TRADE REPLAY\nRendering point-in-time lifecycle …',allowedMentions:{parse:[]}});
+          await renderCoreIntoMessage(closedChannel,visual,'tradereplay:'+String(p.symbol),{forcePhoto:true}).catch(err=>fail('closed-visual:'+id,err));
           closedPosted.add(id);
         }
       }
@@ -486,7 +603,16 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const result=await bootstrapV2();
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
-    await interaction.editReply('TCX Discord V3 eingerichtet: '+result.channels+' Channels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    await interaction.editReply('BIGGJ Discord V4 eingerichtet: '+result.channels+' Channels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+  }
+  async function thesisCommand(interaction){
+    const symbol=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
+    await interaction.deferReply();
+    const snapshot=await safeMissionSnapshot();
+    const rows=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
+    const p=[...rows].filter(x=>x?.symbol===symbol&&x?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
+    if(!p){await interaction.editReply('Für '+String(symbol||'diesen Markt')+' gibt es gerade keine aktive primäre Shadow-Position.');return;}
+    await interaction.editReply(biggjThesisPayload(p));
   }
   async function terminalCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordTerminalPayload(await safeMissionSnapshot()));}
   async function systemCommand(interaction){await interaction.deferReply();await interaction.editReply(buildDiscordSystemPayload(await safeMissionSnapshot()));}
@@ -525,6 +651,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='start'){await startCommand(interaction);return;}
     if(name==='dashboard'||name==='terminal'){await terminalCommand(interaction);return;}
     if(name==='system'){await systemCommand(interaction);return;}
+    if(name==='thesis'){await thesisCommand(interaction);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
     const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
@@ -537,6 +664,16 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function onButton(interaction){
     if(String(interaction.guildId)!==guildId)return;
     const customId=String(interaction.customId||'');
+    if(customId.startsWith('dc4:thesis:')){
+      const symbol=normalizeDiscordSymbol(customId.split(':')[2]);
+      await interaction.deferReply();
+      const snapshot=await safeMissionSnapshot();
+      const rows=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
+      const p=[...rows].filter(x=>x?.symbol===symbol&&x?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
+      if(!p){await interaction.editReply('Keine aktive primäre Shadow-Position für '+String(symbol||'diesen Markt')+'.');return;}
+      await interaction.editReply(biggjThesisPayload(p));
+      return;
+    }
     if(customId.startsWith('dc3:')){
       await runCoreCallback(interaction,customId.slice(4));
       return;
@@ -569,6 +706,6 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return snapshot();
   }
   async function stop(){for(const timer of timers)clearInterval(timer);timers.clear();client.destroy();state.ready=false;}
-  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size});}
+  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size});}
   return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }
