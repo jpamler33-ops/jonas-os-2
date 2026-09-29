@@ -82,11 +82,11 @@ function isGzipBuffer(value){
   return Buffer.isBuffer(value)&&value.length>=2&&value[0]===0x1f&&value[1]===0x8b;
 }
 
-function* jsonArrayStoreBuffers({version,arrayKey,rows}){
+function* jsonArrayStoreBuffers({version,arrayKey,rows,projectRow=null}){
   yield Buffer.from('{"version":'+JSON.stringify(version)+','+JSON.stringify(String(arrayKey))+':[','utf8');
   let first=true;
   for(const row of Array.isArray(rows)?rows:[]){
-    const serialized=JSON.stringify(row);
+    const serialized=JSON.stringify(projectRow?projectRow(row):row);
     const value=serialized===undefined?'null':serialized;
     yield Buffer.from((first?'':',')+value,'utf8');
     first=false;
@@ -94,17 +94,17 @@ function* jsonArrayStoreBuffers({version,arrayKey,rows}){
   yield Buffer.from(']}','utf8');
 }
 
-function fingerprintJsonArrayStore({version,arrayKey,rows}){
+function fingerprintJsonArrayStore({version,arrayKey,rows,projectRow=null}){
   const hash=createHash('sha256');
   let logicalBytes=0;
-  for(const chunk of jsonArrayStoreBuffers({version,arrayKey,rows})){
+  for(const chunk of jsonArrayStoreBuffers({version,arrayKey,rows,projectRow})){
     logicalBytes+=chunk.length;
     hash.update(chunk);
   }
   return {sha256:hash.digest('hex'),logicalBytes};
 }
 
-async function writeGzipJsonArrayStore({filePath,version,arrayKey,rows,level=1}){
+async function writeGzipJsonArrayStore({filePath,version,arrayKey,rows,projectRow=null,level=1}){
   const hash=createHash('sha256');
   let logicalBytes=0;
   const audit=new Transform({
@@ -115,7 +115,7 @@ async function writeGzipJsonArrayStore({filePath,version,arrayKey,rows,level=1})
     }
   });
   await pipeline(
-    Readable.from(jsonArrayStoreBuffers({version,arrayKey,rows})),
+    Readable.from(jsonArrayStoreBuffers({version,arrayKey,rows,projectRow})),
     audit,
     createGzip({level}),
     createWriteStream(filePath,{flags:'w',mode:0o600})
@@ -862,15 +862,11 @@ function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={
   };
 }
 
-function trackerArchiveForPersistence(snapshot){
-  const records=Array.isArray(snapshot?.tracker?.records)?snapshot.tracker.records:[];
+function trackerArchiveRowForPersistence(record){
   return {
-    version:FORECAST_TRACKER_ARCHIVE_VERSION,
-    records:records.map(record=>({
-      id:record.id,
-      issueState:clone(record.issueState),
-      revisions:clone(Array.isArray(record.revisions)?record.revisions:[])
-    }))
+    id:record?.id,
+    issueState:record?.issueState,
+    revisions:Array.isArray(record?.revisions)?record.revisions:[]
   };
 }
 
@@ -980,9 +976,16 @@ export async function saveInstitutionalForecastRuntime(runtime){
       };
     }
     if(externalizeArchives){
-      const trackerArchive=trackerArchiveForPersistence(payload.intelligence);
-      const archiveSerialized=JSON.stringify(trackerArchive);
-      const archiveLogicalBytes=Buffer.byteLength(archiveSerialized);
+      const trackerRows=Array.isArray(payload?.intelligence?.tracker?.records)
+        ?payload.intelligence.tracker.records
+        :[];
+      const archiveFingerprint=fingerprintJsonArrayStore({
+        version:FORECAST_TRACKER_ARCHIVE_VERSION,
+        arrayKey:'records',
+        rows:trackerRows,
+        projectRow:trackerArchiveRowForPersistence
+      });
+      const archiveLogicalBytes=archiveFingerprint.logicalBytes;
       const maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
       if(archiveLogicalBytes>maxTrackerArchiveBytes){
         throw Object.assign(new Error('forecast tracker archive exceeds configured persistence limit'),{
@@ -991,29 +994,38 @@ export async function saveInstitutionalForecastRuntime(runtime){
           maxTrackerArchiveBytes
         });
       }
-      const archiveHash=sha256(archiveSerialized);
+      const archiveHash=archiveFingerprint.sha256;
       let slot=runtime.trackerArchiveSlot;
       let archiveBytes=runtime.lastTrackerArchiveBytes;
       if(!slot||runtime.trackerArchiveHash!==archiveHash){
         slot=runtime.trackerArchiveSlot==='a'?'b':'a';
-        const packed=await gzip(Buffer.from(archiveSerialized,'utf8'),{level:1});
         const archivePath=trackerArchivePath(runtime.filePath,slot);
         const archiveTmp=archivePath+'.tmp-'+process.pid;
         try{
-          await writeFile(archiveTmp,packed,{mode:0o600});
+          const streamed=await writeGzipJsonArrayStore({
+            filePath:archiveTmp,
+            version:FORECAST_TRACKER_ARCHIVE_VERSION,
+            arrayKey:'records',
+            rows:trackerRows,
+            projectRow:trackerArchiveRowForPersistence,
+            level:1
+          });
+          if(streamed.sha256!==archiveHash||streamed.logicalBytes!==archiveLogicalBytes){
+            throw new Error('forecast tracker archive streaming fingerprint mismatch');
+          }
+          archiveBytes=streamed.storageBytes;
           await rename(archiveTmp,archivePath);
         }catch(err){
           await rm(archiveTmp,{force:true}).catch(()=>{});
           throw err;
         }
-        archiveBytes=packed.length;
       }
-      const revisionCount=trackerArchive.records.reduce((n,row)=>n+row.revisions.length,0);
+      const revisionCount=trackerRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
       trackerArchiveMeta={
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         slot,
         sha256:archiveHash,
-        recordCount:trackerArchive.records.length,
+        recordCount:trackerRows.length,
         revisionCount,
         storageBytes:archiveBytes,
         logicalBytes:archiveLogicalBytes
