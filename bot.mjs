@@ -7603,6 +7603,7 @@ function currentPersistenceCompatibility(){
       AUDIT_LEDGER:{healthy:auditLedger.healthy},
       MARKET_DATA_FABRIC:{healthy:marketFabric.healthy},
       RELEASE_REGISTRY:{healthy:releaseRegistry.healthy},
+      MODEL_CANDIDATE_REGISTRY:{healthy:modelCandidateRegistry.healthy,recoveredFromCorrupt:false},
       RESEARCH_DATA_PLANE:{healthy:researchDataPlane.healthy},
       RESEARCH_DATA_GOVERNANCE:{
         healthy:researchGovernanceHealthy,
