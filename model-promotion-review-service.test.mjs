@@ -359,7 +359,9 @@ test('governor evidence must be bound to the exact walk-forward metrics',()=>{
     }
   };
   delete core.evidenceId;
-  f.governorState.evidencePacks[0]={...core,evidenceId:sha256(core)};
+  const changed={...core,evidenceId:sha256(core)};
+  f.governorState.evidencePacks[0]=changed;
+  f.governorState.participants[0].decision.evidenceId=changed.evidenceId;
   assert.throws(()=>buildModelPromotionReview({
     governorState:f.governorState,
     competitionState:f.competitionState,
@@ -373,7 +375,9 @@ test('experiment cutoff and champion lineage must match the frozen candidate lin
   const original=f.governorState.evidencePacks[0];
   const core={...original,championReleaseId:'different-release'};
   delete core.evidenceId;
-  f.governorState.evidencePacks[0]={...core,evidenceId:sha256(core)};
+  const changed={...core,evidenceId:sha256(core)};
+  f.governorState.evidencePacks[0]=changed;
+  f.governorState.participants[0].decision.evidenceId=changed.evidenceId;
   assert.throws(()=>buildModelPromotionReview({
     governorState:f.governorState,
     competitionState:f.competitionState,
