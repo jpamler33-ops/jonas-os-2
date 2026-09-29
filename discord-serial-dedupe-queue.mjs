@@ -53,3 +53,20 @@ export async function mapWithConcurrency(items,concurrency,worker){
   await Promise.all(Array.from({length:limit},()=>run()));
   return results;
 }
+
+
+export function refreshDueFromTimestamps({
+  now=Date.now(),
+  intervalMs,
+  lastRefreshedAt=null,
+  messageEditedAt=null,
+  messageCreatedAt=null
+}={}){
+  const interval=Math.max(0,Number(intervalMs)||0);
+  if(interval===0)return true;
+  const candidates=[lastRefreshedAt,messageEditedAt,messageCreatedAt]
+    .map(Number)
+    .filter(Number.isFinite);
+  if(!candidates.length)return true;
+  return Number(now)-Math.max(...candidates)>=interval;
+}
