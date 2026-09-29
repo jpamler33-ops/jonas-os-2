@@ -4,7 +4,7 @@ function finite(v){const n=Number(v);return Number.isFinite(n)?n:null;}
 function signedLog(v){const n=finite(v);if(n==null)return null;return Math.sign(n)*Math.log1p(Math.abs(n));}
 async function rpc(fetchImpl,url,method,params,{timeoutMs=7000}={}){
   const ctrl=new AbortController();
-  const timer=setTimeout(()=>ctrl.abort(),Math.max(1000,Number(timeoutMs)||7000));
+  const timer=setTimeout(()=>ctrl.abort(),Math.max(50,Number(timeoutMs)||7000));
   try{
     const res=await fetchImpl(url,{method:'POST',signal:ctrl.signal,headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
     const text=await res.text();
@@ -20,7 +20,7 @@ async function rpc(fetchImpl,url,method,params,{timeoutMs=7000}={}){
 async function rpcBatch(fetchImpl,url,calls,{timeoutMs=7000}={}){
   const payload=calls.map((x,i)=>({jsonrpc:'2.0',id:i+1,method:x.method,params:x.params}));
   const ctrl=new AbortController();
-  const timer=setTimeout(()=>ctrl.abort(),Math.max(1000,Number(timeoutMs)||7000));
+  const timer=setTimeout(()=>ctrl.abort(),Math.max(50,Number(timeoutMs)||7000));
   try{
     const res=await fetchImpl(url,{method:'POST',signal:ctrl.signal,headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
     const text=await res.text();
