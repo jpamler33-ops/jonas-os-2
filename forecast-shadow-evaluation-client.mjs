@@ -4,6 +4,51 @@ export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVAL
 
 export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V1';
 
+export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V1';
+
+export function evaluateAutoLearnMemoryAdmission({
+  phase='ISSUE',
+  heapUsedMb=0,
+  rssMb=0,
+  externalMb=0,
+  issueHeapMb=320,
+  issueRssMb=720,
+  issueExternalMb=64,
+  resumeHeapMb=280,
+  resumeRssMb=620,
+  resumeExternalMb=48
+}={}){
+  const normalized=String(phase||'ISSUE').trim().toUpperCase()==='RESUME'?'RESUME':'ISSUE';
+  const memory={
+    heapUsedMb:Math.max(0,Number(heapUsedMb)||0),
+    rssMb:Math.max(0,Number(rssMb)||0),
+    externalMb:Math.max(0,Number(externalMb)||0)
+  };
+  const issue={
+    heapUsedMb:Math.max(1,Number(issueHeapMb)||320),
+    rssMb:Math.max(1,Number(issueRssMb)||720),
+    externalMb:Math.max(1,Number(issueExternalMb)||64)
+  };
+  const resume={
+    heapUsedMb:Math.min(issue.heapUsedMb,Math.max(1,Number(resumeHeapMb)||280)),
+    rssMb:Math.min(issue.rssMb,Math.max(1,Number(resumeRssMb)||620)),
+    externalMb:Math.min(issue.externalMb,Math.max(1,Number(resumeExternalMb)||48))
+  };
+  const limits=normalized==='RESUME'?resume:issue;
+  const exceeded=[];
+  if(memory.heapUsedMb>=limits.heapUsedMb) exceeded.push('HEAP');
+  if(memory.rssMb>=limits.rssMb) exceeded.push('RSS');
+  if(memory.externalMb>=limits.externalMb) exceeded.push('EXTERNAL');
+  return {
+    allowed:exceeded.length===0,
+    phase:normalized,
+    reason:exceeded.length?'MEMORY_PRESSURE':'MEMORY_HEADROOM_AVAILABLE',
+    exceeded,
+    memory,
+    limits
+  };
+}
+
 export function evaluateShadowWorkerAdmission({
   mode='AUTO',
   heapUsedMb=0,
