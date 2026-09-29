@@ -1,6 +1,17 @@
-# TCX Telegram · Railway
+# BIGGJ / TCX Research Operating System
 
-Telegram Live-Market UI for TCX v2. Execution remains **SHADOW_ONLY** and there is no order-execution path.
+BIGGJ is the operator-facing interface of one canonical TCX Research OS: point-in-time market fabric, evidence/provenance, mechanism research, calibrated forecasting, failure-first decision gates, audit, learning, challenger evaluation, Shadow OMS/portfolio, and Telegram/Discord views.
+
+Canonical architecture: `TCX_RESEARCH_OS_CANON_V1.md`  
+Canonical runtime contract: `tcx-research-os-contract.mjs`
+
+Core DNA:
+
+`Point-in-Time Truth → Evidence → Disagreement → calibrated Uncertainty → Invalidation → ABSTAIN → Audit → Learning`
+
+Trading is a downstream research consumer, not the center of the system. Execution remains **SHADOW_ONLY** and there is no live order-execution path.
+
+## Telegram / Railway runtime
 
 ## Features
 

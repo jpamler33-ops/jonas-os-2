@@ -1,8 +1,11 @@
 # BIGGJ Trading Constitution V1
 
-Status: DESIGN SOURCE OF TRUTH  
+Status: TRADING SUBSYSTEM POLICY  
+Parent architecture: **TCX_RESEARCH_OS_CANON_V1**  
 Execution: SHADOW_ONLY  
 Real-money execution: BLOCKED
+
+This document governs only the downstream trading subsystem. It does not override the TCX Research OS. Market truth, provenance, evidence quality, disagreement, uncertainty, invalidation, audit and promotion are decided by the upstream Research OS contract first.
 
 ## 1. Purpose
 
@@ -44,6 +47,51 @@ A 5m execution chart never implies a 5m holding period.
 | Micro execution | 1m / order book | fill quality only; never defines the thesis |
 
 The chart displayed in Discord can be 5m while the selected thesis horizon is 1h or 3h.
+
+## 3.1 Trading style is separate from strategy
+
+BIGGJ must choose **how long and how locally it wants to trade** before choosing the setup family.
+
+### SCALP
+- Context: 15m / 5m
+- Trigger: 1m / 5m
+- Typical hold: 3–45 minutes
+- Highest weight: spread, executable depth, order-book imbalance, liquidity sweeps, short-term flow
+- Valid examples: SCALP + LIQUIDITY_SWEEP_REVERSAL, SCALP + BREAKOUT_RETEST
+
+### INTRADAY
+- Context: 1h / 15m
+- Trigger: 5m
+- Typical hold: 30 minutes–6 hours
+- Highest weight: 1h/15m structure, forecast, regime, flow, derivatives context
+- Valid examples: INTRADAY + TREND_CONTINUATION, INTRADAY + BREAKOUT_RETEST
+
+### SWING
+- Context: 4h / 1h
+- Trigger: 15m / 1h
+- Typical hold: 4 hours–3 days
+- Highest weight: higher-timeframe structure, regime persistence, broader forecast, macro/on-chain context
+- Micro order-book noise must not close a swing thesis by itself.
+- Valid examples: SWING + TREND_CONTINUATION, SWING + RANGE_MEAN_REVERSION
+
+Breakout, trend continuation, mean reversion and liquidity-sweep reversal are **strategy/setup families**, not holding styles. BIGGJ learns the performance of the pair `style × strategy × regime`.
+
+Before every PRIMARY entry BIGGJ must complete a market preflight:
+
+1. multi-timeframe structure,
+2. current regime,
+3. nearest support/resistance and swing liquidity,
+4. executable order-book depth/spread,
+5. likely sweep/stop-liquidity areas,
+6. observed liquidation clusters,
+7. forecast direction and uncertainty,
+8. flow / taker pressure,
+9. open-interest/funding context,
+10. on-chain / macro context when available,
+11. data trust and freshness,
+12. portfolio exposure and correlation.
+
+Only after the preflight may BIGGJ choose a style, a strategy family, an entry method and a hold plan.
 
 ## 4. Primary strategy families
 
@@ -275,6 +323,38 @@ No fresh trusted data:
 - preserve the last verified thesis state,
 - continue only risk controls that can be evaluated from a trusted executable book,
 - if exit liquidity is not verifiable, fail closed and do not fabricate an exit price.
+
+## 12.1 Mandatory decision rationale and reverse engineering
+
+Every PRIMARY trade freezes a decision record at entry containing:
+
+- selected trading style,
+- selected strategy family,
+- market state and timeframe alignment,
+- preferred entry method (limit/retest vs confirmation),
+- expected liquidity-sweep path,
+- invalidation,
+- target,
+- expected hold range,
+- evidence supporting entry,
+- counter-evidence known at entry,
+- data-source availability,
+- policy/model fingerprints.
+
+After exit BIGGJ must reverse-engineer the trade without rewriting history:
+
+- What did it predict correctly?
+- What did it predict incorrectly?
+- Which known factors were associated with similar wins/losses before this trade?
+- Which factors only became visible after entry?
+- Did MFE/MAE indicate poor timing?
+- Did it exit too early or give back too much MFE?
+- Would a shorter or longer hold have performed better using point-in-time executable marks?
+- Was the strategy wrong, or was the style/horizon wrong?
+- Did the entry rationale ignore counter-evidence?
+- Is the observed pattern repeatable enough to create a challenger?
+
+Post-hoc association is not causal proof. A newly discovered rule cannot alter PRIMARY policy directly. It becomes a **CHALLENGER_ONLY** experiment and needs forward samples, chronological stability, cost stress, winner-removal stress and concentration checks before promotion.
 
 ## 13. Learning loop
 

@@ -32,7 +32,9 @@ export function deriveAutonomousShadowTrade(issuance,{
   cautionMinExpectedReturn=0.0035,
   cautionMinDirectionalProbability=0.62,
   cautionMinProbabilityEdge=0.15,
-  horizonSelection='SHORTEST'
+  horizonSelection='SHORTEST',
+  minHorizonMs=0,
+  maxHorizonMs=Infinity
 }={}){
   if(!issuance||typeof issuance!=='object') return ineligible('ISSUANCE_MISSING');
   if(
@@ -58,13 +60,19 @@ export function deriveAutonomousShadowTrade(issuance,{
   if(ageMs>Math.max(1,Number(maxAgeMs)||1)) return ineligible('FORECAST_STALE',{admissionGate,ageMs});
 
   const selection=String(horizonSelection||'SHORTEST').toUpperCase();
+  const minHorizon=Math.max(0,Number(minHorizonMs)||0);
+  const requestedMax=Number(maxHorizonMs);
+  const maxHorizon=Number.isFinite(requestedMax)?Math.max(minHorizon,requestedMax):Infinity;
   const horizons=(Array.isArray(issuance.forecast?.horizons)?issuance.forecast.horizons:[])
     .filter(h=>
       String(h?.gate||'').toUpperCase()==='PASS'&&
       h?.display?.probabilityDisplayAllowed===true&&
       String(h?.calibration?.status||'').toUpperCase()==='CALIBRATED'&&
       ['UP','DOWN'].includes(String(h?.direction||'').toUpperCase())&&
-      finite(h?.expectedReturn)!=null
+      finite(h?.expectedReturn)!=null&&
+      finite(h?.horizonMs)!=null&&
+      Number(h.horizonMs)>=minHorizon&&
+      Number(h.horizonMs)<=maxHorizon
     )
     .sort((a,b)=>{
       if(selection==='LONGEST') return Number(b.horizonMs||0)-Number(a.horizonMs||0);
@@ -78,7 +86,7 @@ export function deriveAutonomousShadowTrade(issuance,{
       if(selection==='MAX_RETURN') return Math.abs(Number(b.expectedReturn||0))-Math.abs(Number(a.expectedReturn||0));
       return Number(a.horizonMs||Infinity)-Number(b.horizonMs||Infinity);
     });
-  if(!horizons.length) return ineligible('NO_ADMITTED_DIRECTIONAL_HORIZON',{admissionGate,ageMs});
+  if(!horizons.length) return ineligible('NO_ADMITTED_DIRECTIONAL_HORIZON',{admissionGate,ageMs,horizonSelection:selection,minHorizonMs:minHorizon,maxHorizonMs:Number.isFinite(maxHorizon)?maxHorizon:null});
 
   const h=horizons[0],direction=String(h.direction).toUpperCase();
   const p=h.display?.probabilities||h.probabilities||null;
@@ -123,7 +131,9 @@ export function deriveAutonomousShadowTrade(issuance,{
     oppositeProbability,
     admissionGate,
     generatedAt,
-    horizonSelection:selection
+    horizonSelection:selection,
+    minHorizonMs:minHorizon,
+    maxHorizonMs:Number.isFinite(maxHorizon)?maxHorizon:null
   };
   return freezeDeep({
     ...decisionCore,

@@ -439,3 +439,101 @@ test('coverage probe remains excluded from primary performance but is visible as
 });
 
 test('leveraged positions expose price return and margin ROE separately',()=>{const p={execution:'SHADOW_ONLY',canExecuteLive:false,status:'OPEN',side:'LONG',qtyBase:1,entryQuote:100,entryFeesQuote:0,marginQuote:50,leverage:2,plannedExitAt:999999,stopLossPct:1,takeProfitPct:1};const book={bids:[[110,2]],asks:[[111,2]],source:'TEST',availableAt:2};const m=markShadowPosition(p,book,{at:2,feeBps:0});assert.equal(m.exit.priceReturnPct,.1);assert.equal(m.exit.marginRoePct,.2);const closed=closeShadowPosition(m.position,{at:3});assert.equal(closed.realizedPriceReturnPct,.1);assert.equal(closed.realizedMarginRoePct,.2);assert.equal(closed.realizedReturnPct,.2);});
+
+
+test('BIGGJ metadata and structure-derived risk plan are frozen into primary positions',()=>{
+  const e=entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingStyle:'INTRADAY',
+      strategyFamily:'TREND_CONTINUATION',
+      maxHoldMs:6*60*60_000,
+      expectedHoldRangeMs:[30*60_000,6*60*60_000],
+      plannedStopLossPct:.007,
+      plannedTakeProfitPct:.014,
+      entryEvidenceScore:.81,
+      entryCounterThesisStrength:.19,
+      biggjDecision:{decisionId:'bd_test',whyEntered:['HTF_ALIGNMENT'],fingerprint:'d'.repeat(64)}
+    }
+  });
+  const p=shadowPositionFromEntryOrder(e);
+  assert.equal(p.tradingStyle,'INTRADAY');
+  assert.equal(p.strategyFamily,'TREND_CONTINUATION');
+  assert.equal(p.stopLossPct,.007);
+  assert.equal(p.takeProfitPct,.014);
+  assert.equal(p.entryEvidenceScore,.81);
+  assert.equal(p.biggjDecision.decisionId,'bd_test');
+});
+
+test('BIGGJ lifecycle review can extend a primary trade past the original forecast horizon',()=>{
+  const p=shadowPositionFromEntryOrder(entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingStyle:'INTRADAY',
+      strategyFamily:'TREND_CONTINUATION',
+      biggjDecision:{decisionId:'bd_extend',fingerprint:'d'.repeat(64)}
+    }
+  }));
+  const at=p.plannedExitAt+1;
+  const lifecycle={
+    action:'HOLD',reason:'HORIZON_REVIEW_EXTEND',thesisHealth:.8,
+    oppositeThesisStrength:.2,nextReviewAt:at+15*60_000,
+    execution:'SHADOW_ONLY',canExecuteLive:false
+  };
+  const m=markShadowPosition(p,book({bid:100.2,availableAt:at}),{at,feeBps:0,lifecycleDecision:lifecycle});
+  assert.equal(m.trigger,null);
+  assert.equal(m.position.biggjLifecycle.reason,'HORIZON_REVIEW_EXTEND');
+  assert.equal(m.position.nextBiggjReviewAt,lifecycle.nextReviewAt);
+});
+
+test('fixed-horizon coverage probes still close exactly at their research horizon',()=>{
+  const p=shadowPositionFromEntryOrder(entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'COVERAGE_PROBE_ENTRY',
+      entryMode:'COVERAGE_PROBE',
+      horizonOnlyExit:true
+    }
+  }),{acceptedRoles:['COVERAGE_PROBE_ENTRY']});
+  const at=p.plannedExitAt+1;
+  const lifecycle={action:'HOLD',reason:'HORIZON_REVIEW_EXTEND',execution:'SHADOW_ONLY',canExecuteLive:false};
+  const m=markShadowPosition(p,book({bid:100.2,availableAt:at}),{at,feeBps:0,lifecycleDecision:lifecycle});
+  assert.equal(m.trigger,'HORIZON_EXIT');
+});
+
+test('open BIGGJ positions accumulate executable learning timeline samples',()=>{
+  const p=shadowPositionFromEntryOrder(entry({
+    strategyMeta:{
+      ...entry().strategyMeta,
+      tradingStyle:'SCALP',
+      biggjDecision:{decisionId:'bd_timeline',fingerprint:'d'.repeat(64)}
+    }
+  }));
+  const a=markShadowPosition(p,book({bid:100.4,availableAt:20_000}),{at:20_000,feeBps:0,lifecycleDecision:{action:'HOLD',reason:'THESIS_ACTIVE'}});
+  const b=markShadowPosition(a.position,book({bid:100.6,availableAt:40_000}),{at:40_000,feeBps:0,lifecycleDecision:{action:'HOLD',reason:'THESIS_ACTIVE'}});
+  assert.ok(b.position.learningTimeline.length>=2);
+  assert.equal(b.position.learningTimeline.at(-1).fullyExecutable,true);
+});
+
+
+test('style experiment positions are excluded from primary performance',()=>{
+  const e=entry({
+    id:'sh_style_exp',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'BIGGJ_STYLE_EXPERIMENT_ENTRY',
+      entryMode:'STYLE_EXPERIMENT',
+      tradingStyle:'SCALP',
+      strategyFamily:'LIQUIDITY_SWEEP_REVERSAL',
+      styleExperimentKey:'bsx_test'
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  assert.equal(l.positions.length,1);
+  assert.equal(l.positions[0].entryMode,'STYLE_EXPERIMENT');
+  let p=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0}).position;
+  p=closeShadowPosition(p,{reason:'STYLE_HORIZON_REVIEW',at:61_000});
+  l=replaceShadowPortfolioPosition(l,p);
+  assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
+  assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
+});

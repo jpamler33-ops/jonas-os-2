@@ -74,6 +74,8 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
   const openAt=finite(openedAt,finite(order.updatedAt,finite(order.createdAt,Date.now())));
   const horizonMs=Math.max(60_000,finite(order.strategyMeta?.horizonMs,15*60_000));
   const plan=deriveShadowRiskPlan(order.strategyMeta?.expectedReturn);
+  const plannedStopLossPct=Math.max(.0001,finite(order.strategyMeta?.plannedStopLossPct,plan.stopLossPct));
+  const plannedTakeProfitPct=Math.max(.0001,finite(order.strategyMeta?.plannedTakeProfitPct,plan.takeProfitPct));
   const side=String(order.side).toUpperCase()==='BUY'?'LONG':'SHORT';
   const coreId={
     entryOrderId:String(order.id),
@@ -105,8 +107,8 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     openedAt:openAt,
     horizonMs,
     plannedExitAt:openAt+horizonMs,
-    takeProfitPct:plan.takeProfitPct,
-    stopLossPct:plan.stopLossPct,
+    takeProfitPct:plannedTakeProfitPct,
+    stopLossPct:plannedStopLossPct,
     tradeLifecycleVersion:String(order.strategyMeta?.tradeLifecycleVersion||''),
     setupType:String(order.strategyMeta?.setupType||'UNKNOWN'),
     setupScore:finite(order.strategyMeta?.setupScore),
@@ -119,7 +121,25 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     horizonId:String(order.strategyMeta?.horizonId||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
-    exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
+    tradingStyle:String(order.strategyMeta?.tradingStyle||'UNKNOWN').toUpperCase(),
+    strategyFamily:String(order.strategyMeta?.strategyFamily||order.strategyMeta?.setupFamily||'UNKNOWN').toUpperCase(),
+    maxHoldMs:Math.max(horizonMs,finite(order.strategyMeta?.maxHoldMs,horizonMs)),
+    expectedHoldRangeMs:Array.isArray(order.strategyMeta?.expectedHoldRangeMs)
+      ?order.strategyMeta.expectedHoldRangeMs.slice(0,2).map(x=>finite(x)).filter(x=>x!=null)
+      :null,
+    biggjDecision:order.strategyMeta?.biggjDecision&&typeof order.strategyMeta.biggjDecision==='object'
+      ?JSON.parse(JSON.stringify(order.strategyMeta.biggjDecision))
+      :null,
+    biggjDecisionFingerprint:String(order.strategyMeta?.biggjDecisionFingerprint||order.strategyMeta?.biggjDecision?.fingerprint||''),
+    entryEvidenceScore:finite(order.strategyMeta?.entryEvidenceScore),
+    entryCounterThesisStrength:finite(order.strategyMeta?.entryCounterThesisStrength),
+    entryDataTrustScore:finite(order.strategyMeta?.entryDataTrustScore),
+    entryFlowState:String(order.strategyMeta?.entryFlowState||'UNKNOWN'),
+    entryStructureState:String(order.strategyMeta?.entryStructureState||'UNKNOWN'),
+    entryLiquidationState:String(order.strategyMeta?.entryLiquidationState||'UNKNOWN'),
+    entryOnchainState:String(order.strategyMeta?.entryOnchainState||'UNKNOWN'),
+    entryMacroState:String(order.strategyMeta?.entryMacroState||'UNKNOWN'),
+    exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE','STYLE_EXPERIMENT'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
     probeOnly:String(order.strategyMeta?.entryMode||'').toUpperCase()==='ABSTAIN_PROBE',
     probeAdmissionReasons:Array.isArray(order.strategyMeta?.probeAdmissionReasons)
       ?order.strategyMeta.probeAdmissionReasons.map(String).slice(0,12)
@@ -184,6 +204,10 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     status:'OPEN',
     closeReason:null,
     lastMark:null,
+    learningTimeline:[],
+    biggjLifecycle:null,
+    lastBiggjReviewAt:null,
+    nextBiggjReviewAt:null,
     closedAt:null,
     exitPrice:null,
     exitQuote:null,
@@ -247,7 +271,7 @@ export function simulateShadowPositionExit(position,book,{feeBps=10}={}){
   };
 }
 
-export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
+export function markShadowPosition(position,book,{at=Date.now(),feeBps=10,lifecycleDecision=null}={}){
   if(String(position?.status||'')!=='OPEN') return {position,trigger:null,changed:false};
   const exit=simulateShadowPositionExit(position,book,{feeBps});
   const markAt=finite(at,Date.now());
@@ -268,20 +292,50 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10}={}){
   };
   const priorMfe=Number.isFinite(Number(position.mfeMarginRoePct))?Number(position.mfeMarginRoePct):-Infinity;
   const priorMae=Number.isFinite(Number(position.maeMarginRoePct))?Number(position.maeMarginRoePct):Infinity;
-  const next={...position,lastMark:mark,mfeMarginRoePct:Math.max(priorMfe,finite(exit.marginRoePct,0)),maeMarginRoePct:Math.min(priorMae,finite(exit.marginRoePct,0))};
+  const style=String(position.tradingStyle||'UNKNOWN').toUpperCase();
+  const minLearningSpacingMs=style==='SCALP'?15_000:style==='SWING'?5*60_000:60_000;
+  const priorTimeline=Array.isArray(position.learningTimeline)?position.learningTimeline:[];
+  const priorPoint=priorTimeline.at(-1);
+  const shouldSampleTimeline=!priorPoint||markAt-Number(priorPoint.at||0)>=minLearningSpacingMs;
+  const learningPoint={
+    at:markAt,
+    marginRoePct:finite(exit.marginRoePct,0),
+    priceReturnPct:finite(exit.priceReturnPct,0),
+    executableExitPrice:finite(exit.avgExitPrice),
+    fullyExecutable:exit.fullyExecutable===true,
+    fillRatio:finite(exit.fillRatio,0),
+    source:String(book?.source||'UNKNOWN')
+  };
+  const learningTimeline=shouldSampleTimeline
+    ?[...priorTimeline.slice(-511),learningPoint]
+    :priorTimeline;
+  const next={
+    ...position,
+    lastMark:mark,
+    learningTimeline,
+    biggjLifecycle:lifecycleDecision&&typeof lifecycleDecision==='object'?JSON.parse(JSON.stringify(lifecycleDecision)):position.biggjLifecycle||null,
+    lastBiggjReviewAt:lifecycleDecision?markAt:position.lastBiggjReviewAt||null,
+    nextBiggjReviewAt:lifecycleDecision&&finite(lifecycleDecision.nextReviewAt)!=null?finite(lifecycleDecision.nextReviewAt):position.nextBiggjReviewAt||null,
+    mfeMarginRoePct:Math.max(priorMfe,finite(exit.marginRoePct,0)),
+    maeMarginRoePct:Math.min(priorMae,finite(exit.marginRoePct,0))
+  };
   if(!exit.fullyExecutable) return {position:next,trigger:null,changed:true,reason:'EXIT_LIQUIDITY_INSUFFICIENT'};
 
   let trigger=null;
   const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
-  const lifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
+  const lifecycle=lifecycleDecision&&typeof lifecycleDecision==='object'
+    ?lifecycleDecision
+    :manageShadowPosition(position,{marginRoePct:ret,at:markAt});
   if(position.horizonOnlyExit===true){
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
+  }else if(lifecycleDecision&&typeof lifecycleDecision==='object'){
+    if(String(lifecycle.action||'').toUpperCase()==='EXIT') trigger=String(lifecycle.reason||'BIGGJ_POLICY_EXIT');
   }else{
     if(markAt>=Number(position.plannedExitAt||Infinity)) trigger='HORIZON_EXIT';
     else if(lifecycle.action==='EXIT') trigger=lifecycle.reason;
     else if(ret>=Math.abs(Number(position.takeProfitPct)||0)) trigger='TAKE_PROFIT';
   }
-  return {position:{...next,lifecycle},trigger,changed:true,exit,lifecycle};
+  return {position:{...next,lifecycle,biggjLifecycle:lifecycleDecision||next.biggjLifecycle||null},trigger,changed:true,exit,lifecycle};
 }
 
 export function closeShadowPosition(position,{reason='MANUAL_RESEARCH_EXIT',at=Date.now()}={}){
@@ -344,7 +398,7 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const current=validLedger?ledger:createEmptyShadowPortfolioLedger();
   const positions=Array.isArray(current.positions)?current.positions:[];
   const known=new Set(positions.map(p=>String(p.entryOrderId)));
-  const acceptedRoles=['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY'];
+  const acceptedRoles=['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY','BIGGJ_STYLE_EXPERIMENT_ENTRY'];
   const additions=[];
 
   for(const order of Array.isArray(orders)?orders:[]){
@@ -420,7 +474,7 @@ export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
 }
 
 export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
-  const excludedModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE']);
+  const excludedModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','STYLE_EXPERIMENT']);
   const rows=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
     .filter(p=>excludedModes.has(String(p.entryMode||'STANDARD').toUpperCase()));
   const open=rows.filter(p=>p.status==='OPEN');
@@ -484,7 +538,7 @@ export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
 
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','STYLE_EXPERIMENT'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const open=positions.filter(p=>p.status==='OPEN');
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
@@ -626,7 +680,7 @@ function tradeStats(rows){
 export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
   const window=periodWindow(period,asOf,timeZone);
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','STYLE_EXPERIMENT'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
   const base=tradeStats(closed);
