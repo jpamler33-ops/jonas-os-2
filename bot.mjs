@@ -8055,8 +8055,11 @@ function missionControlData(){
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
+ const visibleShadowPositions=(shadowPortfolioLedger?.positions||[]).filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p?.entryMode||'STANDARD').toUpperCase()));
+ const openPositions=visibleShadowPositions.filter(p=>p?.status==='OPEN').slice(0,30);
+ const recentClosed=visibleShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
  const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now:Date.now(),runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN'&&p.entryMode!=='EXPLORATION').length,openDiscoveryPositions:countOpenDiscoveryPositions(shadowPortfolioLedger?.positions||[])}});
- return missionControlSnapshot({health,portfolio:{...portfolio,positions:(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN').slice(0,20)},discovery,storage:{persistentStorageMounted}});
+ return missionControlSnapshot({health,portfolio:{...portfolio,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
