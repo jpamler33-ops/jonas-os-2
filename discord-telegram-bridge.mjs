@@ -599,6 +599,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const closedPosted=new Set();
   const timers=new Set();
   const visualRefreshQueue=createSerialDedupeQueue({maxSize:64});
+  const visualRefreshState=new Map();
   const tradeSyncIntervalMs=Math.max(15000,Number(tradeSyncMs)||20000);
   let schedulerStopped=false;
   let closedFeedInitialized=false;
@@ -752,37 +753,47 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       return refreshed;
     }catch(err){fail('panel-components',err);return null;}
   }
-  function queueTradeVisual({key,positionId,channel,message,callbackData,target}={}){
-    const queued=visualRefreshQueue.enqueue(key,async()=>{
+  function tradeVisualDue(key,now=Date.now()){
+    const row=visualRefreshState.get(String(key||''))||null;
+    return !row?.queuedAt&&(!row?.lastRenderedAt||Number(now)-Number(row.lastRenderedAt)>120000);
+  }
+  function queueTradeVisual({key,channel,message,callbackData}={}){
+    const k=String(key||'');
+    if(!k||!channel||!message)return false;
+    const prior=visualRefreshState.get(k)||{};
+    if(prior.queuedAt)return false;
+    const queuedAt=Date.now();
+    visualRefreshState.set(k,{...prior,queuedAt,lastError:null});
+    const queued=visualRefreshQueue.enqueue(k,async()=>{
       const startedAt=Date.now();
       let ok=false;
+      let error=null;
       try{
-        if(positionId&&!tradeCards.has(String(positionId)))return;
         await renderCoreIntoMessage(channel,message,callbackData,{forcePhoto:true});
         ok=true;
       }catch(err){
+        error=err instanceof Error?err.message:String(err);
         state.visualRenderErrors++;
-        fail('trade-visual:'+String(key||'unknown'),err);
+        fail('trade-visual:'+k,err);
       }finally{
         const finishedAt=Date.now();
         state.lastVisualRenderAt=finishedAt;
         state.lastVisualRenderDurationMs=Math.max(0,finishedAt-startedAt);
-        if(positionId){
-          const id=String(positionId),current=tradeCards.get(id);
-          if(current){
-            const next={...current};
-            if(target==='feed'){
-              next.feedVisualQueuedAt=null;
-              if(ok)next.feedVisualAt=finishedAt;
-            }else if(target==='thread'){
-              next.lastVisualQueuedAt=null;
-              if(ok)next.lastVisualAt=finishedAt;
-            }
-            tradeCards.set(id,next);
-          }
+        if(visualRefreshState.has(k)){
+          const current=visualRefreshState.get(k)||{};
+          visualRefreshState.set(k,{
+            ...current,
+            queuedAt:null,
+            lastRenderedAt:ok?finishedAt:(current.lastRenderedAt||null),
+            lastError:error
+          });
         }
       }
     });
+    if(!queued){
+      if(Object.keys(prior).length)visualRefreshState.set(k,prior);
+      else visualRefreshState.delete(k);
+    }
     state.visualRefreshQueueDepth=visualRefreshQueue.snapshot().depth;
     return queued;
   }
@@ -852,21 +863,18 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
 
     let visualMsg=prior?.visualMessageId?await thread.messages.fetch(prior.visualMessageId).catch(()=>null):null;
     if(!visualMsg) visualMsg=recent?.find(m=>m.author?.id===client.user?.id&&String(m.content||'').includes('TCX SUPERCHART'))||null;
-    const now=Date.now(),due=!prior?.lastVisualAt||now-Number(prior.lastVisualAt)>120000;
     if(!visualMsg){
       visualMsg=await thread.send({content:'BIGGJ // TRADE VISUAL\nRendering live market state …',allowedMentions:{parse:[]}});
     }
     const next={...prior,thesisMessageId:thesisMsg?.id||null,visualMessageId:visualMsg?.id||null};
-    if(due&&!prior?.lastVisualQueuedAt&&visualMsg){
-      const queued=queueTradeVisual({
-        key:'thread:'+id,
-        positionId:id,
+    const visualKey='thread:'+id;
+    if(visualMsg&&tradeVisualDue(visualKey)){
+      queueTradeVisual({
+        key:visualKey,
         channel:thread,
         message:visualMsg,
-        callbackData:'superchart:'+String(position.symbol)+':FULL:5m',
-        target:'thread'
+        callbackData:'superchart:'+String(position.symbol)+':FULL:5m'
       });
-      if(queued)next.lastVisualQueuedAt=now;
     }
     return next;
   }
@@ -915,22 +923,18 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         else starter=await c.send(shadowTradePayload(p));
 
         let feedVisual=card.feedVisualMessageId?await c.messages.fetch(card.feedVisualMessageId).catch(()=>null):null;
-        const feedVisualDue=!card.feedVisualAt||Date.now()-Number(card.feedVisualAt)>120000;
         if(!feedVisual){
           feedVisual=await c.send({content:'BIGGJ // LIVE TRADE VISUAL\nRendering market state …',allowedMentions:{parse:[]}});
           card.feedVisualMessageId=feedVisual.id;
         }
-        if(feedVisual&&feedVisualDue&&!card.feedVisualQueuedAt){
-          const queuedAt=Date.now();
-          const queued=queueTradeVisual({
-            key:'feed:'+id,
-            positionId:id,
+        const feedVisualKey='feed:'+id;
+        if(feedVisual&&tradeVisualDue(feedVisualKey)){
+          queueTradeVisual({
+            key:feedVisualKey,
             channel:c,
             message:feedVisual,
-            callbackData:'superchart:'+String(p.symbol)+':FULL:5m',
-            target:'feed'
+            callbackData:'superchart:'+String(p.symbol)+':FULL:5m'
           });
-          if(queued)card.feedVisualQueuedAt=queuedAt;
         }
 
         let thread=card.threadId?await client.channels.fetch(card.threadId).catch(()=>null):null;
@@ -960,6 +964,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       }
       visualRefreshQueue.cancel('feed:'+id);
       visualRefreshQueue.cancel('thread:'+id);
+      visualRefreshState.delete('feed:'+id);
+      visualRefreshState.delete('thread:'+id);
       state.visualRefreshQueueDepth=visualRefreshQueue.snapshot().depth;
       tradeCards.delete(id);
     }
