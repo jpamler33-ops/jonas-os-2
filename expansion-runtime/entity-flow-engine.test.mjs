@@ -197,3 +197,48 @@ test('entity flow memory survives persistence round trip',async()=>{
   assert.equal(entityFlowMemorySummary(loaded).observations,1);
   assert.equal(loaded.observations[0].entityId,'OKX');
 });
+
+
+test('provider scans block batches with bounded concurrency',async()=>{
+  const idx=buildEntityAddressIndex(registry());
+  const finalizedTs=2_000_000;
+  let inFlight=0,maxInFlight=0,batchCalls=0;
+  const fetchImpl=async(_url,opts)=>{
+    const req=JSON.parse(opts.body);
+    if(!Array.isArray(req)){
+      return {
+        ok:true,status:200,
+        async text(){return JSON.stringify({jsonrpc:'2.0',id:1,result:block(100,finalizedTs,[])});}
+      };
+    }
+    batchCalls++;
+    inFlight++;
+    maxInFlight=Math.max(maxInFlight,inFlight);
+    await new Promise(resolve=>setTimeout(resolve,10));
+    inFlight--;
+    const rows=req.map(r=>{
+      const n=parseInt(r.params[0],16);
+      const age=(100-n)*12_000;
+      return {jsonrpc:'2.0',id:r.id,result:block(n,finalizedTs-age,[])};
+    });
+    return {ok:true,status:200,async text(){return JSON.stringify(rows);}};
+  };
+  const provider=createEthereumEntityFlowProvider({
+    fetchImpl,
+    rpcUrl:'https://eth.local',
+    addressIndex:idx,
+    entityIds:['OKX'],
+    maxBlocks:18,
+    batchSize:3,
+    batchConcurrency:3,
+    now:()=>2_100_000,
+    cacheMs:0
+  });
+  const s=await provider.fetchSnapshot({force:true});
+  assert.equal(s.ok,true);
+  assert.equal(batchCalls,6);
+  assert.ok(maxInFlight>1);
+  assert.ok(maxInFlight<=3);
+  assert.equal(s.batchConcurrency,3);
+  assert.equal(s.batchRequests,6);
+});
