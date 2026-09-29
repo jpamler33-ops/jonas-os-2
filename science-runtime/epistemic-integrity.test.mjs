@@ -209,3 +209,47 @@ test('epistemic report tampering is detected',()=>{
   r.gate='ABSTAIN';
   assert.equal(verifyEpistemicIntegrity(r).ok,false);
 });
+
+
+test('empty trust roots fail closed instead of vacuously passing closure',()=>{
+  const x=bundle();
+  x.resolverClaims=[];
+  const r=evaluateEpistemicIntegrity(x);
+  assert.equal(r.trustClosure.closed,false);
+  assert.equal(r.trustClosure.emptyRoots,true);
+  assert.ok(r.obligations.some(o=>o.kind==='TRUST_ROOT_EVIDENCE'));
+  assert.ok(r.obligations.some(o=>o.kind==='INDEPENDENT_RESOLVER_CLAIM'));
+  assert.equal(r.gate,'ABSTAIN');
+});
+
+test('zero discovery channels produce a concrete evidence acquisition obligation',()=>{
+  const x=bundle();
+  x.discoveryChannels=[];
+  const r=evaluateEpistemicIntegrity(x);
+  assert.equal(r.discovery.status,'INSUFFICIENT');
+  assert.ok(r.obligations.some(o=>o.kind==='DISCOVERY_CHANNEL_EVIDENCE'));
+  const plan=buildIdentificationEvidencePlan(r);
+  assert.ok(plan.items.some(i=>i.evidenceKind==='OBSERVED_INDEPENDENT_DISCOVERY_CHANNEL'));
+  assert.equal(r.gate,'ABSTAIN');
+});
+
+test('missing resolver consensus becomes an explicit observed resolver evidence plan item',()=>{
+  const x=bundle();
+  x.resolverClaims=[x.resolverClaims[0]];
+  const r=evaluateEpistemicIntegrity(x);
+  assert.equal(r.identity.status,'INSUFFICIENT');
+  const plan=buildIdentificationEvidencePlan(r);
+  assert.ok(plan.items.some(i=>i.evidenceKind==='OBSERVED_INDEPENDENT_RESOLVER_CLAIM'));
+  assert.equal(plan.clearsAbstain,false);
+});
+
+test('specific trust obligations dominate generic closure in the evidence plan',()=>{
+  const x=bundle();
+  x.resolverClaims=[];
+  const r=evaluateEpistemicIntegrity(x);
+  const plan=buildIdentificationEvidencePlan(r);
+  const kinds=plan.items.map(i=>i.evidenceKind);
+  assert.ok(kinds.includes('OBSERVED_TRUST_ROOT'));
+  assert.ok(kinds.includes('OBSERVED_INDEPENDENT_RESOLVER_CLAIM'));
+  assert.equal(kinds.filter(k=>k==='OBSERVED_PROVENANCE_CLOSURE').length,0);
+});
