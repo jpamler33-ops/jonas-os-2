@@ -115,6 +115,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'mission-control.mjs',
   'market-fabric-rotation.mjs',
   'market-fabric-archive.mjs',
+  'market-fabric-cold-store.mjs',
+  'market-fabric-cold-tier.mjs',
   'persistence-smoke.mjs',
   'storage-maintenance.mjs',
   'trade-discovery-diagnostics.mjs',
