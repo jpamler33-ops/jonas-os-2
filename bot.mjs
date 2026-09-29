@@ -193,6 +193,8 @@ const autoLearnHeapHeadroomMb = Math.max(320, Math.min(400, Number(process.env.T
 const autoLearnRssHeadroomMb = Math.max(650, Math.min(850, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 760)));
 const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(6, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 3) || 3)));
 const autoLearnInterIssueMs = Math.max(1000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 4000)));
+const autoLearnResumeHeapMb = Math.max(260, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || 320)));
+const autoLearnMemoryBackoffMs = Math.max(15000, Math.min(120000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 45000)));
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
@@ -6912,6 +6914,7 @@ async function autoLearnForecastWatcher() {
   while(running) {
     const started=Date.now();
     let issued=0,skipped=0,failed=0,deferred=0;
+    let memoryPressure=false;
     if(autoLearnEnabled&&forecastRuntime.healthy){
       while(running&&activeBackgroundResearchJob) await sleep(250);
       if(!running) break;
@@ -6928,6 +6931,7 @@ async function autoLearnForecastWatcher() {
         // letting background learning consume the serving process heap.
         if(heapUsedMb>=autoLearnHeapHeadroomMb||rssMb>=autoLearnRssHeadroomMb){
           deferred++;
+          memoryPressure=true;
           console.warn('autolearn forecast deferred for memory headroom',JSON.stringify({
             symbol,heapUsedMb,rssMb,historyRows:forecastRuntime.engine.historySize(),
             threshold:{heapUsedMb:autoLearnHeapHeadroomMb,rssMb:autoLearnRssHeadroomMb}
@@ -7037,6 +7041,21 @@ async function autoLearnForecastWatcher() {
           forecastJournalRows:forecastRuntime.journal.entries.length
         };})()
       }));
+    }
+    if(memoryPressure){
+      const before=process.memoryUsage();
+      console.log('autolearn memory backoff',JSON.stringify({
+        delayMs:autoLearnMemoryBackoffMs,
+        resumeHeapMb:autoLearnResumeHeapMb,
+        heapUsedMb:Math.round(before.heapUsed/1024/1024),
+        rssMb:Math.round(before.rss/1024/1024)
+      }));
+      await sleep(autoLearnMemoryBackoffMs);
+      const after=process.memoryUsage();
+      if(Math.round(after.heapUsed/1024/1024)>autoLearnResumeHeapMb){
+        await sleep(autoLearnSweepMs);
+        continue;
+      }
     }
     await sleep(autoLearnSweepMs);
   }
