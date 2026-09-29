@@ -3128,6 +3128,12 @@ async function showTerminalView(chatId,messageId,symbol,view){
  return deliverTelegramTextCard(tg,chatId,messageId,{text,reply_markup:terminalKeyboard(symbol)});
 }
 
+const globalIntelEvents=[];
+function globalIntelSnapshot(){return globalIntelEvents.slice(-250);}
+async function showGlobalIntel(chatId,messageId,filter='TOP'){
+  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderGlobalIntelFeed(globalIntelSnapshot(),{filter}),reply_markup:globalIntelKeyboard(filter)});
+}
+
 async function showHomeSection(chatId,messageId,section) {
   if(section==='TERMINAL') return showSuperRadar(chatId,messageId);
   if(section==='DATA') return showDataStatus(chatId,messageId);
@@ -3145,12 +3151,7 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='STATS_MONTH') return showShadowTradeStats(chatId,messageId,'MONTH');
   if(section==='STATS_ALL') return showShadowTradeStats(chatId,messageId,'ALL');
   if(section==='MORE') return showPremiumMore(chatId,messageId);
-  if(section==='NEWS') {
-    return deliverTelegramTextCard(tg,chatId,messageId,{
-      text:renderGlobalIntelFeed([],{filter:'TOP'}),
-      reply_markup:globalIntelKeyboard('TOP')
-    });
-  }
+  if(section==='NEWS') return showGlobalIntel(chatId,messageId,'TOP');
   if(section==='PROOF') { const p=buildTcxProofReport(shadowPortfolioLedger), icon=p.status==='ROBUST'?'🟢':p.status==='EMERGING'?'🟡':'⚪', wf=p.walkForward.validationMode==='FROZEN_POLICY_OOS'?'🟢 Frozen OOS':'🟡 Replay only'; const body=['🧾 TCX PROOF CENTER','',icon+' EVIDENZSTATUS   '+p.status,'PRÜFUNGEN       '+p.passedChecks+'/'+p.totalChecks,'TRADES          '+p.evidence.trades,'FORWARD TRADES  '+p.evidence.forwardTrades,'','VALIDIERUNG','Walk-Forward     '+wf,'Tail Risk        '+(p.tailRisk.passed?'🟢 bestanden':'🟡 nicht bestanden'),'Independent Audit '+(p.audit.passed?'🟢 bestanden':'🟡 nicht bestanden'),'Regime-Breite   '+p.regimes.distinct+' Regimes · '+p.regimes.matureCells+' reif','','RISIKO','Max Drawdown     '+(Number.isFinite(p.evidence.maxDrawdownPct)?fmt(p.evidence.maxDrawdownPct*100,1)+'%':'—'),'Stress p95 DD    '+(Number.isFinite(p.tailRisk.p95DrawdownPct)?fmt(p.tailRisk.p95DrawdownPct*100,1)+'%':'—'),'','ROBUST verlangt echte eingefrorene Out-of-Sample-Policy-Evidenz.','Status ist kein Profitversprechen und keine Live-Freigabe.','ABSTAIN / SHADOW_ONLY']; return deliverTelegramTextCard(tg,chatId,messageId,{text:body.join('\n'),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:proof'},{text:'🧪 Lernzentrum',callback_data:'home:performance'}],[{text:'🏠 Command Center',callback_data:'home'}]]}}); }
 
   let text='';
@@ -5916,6 +5917,11 @@ async function handle(update) {
       stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showStart(chatId,textMessageId);
+      await ack(q.id);
+      return;
+    }
+    if (a.kind === 'GLOBAL_INTEL') {
+      await showGlobalIntel(chatId,messageId,a.filter||'TOP');
       await ack(q.id);
       return;
     }
