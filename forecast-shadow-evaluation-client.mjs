@@ -2,6 +2,54 @@ import { Worker } from 'node:worker_threads';
 
 export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1';
 
+export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V1';
+
+export function evaluateShadowWorkerAdmission({
+  mode='AUTO',
+  heapUsedMb=0,
+  rssMb=0,
+  externalMb=0,
+  autoHeapMb=260,
+  autoRssMb=620,
+  autoExternalMb=96,
+  hardHeapMb=300,
+  hardRssMb=900
+}={}){
+  const normalized=String(mode||'AUTO').trim().toUpperCase();
+  const effectiveMode=['0','OFF','FALSE','DISABLED'].includes(normalized)
+    ?'OFF'
+    :['1','ON','TRUE','ENABLED'].includes(normalized)
+      ?'ON'
+      :'AUTO';
+  const memory={
+    heapUsedMb:Math.max(0,Number(heapUsedMb)||0),
+    rssMb:Math.max(0,Number(rssMb)||0),
+    externalMb:Math.max(0,Number(externalMb)||0)
+  };
+  const limits={
+    autoHeapMb:Math.max(1,Number(autoHeapMb)||260),
+    autoRssMb:Math.max(1,Number(autoRssMb)||620),
+    autoExternalMb:Math.max(1,Number(autoExternalMb)||96),
+    hardHeapMb:Math.max(1,Number(hardHeapMb)||300),
+    hardRssMb:Math.max(1,Number(hardRssMb)||900)
+  };
+
+  if(effectiveMode==='OFF'){
+    return {allowed:false,mode:effectiveMode,reason:'DISABLED',memory,limits};
+  }
+  if(memory.heapUsedMb>=limits.hardHeapMb||memory.rssMb>=limits.hardRssMb){
+    return {allowed:false,mode:effectiveMode,reason:'HARD_MEMORY_PRESSURE',memory,limits};
+  }
+  if(effectiveMode==='AUTO'&&(
+    memory.heapUsedMb>=limits.autoHeapMb||
+    memory.rssMb>=limits.autoRssMb||
+    memory.externalMb>=limits.autoExternalMb
+  )){
+    return {allowed:false,mode:effectiveMode,reason:'ADAPTIVE_MEMORY_PRESSURE',memory,limits};
+  }
+  return {allowed:true,mode:effectiveMode,reason:'MEMORY_HEADROOM_AVAILABLE',memory,limits};
+}
+
 export function forecastHistoryProgressAt(historyRows){
   let latest=0;
   for(const row of Array.isArray(historyRows)?historyRows:[]){
