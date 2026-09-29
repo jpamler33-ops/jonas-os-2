@@ -6,6 +6,7 @@ import {
   routeBiggjStrategy,
   evaluateBiggjEntryAdmission,
   deriveBiggjShadowRiskBudget,
+  deriveBiggjPrimaryLeveragePolicy,
   deriveBiggjThesisEvidence,
   evaluateBiggjPositionLifecycle
 } from './biggj-trading-policy.mjs';
@@ -299,4 +300,24 @@ test('un-calibrated or hidden horizon probabilities are withheld',()=>{
   );
   assert.equal(hidden.trusted,false);
   assert.equal(hidden.reason,'PROBABILITY_NOT_ADMITTED');
+});
+
+
+test('PRIMARY leverage baseline stays 1x even when research lab suggests more',()=>{
+  const x=deriveBiggjPrimaryLeveragePolicy({suggestedLeverage:3});
+  assert.equal(x.requestedLeverage,1);
+  assert.equal(x.allowedLeverage,1);
+  assert.equal(x.leveragePolicy,'PRIMARY_BASELINE_UNLEVERED');
+  assert.equal(x.suggestedResearchLeverage,3);
+  assert.equal(x.suggestionDisposition,'RESEARCH_ONLY');
+  assert.equal(x.experimentOnly,true);
+  assert.equal(x.execution,'SHADOW_ONLY');
+  assert.equal(x.canExecuteLive,false);
+});
+
+test('1x leverage suggestion matches PRIMARY baseline without experiment flag',()=>{
+  const x=deriveBiggjPrimaryLeveragePolicy({suggestedLeverage:1});
+  assert.equal(x.allowedLeverage,1);
+  assert.equal(x.suggestionDisposition,'BASELINE_MATCH');
+  assert.equal(x.experimentOnly,false);
 });
