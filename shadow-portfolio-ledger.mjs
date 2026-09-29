@@ -338,6 +338,11 @@ function sanitizePosition(p){
   return p;
 }
 
+const PRIMARY_PERFORMANCE_EXCLUDED_MODES=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE']);
+function isPrimaryPerformancePosition(position){
+  return !PRIMARY_PERFORMANCE_EXCLUDED_MODES.has(String(position?.entryMode||'STANDARD').toUpperCase());
+}
+
 export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={}){
   const base=ledger&&ledger.version===SHADOW_PORTFOLIO_LEDGER_VERSION
     ? structuredClone(ledger)
@@ -403,7 +408,7 @@ export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
 
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(isPrimaryPerformancePosition);
   const open=positions.filter(p=>p.status==='OPEN');
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
@@ -454,6 +459,88 @@ export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
       unrealizedNetPnlQuote:finite(p.lastMark?.unrealizedNetPnlQuote),
       unrealizedReturnPct:finite(p.lastMark?.unrealizedReturnPct)
     })),
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  return deepFreeze({...core,fingerprint:sha256(core)});
+}
+
+export function shadowPortfolioActivitySummary(ledger,{asOf=Date.now()}={}){
+  const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean);
+  const primary=positions.filter(isPrimaryPerformancePosition);
+  const research=positions.filter(p=>!isPrimaryPerformancePosition(p));
+  const researchOpen=research.filter(p=>p.status==='OPEN');
+  const researchClosed=research.filter(p=>p.status==='CLOSED');
+  const researchRealized=researchClosed.reduce((sum,p)=>sum+Number(p.realizedNetPnlQuote||0),0);
+  const researchUnrealized=researchOpen.reduce((sum,p)=>sum+Number(p.lastMark?.unrealizedNetPnlQuote||0),0);
+  const byMode={};
+  for(const p of research){
+    const mode=String(p.entryMode||'RESEARCH').toUpperCase();
+    const bucket=byMode[mode]||{openPositions:0,closedTrades:0,realizedPnlQuote:0,unrealizedPnlQuote:0,netPnlQuote:0};
+    if(p.status==='OPEN'){
+      bucket.openPositions++;
+      bucket.unrealizedPnlQuote+=Number(p.lastMark?.unrealizedNetPnlQuote||0);
+    }else{
+      bucket.closedTrades++;
+      bucket.realizedPnlQuote+=Number(p.realizedNetPnlQuote||0);
+    }
+    bucket.netPnlQuote=bucket.realizedPnlQuote+bucket.unrealizedPnlQuote;
+    byMode[mode]=bucket;
+  }
+  const researchActive=researchOpen
+    .sort((a,b)=>Number(b.openedAt||0)-Number(a.openedAt||0))
+    .slice(0,30)
+    .map(p=>({
+      positionId:p.positionId,
+      symbol:p.symbol,
+      side:p.side,
+      entryPrice:p.entryPrice,
+      openedAt:p.openedAt,
+      plannedExitAt:p.plannedExitAt,
+      horizonId:p.horizonId,
+      setupType:p.setupType,
+      entryMode:p.entryMode,
+      lastMark:{
+        price:finite(p.lastMark?.price),
+        unrealizedNetPnlQuote:finite(p.lastMark?.unrealizedNetPnlQuote),
+        unrealizedReturnPct:finite(p.lastMark?.unrealizedReturnPct)
+      }
+    }));
+  const researchRecentClosed=researchClosed
+    .sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0))
+    .slice(0,30)
+    .map(p=>({
+      positionId:p.positionId,
+      symbol:p.symbol,
+      side:p.side,
+      entryPrice:p.entryPrice,
+      exitPrice:p.exitPrice,
+      openedAt:p.openedAt,
+      closedAt:p.closedAt,
+      horizonId:p.horizonId,
+      setupType:p.setupType,
+      entryMode:p.entryMode,
+      closeReason:p.closeReason,
+      realizedNetPnlQuote:finite(p.realizedNetPnlQuote),
+      realizedReturnPct:finite(p.realizedReturnPct)
+    }));
+  const core={
+    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+    asOf:Number(asOf),
+    totalOpenPositions:positions.filter(p=>p.status==='OPEN').length,
+    totalClosedTrades:positions.filter(p=>p.status==='CLOSED').length,
+    primaryOpenPositions:primary.filter(p=>p.status==='OPEN').length,
+    primaryClosedTrades:primary.filter(p=>p.status==='CLOSED').length,
+    researchOpenPositions:researchOpen.length,
+    researchClosedTrades:researchClosed.length,
+    researchRealizedPnlQuote:researchRealized,
+    researchUnrealizedPnlQuote:researchUnrealized,
+    researchNetPnlQuote:researchRealized+researchUnrealized,
+    byMode,
+    researchActive,
+    researchRecentClosed,
+    primaryAccounting:'PRIMARY_PERFORMANCE_ONLY',
+    researchExcludedFromPrimaryEquity:true,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
@@ -545,7 +632,7 @@ function tradeStats(rows){
 export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
   const window=periodWindow(period,asOf,timeZone);
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(isPrimaryPerformancePosition);
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
   const base=tradeStats(closed);
