@@ -9,7 +9,10 @@ const GENESIS='0'.repeat(64);
 
 const AUDIT_IDENTITY_FIELDS=Object.freeze({
   TCX_INSTITUTIONAL_FORECAST_ISSUED:'issuanceId',
-  TCX_RESEARCH_TRACE_EVALUATED:'evaluationId'
+  TCX_RESEARCH_TRACE_EVALUATED:'evaluationId',
+  TCX_MODEL_CANDIDATE_EVALUATED:'evaluationFingerprint',
+  TCX_MODEL_CANDIDATE_PROMOTED:'promotionId',
+  TCX_MODEL_ROLLBACK_DRILL:'drillId'
 });
 
 function auditIdentityKey(kind,idField,id){
