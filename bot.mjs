@@ -219,6 +219,9 @@ if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
 const discordToken = String(process.env.DISCORD_BOT_TOKEN || '').trim();
 const discordApplicationId = String(process.env.DISCORD_APPLICATION_ID || '').trim();
 const discordGuildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+const discordAutoSetup = String(process.env.DISCORD_AUTO_SETUP || '1') !== '0';
+const discordRefreshMs = Math.max(30000, Number(process.env.DISCORD_REFRESH_MS || 60000));
+const discordMarketRefreshMs = Math.max(60000, Number(process.env.DISCORD_MARKET_REFRESH_MS || 120000));
 let discordBridge = null;
 
 const telegramApi = `https://api.telegram.org/bot${token}`;
@@ -6543,6 +6546,10 @@ if(discordToken && discordApplicationId && discordGuildId){
     applicationId:discordApplicationId,
     guildId:discordGuildId,
     handleUpdate:handle,
+    getMissionControlSnapshot:()=>missionControlData(),
+    autoSetup:discordAutoSetup,
+    refreshMs:discordRefreshMs,
+    marketRefreshMs:discordMarketRefreshMs,
     logger:console
   });
 }
