@@ -89,13 +89,24 @@ function recordCore({seq,prevHash,input}){
     payloadHash
   };
 }
+function sourceEventPayloadHash(record){
+  return sha256({
+    domain:record?.domain,
+    source:record?.source,
+    sourceVersion:record?.sourceVersion,
+    finality:record?.finality,
+    quality:record?.quality,
+    features:record?.features,
+    provenance:record?.provenance
+  });
+}
 function dedupeKey(record){
   return sha256({
     streamKey:record.streamKey,
     domain:record.domain,
     source:record.source,
     sourceEventId:record.sourceEventId,
-    payloadHash:record.payloadHash
+    sourceEventPayloadHash:sourceEventPayloadHash(record)
   });
 }
 
@@ -292,7 +303,7 @@ export async function openResearchDataPlane(filePath,{
   const dedupe=new Set(records.map(dedupeKey));
   const sourcePayload=new Map(records.map(x=>[
     x.streamKey+'\u0000'+x.domain+'\u0000'+x.source+'\u0000'+x.sourceEventId,
-    x.payloadHash
+    sourceEventPayloadHash(x)
   ]));
 
   const hard=Math.max(8*1024*1024,Number(hardBytes)||160*1024*1024);
@@ -337,8 +348,9 @@ export async function appendResearchDataPlane(plane,inputs){
     if(!shape.ok) throw new Error('Invalid research data record: '+shape.errors.join(','));
     const key=dedupeKey(record);
     const sourceKey=record.streamKey+'\u0000'+record.domain+'\u0000'+record.source+'\u0000'+record.sourceEventId;
+    const sourcePayloadHash=sourceEventPayloadHash(record);
     const priorPayload=plane.sourcePayload.get(sourceKey)||localSourcePayload.get(sourceKey);
-    if(priorPayload&&priorPayload!==record.payloadHash){
+    if(priorPayload&&priorPayload!==sourcePayloadHash){
       throw new Error('SOURCE_EVENT_ID_CONFLICT:'+record.sourceEventId);
     }
     if(plane.dedupe.has(key)||localDedupe.has(key)){
@@ -347,7 +359,7 @@ export async function appendResearchDataPlane(plane,inputs){
     }
     prepared.push({record,key,sourceKey});
     localDedupe.add(key);
-    localSourcePayload.set(sourceKey,record.payloadHash);
+    localSourcePayload.set(sourceKey,sourcePayloadHash);
     seq=record.seq;
     prev=record.recordHash;
   }
@@ -379,7 +391,7 @@ export async function appendResearchDataPlane(plane,inputs){
     plane.totalRecords++;
     plane.fileBytes+=Buffer.byteLength(canonicalJson(record)+'\n');
     plane.dedupe.add(key);
-    plane.sourcePayload.set(sourceKey,record.payloadHash);
+    plane.sourcePayload.set(sourceKey,sourceEventPayloadHash(record));
     plane.records.push(record);
     if(plane.records.length>plane.maxInMemoryRecords){
       const removed=plane.records.shift();
