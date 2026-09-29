@@ -357,6 +357,11 @@ const autoShadowMemecoinMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(p
 const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MIN_EXPECTED_RETURN || 0.002));
 const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
+const autoShadowHorizonSelectionRaw = String(process.env.TCX_AUTO_SHADOW_HORIZON_SELECTION || 'MAX_EDGE').toUpperCase();
+const autoShadowHorizonSelection = ['MAX_EDGE','MAX_RETURN','LONGEST','SHORTEST'].includes(autoShadowHorizonSelectionRaw)?autoShadowHorizonSelectionRaw:'MAX_EDGE';
+const autoShadowCoreMinHorizonMs = Math.max(15*60_000, Number(process.env.TCX_AUTO_SHADOW_CORE_MIN_HORIZON_MS || 60*60_000));
+const autoShadowMemeMinHorizonMs = Math.max(5*60_000, Number(process.env.TCX_AUTO_SHADOW_MEME_MIN_HORIZON_MS || 15*60_000));
+const autoShadowMaxHorizonMs = Math.max(autoShadowCoreMinHorizonMs, autoShadowMemeMinHorizonMs, Number(process.env.TCX_AUTO_SHADOW_MAX_HORIZON_MS || 3*60*60_000));
 const mandatoryShadowDiscoveryEnabled = String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
 const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 12));
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
@@ -1683,7 +1688,10 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     notionalQuote:supervisedBudget.notionalQuote,
     minExpectedReturn:isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn,
     minDirectionalProbability:isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability,
-    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
+    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge,
+    horizonSelection:autoShadowHorizonSelection,
+    minHorizonMs:isMeme?autoShadowMemeMinHorizonMs:autoShadowCoreMinHorizonMs,
+    maxHorizonMs:autoShadowMaxHorizonMs
   });
   if(!decision.eligible) return {...decision,placed:false};
   const setup=classifyShadowSetup({expectedReturn:decision.expectedReturn,probabilityEdge:decision.probabilityEdge,regimeConfidence:Number(issuance?.regime?.confidence||issuance?.regimeConfidence||0),stressRobustnessScore:Number(issuance?.stressRobustnessScore||0),assetClass});
@@ -1776,7 +1784,7 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     return {...decision,placed:false,reason:'DAILY_SYMBOL_CAP'};
   }
 
-  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,setupMemory:SETUP_PERFORMANCE_MEMORY_VERSION,setupType:setup.setupType,setupScore:setup.score,setupEvidenceStatus:setupEvidence.status,setupEvidenceMultiplier}});
+  const frozenPolicy=createFrozenShadowPolicy({policyVersion:'AUTO_SHADOW_ENTRY_POLICY_V1',frozenAt:now,parameters:{strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,opportunityAllocator:OPPORTUNITY_ALLOCATOR_VERSION,leverageRisk:SHADOW_LEVERAGE_RISK_VERSION,leverageLab:LEVERAGE_COUNTERFACTUAL_LAB_VERSION,portfolioRisk:PORTFOLIO_RISK_BRAIN_VERSION,correlation:PIT_CORRELATION_ENGINE_VERSION,assetClass,horizonId:decision.horizonId,horizonSelection:decision.horizonSelection,minHorizonMs:decision.minHorizonMs,maxHorizonMs:decision.maxHorizonMs,side:decision.side,admissionGate:decision.admissionGate,academyStage:academy.activeStage,trainingMissionType:training.mission.type,tradeLifecycle:TRADE_LIFECYCLE_VERSION,setupMemory:SETUP_PERFORMANCE_MEMORY_VERSION,setupType:setup.setupType,setupScore:setup.score,setupEvidenceStatus:setupEvidence.status,setupEvidenceMultiplier}});
   const order=await placeShadowOrder({
     symbol:decision.symbol,
     side:decision.side,
@@ -1844,6 +1852,9 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
       forecastFingerprint:decision.forecastFingerprint,
       horizonId:decision.horizonId,
       horizonMs:decision.horizonMs,
+      horizonSelection:decision.horizonSelection,
+      minHorizonMs:decision.minHorizonMs,
+      maxHorizonMs:decision.maxHorizonMs,
       admissionGate:decision.admissionGate,
       expectedReturn:decision.expectedReturn,
       directionalProbability:decision.directionalProbability,
@@ -1865,6 +1876,8 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     opportunityMultiplier:opportunityAllocation.multiplier,
     failureMemoryScore:opportunityAllocation.failureScore,
     horizonId:decision.horizonId,
+    horizonMs:decision.horizonMs,
+    horizonSelection:decision.horizonSelection,
     expectedReturn:decision.expectedReturn,
     directionalProbability:decision.directionalProbability,
     admissionGate:decision.admissionGate,
