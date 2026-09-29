@@ -1852,15 +1852,50 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     };
   }
   const supervisedBudget=supervisedShadowBudget(training,{academyNotionalQuote:academyBudget.notionalQuote});
+  let biggjPreflight=null;
+  try{
+    biggjPreflight=await buildBiggjRuntimeMarketAnalysis(issuance);
+  }catch(err){
+    const message=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'biggj.pretrade',message});
+    return {placed:false,eligible:false,reason:'BIGGJ_MARKET_ANALYSIS_FAILED',error:message,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const marketAnalysis=biggjPreflight.analysis;
+  if(marketAnalysis?.decision!=='CANDIDATE'||!marketAnalysis?.selectedStyle){
+    return {
+      placed:false,eligible:false,reason:'BIGGJ_MARKET_PREFLIGHT_ABSTAIN',
+      marketDecision:marketAnalysis?.decision||'ABSTAIN',
+      marketReason:marketAnalysis?.strategyReason||marketAnalysis?.reason||'NO_COHERENT_SETUP',
+      marketAnalysisFingerprint:marketAnalysis?.fingerprint||null,
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    };
+  }
+  const styleWindow=biggjStyleHorizonWindow(marketAnalysis.selectedStyle);
   const decision=deriveAutonomousShadowTrade(issuance,{
     now,
     notionalQuote:supervisedBudget.notionalQuote,
     minExpectedReturn:isMeme?autoShadowMemecoinMinExpectedReturn:autoShadowMinExpectedReturn,
     minDirectionalProbability:isMeme?autoShadowMemecoinMinDirectionalProbability:autoShadowMinDirectionalProbability,
-    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge
+    minProbabilityEdge:isMeme?autoShadowMemecoinMinProbabilityEdge:autoShadowMinProbabilityEdge,
+    horizonSelection:'MAX_EDGE',
+    minHorizonMs:styleWindow.minHorizonMs,
+    maxHorizonMs:styleWindow.maxHorizonMs
   });
-  if(!decision.eligible) return {...decision,placed:false};
-  const setup=classifyShadowSetup({expectedReturn:decision.expectedReturn,probabilityEdge:decision.probabilityEdge,regimeConfidence:Number(issuance?.regime?.confidence||issuance?.regimeConfidence||0),stressRobustnessScore:Number(issuance?.stressRobustnessScore||0),assetClass});
+  if(!decision.eligible) return {...decision,placed:false,tradingStyle:marketAnalysis.selectedStyle,strategyFamily:marketAnalysis.strategyFamily};
+  if(
+    (decision.side==='BUY'&&marketAnalysis.side!=='LONG')||
+    (decision.side==='SELL'&&marketAnalysis.side!=='SHORT')
+  ){
+    return {...decision,placed:false,reason:'BIGGJ_PREFLIGHT_DIRECTION_MISMATCH',marketSide:marketAnalysis.side,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const structurePlan=biggjStructurePlan(marketAnalysis);
+  if(!structurePlan.valid){
+    return {...decision,placed:false,reason:structurePlan.reason,structurePlan,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!(Number(structurePlan.rewardRisk)>=1.5)){
+    return {...decision,placed:false,reason:'BIGGJ_REWARD_RISK_TOO_LOW',structurePlan,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const setup=classifyShadowSetup({expectedReturn:decision.expectedReturn,probabilityEdge:decision.probabilityEdge,regimeConfidence:Number(issuance?.regime?.confidence||issuance?.regimeConfidence||marketAnalysis.styleScore||0),stressRobustnessScore:Number(issuance?.stressRobustnessScore||0),assetClass});
   if(setup.setupType==='REJECT') return {...decision,placed:false,reason:'ENTRY_SETUP_REJECT',setup,execution:'SHADOW_ONLY'};
   const setupMemory=buildSetupPerformanceMemory(shadowPortfolioLedger);
   const setupEvidence=setupEvidenceFor(setupMemory,{setupType:setup.setupType,assetClass,symbol:decision.symbol,side:decision.side,horizonId:decision.horizonId,regimeKey:String(issuance?.regime?.id||issuance?.regimeId||'UNKNOWN')});
