@@ -81,6 +81,7 @@ async function acquireSegment({filePath,item,coldStore}){
   }
 
   if(!item?.cold) throw new Error('TCX_COLD_REPLAY_SEGMENT_MISSING:'+String(item?.sourceName||item?.name||'unknown'));
+  if(item.cold.recoveryVerified!==true) throw new Error('TCX_COLD_REPLAY_REMOTE_NOT_RECOVERY_VERIFIED');
   if(!coldStore?.enabled||typeof coldStore.restoreVerifiedSegment!=='function') throw new Error('TCX_COLD_REPLAY_COLD_STORE_REQUIRED');
 
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-cold-replay-'));
