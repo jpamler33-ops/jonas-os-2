@@ -130,6 +130,38 @@ test('main ENTRY is excluded from league reconciliation',()=>{
   assert.equal(r.ledger.positions[0].entryOrderId,'league');
 });
 
+test('league reconciliation is zero-copy when no new entry exists',()=>{
+  const order=leagueOrder({id:'league-hot'});
+  const first=reconcileStrategyLeagueEntries(createEmptyStrategyLeagueLedger(),[order],{now:2000});
+  const second=reconcileStrategyLeagueEntries(first.ledger,[order],{now:3000});
+  assert.equal(second.changed,false);
+  assert.equal(second.copyMode,'HOT_NOOP');
+  assert.equal(second.ledger,first.ledger);
+});
+
+test('league reconciliation structurally shares historical positions',()=>{
+  const first=reconcileStrategyLeagueEntries(createEmptyStrategyLeagueLedger(),[leagueOrder({id:'league-a'})],{now:2000}).ledger;
+  const historical=first.positions[0];
+  const next=reconcileStrategyLeagueEntries(first,[leagueOrder({id:'league-b'})],{now:3000});
+  assert.equal(next.copyMode,'COPY_ON_WRITE');
+  assert.equal(next.ledger.positions[0],historical);
+  assert.notEqual(next.ledger,first);
+});
+
+test('league replacement copies only the target position',()=>{
+  const ledger=reconcileStrategyLeagueEntries(createEmptyStrategyLeagueLedger(),[
+    leagueOrder({id:'league-a'}),
+    leagueOrder({id:'league-b'})
+  ],{now:2000}).ledger;
+  const untouched=ledger.positions[0];
+  const target=ledger.positions[1];
+  const replacement={...target,lastMark:{markedAt:3000,fullyExecutable:true}};
+  const next=replaceStrategyLeaguePosition(ledger,replacement);
+  assert.equal(next.positions[0],untouched);
+  assert.notEqual(next.positions[1],replacement);
+  assert.deepEqual(next.positions[1].lastMark,replacement.lastMark);
+});
+
 test('league position can be marked and closed with public book simulation',()=>{
   let p=leaguePositionFromEntryOrder(leagueOrder());
   const marked=markStrategyLeaguePosition(p,{bids:[[102,10]],asks:[[102.1,10]],source:'TEST',availableAt:2000},{at:2000,feeBps:0});
