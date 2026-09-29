@@ -7386,6 +7386,7 @@ async function shadowCompetitionWatcher(){
           autoExternalMb:shadowCompetitionAutoExternalMb,
           hardHeapMb:300,
           hardRssMb:900,
+          hardExternalMb:shadowCompetitionHardExternalMb,
           hardExternalMb:shadowCompetitionHardExternalMb
         });
         shadowCompetitionWorkerLastDecision={...admission,at:Date.now()};
