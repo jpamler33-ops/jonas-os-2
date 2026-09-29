@@ -5,6 +5,7 @@ import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive,
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { createS3ColdStoreFromEnv, MARKET_FABRIC_COLD_STORE_VERSION } from './market-fabric-cold-store.mjs';
 import { offloadMarketFabricArchive, MARKET_FABRIC_COLD_TIER_VERSION } from './market-fabric-cold-tier.mjs';
+import { sampleArchivedReplayPoints, loadArchivedReplayTail, MARKET_FABRIC_COLD_REPLAY_VERSION } from './market-fabric-cold-replay.mjs';
 import { buildStrategyDnaMemory, allocateShadowOpportunity, OPPORTUNITY_ALLOCATOR_VERSION } from './opportunity-allocator.mjs';
 import { evaluateShadowLeverageRisk, SHADOW_LEVERAGE_RISK_VERSION } from './shadow-leverage-risk.mjs';
 import { evaluatePortfolioRiskBrain, PORTFOLIO_RISK_BRAIN_VERSION } from './portfolio-risk-brain.mjs';
@@ -789,6 +790,7 @@ try {
       marketFabricArchive:MARKET_FABRIC_ARCHIVE_VERSION,
       marketFabricColdStore:MARKET_FABRIC_COLD_STORE_VERSION,
       marketFabricColdTier:MARKET_FABRIC_COLD_TIER_VERSION,
+      marketFabricColdReplay:MARKET_FABRIC_COLD_REPLAY_VERSION,
       deterministicReplay:DETERMINISTIC_REPLAY_VERSION,
       releaseRegistry:RELEASE_REGISTRY_VERSION,
       observability:OBSERVABILITY_VERSION,
@@ -4972,21 +4974,42 @@ function recentReplayPoints(symbol,{limit=8}={}) {
   return out;
 }
 
-function replayMenuKeyboard(symbol,points) {
+let marketFabricReplayQueue=Promise.resolve();
+function runMarketFabricReplayJob(job){
+  const next=marketFabricReplayQueue.catch(()=>{}).then(job);
+  marketFabricReplayQueue=next.catch(()=>{});
+  return next;
+}
+
+function earliestRetainedFabricAt(){
+  let earliest=Infinity;
+  for(const event of marketFabric?.events||[]){
+    const at=Number(event?.availableAt);
+    if(Number.isFinite(at)&&at<earliest) earliest=at;
+  }
+  return Number.isFinite(earliest)?earliest:null;
+}
+
+function replayPointRows(symbol,points,{includeDate=false}={}){
   const rows=[];
   for(let i=0;i<points.length;i+=2){
     rows.push(points.slice(i,i+2).map(at=>{
       const label=new Intl.DateTimeFormat('de-DE',{
         timeZone:'Europe/Berlin',
+        ...(includeDate?{day:'2-digit',month:'2-digit'}:{}),
         hour:'2-digit',
-        minute:'2-digit',
-        second:'2-digit'
+        minute:'2-digit'
       }).format(new Date(at));
-      return {
-        text:'⏪ '+label,
-        callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)
-      };
+      return {text:'⏪ '+label,callback_data:'replayat:'+symbol+':'+Math.floor(at/1000)};
     }));
+  }
+  return rows;
+}
+
+function replayMenuKeyboard(symbol,points) {
+  const rows=replayPointRows(symbol,points);
+  if(marketFabricColdStore.enabled){
+    rows.push([{text:'🧊 Verifiziertes Archiv',callback_data:'replayarchive:'+symbol}]);
   }
   rows.push([
     {text:'📊 Markt',callback_data:'refresh:'+symbol},
@@ -5017,8 +5040,67 @@ async function showReplayMenu(chatId,messageId,symbol) {
   return tg('sendMessage',payload);
 }
 
+async function showReplayArchiveMenu(chatId,messageId,symbol) {
+  if(!marketFabricColdStore.enabled){
+    const payload={
+      chat_id:chatId,
+      text:'🧊 TCX ARCHIVE REPLAY · '+symbol.replace('USDT','/USDT')+'\n\nCold Storage ist aktuell nicht aktiviert.\nExecution: SHADOW_ONLY',
+      reply_markup:{inline_keyboard:[[{text:'🎬 Hot Replay',callback_data:'replaymenu:'+symbol}],[{text:'🏠 Home',callback_data:'home'}]]}
+    };
+    if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+    return tg('sendMessage',payload);
+  }
+
+  const before=earliestRetainedFabricAt()||Date.now();
+  const result=await runMarketFabricReplayJob(()=>sampleArchivedReplayPoints({
+    filePath:marketFabricFile,
+    coldStore:marketFabricColdStore,
+    symbol,
+    before,
+    limit:8,
+    maxSegments:6
+  }));
+  const rows=replayPointRows(symbol,result.points,{includeDate:true});
+  rows.push([{text:'🎬 Hot Replay',callback_data:'replaymenu:'+symbol}]);
+  rows.push([{text:'📊 Markt',callback_data:'refresh:'+symbol},{text:'🏠 Home',callback_data:'home'}]);
+  const provider=result.provider?.provider||'VERIFIED_ARCHIVE';
+  const text=result.points.length
+    ? [
+        '🧊 TCX ARCHIVE REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Verifizierte ältere Point-in-Time-Zustände.',
+        'Quelle: '+provider,
+        'Geprüfte Segmente: '+result.scannedSegments+' · cold '+result.coldSegments+' · local '+result.localSegments,
+        'Hash + Raw-Hash + Event-Chain werden vor Nutzung geprüft.','',
+        'Wähle einen Zeitpunkt.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n')
+    : [
+        '🧊 TCX ARCHIVE REPLAY · '+symbol.replace('USDT','/USDT'),'',
+        'Keine älteren PRIMARY_MARKET-Punkte in den geprüften Archivsegmenten gefunden.',
+        'Es werden keine unvollständigen Replay-Daten erfunden.',
+        'Execution: SHADOW_ONLY'
+      ].join('\n');
+  const payload={chat_id:chatId,text:text.slice(0,4096),reply_markup:{inline_keyboard:rows}};
+  if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
+  return tg('sendMessage',payload);
+}
+
 async function showReplay(chatId,symbol,asOf,messageId=null) {
-  const state=reconstructInstitutionalState(marketFabric.events,{symbol,asOf});
+  let replayEvents=marketFabric.events||[];
+  let archiveReplay=null;
+  const earliest=earliestRetainedFabricAt();
+  if(marketFabricColdStore.enabled&&(earliest==null||Number(asOf)<earliest)){
+    archiveReplay=await runMarketFabricReplayJob(()=>loadArchivedReplayTail({
+      filePath:marketFabricFile,
+      coldStore:marketFabricColdStore,
+      symbol,
+      asOf,
+      limit:Math.max(1000,Number(marketFabric?.maxInMemoryEvents||12000)),
+      maxSegments:24
+    }));
+    replayEvents=archiveReplay.events;
+  }
+  const state=reconstructInstitutionalState(replayEvents,{symbol,asOf});
   const s=replaySummary(state);
   const primary=state.primary;
   const witness=state.witness;
@@ -5029,6 +5111,8 @@ async function showReplay(chatId,symbol,asOf,messageId=null) {
     'asOf: '+new Date(asOf).toISOString(),
     'Hash: '+s.replayHash.slice(0,20)+'…',
     'Future leakage: '+(s.leakage.ok?'PASS':'FAIL '+s.leakage.violations.join(', ')),
+    'Source: '+(archiveReplay?'VERIFIED COLD ARCHIVE':'HOT FABRIC TAIL'),
+    ...(archiveReplay?['Archive scan: '+archiveReplay.scannedSegments+' segments · '+archiveReplay.events.length+' retained events']:[]),
     '',
     'Primary: '+(primary?(priceText(primary.price)+' · '+(primary.source||'UNKNOWN')):'not available'),
     'Witness: '+(witness?(fmt(Number(witness.agreementScore||0)*100,0)+'% agreement · external '+(witness.externalWitnessCount||0)):'not available'),
@@ -6056,6 +6140,7 @@ function parseAction(data='') {
   if (p[0] === 'forecast' && p[1]) return { kind:'FORECAST', symbol:p[1] };
   if (p[0] === 'witness' && p[1]) return { kind:'WITNESS', symbol:p[1] };
   if (p[0] === 'live' && p[1] && (p[2] === 'on' || p[2] === 'off')) return { kind:'LIVE', symbol:p[1], enabled:p[2] === 'on' };
+  if (p[0] === 'replayarchive' && p[1]) return { kind:'REPLAY_ARCHIVE_MENU', symbol:p[1] };
   if (p[0] === 'replayat' && p[1] && /^\d{9,13}$/.test(String(p[2]||''))) return { kind:'REPLAY_AT', symbol:p[1], asOf:Number(p[2])*1000 };
   return { kind:'UNKNOWN' };
 }
@@ -6301,10 +6386,26 @@ async function handle(update) {
       await ack(q.id,'Replay-Punkte geladen');
       return;
     }
+    if (a.kind === 'REPLAY_ARCHIVE_MENU') {
+      if(!symbolOk(a.symbol)) { await ack(q.id,'Unbekannter Markt'); return; }
+      await ack(q.id,'Archiv wird verifiziert …');
+      try{
+        await showReplayArchiveMenu(chatId,messageId,a.symbol);
+      }catch(err){
+        console.error('[TCX_COLD_REPLAY_FAILED]',JSON.stringify({scope:'archive-menu',symbol:a.symbol,error:err instanceof Error?err.message:String(err)}));
+        await tg('sendMessage',{chat_id:chatId,text:'🧊 Archive Replay abgebrochen.\nIntegritätsprüfung oder R2-Lesezugriff ist fehlgeschlagen. Es werden keine Teil-Daten verwendet.\n\nSHADOW_ONLY'});
+      }
+      return;
+    }
     if (a.kind === 'REPLAY_AT') {
       if(!symbolOk(a.symbol) || !Number.isFinite(a.asOf)) { await ack(q.id,'Ungültiger Replay-Punkt'); return; }
-      await showReplay(chatId,a.symbol,a.asOf,messageId);
-      await ack(q.id,'Replay geladen');
+      await ack(q.id,'Replay wird verifiziert …');
+      try{
+        await showReplay(chatId,a.symbol,a.asOf,messageId);
+      }catch(err){
+        console.error('[TCX_COLD_REPLAY_FAILED]',JSON.stringify({scope:'replay',symbol:a.symbol,asOf:a.asOf,error:err instanceof Error?err.message:String(err)}));
+        await tg('sendMessage',{chat_id:chatId,text:'⏪ Replay abgebrochen.\nDie benötigten historischen Daten konnten nicht vollständig verifiziert werden. Kein unvollständiger Zustand wird angezeigt.\n\nSHADOW_ONLY'});
+      }
       return;
     }
     if (a.kind === 'OMS') {
@@ -8153,7 +8254,10 @@ const server = http.createServer((req,res) => {
         file:marketFabricFile
       },
       deterministicReplay:{
-        version:DETERMINISTIC_REPLAY_VERSION
+        version:DETERMINISTIC_REPLAY_VERSION,
+        coldArchiveReplay:MARKET_FABRIC_COLD_REPLAY_VERSION,
+        coldArchiveEnabled:marketFabricColdStore.enabled,
+        coldArchiveProvider:marketFabricColdStore.summary?.()||null
       },
       observability:{
         version:OBSERVABILITY_VERSION,
