@@ -10,8 +10,14 @@ export const IDENTIFICATION_STATUSES=Object.freeze([
 
 export const IDENTIFICATION_OBLIGATION_KINDS=Object.freeze([
   'CLOSURE_EVIDENCE',
+  'INDEPENDENT_RESOLVER_CLAIM',
+  'TRUST_ROOT_EVIDENCE',
+  'DISCOVERY_CHANNEL_EVIDENCE',
   'DEPENDENCY_MAPPING',
   'COMMON_CAUSE_METADATA',
+  'INDEPENDENT_RESOLVER_CLAIM',
+  'TRUST_ROOT_EVIDENCE',
+  'DISCOVERY_CHANNEL_EVIDENCE',
   'LINEAGE_FACT',
   'LINEAGE_COVERAGE',
   'COVERAGE_CALIBRATION',
@@ -21,6 +27,9 @@ export const IDENTIFICATION_OBLIGATION_KINDS=Object.freeze([
 
 const OBLIGATION_TO_EVIDENCE=Object.freeze({
   CLOSURE_EVIDENCE:'OBSERVED_PROVENANCE_CLOSURE',
+  INDEPENDENT_RESOLVER_CLAIM:'OBSERVED_INDEPENDENT_RESOLVER_CLAIM',
+  TRUST_ROOT_EVIDENCE:'OBSERVED_TRUST_ROOT',
+  DISCOVERY_CHANNEL_EVIDENCE:'OBSERVED_INDEPENDENT_DISCOVERY_CHANNEL',
   DEPENDENCY_MAPPING:'OBSERVED_DEPENDENCY_MAP',
   COMMON_CAUSE_METADATA:'OBSERVED_COMMON_CAUSE_MAP',
   LINEAGE_FACT:'OBSERVED_LINEAGE_FACT',
@@ -172,6 +181,7 @@ function buildLineageIndex(lineageFacts,asOf){
   return {rows,byId};
 }
 function lineageClosureFor(rootIds,lineage,asOf){
+  const roots=uniq(rootIds);
   const missing=new Set();
   const cycles=new Set();
   const future=new Set();
@@ -194,9 +204,11 @@ function lineageClosureFor(rootIds,lineage,asOf){
     visiting.delete(key);
     visited.add(key);
   };
-  for(const id of uniq(rootIds)) walk(id);
+  for(const id of roots) walk(id);
   return {
-    closed:missing.size===0&&cycles.size===0&&future.size===0&&nonObservedLeaves.size===0,
+    closed:roots.length>0&&missing.size===0&&cycles.size===0&&future.size===0&&nonObservedLeaves.size===0,
+    emptyRoots:roots.length===0,
+    roots,
     visited:uniq([...visited]),
     missing:uniq([...missing]),
     cycles:uniq([...cycles]),
@@ -329,6 +341,12 @@ function evaluateCoverage({asOf,coverage,evidence}){
 function evaluateDiscoveryChannels({asOf,discoveryChannels}){
   const usable=(discoveryChannels||[]).filter(x=>pitUsable(x,asOf));
   const obligations=[];
+  if(usable.length<2){
+    obligations.push(obligation('DISCOVERY_CHANNEL_EVIDENCE',{
+      detail:'NEED_'+Math.max(0,2-usable.length)+'_MORE_INDEPENDENT_PIT_CHANNELS',
+      problemCodes:['DISCOVERY_CHANNEL_INSUFFICIENT']
+    }));
+  }
   for(const row of usable){
     if(!Array.isArray(row?.lineageIds)||!row.lineageIds.length){
       obligations.push(obligation('DISCOVERY_CHANNEL_LINEAGE',{detail:text(row?.channelId)||'UNKNOWN_CHANNEL'}));
@@ -381,7 +399,14 @@ export function evaluateEpistemicIntegrity({
     ...discovery.obligations
   ];
   if(identity.status!=='RESOLVED'){
+    obligations.push(obligation('INDEPENDENT_RESOLVER_CLAIM',{
+      detail:'NEED_'+Math.max(0,identity.requiredResolverConsensus-(identity.groups?.[0]?.independentClaims||0))+'_MORE_INDEPENDENT_RESOLVER_CLAIMS',
+      problemCodes:['ENTITY_RESOLUTION','RESOLVER_INDEPENDENCE']
+    }));
     obligations.push(obligation('CLOSURE_EVIDENCE',{detail:'CANONICAL_CONTROLLER_NOT_RESOLVED',problemCodes:['ENTITY_RESOLUTION']}));
+  }
+  if(trustClosure.emptyRoots){
+    obligations.push(obligation('TRUST_ROOT_EVIDENCE',{detail:'NO_PIT_TRUST_ROOTS',problemCodes:['TRUST_CHAIN','TRUST_ROOT_MISSING']}));
   }
   if(!trustClosure.closed){
     obligations.push(obligation('CLOSURE_EVIDENCE',{detail:'TRUST_CHAIN_NOT_CLOSED',problemCodes:['TRUST_CHAIN']}));
