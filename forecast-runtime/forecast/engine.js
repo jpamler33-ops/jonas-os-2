@@ -153,6 +153,62 @@ function dependencyAdjustedWeights(rows, base, windowMs) {
     flush();
     return result;
 }
+function analogRank(a, b) {
+    const similarity = Number(b?.similarity ?? 0) - Number(a?.similarity ?? 0);
+    if (Math.abs(similarity) > EPS)
+        return similarity;
+    const weight = Number(b?.weight ?? 0) - Number(a?.weight ?? 0);
+    if (Math.abs(weight) > EPS)
+        return weight;
+    const at = Number(a?.row?.timestamp ?? 0), bt = Number(b?.row?.timestamp ?? 0);
+    if (at !== bt)
+        return at - bt;
+    return String(a?.row?.id ?? a?.row?.episodeId ?? '').localeCompare(String(b?.row?.id ?? b?.row?.episodeId ?? ''));
+}
+export function selectIndependenceAwareAnalogs(candidates, {
+    topK = 250,
+    windowMs = 0,
+    minIndependentEpisodes = 0
+} = {}) {
+    const limit = Math.max(1, Math.floor(Number(topK) || 250));
+    const window = Math.max(0, Number(windowMs) || 0);
+    const sorted = (Array.isArray(candidates) ? candidates : []).filter(Boolean).sort(analogRank);
+    if (!sorted.length)
+        return { rows: [], candidateCount: 0, reservedIndependentEpisodes: 0, reserveTarget: 0, policy: 'INDEPENDENCE_AWARE_TOPK_V1' };
+    if (window <= 0 || limit === 1) {
+        const rows = sorted.slice(0, limit);
+        return { rows, candidateCount: sorted.length, reservedIndependentEpisodes: rows.length ? 1 : 0, reserveTarget: rows.length ? 1 : 0, policy: 'SIMILARITY_TOPK_V1' };
+    }
+    const requested = Math.max(0, Math.floor(Number(minIndependentEpisodes) || 0));
+    const reserveTarget = Math.min(limit, sorted.length, Math.max(Math.ceil(Math.sqrt(limit)), requested * 2));
+    const reserved = [];
+    for (const candidate of sorted) {
+        const ts = Number(candidate?.row?.timestamp);
+        if (!Number.isFinite(ts))
+            continue;
+        if (reserved.every(x => Math.abs(ts - x.timestamp) >= window)) {
+            reserved.push({ candidate, timestamp: ts });
+            if (reserved.length >= reserveTarget)
+                break;
+        }
+    }
+    const reservedSet = new Set(reserved.map(x => x.candidate));
+    const selected = reserved.map(x => x.candidate);
+    for (const candidate of sorted) {
+        if (selected.length >= limit)
+            break;
+        if (!reservedSet.has(candidate))
+            selected.push(candidate);
+    }
+    selected.sort(analogRank);
+    return {
+        rows: selected,
+        candidateCount: sorted.length,
+        reservedIndependentEpisodes: reserved.length,
+        reserveTarget,
+        policy: 'INDEPENDENCE_AWARE_TOPK_V1'
+    };
+}
 export class ProbabilisticForecastEngine {
     history = [];
     historyKeys = new Set();
@@ -270,7 +326,13 @@ export class ProbabilisticForecastEngine {
         const independenceWindow = Math.max(1, h.independenceWindowMs ?? h.horizonMs);
         const search = this.findAnalogs(input, usable, h);
         const analogRows = search.rows;
-        const analog = this.summarizeAnalogs(analogRows, h.flatThreshold, independenceWindow, search.nearestSimilarity);
+        const analog = {
+            ...this.summarizeAnalogs(analogRows, h.flatThreshold, independenceWindow, search.nearestSimilarity),
+            selectionPolicy: search.selectionPolicy,
+            candidateCount: search.candidateCount,
+            diversityReservedEpisodes: search.diversityReservedEpisodes,
+            diversityReserveTarget: search.diversityReserveTarget
+        };
         const models = [];
         if (analogRows.length) {
             models.push({ modelId: 'ANALOG_EMPIRICAL', expectedReturn: analog.expectedReturn, residualStd: Math.max(1e-6, weightedStd(analogRows.map(a => a.row.forwardReturn), analogRows.map(a => a.weight))), pUp: analog.pUp, pDown: analog.pDown, pFlat: analog.pFlat, weight: 1.25, sampleCount: Math.max(1, Math.round(analog.episodeEffectiveSamples)), uncertaintySource: 'EMPIRICAL_ANALOG', oosResidualCount: 0, performanceMultiplier: 1, effectiveWeight: 1.25, performanceStatus: 'INSUFFICIENT' });
@@ -481,9 +543,22 @@ export class ProbabilisticForecastEngine {
             if (weight > EPS)
                 out.push({ row, similarity, weight });
         }
-        const selected = out.sort((a, b) => b.similarity - a.similarity).slice(0, topK);
-        const adjusted = dependencyAdjustedWeights(selected.map(x => x.row), selected.map(x => x.weight), Math.max(1, h.independenceWindowMs ?? h.horizonMs));
-        return { rows: selected.map((x, i) => ({ ...x, weight: adjusted[i] ?? x.weight })), nearestSimilarity };
+        const independenceWindow = Math.max(1, h.independenceWindowMs ?? h.horizonMs);
+        const selection = selectIndependenceAwareAnalogs(out, {
+            topK,
+            windowMs: independenceWindow,
+            minIndependentEpisodes: this.cfg.minAnalogIndependentEpisodes
+        });
+        const selected = selection.rows;
+        const adjusted = dependencyAdjustedWeights(selected.map(x => x.row), selected.map(x => x.weight), independenceWindow);
+        return {
+            rows: selected.map((x, i) => ({ ...x, weight: adjusted[i] ?? x.weight })),
+            nearestSimilarity,
+            selectionPolicy: selection.policy,
+            candidateCount: selection.candidateCount,
+            diversityReservedEpisodes: selection.reservedIndependentEpisodes,
+            diversityReserveTarget: selection.reserveTarget
+        };
     }
     summarizeAnalogs(rows, flat, independenceWindowMs, nearestSimilarity) {
         if (!rows.length)
