@@ -5303,6 +5303,44 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   const started=Date.now();
   const silent=options?.silent===true;
   const issuanceSource=String(options?.source||'TCX_TELEGRAM_INSTITUTIONAL_FORECAST');
+  const forecastMemoryTrace=issuanceSource==='TCX_AUTOLEARN_V1'?[]:null;
+  const markForecastMemory=(phase)=>{
+    if(!forecastMemoryTrace) return;
+    const m=process.memoryUsage();
+    forecastMemoryTrace.push({
+      phase:String(phase),
+      atMs:Date.now()-started,
+      heapUsedMb:Math.round(m.heapUsed/1024/1024),
+      rssMb:Math.round(m.rss/1024/1024),
+      externalMb:Math.round(m.external/1024/1024),
+      arrayBuffersMb:Math.round((m.arrayBuffers||0)/1024/1024)
+    });
+  };
+  const emitForecastMemoryTrace=(outcome)=>{
+    if(!forecastMemoryTrace?.length) return;
+    const base=forecastMemoryTrace[0];
+    const peak=forecastMemoryTrace.reduce((acc,row)=>({
+      heapUsedMb:Math.max(acc.heapUsedMb,row.heapUsedMb),
+      rssMb:Math.max(acc.rssMb,row.rssMb),
+      externalMb:Math.max(acc.externalMb,row.externalMb),
+      arrayBuffersMb:Math.max(acc.arrayBuffersMb,row.arrayBuffersMb)
+    }),{heapUsedMb:0,rssMb:0,externalMb:0,arrayBuffersMb:0});
+    console.info('[TCX_FORECAST_MEMORY_TRACE]',JSON.stringify({
+      symbol,
+      outcome:String(outcome||'UNKNOWN'),
+      durationMs:Date.now()-started,
+      base,
+      peak,
+      deltaFromStart:{
+        heapUsedMb:peak.heapUsedMb-base.heapUsedMb,
+        rssMb:peak.rssMb-base.rssMb,
+        externalMb:peak.externalMb-base.externalMb,
+        arrayBuffersMb:peak.arrayBuffersMb-base.arrayBuffersMb
+      },
+      phases:forecastMemoryTrace
+    }));
+  };
+  markForecastMemory('start');
   if(!forecastRuntime.healthy){
     const failure={ok:false,skipped:true,reason:'FORECAST_RUNTIME_UNHEALTHY'};
     if(silent) return failure;
@@ -5376,11 +5414,13 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     }
   }
 
+  markForecastMemory('research-providers');
   const ctx=await buildInstitutionalResearchContext(symbol,{auditEnvelope:true});
   const {
     state,witnessReport,r15,
     marketAudit,witnessAudit,engineAudit,safety,envelope
   }=ctx;
+  markForecastMemory('institutional-context');
 
   const seed=seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
   if(seed.addedRows>0) await persistForecastRuntime('forecast-episode-seed');
@@ -5426,6 +5466,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     blockedSourceKeys:blockedResearchSourceKeys
   });
   const researchPlaneExtraFeatures=researchPlaneView.ok?researchPlaneView.features:[];
+  markForecastMemory('research-plane');
   const derivativesExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='DERIVATIVES');
   const liquidationExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='LIQUIDATION');
   const onchainExtraFeatures=researchPlaneExtraFeatures.filter(row=>row.domain==='ONCHAIN');
@@ -5456,6 +5497,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       safety?.canResearch===true&&
       runtimeQuality.dataQuality>=0.70;
     if(!cleanAudit){
+      markForecastMemory('quality-gate');
+      emitForecastMemoryTrace('AUTOLEARN_QUALITY_GATE');
       return {
         ok:false,
         skipped:true,
@@ -5487,6 +5530,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       message:err instanceof Error?err.message:String(err)
     });
   }
+  markForecastMemory('expansion-evidence');
   const input=buildCanonicalForecastInput({
     envelope,
     dataQuality:runtimeQuality.dataQuality,
@@ -5530,6 +5574,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   ){
     await persistForecastRuntime('forecast-live-observation');
   }
+  markForecastMemory('live-observation');
   if(observationAuditFailures||!auditLedger.healthy){
     recordError(observability,{
       scope:'forecast.live_observation',
@@ -5543,7 +5588,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       'Neue Forecast-Ausgabe wurde fail-closed blockiert.',
       'Action: ABSTAIN / SHADOW_ONLY'
     ].join('\n');
-    if(silent) return {ok:false,skipped:true,reason:'AUDIT_BINDING_FAILED'};
+    if(silent){
+      emitForecastMemoryTrace('AUDIT_BINDING_FAILED');
+      return {ok:false,skipped:true,reason:'AUDIT_BINDING_FAILED'};
+    }
     const failPayload={text:failText,reply_markup:forecastProductKeyboard(symbol)};
     return deliverTelegramTextCard(tg,chatId,messageId,failPayload);
   }
@@ -5650,6 +5698,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
 
   const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
   await persistForecastRuntime('forecast-issued');
+  markForecastMemory('forecast-issued');
 
   const issuance=issued.issuance;
   const auditHealthyAfter=Boolean(auditRecord)&&auditLedger.healthy;
@@ -5726,6 +5775,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       console.error('strategy league entry error',symbol,msg);
     }
   }
+  markForecastMemory('shadow-actions');
+  emitForecastMemoryTrace(issued.duplicate?'ISSUED_DUPLICATE':'ISSUED');
   const runtimeSummary=institutionalForecastRuntimeSummary(forecastRuntime);
   const scienceGuardLines=Object.entries(scienceAdapter.profile)
     .filter(([,cfg])=>cfg.required===true)
