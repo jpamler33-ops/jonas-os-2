@@ -1,1 +1,31 @@
-import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { readFileSync } from 'node:fs';\n\nconst source=readFileSync(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');\n\ntest('Discord Command Center V3 is release-bound and interactive',()=>{\n  assert.ok(source.includes('TCX_DISCORD_COMMAND_CENTER_V3'));\n  assert.ok(source.includes('dc3:market-select'));\n  assert.ok(source.includes('commandCenterComponents'));\n  assert.ok(source.includes('marketActionComponents'));\n});\n\ntest('Discord V3 keeps execution safety explicit',()=>{\n  assert.ok(source.includes('SHADOW_ONLY'));\n  assert.ok(source.includes('REAL ORDERS BLOCKED'));\n  assert.ok(source.includes('keine echten Orders'));\n});\n\ntest('Discord V3 contains persistent research and lifecycle surfaces',()=>{\n  for(const required of [\n    'buildDiscordPerformancePayload',\n    'buildDiscordMarketOverviewPayload',\n    'buildDiscordDataHealthPayload',\n    'closed-trades',\n    'alerts',\n    'syncHealthAlerts',\n    'recentClosed',\n    'isStringSelectMenu'\n  ]) assert.ok(source.includes(required),required);\n});\n
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const source=readFileSync(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+
+test('Discord Command Center V3 is release-bound and interactive',()=>{
+  assert.ok(source.includes('TCX_DISCORD_COMMAND_CENTER_V3'));
+  assert.ok(source.includes('dc3:market-select'));
+  assert.ok(source.includes('commandCenterComponents'));
+  assert.ok(source.includes('marketActionComponents'));
+});
+
+test('Discord V3 keeps execution safety explicit',()=>{
+  assert.ok(source.includes('SHADOW_ONLY'));
+  assert.ok(source.includes('REAL ORDERS BLOCKED'));
+  assert.ok(source.includes('keine echten Orders'));
+});
+
+test('Discord V3 contains persistent research and lifecycle surfaces',()=>{
+  for(const required of [
+    'buildDiscordPerformancePayload',
+    'buildDiscordMarketOverviewPayload',
+    'buildDiscordDataHealthPayload',
+    'closed-trades',
+    'alerts',
+    'syncHealthAlerts',
+    'recentClosed',
+    'isStringSelectMenu'
+  ]) assert.ok(source.includes(required),required);
+});
