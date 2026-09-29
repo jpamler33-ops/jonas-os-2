@@ -242,6 +242,13 @@ function marketActionComponents(symbol){
   ];
 }
 function fakeChatId(guildId,channelId,userId){return 'discord:'+guildId+':'+channelId+':'+userId;}
+export function isDiscordInteractionReplyTarget(ctx,messageId){
+  return Boolean(
+    ctx?.interaction &&
+    ctx?.replyMessageId!=null &&
+    String(ctx.replyMessageId)===String(messageId||'')
+  );
+}
 export function parseDiscordChatId(value){
   const m=/^discord:([^:]+):([^:]+):([^:]+)$/.exec(String(value||''));
   return m?{guildId:m[1],channelId:m[2],userId:m[3]}:null;
@@ -330,6 +337,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let closedFeedInitialized=false;
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
+  let tradeSyncRunning=false;
   const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
   function fail(scope,err){state.lastError=scope+': '+(err instanceof Error?err.message:String(err));try{logger.error('[TCX_DISCORD]',state.lastError);}catch{}}
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
@@ -348,10 +356,18 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return {message_id:first?.id||null,chat:{id:chatId},text:String(body.text||'')};
   }
   async function editText(chatId,body){
-    const x=await channelFor(chatId); const msg=await x.c.messages.fetch(String(body.message_id));
+    const ctx=contexts.get(String(chatId));
     const panelChat=parseDiscordChatId(chatId)?.userId==='panel';
     const payload={content:clip(body.text,2000),components:panelChat?[]:discordComponents(body.reply_markup),allowedMentions:{parse:[]}};
-    const edited=await msg.edit(payload); return {message_id:edited.id,chat:{id:chatId},text:String(body.text||'')};
+    if(isDiscordInteractionReplyTarget(ctx,body.message_id)){
+      const edited=await ctx.interaction.editReply(payload);
+      ctx.responded=true;
+      return {message_id:edited?.id||String(body.message_id),chat:{id:chatId},text:String(body.text||'')};
+    }
+    const x=await channelFor(chatId);
+    const msg=await x.c.messages.fetch(String(body.message_id));
+    const edited=await msg.edit(payload);
+    return {message_id:edited.id,chat:{id:chatId},text:String(body.text||'')};
   }
   async function sendPhoto(chatId,fields,fileName,fileBuffer,mime){
     const ctx=contexts.get(String(chatId)); const caption=fields.caption??fields.media?.caption??'';
@@ -364,10 +380,18 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return {message_id:msg?.id||null,chat:{id:chatId},photo:[{}],caption:String(caption)};
   }
   async function editPhoto(chatId,fields,fileName,fileBuffer,mime){
-    const x=await channelFor(chatId); const msg=await x.c.messages.fetch(String(fields.message_id));
+    const ctx=contexts.get(String(chatId));
     const caption=fields.caption??fields.media?.caption??'';
     const attachment=new AttachmentBuilder(fileBuffer,{name:fileName||'chart.png',description:'TCX chart'});
-    const edited=await msg.edit({content:clip(caption,2000),attachments:[],files:[attachment],components:discordComponents(fields.reply_markup),allowedMentions:{parse:[]}});
+    const payload={content:clip(caption,2000),attachments:[],files:[attachment],components:discordComponents(fields.reply_markup),allowedMentions:{parse:[]}};
+    if(isDiscordInteractionReplyTarget(ctx,fields.message_id)){
+      const edited=await ctx.interaction.editReply(payload);
+      ctx.responded=true;
+      return {message_id:edited?.id||String(fields.message_id),chat:{id:chatId},photo:[{}],caption:String(caption)};
+    }
+    const x=await channelFor(chatId);
+    const msg=await x.c.messages.fetch(String(fields.message_id));
+    const edited=await msg.edit(payload);
     return {message_id:edited.id,chat:{id:chatId},photo:[{}],caption:String(caption)};
   }
   function handlesTelegramCall(method,body){
@@ -512,6 +536,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
   async function syncTradeCards(){
     const c=channelCache.get('live-trades'); if(!c)return;
+    if(tradeSyncRunning){
+      try{logger.warn?.('[TCX_DISCORD_TRADE_SYNC_SKIPPED] previous sync still running');}catch{}
+      return;
+    }
+    tradeSyncRunning=true;
+    try{
     const snapshot=await safeMissionSnapshot();
     const positions=Array.isArray(snapshot?.portfolio?.positions)?snapshot.portfolio.positions:[];
     const recentClosed=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
@@ -589,6 +619,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       closedPosted.clear();for(const id of keep)closedPosted.add(id);
     }
     state.tradeCards=tradeCards.size;state.lastTradeSyncAt=Date.now();
+    }finally{
+      tradeSyncRunning=false;
+    }
   }
   async function maybeDailyReport(){const t=berlinParts();if(t.hour===23&&t.minute>=55&&lastDailyReportDate!==t.date){lastDailyReportDate=t.date;try{await dispatchReadCommand('performance','/daystats');}catch(err){fail('daily-report',err);}}}
   function addTimer(fn,ms){const timer=setInterval(()=>void Promise.resolve().then(fn).catch(err=>fail('timer',err)),ms);timer.unref?.();timers.add(timer);}
@@ -622,7 +655,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await interaction.deferReply();
     const placeholder=await interaction.editReply({content:'TCX lädt Analyse …',allowedMentions:{parse:[]}});
     const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id);
-    const ctx={interaction:interaction,responded:false};
+    const ctx={interaction:interaction,responded:false,replyMessageId:String(placeholder.id)};
     contexts.set(chatId,ctx);
     try{
       await handleUpdate({
@@ -636,7 +669,10 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       });
       if(!ctx.responded){
         const current=await interaction.fetchReply().catch(()=>null);
-        if(current&&String(current.content||'').includes('TCX lädt Analyse')) await interaction.editReply('TCX hat keine Ausgabe erzeugt.');
+        if(current&&String(current.content||'').includes('TCX lädt Analyse')){
+          try{logger.warn?.('[TCX_DISCORD_NO_OUTPUT] '+String(data||'UNKNOWN'));}catch{}
+          await interaction.editReply({content:'TCX konnte für diese Aktion keine sichtbare Ausgabe erzeugen. Bitte erneut versuchen.',components:[],allowedMentions:{parse:[]}});
+        }
       }
     }catch(err){
       fail('v3-callback',err);
