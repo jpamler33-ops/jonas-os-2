@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createBiggjSkillTree,
   proposeBiggjChildSkill,
+  evaluateBiggjSkillProgress,
   buildBiggjResearchQueue,
   biggjSkillTreeSnapshot
 } from './biggj-skill-tree.mjs';
@@ -94,6 +95,33 @@ test('discovered child-skill dependencies use the same maturity gates',()=>{
   const child=tree.nodes.find(x=>x.title==='TEMPORAL_ANOMALY_RESEARCH');
   assert.equal(evaluateBiggjSkillDependencyGate(tree,{skillId:child.skillId,phase:'RESEARCH'}).ready,true);
   assert.equal(evaluateBiggjSkillDependencyGate(tree,{skillId:child.skillId,phase:'TESTING'}).ready,false);
+});
+
+test('skill lifecycle cannot advance into TESTING while a hard prerequisite is immature',()=>{
+  const tree=mutableTree();
+  const provenance=setStatus(tree,'PROVENANCE_CHAIN','LEARNING');
+  provenance.evidenceSummary={
+    total:10,observed:10,inferred:0,modelled:0,assumed:0,
+    forwardShadow:0,independentEpisodes:10,positive:10,negative:0,neutral:0,
+    pitSafe:10,auditReady:10,sciencePassed:0,chronologicalStable:0,
+    costStressPassed:0,concentrationPassed:0,winnerRemovalPassed:0
+  };
+  const evaluation=evaluateBiggjSkillProgress(tree,provenance.skillId);
+  assert.equal(evaluation.recommendedStatus,'LEARNING');
+  assert.ok(evaluation.reasons.includes('DEPENDENCY_GATE_TESTING_BLOCKED'));
+  assert.equal(evaluation.dependencyGates.testing.ready,false);
+  assert.ok(evaluation.dependencyGates.testing.blockers.some(x=>x.dependencyCapabilityId==='PIT_EVENT_CLOCK'));
+});
+
+test('trusted skill is recommended for decay when a required foundation decays',()=>{
+  const tree=mutableTree();
+  const pit=setStatus(tree,'PIT_EVENT_CLOCK','DECAYING');
+  const provenance=setStatus(tree,'PROVENANCE_CHAIN','TRUSTED');
+  assert.equal(pit.status,'DECAYING');
+  const evaluation=evaluateBiggjSkillProgress(tree,provenance.skillId);
+  assert.equal(evaluation.recommendedStatus,'DECAYING');
+  assert.ok(evaluation.reasons.includes('DEPENDENCY_DECAY_PROPAGATION'));
+  assert.equal(evaluation.dependencyGates.trust.ready,false);
 });
 
 test('dependency leverage identifies foundation skills that unlock many downstream capabilities',()=>{
