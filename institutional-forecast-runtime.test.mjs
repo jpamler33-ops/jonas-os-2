@@ -17,6 +17,7 @@ import {
   observeInstitutionalForecastRuntime,
   observeInstitutionalForecastOutcomePoint,
   recordCoverageProbeCalibration,
+  forecastClaimAssumptionShadowDataset,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
   EPISODE_FORECAST_FEATURE_IDS
@@ -209,6 +210,8 @@ test('issuance persistence deduplicates trace forecast/science and restores a va
   assert.equal(reopened.issuances.length,1);
   assert.equal(reopened.issuances[0].trace.forecast.fingerprint,out.issuance.forecast.fingerprint);
   assert.equal(reopened.issuances[0].trace.science.fingerprint,out.issuance.scientificValidity.fingerprint);
+  assert.ok(reopened.issuances[0].claimAssumptionSidecar);
+  assert.equal(reopened.issuances[0].claimAssumptionSidecar.fingerprint,out.issuance.claimAssumptionSidecar.fingerprint);
   assert.equal(verifyInstitutionalForecastIssuance(reopened.issuances[0]).ok,true);
 });
 
@@ -268,6 +271,58 @@ test('matured journal outcome becomes Research Trace evaluation only after due t
   assert.equal(due.evaluations[0].evaluation.traceId,due.evaluations[0].trace.traceId);
 });
 
+test('matured forecast outcome emits reconstructible claim-assumption forward-shadow observation',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  assert.ok(issued.issuance.claimAssumptionSidecar);
+  const due=observeInstitutionalForecastRuntime(r,{input:input(inp.asOf+300_000,65100)});
+  assert.equal(due.evaluations.length,1);
+  assert.ok(due.evaluations[0].claimAssumptionObservation);
+  assert.equal(due.evaluations[0].claimAssumptionObservation.sidecarFingerprint,issued.issuance.claimAssumptionSidecar.fingerprint);
+  assert.equal(due.evaluations[0].claimAssumptionObservation.semantics.doesNotInferAssumptionTruthFromOutcome,true);
+  assert.equal(due.evaluations[0].claimAssumptionObservation.canInfluencePrimary,false);
+
+  const dataset=forecastClaimAssumptionShadowDataset(r);
+  assert.equal(dataset.observationCount,1);
+  assert.equal(dataset.observations[0].fingerprint,due.evaluations[0].claimAssumptionObservation.fingerprint);
+  assert.equal(dataset.persistenceSemantics,'RECONSTRUCTED_FROM_PERSISTED_ISSUANCES_AND_FORECAST_JOURNAL');
+  assert.equal(dataset.prospectiveOnly,true);
+  assert.equal(dataset.infersAssumptionTruth,false);
+});
+
+test('claim-assumption shadow dataset reconstructs after forecast runtime restart without a new truth store',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  observeInstitutionalForecastRuntime(r,{input:input(inp.asOf+300_000,65100)});
+  const before=forecastClaimAssumptionShadowDataset(r);
+  assert.equal(before.observationCount,1);
+  await saveInstitutionalForecastRuntime(r);
+
+  const reopened=await openInstitutionalForecastRuntime(r.filePath,{config:r.engine.configSnapshot()});
+  const after=forecastClaimAssumptionShadowDataset(reopened);
+  assert.equal(after.observationCount,1);
+  assert.equal(after.observations[0].fingerprint,before.observations[0].fingerprint);
+  assert.equal(institutionalForecastRuntimeSummary(reopened).claimAssumptionSidecars,1);
+});
+
 test('duplicate issuance is idempotent',async()=>{
   const r=await runtime();
   seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
@@ -284,6 +339,50 @@ test('duplicate issuance is idempotent',async()=>{
   const b=issueInstitutionalForecast(r,args);
   assert.equal(a.issuance.issuanceId,b.issuance.issuanceId);
   assert.equal(b.duplicate,true);
+  assert.equal(r.issuances.length,1);
+});
+
+test('duplicate issuance fails closed when custom assumption sidecar diverges',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const a=traceContext(inp);
+  a.claimAssumptionDeclarations={
+    assumptions:[{
+      assumptionId:'CUSTOM-A',
+      statement:'Custom assumption A.',
+      evidenceIds:[],
+      requiresEvidence:false,
+      availableAt:inp.asOf+100
+    }]
+  };
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:a,
+    generatedAt:inp.asOf+100
+  });
+
+  const b=traceContext(inp);
+  b.claimAssumptionDeclarations={
+    assumptions:[{
+      assumptionId:'CUSTOM-B',
+      statement:'Different custom assumption B.',
+      evidenceIds:[],
+      requiresEvidence:false,
+      availableAt:inp.asOf+100
+    }]
+  };
+  assert.throws(()=>issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:b,
+    generatedAt:inp.asOf+100
+  }),/claim-assumption sidecar mismatch/);
   assert.equal(r.issuances.length,1);
 });
 
