@@ -431,17 +431,21 @@ function rootForCapability(capabilityId){
 function semanticKey(row){
   if(row.proposedChildSkill?.title) return 'PROPOSAL:'+row.proposedChildSkill.title;
   if(row.capabilityId) return 'CAP:'+row.capabilityId+':'+row.role;
+  if(row.rootId) return 'ROOT:'+row.rootId+':'+row.role;
   return 'TITLE:'+token(row.title);
 }
 
 export function migrateBiggjHistoricalIdeas({ideas=BIGGJ_HISTORICAL_IDEAS}={}){
   const migrated=ideas.map(idea=>{
     const classification=classifyIdea(idea);
-    const capability=classification.capabilityId?capabilityById.get(classification.capabilityId):null;
-    const rootId=classification.capabilityId?rootForCapability(classification.capabilityId):null;
-    const leverage=classification.capabilityId?canonicalSkillLeverage(classification.capabilityId):null;
-    const dependencies=classification.capabilityId
-      ?canonicalDependenciesFor(classification.capabilityId).map(x=>({
+    const rawTarget=classification.capabilityId||null;
+    const rootTarget=rawTarget&&rootById.has(rawTarget)&&!capabilityById.has(rawTarget)?rootById.get(rawTarget):null;
+    const capability=rootTarget?null:(rawTarget?capabilityById.get(rawTarget):null);
+    const capabilityId=capability?.id||null;
+    const rootId=rootTarget?.id||(capabilityId?rootForCapability(capabilityId):null);
+    const leverage=capabilityId?canonicalSkillLeverage(capabilityId):null;
+    const dependencies=capabilityId
+      ?canonicalDependenciesFor(capabilityId).map(x=>({
         dependencyCapabilityId:x.dependencyCapabilityId,
         relation:x.relation
       }))
@@ -451,10 +455,11 @@ export function migrateBiggjHistoricalIdeas({ideas=BIGGJ_HISTORICAL_IDEAS}={}){
       normalizedTitle:norm(idea.title),
       role:classification.role,
       disposition:classification.disposition,
+      targetKind:rootTarget?'ROOT':capability?'CAPABILITY':null,
       rootId,
-      capabilityId:classification.capabilityId||null,
-      capabilityPlane:capability?.plane||null,
-      capabilityPriority:capability?.priority||null,
+      capabilityId,
+      capabilityPlane:capability?.plane||rootTarget?.plane||null,
+      capabilityPriority:capability?.priority||rootTarget?.priority||null,
       rationale:classification.rationale,
       proposedChildSkill:classification.proposedChildSkill||null,
       canonicalDependencies:dependencies,
@@ -485,7 +490,7 @@ export function migrateBiggjHistoricalIdeas({ideas=BIGGJ_HISTORICAL_IDEAS}={}){
   return finalized({
     version:BIGGJ_HISTORICAL_MIGRATION_VERSION,
     sourceIdeaCount:withDuplicates.length,
-    mappedCount:withDuplicates.filter(x=>x.capabilityId).length,
+    mappedCount:withDuplicates.filter(x=>x.capabilityId||x.rootId).length,
     uniqueSemanticTargets:groups.size,
     dispositions:counts,
     ideas:withDuplicates,
