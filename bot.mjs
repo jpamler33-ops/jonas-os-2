@@ -6780,7 +6780,18 @@ async function handle(update) {
       return;
     }
   } catch (err) {
-    console.error('callback error', err instanceof Error ? err.message : String(err));
+    const isDiscordCallback=String(q?.id||'').startsWith('discordcb:');
+    const detail={
+      transport:isDiscordCallback?'DISCORD':'TELEGRAM',
+      callbackData:String(q?.data||'').slice(0,240),
+      message:err instanceof Error?err.message:String(err),
+      code:err?.code??null,
+      status:err?.status??null,
+      rawMessage:err?.rawError?.message??null,
+      apiErrors:err?.rawError?.errors??null
+    };
+    console.error('[TCX_CALLBACK_ERROR]',JSON.stringify(detail));
+    if(isDiscordCallback) throw err;
     await ack(q.id,'Live-Daten gerade nicht verfügbar');
   }
 }
