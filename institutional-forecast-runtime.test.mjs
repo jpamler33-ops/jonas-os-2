@@ -629,6 +629,35 @@ test('gzip persistence externalizes tracker issue-state and revision history los
   assert.equal(cf.interpretation,'MODEL_SENSITIVITY_NOT_CAUSAL');
 });
 
+test('gzip persistence bypasses full intelligence snapshot materialization',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-hot-view-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  const originalSnapshot=r.intelligence.snapshot;
+  r.intelligence.snapshot=()=>{ throw new Error('FULL_INTELLIGENCE_SNAPSHOT_MUST_NOT_RUN'); };
+  const meta=await saveInstitutionalForecastRuntime(r);
+  r.intelligence.snapshot=originalSnapshot;
+  assert.equal(meta.encoding,'gzip');
+  assert.equal(meta.issuanceStore.count,1);
+  assert.equal(meta.trackerArchive.recordCount,1);
+
+  const main=JSON.parse(gunzipSync(await readFile(file)).toString('utf8'));
+  assert.deepEqual(main.issuances,[]);
+  assert.equal(main.intelligence.tracker.records.length,1);
+  assert.equal(main.intelligence.tracker.records[0].issueState,null);
+  assert.deepEqual(main.intelligence.tracker.records[0].revisions,[]);
+});
+
 test('gzip persistence externalizes immutable issuances into an atomic A/B sidecar and restores them',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-sidecar-'));
   const file=path.join(dir,'runtime.json.gz');
