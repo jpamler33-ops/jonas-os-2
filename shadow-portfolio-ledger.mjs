@@ -401,6 +401,69 @@ export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
   return deepFreeze({...core,fingerprint:sha256(core)});
 }
 
+export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
+  const excludedModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE']);
+  const rows=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
+    .filter(p=>excludedModes.has(String(p.entryMode||'STANDARD').toUpperCase()));
+  const open=rows.filter(p=>p.status==='OPEN');
+  const closed=rows.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
+  const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
+  const unrealized=open.reduce((s,p)=>s+Number(p.lastMark?.unrealizedNetPnlQuote||0),0);
+  const wins=closed.filter(p=>Number(p.realizedNetPnlQuote||0)>0).length;
+  const losses=closed.filter(p=>Number(p.realizedNetPnlQuote||0)<0).length;
+  const byMode={};
+  for(const p of rows){
+    const mode=String(p.entryMode||'UNKNOWN').toUpperCase();
+    if(!byMode[mode]) byMode[mode]={open:0,closed:0,realizedPnlQuote:0};
+    if(p.status==='OPEN') byMode[mode].open++;
+    else {
+      byMode[mode].closed++;
+      byMode[mode].realizedPnlQuote+=Number(p.realizedNetPnlQuote||0);
+    }
+  }
+  const core={
+    version:SHADOW_PORTFOLIO_LEDGER_VERSION,
+    asOf:Number(asOf),
+    openPositions:open.length,
+    closedTrades:closed.length,
+    wins,
+    losses,
+    winRate:closed.length?wins/closed.length:null,
+    realizedPnlQuote:realized,
+    unrealizedPnlQuote:unrealized,
+    netPnlQuote:realized+unrealized,
+    byMode,
+    active:open.slice(0,30).map(p=>({
+      positionId:p.positionId,
+      symbol:p.symbol,
+      side:p.side,
+      entryMode:String(p.entryMode||'UNKNOWN').toUpperCase(),
+      entryPrice:p.entryPrice,
+      horizonId:p.horizonId,
+      openedAt:p.openedAt,
+      plannedExitAt:p.plannedExitAt,
+      unrealizedNetPnlQuote:finite(p.lastMark?.unrealizedNetPnlQuote),
+      unrealizedReturnPct:finite(p.lastMark?.unrealizedReturnPct)
+    })),
+    recentClosed:[...closed].reverse().slice(0,30).map(p=>({
+      positionId:p.positionId,
+      symbol:p.symbol,
+      side:p.side,
+      entryMode:String(p.entryMode||'UNKNOWN').toUpperCase(),
+      closeReason:p.closeReason,
+      openedAt:p.openedAt,
+      closedAt:p.closedAt,
+      realizedNetPnlQuote:finite(p.realizedNetPnlQuote),
+      realizedReturnPct:finite(p.realizedReturnPct)
+    })),
+    performanceExcluded:true,
+    meaning:'NON_PRIMARY_RESEARCH_ACTIVITY',
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  return deepFreeze({...core,fingerprint:sha256(core)});
+}
+
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
     .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase()));

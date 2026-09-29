@@ -83,10 +83,11 @@ function percent(value){const n=Number(value);return Number.isFinite(n)?(n*100).
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
 function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**SCHNELLSTART**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/deep BTC\` · Deep Dive','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
-  const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
+  const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
   return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
-    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'Open Shadow',value:String(p?.openPositions??0),inline:true},{name:'Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Closed Trades',value:String(p?.closedTrades??0),inline:true},{name:'Net PnL',value:money(p?.netPnlQuote),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'Primary Open',value:String(p?.openPositions??0),inline:true},{name:'Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},{name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Research Open',value:String(research?.openPositions??0),inline:true},{name:'Research Closed',value:String(research?.closedTrades??0),inline:true},{name:'Research PnL',value:money(research?.netPnlQuote),inline:true},
     {name:'Forecast Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},{name:'Episodes',value:String(h?.episodeMemory?.total??'—'),inline:true},{name:'Evidence',value:String(h?.evidenceHistory?.total??'—'),inline:true},
     {name:'Execution',value:'SHADOW_ONLY',inline:true},{name:'Live Orders',value:'BLOCKED',inline:true}
   ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
@@ -102,14 +103,17 @@ export function buildDiscordSystemPayload(snapshot={}){
 }
 
 export function buildDiscordPerformancePayload(snapshot={}){
-  const p=snapshot?.portfolio||{};
-  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Simulation / Research · keine echten Orders**',fields:[
-    {name:'Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Net PnL',value:money(p?.netPnlQuote),inline:true},
-    {name:'Return',value:percent(p?.returnPct),inline:true},
-    {name:'Open',value:String(p?.openPositions??0),inline:true},
-    {name:'Closed',value:String(p?.closedTrades??0),inline:true},
-    {name:'Winrate',value:percent(p?.winRate),inline:true},
+  const p=snapshot?.portfolio||{},research=p?.researchActivity||{};
+  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance getrennt von Research/Probes · keine echten Orders**',fields:[
+    {name:'Primary Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},
+    {name:'Primary Return',value:percent(p?.returnPct),inline:true},
+    {name:'Primary Open',value:String(p?.openPositions??0),inline:true},
+    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},
+    {name:'Primary Winrate',value:percent(p?.winRate),inline:true},
+    {name:'Research Open',value:String(research?.openPositions??0),inline:true},
+    {name:'Research Closed',value:String(research?.closedTrades??0),inline:true},
+    {name:'Research PnL',value:money(research?.netPnlQuote),inline:true},
     {name:'Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
     {name:'Expectancy',value:money(p?.expectancyQuote),inline:true},
     {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
@@ -124,8 +128,8 @@ export function buildDiscordPerformancePayload(snapshot={}){
   ],allowedMentions:{parse:[]}};
 }
 export function buildDiscordMarketOverviewPayload(snapshot={}){
-  const p=snapshot?.portfolio||{},h=snapshot?.health||{};
-  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Shadow Positionen: **'+String(p?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+  const p=snapshot?.portfolio||{},h=snapshot?.health||{},research=p?.researchActivity||{};
+  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Primary offen: **'+String(p?.openPositions??0)+'**','Research offen: **'+String(research?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordDataHealthPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{};

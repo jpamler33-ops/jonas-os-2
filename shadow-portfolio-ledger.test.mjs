@@ -14,6 +14,7 @@ import {
   replaceShadowPortfolioPosition,
   shadowPortfolioSummary,
   shadowResearchProbeSummary,
+  shadowResearchActivitySummary,
   shadowPortfolioPeriodStats,
   shadowPortfolioStatistics,
   verifyShadowPortfolioSummary,
@@ -370,6 +371,41 @@ test('coverage probe is horizon-only and excluded from primary performance',()=>
 
   assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
   assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
+});
+
+test('coverage probe remains excluded from primary performance but is visible as research activity',()=>{
+  const e=entry({
+    id:'sh_coverage_visibility',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'COVERAGE_PROBE_ENTRY',
+      entryMode:'COVERAGE_PROBE',
+      horizonMs:60_000,
+      horizonId:'1m',
+      coverageCurriculumVersion:'TCX_SHADOW_COVERAGE_CURRICULUM_V1',
+      coverageKey:'cc_visibility',
+      horizonOnlyExit:true
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  const openSummary=shadowResearchActivitySummary(l,{asOf:30_000});
+  assert.equal(openSummary.openPositions,1);
+  assert.equal(openSummary.closedTrades,0);
+  assert.equal(openSummary.byMode.COVERAGE_PROBE.open,1);
+  assert.equal(openSummary.performanceExcluded,true);
+  assert.equal(shadowPortfolioSummary(l,{asOf:30_000}).openPositions,0);
+
+  const marked=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0});
+  assert.equal(marked.trigger,'HORIZON_EXIT');
+  const closed=closeShadowPosition(marked.position,{reason:marked.trigger,at:61_000});
+  l=replaceShadowPortfolioPosition(l,closed);
+
+  const research=shadowResearchActivitySummary(l,{asOf:70_000});
+  assert.equal(research.openPositions,0);
+  assert.equal(research.closedTrades,1);
+  assert.ok(research.realizedPnlQuote>0);
+  assert.equal(research.recentClosed[0].entryMode,'COVERAGE_PROBE');
+  assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
 });
 
 test('leveraged positions expose price return and margin ROE separately',()=>{const p={execution:'SHADOW_ONLY',canExecuteLive:false,status:'OPEN',side:'LONG',qtyBase:1,entryQuote:100,entryFeesQuote:0,marginQuote:50,leverage:2,plannedExitAt:999999,stopLossPct:1,takeProfitPct:1};const book={bids:[[110,2]],asks:[[111,2]],source:'TEST',availableAt:2};const m=markShadowPosition(p,book,{at:2,feeBps:0});assert.equal(m.exit.priceReturnPct,.1);assert.equal(m.exit.marginRoePct,.2);const closed=closeShadowPosition(m.position,{at:3});assert.equal(closed.realizedPriceReturnPct,.1);assert.equal(closed.realizedMarginRoePct,.2);assert.equal(closed.realizedReturnPct,.2);});
