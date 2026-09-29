@@ -83,7 +83,7 @@ function base(overrides={}){
         availableAt:880
       }
     ],
-    sourceTraceId:'trace-001',
+    sourceTraceId:'a'.repeat(64),
     ...overrides
   };
 }
@@ -99,6 +99,12 @@ test('claim-assumption graph is deterministic, immutable and research-only',()=>
   assert.equal(a.canInfluencePrimary,false);
   assert.equal(a.canExecuteLive,false);
   assert.equal(Object.isFrozen(a),true);
+});
+
+test('optional source trace binding requires an immutable sha256 trace id',()=>{
+  assert.throws(()=>buildClaimAssumptionGraph(base({sourceTraceId:'trace-001'})),/sha256 hex string/);
+  const g=buildClaimAssumptionGraph(base());
+  assert.equal(g.sourceTraceId,'a'.repeat(64));
 });
 
 test('future claims assumptions evidence and dependency records are blocked',()=>{
