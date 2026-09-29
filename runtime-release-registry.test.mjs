@@ -116,6 +116,7 @@ test('institutional staged release set hashes forecast, science, admission and t
     'science-runtime/empirical-support.mjs',
     'science-runtime/specification-multiverse.mjs',
     'science-runtime/evidence-lineage-independence.mjs',
+    'science-runtime/epistemic-integrity.mjs',
     'expansion-runtime/provenance.mjs',
     'expansion-runtime/institutional-expansion.mjs',
     'expansion-runtime/source-intelligence.mjs',
@@ -127,4 +128,25 @@ test('institutional staged release set hashes forecast, science, admission and t
   assert.equal(files.some(x=>x.endsWith('.test.mjs')),false);
   assert.equal(new Set(files).size,files.length);
   assert.ok(INSTITUTIONAL_STAGED_RUNTIME_FILES.length>=20);
+});
+
+
+test('runtime release identity is transitively closed over local source imports',async()=>{
+  const files=new Set(institutionalRuntimeFiles());
+  const missing=[];
+  for(const file of [...files].filter(x=>/\.(?:mjs|js)$/.test(x))){
+    const source=await readFile(new URL('./'+file,import.meta.url),'utf8');
+    const specs=[
+      ...[...source.matchAll(/from\s+['"](\.\.?\/[^'"]+)['"]/g)].map(m=>m[1]),
+      ...[...source.matchAll(/import\s+['"](\.\.?\/[^'"]+)['"]/g)].map(m=>m[1]),
+      ...[...source.matchAll(/import\s*\(\s*['"](\.\.?\/[^'"]+)['"]/g)].map(m=>m[1])
+    ];
+    for(const spec of new Set(specs)){
+      const resolved=path.posix.normalize(path.posix.join(path.posix.dirname(file),spec));
+      if(/\.(?:mjs|js|json)$/.test(resolved)&&!files.has(resolved)){
+        missing.push(file+' -> '+resolved);
+      }
+    }
+  }
+  assert.deepEqual(missing.sort(),[]);
 });
