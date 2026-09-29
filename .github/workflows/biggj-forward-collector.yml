@@ -1,0 +1,34 @@
+name: BIGGJ Forward Derivatives Collector
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: biggj-forward-derivatives
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify BIGGJ tests
+        run: node --test biggj/*.test.mjs
+      - name: Collect forward derivatives
+        run: node biggj/run-forward-collector.mjs
+      - name: Persist evidence chain
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add biggj/data/forward-derivatives.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'data(biggj): append forward derivatives observation'
+          git pull --rebase origin main
+          git push origin HEAD:main
