@@ -88,3 +88,46 @@ test('strategy horizon selection can prefer strongest edge or longest horizon',(
   assert.equal(edge.horizonId,'1h');
   assert.equal(longest.horizonId,'1h');
 });
+
+
+test('minimum horizon policy excludes tiny forecast lanes from primary selection',()=>{
+  const x=issuance();
+  const base=x.forecast.horizons[0];
+  x.forecast={horizons:[
+    {...base,horizonId:'5m',horizonMs:5*60_000,expectedReturn:0.012,
+      probabilities:{up:.80,down:.10,flat:.10},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:.80,down:.10,flat:.10}}},
+    {...base,horizonId:'15m',horizonMs:15*60_000,expectedReturn:0.010,
+      probabilities:{up:.76,down:.12,flat:.12},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:.76,down:.12,flat:.12}}},
+    {...base,horizonId:'1h',horizonMs:60*60_000,expectedReturn:0.008,
+      probabilities:{up:.70,down:.16,flat:.14},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:.70,down:.16,flat:.14}}},
+    {...base,horizonId:'3h',horizonMs:3*60*60_000,expectedReturn:0.007,
+      probabilities:{up:.66,down:.18,flat:.16},
+      display:{probabilityDisplayAllowed:true,probabilities:{up:.66,down:.18,flat:.16}}}
+  ]};
+  const d=deriveAutonomousShadowTrade(x,{
+    now:1_030_000,
+    horizonSelection:'MAX_EDGE',
+    minHorizonMs:60*60_000,
+    maxHorizonMs:3*60*60_000
+  });
+  assert.equal(d.eligible,true);
+  assert.equal(d.horizonId,'1h');
+  assert.equal(d.horizonMs,60*60_000);
+  assert.equal(d.horizonSelection,'MAX_EDGE');
+  assert.equal(d.minHorizonMs,60*60_000);
+});
+
+test('minimum horizon policy abstains instead of falling back to a tiny trade',()=>{
+  const x=issuance();
+  x.forecast={horizons:[
+    {...x.forecast.horizons[0],horizonId:'5m',horizonMs:5*60_000},
+    {...x.forecast.horizons[0],horizonId:'15m',horizonMs:15*60_000}
+  ]};
+  const d=deriveAutonomousShadowTrade(x,{now:1_030_000,minHorizonMs:60*60_000,maxHorizonMs:3*60*60_000,horizonSelection:'MAX_EDGE'});
+  assert.equal(d.eligible,false);
+  assert.equal(d.reason,'NO_ADMITTED_DIRECTIONAL_HORIZON');
+  assert.equal(d.minHorizonMs,60*60_000);
+});
