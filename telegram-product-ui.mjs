@@ -129,6 +129,52 @@ export function homeText({marketCount=0,systemStatus="ONLINE"}={}) {
 
 export function homeKeyboard() {return {inline_keyboard:[[{text:"🧠 INTELLIGENCE TERMINAL",callback_data:"home:terminal"}],[{text:"◉ LIVE RADAR",callback_data:"home:radar"},{text:"▦ MÄRKTE",callback_data:"home:markets"}],[{text:"▤ PORTFOLIO",callback_data:"home:portfolio"},{text:"⌁ STATISTIK",callback_data:"home:stats_day"}],[{text:"☆ WATCHLIST",callback_data:"home:watchlist"},{text:"◇ ALERTS",callback_data:"home:alerts"}],[{text:"▤ GLOBAL INTEL / NEWS",callback_data:"home:news"}],[{text:"⌁ FORECAST",callback_data:"cmd:forecast"},{text:"☰ MEHR",callback_data:"home:more"}]]};}
 
+
+export function globalIntelKeyboard(filter="TOP") {
+  const active=String(filter||"TOP").toUpperCase();
+  const b=(label,key)=>({text:(active===key?"● ":"")+label,callback_data:"news:"+key.toLowerCase()});
+  return {inline_keyboard:[
+    [b("TOP EVENTS","TOP"),b("CRYPTO","CRYPTO")],
+    [b("MACRO","MACRO"),b("GEOPOLITIK","GEOPOLITICS")],
+    [b("COMPANIES / IPO","CORPORATE"),b("TECH / AI","TECH")],
+    [b("ALLE NEWS","ALL")],
+    [{text:"↻ REFRESH",callback_data:"home:news"},{text:"🏠 HOME",callback_data:"home"}]
+  ]};
+}
+
+export function renderGlobalIntelFeed(events=[],{filter="TOP",now=Date.now(),limit=8}={}) {
+  const f=String(filter||"TOP").toUpperCase();
+  const familyMatch=e=>{
+    const fam=String(e?.family||e?.eventFamily||"OTHER").toUpperCase();
+    if(f==="ALL"||f==="TOP") return true;
+    if(f==="CRYPTO") return fam==="CRYPTO";
+    if(f==="MACRO") return fam==="MACRO";
+    if(f==="GEOPOLITICS") return fam==="GEOPOLITICS";
+    if(f==="CORPORATE") return fam==="CORPORATE"||fam==="CAPITAL_MARKETS";
+    if(f==="TECH") return fam==="TECHNOLOGY";
+    return true;
+  };
+  const rank={HIGH_IMPACT:3,DEVELOPING:2,CORROBORATED:2,WATCH:1,UNVERIFIED:0};
+  let rows=[...(events||[])].filter(familyMatch);
+  if(f==="TOP") rows=rows.filter(e=>["HIGH_IMPACT","DEVELOPING","CORROBORATED"].includes(String(e?.status||"").toUpperCase()));
+  rows.sort((a,b)=>(rank[String(b?.status||"").toUpperCase()]||0)-(rank[String(a?.status||"").toUpperCase()]||0)||(Number(b?.availableAt||b?.timestamp)||0)-(Number(a?.availableAt||a?.timestamp)||0));
+  rows=rows.slice(0,Math.max(1,Math.min(12,Number(limit)||8)));
+  const lines=["TCX // GLOBAL INTEL","━━━━━━━━━━━━━━━━━━━━",f==="TOP"?"HIGH IMPACT · DEVELOPING · CORROBORATED":f,""];
+  if(!rows.length) lines.push("Keine passenden verifizierten Events im aktuellen Speicher.");
+  for(const e of rows) {
+    const status=String(e?.status||"WATCH").replaceAll("_"," ");
+    const title=safeText(e?.title||e?.headline||e?.eventType,"Event");
+    const family=safeText(e?.family||e?.eventFamily,"OTHER");
+    const verification=e?.verified===true||Number(e?.independentConfirmation)>=0.45?"verifiziert":"Prüfung läuft";
+    const assets=(e?.affectedAssets||e?.assets||[]).slice(0,5).join(" · ")||"—";
+    const market=String(e?.cryptoImpactStatus||e?.marketStatus||"AWAITING_MARKET_DATA").replaceAll("_"," ");
+    const shadow=String(e?.shadowTradeStatus||"NONE").replaceAll("_"," ");
+    lines.push("["+status+"] "+title,family+" · "+verification,"Märkte: "+assets,"Marktreaktion: "+market,"Shadow: "+shadow,"");
+  }
+  lines.push("Mechanismen sind Hypothesen; beobachtete Marktreaktionen werden getrennt ausgewiesen.");
+  return lines.join("\n");
+}
+
 export function marketsKeyboard(markets=[],favoritesCount=0) {
   const rows=[];
   for(let i=0;i<markets.length;i+=2) {
