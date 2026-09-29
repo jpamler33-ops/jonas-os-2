@@ -236,6 +236,16 @@ export async function appendMarketEvents(fabric,inputs){
       if(removed) fabric.dedupe.delete(dedupeKeyOf(removed));
     }
   }
+  const writtenBytes=Buffer.byteLength(data,'utf8');
+  fabric.verification={
+    ...(fabric.verification||{}),
+    ok:true,
+    count:Number(fabric.totalEvents||0),
+    lastSeq:fabric.seq,
+    tailHash:fabric.tailHash,
+    retainedEvents:fabric.events.length,
+    lastValidByteOffset:Number(fabric.verification?.lastValidByteOffset||0)+writtenBytes
+  };
 
   return {appended:prepared.map(x=>x.event),duplicates};
 }
