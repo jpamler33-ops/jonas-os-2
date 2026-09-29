@@ -1727,7 +1727,11 @@ function biggjStructurePlan(analysis){
     targetSource:String(targetLevel.source||targetLevel.kind||'LIQUIDITY')
   };
 }
-async function buildBiggjRuntimeMarketAnalysis(issuance){
+const biggjMarketAnalysisCache=new Map();
+async function buildBiggjRuntimeMarketAnalysis(issuance,{cacheMs=30_000}={}){
+  const cacheKey=String(issuance?.issuanceId||issuance?.forecastFingerprint||issuance?.forecast?.fingerprint||'')+'|'+String(issuance?.symbol||'');
+  const cached=cacheKey?biggjMarketAnalysisCache.get(cacheKey):null;
+  if(cached&&Date.now()-Number(cached.cachedAt||0)<=Math.max(0,Number(cacheMs)||0)) return cached.value;
   const symbol=String(issuance?.symbol||'').toUpperCase();
   const now=Date.now();
   if(!symbol) throw new Error('BIGGJ_SYMBOL_REQUIRED');
@@ -1764,7 +1768,7 @@ async function buildBiggjRuntimeMarketAnalysis(issuance){
     symbol,asOf:now,candlesByTf,orderBook:book,liquidation,forecast:issuance?.forecast||null,
     dataTrustScore,flowAlignment,openInterestExpansion,macroAlignment:0,onchainAlignment:0
   });
-  return {
+  const value={
     analysis,book,derivatives,onchain,external,liquidation,
     flowAlignment,openInterestExpansion,dataTrustScore,
     evidence:{
@@ -1776,6 +1780,14 @@ async function buildBiggjRuntimeMarketAnalysis(issuance){
       timeframes:frames
     }
   };
+  if(cacheKey){
+    biggjMarketAnalysisCache.set(cacheKey,{cachedAt:Date.now(),value});
+    if(biggjMarketAnalysisCache.size>32){
+      const oldest=[...biggjMarketAnalysisCache.entries()].sort((a,b)=>Number(a[1]?.cachedAt||0)-Number(b[1]?.cachedAt||0)).slice(0,biggjMarketAnalysisCache.size-32);
+      for(const [key] of oldest) biggjMarketAnalysisCache.delete(key);
+    }
+  }
+  return value;
 }
 function biggjEntryComponents({analysis,setupEvidence,rewardRisk}){
   const style=(analysis?.styleCandidates||[]).find(x=>x.style===analysis?.selectedStyle);
