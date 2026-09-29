@@ -67,3 +67,16 @@ test('local file persistence rejects multiple replicas',()=>{
   assert.equal(r.state,'BLOCKED');
   assert.ok(r.hardReasons.includes('LOCAL_FILE_PERSISTENCE_MULTI_REPLICA_FORBIDDEN'));
 });
+
+
+test('candidate registry corruption degrades serving while promotion remains fail-closed',()=>{
+  const stores=healthyStores();
+  stores.MODEL_CANDIDATE_REGISTRY={healthy:false,recoveredFromCorrupt:false};
+  const r=evaluatePersistenceCompatibility({stores});
+  assert.equal(r.state,'DEGRADED');
+  assert.equal(r.compatible,true);
+  assert.ok(r.warningReasons.includes('MODEL_CANDIDATE_REGISTRY_UNHEALTHY'));
+  const detail=r.details.find(x=>x.id==='MODEL_CANDIDATE_REGISTRY');
+  assert.equal(detail?.status,'DEGRADED');
+  assert.equal(detail?.criticality,'DEGRADE');
+});
