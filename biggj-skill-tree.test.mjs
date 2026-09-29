@@ -10,6 +10,7 @@ import {
 } from './biggj-capability-map.mjs';
 import {
   createBiggjSkillTree,
+  reconcileBiggjSkillTreeWithCapabilityMap,
   proposeBiggjChildSkill,
   recordBiggjSkillEvidence,
   evaluateBiggjSkillProgress,
@@ -69,6 +70,32 @@ test('first-principles V2 adds the missing cognitive, economic and platform root
   assert.equal(map.invariants.execution,'SHADOW_ONLY');
   assert.equal(map.invariants.canExecuteLive,false);
   assert.equal(map.invariants.silentPrimaryMutation,false);
+});
+
+test('V1-like persisted trees reconcile to V2 without rewriting evidence or promotion history',()=>{
+  const current=createBiggjSkillTree({asOf:1_000_000});
+  const legacy=structuredClone(current);
+  legacy.capabilityMapVersion='BIGGJ_CAPABILITY_MAP_V1';
+  legacy.capabilityMapFingerprint='legacy-map-fingerprint';
+  legacy.nodes=legacy.nodes.filter(x=>
+    x.skillId!=='root:WORLD_STATE_MODEL' &&
+    x.skillId!=='seed:CANONICAL_WORLD_STATE'
+  );
+  const preserved=legacy.nodes.find(x=>x.capabilityId==='STYLE_SELECTION');
+  preserved.evidence=[{evidenceId:'legacy-evidence',statement:'must survive migration'}];
+  legacy.promotions=[{transitionId:'legacy-promotion'}];
+
+  const next=reconcileBiggjSkillTreeWithCapabilityMap(legacy,{asOf:2_000_000});
+  assert.equal(next.capabilityMapVersion,'BIGGJ_CAPABILITY_MAP_V2');
+  assert.ok(next.nodes.some(x=>x.skillId==='root:WORLD_STATE_MODEL'));
+  assert.ok(next.nodes.some(x=>x.skillId==='seed:CANONICAL_WORLD_STATE'));
+  assert.deepEqual(next.nodes.find(x=>x.capabilityId==='STYLE_SELECTION').evidence,preserved.evidence);
+  assert.deepEqual(next.promotions,[{transitionId:'legacy-promotion'}]);
+  assert.equal(next.migrations.at(-1).evidenceRewritten,false);
+  assert.equal(next.migrations.at(-1).promotionHistoryRewritten,false);
+  assert.equal(next.migrations.at(-1).productionMutationPerformed,false);
+  assert.equal(next.execution,'SHADOW_ONLY');
+  assert.equal(next.canExecuteLive,false);
 });
 
 test('skill tree seeds every canonical capability without granting trust',()=>{
