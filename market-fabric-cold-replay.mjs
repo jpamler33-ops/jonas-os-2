@@ -296,7 +296,6 @@ export async function loadArchivedReplayTail({
   const segments=orderedSegments(manifest);
   const events=[];
   let scannedSegments=0,coldSegments=0,localSegments=0;
-  let reachedMatchingHistory=false;
 
   for(const item of segments){
     if(scannedSegments>=segmentLimit) break;
@@ -313,16 +312,11 @@ export async function loadArchivedReplayTail({
     if(scan.source==='COLD') coldSegments++; else localSegments++;
 
     if(scan.matches.length){
-      reachedMatchingHistory=true;
       events.push(...scan.matches);
       const bySeq=new Map(events.map(e=>[Number(e.seq),e]));
       const ordered=[...bySeq.values()].sort((a,b)=>Number(a.seq)-Number(b.seq));
       events.splice(0,events.length,...ordered.slice(-keep));
       if(events.length>=keep) break;
-    }else if(reachedMatchingHistory){
-      // Once matching history has begun, an older empty segment cannot improve
-      // the bounded symbol tail enough to justify further remote reads.
-      break;
     }
   }
 
