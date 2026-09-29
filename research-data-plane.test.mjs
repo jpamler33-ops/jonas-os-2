@@ -273,3 +273,30 @@ test('same source event id with changed upstream features still fails closed',as
   );
   assert.equal(p.seq,1);
 });
+
+
+test('source event identity survives in-memory record eviction',async()=>{
+  const p=await plane();
+  const original=snap({
+    sourceEventId:'evicted-source-event',
+    features:[{id:'research.onchain.eth.baseFeeGwei',value:2}]
+  });
+  await appendResearchDataPlane(p,[original]);
+
+  // Simulate the hot record ring no longer retaining the original record.
+  p.records.length=0;
+  p.dedupe.clear();
+
+  const duplicate=await appendResearchDataPlane(p,[original]);
+  assert.equal(duplicate.appended.length,0);
+  assert.equal(duplicate.duplicates,1);
+
+  await assert.rejects(
+    appendResearchDataPlane(p,[snap({
+      sourceEventId:'evicted-source-event',
+      features:[{id:'research.onchain.eth.baseFeeGwei',value:4}]
+    })]),
+    /SOURCE_EVENT_ID_CONFLICT:evicted-source-event/
+  );
+  assert.equal(p.seq,1);
+});
