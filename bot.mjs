@@ -6594,6 +6594,21 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       console.error('learned challenger entry error',symbol,msg);
     }
   }
+  let biggjStyleExperimentRun=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      biggjStyleExperimentRun=await maybePlaceBiggjStyleExperiments(issuance,{
+        auditHealthy:auditHealthyAfter,
+        portfolioPrepared:shadowActionPortfolioPrepared
+      });
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      biggjStyleExperimentRun={placed:0,eligible:0,reason:'BIGGJ_STYLE_EXPERIMENT_ERROR'};
+      recordError(observability,{scope:'biggj_style_experiment.entry',message:msg});
+      console.error('BIGGJ style experiment error',symbol,msg);
+    }
+  }
+
   let strategyLeagueRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'&&issuance.gate!=='ABSTAIN'){
     try{
@@ -6683,6 +6698,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       learnedChallengerStressRules:Number(learnedChallengerRun?.stressLab?.ruleCount||0),
       learnedChallengerStressFragile:Number(learnedChallengerRun?.stressLab?.counts?.fragile||0),
       learnedChallengerStressMature:Number(learnedChallengerRun?.stressLab?.counts?.stressMature||0),
+      biggjStyleExperimentPlaced:Number(biggjStyleExperimentRun?.placed||0),
+      biggjStyleExperimentEligible:Number(biggjStyleExperimentRun?.eligible||0),
+      biggjStyleExperimentReason:biggjStyleExperimentRun?.reason||null,
+      biggjStyleExperimentVersion:biggjStyleExperimentRun?.experimentVersion||BIGGJ_STYLE_EXPERIMENT_VERSION,
       strategyLeaguePlaced:Number(strategyLeagueRun?.placed||0),
       strategyLeagueEligible:Number(strategyLeagueRun?.eligible||0),
       strategyLeagueAllocationMode:strategyLeagueRun?.allocationMode||null
