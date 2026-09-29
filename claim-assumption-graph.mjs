@@ -164,13 +164,16 @@ export function buildClaimAssumptionGraph({
     const time=timed(row,'assumption['+assumptionId+']',t);
     const evidenceIds=uniq(row?.evidenceIds);
     const missingEvidenceIds=evidenceIds.filter(x=>!evidenceMap.has(x));
+    const expiredEvidenceIds=evidenceIds.filter(x=>evidenceMap.get(x)?.validUntil!=null&&evidenceMap.get(x).validUntil<t);
     const expired=time.validUntil!=null&&time.validUntil<t;
     const requiresEvidence=row?.requiresEvidence===true;
     const supportState=missingEvidenceIds.length
       ?'EVIDENCE_REFERENCE_MISSING'
-      :evidenceIds.length
-        ?'EVIDENCE_LINKED'
-        :requiresEvidence?'REQUIRED_SUPPORT_MISSING':'EXPLICIT_ASSUMPTION';
+      :expiredEvidenceIds.length
+        ?'EVIDENCE_EXPIRED'
+        :evidenceIds.length
+          ?'EVIDENCE_LINKED'
+          :requiresEvidence?'REQUIRED_SUPPORT_MISSING':'EXPLICIT_ASSUMPTION';
     const normalized={
       assumptionId,
       statement:id(row?.statement,'assumption['+assumptionId+'].statement'),
@@ -178,6 +181,7 @@ export function buildClaimAssumptionGraph({
       evidenceIds,
       requiresEvidence,
       missingEvidenceIds,
+      expiredEvidenceIds,
       supportState,
       ...time,
       state:expired?'EXPIRED':'ACTIVE'
@@ -197,6 +201,7 @@ export function buildClaimAssumptionGraph({
     const evidenceIds=uniq(row?.evidenceIds);
     const missingAssumptionIds=assumptionIds.filter(x=>!assumptionMap.has(x));
     const missingEvidenceIds=evidenceIds.filter(x=>!evidenceMap.has(x));
+    const expiredEvidenceIds=evidenceIds.filter(x=>evidenceMap.get(x)?.validUntil!=null&&evidenceMap.get(x).validUntil<t);
     const expiredAssumptionIds=assumptionIds.filter(x=>assumptionMap.get(x)?.state==='EXPIRED');
     const required=row?.required!==false;
     const normalized={
@@ -208,10 +213,11 @@ export function buildClaimAssumptionGraph({
       evidenceIds,
       missingAssumptionIds,
       missingEvidenceIds,
+      expiredEvidenceIds,
       expiredAssumptionIds,
       assumptionDeclaration:assumptionIds.length?'EXPLICIT':'NONE_DECLARED',
       ...time,
-      state:missingAssumptionIds.length||missingEvidenceIds.length||expiredAssumptionIds.length
+      state:missingAssumptionIds.length||missingEvidenceIds.length||expiredEvidenceIds.length||expiredAssumptionIds.length
         ?'AUDIT_DEFECT'
         :'PIT_VALID'
     };
@@ -249,10 +255,12 @@ export function buildClaimAssumptionGraph({
   const claimDefects=claimRows.flatMap(c=>[
     ...c.missingAssumptionIds.map(assumptionId=>({kind:'MISSING_ASSUMPTION_DEFINITION',claimId:c.claimId,assumptionId})),
     ...c.missingEvidenceIds.map(evidenceId=>({kind:'MISSING_CLAIM_EVIDENCE',claimId:c.claimId,evidenceId})),
+    ...c.expiredEvidenceIds.map(evidenceId=>({kind:'EXPIRED_CLAIM_EVIDENCE',claimId:c.claimId,evidenceId})),
     ...c.expiredAssumptionIds.map(assumptionId=>({kind:'EXPIRED_ASSUMPTION_USED',claimId:c.claimId,assumptionId}))
   ]);
   const assumptionDefects=assumptionRows.flatMap(a=>[
     ...a.missingEvidenceIds.map(evidenceId=>({kind:'MISSING_ASSUMPTION_EVIDENCE',assumptionId:a.assumptionId,evidenceId})),
+    ...a.expiredEvidenceIds.map(evidenceId=>({kind:'EXPIRED_ASSUMPTION_EVIDENCE',assumptionId:a.assumptionId,evidenceId})),
     ...(a.supportState==='REQUIRED_SUPPORT_MISSING'?[{kind:'REQUIRED_ASSUMPTION_SUPPORT_MISSING',assumptionId:a.assumptionId}]:[])
   ]);
   const dependencyDefects=dependencyRows.flatMap(d=>[
