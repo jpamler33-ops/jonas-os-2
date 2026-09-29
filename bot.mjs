@@ -56,7 +56,7 @@ import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from '.
 import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
-  markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary,
+  markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
   shadowPortfolioPeriodStats, shadowPortfolioStatistics,
   SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
 } from './shadow-portfolio-ledger.mjs';
@@ -4581,11 +4581,35 @@ async function showShadowTradeStats(chatId,messageId=null,period='DAY'){
 
 async function showShadowPortfolio(chatId,messageId=null){
  const r=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now:Date.now()});if(r.changed){shadowPortfolioLedger=r.ledger;await persistShadowPortfolio('ui-reconcile');}
- const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()}),money=v=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—';
- const lines=['TCX // SHADOW PORTFOLIO','━━━━━━━━━━━━━━━━━━━━','CAPITAL SIMULATION','','EQUITY      '+fmt(x.equityQuote,2)+' USDT','GESAMT PnL  '+money(x.netPnlQuote),'HEUTE       '+money(shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:'DAY',asOf:Date.now(),timeZone:shadowStatsTimeZone}).realizedPnlQuote),'DRAWDOWN    '+fmt(x.maxDrawdownPct*100,2)+'%','','PERFORMANCE','Trades '+x.closedTrades+'   ·   Winrate '+(x.winRate==null?'—':fmt(x.winRate*100,1)+'%'),'Profit Factor '+(x.profitFactor==null?'—':fmt(x.profitFactor,2))+'   ·   Offen '+x.openPositions,'','AKTIVE POSITIONEN'];
+ const now=Date.now();
+ const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
+ const research=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
+ const money=v=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—';
+ const lines=[
+  'TCX // SHADOW PORTFOLIO','━━━━━━━━━━━━━━━━━━━━',
+  'PRIMARY PERFORMANCE','','EQUITY      '+fmt(x.equityQuote,2)+' USDT',
+  'GESAMT PnL  '+money(x.netPnlQuote),
+  'HEUTE       '+money(shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:'DAY',asOf:now,timeZone:shadowStatsTimeZone}).realizedPnlQuote),
+  'DRAWDOWN    '+fmt(x.maxDrawdownPct*100,2)+'%','',
+  'Trades '+x.closedTrades+'   ·   Winrate '+(x.winRate==null?'—':fmt(x.winRate*100,1)+'%'),
+  'Profit Factor '+(x.profitFactor==null?'—':fmt(x.profitFactor,2))+'   ·   Offen '+x.openPositions,'',
+  'AKTIVE HAUPTPOSITIONEN'
+ ];
  if(x.active.length)for(const p of x.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.side+' · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene Hauptposition.');
+ lines.push(
+  '',
+  'RESEARCH ACTIVITY · NICHT IN PRIMARY PnL',
+  'Offen '+research.openPositions+'   ·   Abgeschlossen '+research.closedTrades,
+  'Research PnL '+money(research.netPnlQuote),
+  'Coverage '+(research.byMode.COVERAGE_PROBE?.open||0)+' offen / '+(research.byMode.COVERAGE_PROBE?.closed||0)+' fertig',
+  'ABSTAIN '+(research.byMode.ABSTAIN_PROBE?.open||0)+' offen / '+(research.byMode.ABSTAIN_PROBE?.closed||0)+' fertig',
+  'Challenger '+(research.byMode.CHALLENGER?.open||0)+' offen / '+(research.byMode.CHALLENGER?.closed||0)+' fertig',
+  '',
+  'AKTIVE RESEARCH-TRADES'
+ );
+ if(research.active.length)for(const p of research.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.entryMode+' · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offenen Research-Trades.');
  lines.push('','TRADE LOOP','Entry → Position → Exit → Attribution → Learning','','SHADOW ONLY · REAL ORDERS BLOCKED');
- const payload={chat_id:chatId,text:lines.join('\n'),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Performance',callback_data:'home:stats_day'}],[{text:'🎯 Signale',callback_data:'home:radar'},{text:'🔎 Kein Trade?',callback_data:'cmdrun:why_not_trade'}],[{text:'🧠 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
+ const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Performance',callback_data:'home:stats_day'}],[{text:'🎯 Signale',callback_data:'home:radar'},{text:'🔎 Kein Trade?',callback_data:'cmdrun:why_not_trade'}],[{text:'🧠 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
 }
 
 async function showTradeDiscoveryDiagnostics(chatId,messageId=null){
@@ -8159,12 +8183,14 @@ function missionControlData(){
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
- const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
- const visibleShadowPositions=(shadowPortfolioLedger?.positions||[]).filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p?.entryMode||'STANDARD').toUpperCase()));
- const openPositions=visibleShadowPositions.filter(p=>p?.status==='OPEN').slice(0,30);
- const recentClosed=visibleShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
- const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now:Date.now(),runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:(shadowPortfolioLedger?.positions||[]).filter(p=>p.status==='OPEN'&&p.entryMode!=='EXPLORATION').length,openDiscoveryPositions:countOpenDiscoveryPositions(shadowPortfolioLedger?.positions||[])}});
- return missionControlSnapshot({health,portfolio:{...portfolio,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
+ const now=Date.now();
+ const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
+ const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
+ const allShadowPositions=shadowPortfolioLedger?.positions||[];
+ const openPositions=allShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
+ const recentClosed=allShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
+ const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now,runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:portfolio.openPositions,openDiscoveryPositions:countOpenDiscoveryPositions(allShadowPositions)}});
+ return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
