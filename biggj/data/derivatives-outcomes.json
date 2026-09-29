@@ -1,0 +1,9 @@
+{
+  "schema": "BIGGJ_DERIVATIVES_OUTCOME_STORE_V1",
+  "purpose": "RESEARCH_ONLY",
+  "mode": "SHADOW_ONLY",
+  "canExecuteLive": false,
+  "updatedAt": null,
+  "cases": [],
+  "summary": {"totalCases":0,"eligibleCases":0,"bySignal":{}}
+}
