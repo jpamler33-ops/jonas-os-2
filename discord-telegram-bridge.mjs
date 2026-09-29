@@ -84,6 +84,33 @@ const MARKERS=Object.freeze({
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
 function percent(value){const n=Number(value);return Number.isFinite(n)?(n*100).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+'%':'—';}
+function pct0(value){const n=Number(value);return Number.isFinite(n)?Math.round(Math.max(0,Math.min(1,n))*100)+'%':'—';}
+function bar10(value){const n=Number(value);if(!Number.isFinite(n))return '░░░░░░░░░░';const x=Math.round(Math.max(0,Math.min(1,n))*10);return '█'.repeat(x)+'░'.repeat(10-x);}
+function biggjThesisPayload(position={}){
+  const t=buildBiggjTradeThesis(position,{asOf:Date.now()});
+  const ghost=t.hypotheses.map(x=>bar10(x.support)+' '+pct0(x.support)+' · '+x.label).join('\n');
+  const dna=t.tradeDna.map(x=>bar10(x.value)+' '+pct0(x.value)+' · '+x.label).join('\n');
+  const why=t.whyNow.slice(0,6).map(x=>'• **'+x.id+'** · '+x.state+' · '+x.detail).join('\n');
+  const levels=t.levels||{};
+  const fmtPrice=v=>Number.isFinite(Number(v))?String(Number(v).toFixed(8)).replace(/0+$/,'').replace(/\.$/,''):'—';
+  return {embeds:[{
+    title:'BIGGJ // LIVING THESIS · '+t.symbol.replace('USDT','/USDT'),
+    description:'**'+t.side+' · '+t.status+' · '+t.setupType+'**\nThesis `'+t.thesisId+'`\n\nTHESIS HEALTH  '+bar10(t.thesisHealth)+' **'+pct0(t.thesisHealth)+'**',
+    fields:[
+      {name:'Ghost Paths',value:(ghost||'No calibrated path support available').slice(0,1024),inline:false},
+      {name:'Trade DNA',value:(dna||'No trade DNA inputs available').slice(0,1024),inline:false},
+      {name:'Why Now?',value:(why||'No point-in-time thesis inputs available').slice(0,1024),inline:false},
+      {name:'Entry',value:fmtPrice(levels.entryPrice),inline:true},
+      {name:'Stop',value:fmtPrice(levels.stopPrice),inline:true},
+      {name:'Target',value:fmtPrice(levels.takeProfitPrice),inline:true},
+      {name:'Known Beliefs',value:String(t.knownBeliefs)+'/6',inline:true},
+      {name:'Novelty',value:String(t.novelty),inline:true},
+      {name:'Epistemic',value:'Point-in-time shadow state',inline:true}
+    ],
+    footer:{text:'BIGGJ_THESIS:'+t.positionId},
+    timestamp:new Date().toISOString()
+  }],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
+}
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
 function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**SCHNELLSTART**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/deep BTC\` · Deep Dive','\`/portfolio\` · Shadow-Portfolio','\`/stats\` · Performance','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
@@ -296,12 +323,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const contexts=new Map();
   const channelCache=new Map();
   const tradeCards=new Map();
+  const thesisCards=new Map();
   const closedPosted=new Set();
   const timers=new Set();
   let closedFeedInitialized=false;
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null};
   function fail(scope,err){state.lastError=scope+': '+(err instanceof Error?err.message:String(err));try{logger.error('[TCX_DISCORD]',state.lastError);}catch{}}
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
