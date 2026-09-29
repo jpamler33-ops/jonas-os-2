@@ -226,3 +226,77 @@ test('explicit unusable governance is excluded even when decision is degraded',a
   const q=researchFeaturesAsOf(p,{streamKey:'ETHUSDT',asOf:1_015_000,requireGoverned:true});
   assert.equal(q.features.length,0);
 });
+
+
+test('same upstream source event with reevaluated governance deduplicates instead of conflicting',async()=>{
+  const p=await plane();
+  const base=snap({sourceEventId:'same-event-governance'});
+  const first=Object.freeze({...base,governance:Object.freeze({
+    version:'TCX_RESEARCH_DATA_GOVERNANCE_V1',
+    evaluatedAt:1_001_200,
+    decision:'ACCEPT',
+    sourceKey:'ONCHAIN:ETHEREUM_PUBLIC_RPC',
+    sourceStatus:'HEALTHY',
+    usableForResearch:true,
+    canExecute:false
+  })});
+  const second=Object.freeze({...base,governance:Object.freeze({
+    version:'TCX_RESEARCH_DATA_GOVERNANCE_V1',
+    evaluatedAt:1_001_500,
+    decision:'DEGRADED',
+    sourceKey:'ONCHAIN:ETHEREUM_PUBLIC_RPC',
+    sourceStatus:'DEGRADED',
+    usableForResearch:true,
+    reasons:[{code:'SEMANTIC_DISTRIBUTION_SHIFT_REVIEW'}],
+    canExecute:false
+  })});
+  const a=await appendResearchDataPlane(p,[first]);
+  assert.equal(a.appended.length,1);
+  const b=await appendResearchDataPlane(p,[second]);
+  assert.equal(b.appended.length,0);
+  assert.equal(b.duplicates,1);
+  assert.equal(p.seq,1);
+});
+
+test('same source event id with changed upstream features still fails closed',async()=>{
+  const p=await plane();
+  await appendResearchDataPlane(p,[snap({
+    sourceEventId:'conflicting-source-event',
+    features:[{id:'research.onchain.eth.baseFeeGwei',value:2}]
+  })]);
+  await assert.rejects(
+    appendResearchDataPlane(p,[snap({
+      sourceEventId:'conflicting-source-event',
+      features:[{id:'research.onchain.eth.baseFeeGwei',value:3}]
+    })]),
+    /SOURCE_EVENT_ID_CONFLICT:conflicting-source-event/
+  );
+  assert.equal(p.seq,1);
+});
+
+
+test('source event identity survives in-memory record eviction',async()=>{
+  const p=await plane();
+  const original=snap({
+    sourceEventId:'evicted-source-event',
+    features:[{id:'research.onchain.eth.baseFeeGwei',value:2}]
+  });
+  await appendResearchDataPlane(p,[original]);
+
+  // Simulate the hot record ring no longer retaining the original record.
+  p.records.length=0;
+  p.dedupe.clear();
+
+  const duplicate=await appendResearchDataPlane(p,[original]);
+  assert.equal(duplicate.appended.length,0);
+  assert.equal(duplicate.duplicates,1);
+
+  await assert.rejects(
+    appendResearchDataPlane(p,[snap({
+      sourceEventId:'evicted-source-event',
+      features:[{id:'research.onchain.eth.baseFeeGwei',value:4}]
+    })]),
+    /SOURCE_EVENT_ID_CONFLICT:evicted-source-event/
+  );
+  assert.equal(p.seq,1);
+});
