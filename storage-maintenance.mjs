@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { access, readdir, stat, unlink } from 'node:fs/promises';
+import { access, readdir, stat, statfs, unlink } from 'node:fs/promises';
 
 const DEFAULT_CANONICAL_FILES = Object.freeze([
   'tcx-forecast-runtime.json',
@@ -139,4 +139,77 @@ export async function inspectPersistenceStorage({
   return result;
 }
 
-export const STORAGE_MAINTENANCE_VERSION='TCX_STORAGE_MAINTENANCE_V2';
+
+export function classifyStoragePressure({
+  totalBytes,
+  availableBytes,
+  warnFreeBytes=96*1024*1024,
+  criticalFreeBytes=48*1024*1024,
+  warnUtilization=0.82,
+  criticalUtilization=0.92
+}={}){
+  const total=Math.max(0,Number(totalBytes)||0);
+  const available=Math.max(0,Number(availableBytes)||0);
+  const used=Math.max(0,total-available);
+  const utilization=total>0?used/total:null;
+  const warnFree=Math.max(0,Number(warnFreeBytes)||0);
+  const criticalFree=Math.max(0,Math.min(warnFree,Number(criticalFreeBytes)||0));
+  const warnUtil=Math.max(0,Math.min(1,Number(warnUtilization)||0.82));
+  const criticalUtil=Math.max(warnUtil,Math.min(1,Number(criticalUtilization)||0.92));
+  const critical=available<=criticalFree||(utilization!=null&&utilization>=criticalUtil);
+  const warning=!critical&&(available<=warnFree||(utilization!=null&&utilization>=warnUtil));
+  return {
+    state:critical?'CRITICAL':warning?'WARN':'NORMAL',
+    totalBytes:total,
+    usedBytes:used,
+    availableBytes:available,
+    utilization,
+    thresholds:{
+      warnFreeBytes:warnFree,
+      criticalFreeBytes:criticalFree,
+      warnUtilization:warnUtil,
+      criticalUtilization:criticalUtil
+    }
+  };
+}
+
+export async function inspectStoragePressure({
+  dataDir='/data',
+  warnFreeBytes=96*1024*1024,
+  criticalFreeBytes=48*1024*1024,
+  warnUtilization=0.82,
+  criticalUtilization=0.92
+}={}){
+  try{
+    const fs=await statfs(dataDir,{bigint:true});
+    const blockSize=Number(fs.bsize||fs.frsize||4096n);
+    const totalBytes=Number(fs.blocks)*blockSize;
+    const availableBytes=Number(fs.bavail)*blockSize;
+    return {
+      ok:true,
+      dataDir,
+      ...classifyStoragePressure({
+        totalBytes,availableBytes,warnFreeBytes,criticalFreeBytes,warnUtilization,criticalUtilization
+      })
+    };
+  }catch(err){
+    return {
+      ok:false,
+      dataDir,
+      state:'UNKNOWN',
+      error:err instanceof Error?err.message:String(err),
+      totalBytes:null,
+      usedBytes:null,
+      availableBytes:null,
+      utilization:null,
+      thresholds:{
+        warnFreeBytes:Number(warnFreeBytes)||0,
+        criticalFreeBytes:Number(criticalFreeBytes)||0,
+        warnUtilization:Number(warnUtilization)||0.82,
+        criticalUtilization:Number(criticalUtilization)||0.92
+      }
+    };
+  }
+}
+
+export const STORAGE_MAINTENANCE_VERSION='TCX_STORAGE_MAINTENANCE_V3';
