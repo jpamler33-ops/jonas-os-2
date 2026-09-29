@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { sha256, canonicalJson } from './institutional-kernel.mjs';
+import { mkdir, readFile, rename } from 'node:fs/promises';
+import { sha256 } from './institutional-kernel.mjs';
+import { atomicWriteCanonicalObjectWithArray } from './streaming-json-persistence.mjs';
 
 export const SHADOW_OMS_SCHEMA_VERSION=1;
 const SCHEMA_VERSION=SHADOW_OMS_SCHEMA_VERSION;
@@ -402,8 +403,6 @@ export async function saveShadowOms(filePath,orders,{maxOrders=1000}={}){
     capabilityHash:sha256(SHADOW_OMS_CAPABILITIES),
     orders:clean
   };
-  const tmp=`${filePath}.tmp-${process.pid}`;
-  await writeFile(tmp,canonicalJson(body),{encoding:'utf8',mode:0o600});
-  await rename(tmp,filePath);
+  await atomicWriteCanonicalObjectWithArray(filePath,body,{arrayKey:'orders'});
   return clean;
 }
