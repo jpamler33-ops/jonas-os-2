@@ -171,8 +171,9 @@ import {
 const persistenceDataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data';
 const storageWarnFreeBytes=Math.max(32*1024*1024,Number(process.env.TCX_STORAGE_WARN_FREE_BYTES||96*1024*1024));
 const storageCriticalFreeBytes=Math.max(16*1024*1024,Math.min(storageWarnFreeBytes,Number(process.env.TCX_STORAGE_CRITICAL_FREE_BYTES||48*1024*1024)));
+const marketFabricArchiveBudgetBytes=Math.max(16*1024*1024,Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||80*1024*1024));
 await cleanupOrphanedPersistenceArtifacts({dataDir:persistenceDataDir});
-await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
+const startupStorageInventory=await inspectPersistenceStorage({dataDir:persistenceDataDir,topN:24});
 const startupStoragePressure=await inspectStoragePressure({
   dataDir:persistenceDataDir,
   warnFreeBytes:storageWarnFreeBytes,
@@ -183,6 +184,8 @@ console.info('[TCX_STORAGE_PRESSURE]',JSON.stringify({...startupStoragePressure,
 let storagePressureCache=startupStoragePressure;
 let storagePressureCheckedAt=Date.now();
 let storagePressureLastBlockLogAt=0;
+let marketFabricArchiveBudgetBlocked=Number(startupStorageInventory?.categories?.marketFabricArchive||0)>=marketFabricArchiveBudgetBytes;
+let marketFabricArchiveBudgetLastLogAt=0;
 const storagePressureCheckMs=Math.max(5000,Math.min(60000,Number(process.env.TCX_STORAGE_PRESSURE_CHECK_MS||15000)));
 
 async function currentStoragePressure(){
@@ -1126,6 +1129,17 @@ async function appendForecastEvaluationAuditQueued(trace,evaluation) {
 async function appendFabricEvents(inputs) {
   marketFabricAppendQueue = marketFabricAppendQueue.then(async()=>{
     if(!marketFabric.healthy) return {appended:[],duplicates:0,skipped:true};
+    if(marketFabricArchiveBudgetBlocked){
+      if(Date.now()-marketFabricArchiveBudgetLastLogAt>=30000){
+        marketFabricArchiveBudgetLastLogAt=Date.now();
+        console.error('[TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BLOCKED]',JSON.stringify({
+          budgetBytes:marketFabricArchiveBudgetBytes,
+          reason:'ARCHIVE_BUDGET_FAIL_CLOSED',
+          destructiveRetention:false
+        }));
+      }
+      return {appended:[],duplicates:0,skipped:true,reason:'ARCHIVE_BUDGET_FAIL_CLOSED'};
+    }
     const admission=await storageWriteAdmission('MARKET_FABRIC');
     if(!admission.allowed){
       return {appended:[],duplicates:0,skipped:true,reason:admission.reason,storagePressure:admission.state};
@@ -6523,6 +6537,15 @@ async function maintainMarketFabric(){
       criticalFreeBytes:storageCriticalFreeBytes
     });
     const configuredRotateBytes=Math.max(16*1024*1024,Number(process.env.TCX_MARKET_FABRIC_ROTATE_BYTES||80*1024*1024));
+    if(storagePressure.state==='CRITICAL'){
+      console.error('[TCX_MARKET_FABRIC_MAINTENANCE_DEFERRED]',JSON.stringify({
+        ...storagePressure,
+        reason:'CRITICAL_STORAGE_NO_TEMP_FILE_RISK',
+        archiveBudgetBytes:marketFabricArchiveBudgetBytes,
+        destructiveRetention:false
+      }));
+      return;
+    }
     const pressureRotateBytes=storagePressure.state==='CRITICAL'
       ?16*1024*1024
       :storagePressure.state==='WARN'
@@ -6563,11 +6586,16 @@ async function maintainMarketFabric(){
 
     const archive=await archiveMarketFabricSegments({
       filePath:marketFabricFile,
-      maxArchivedBytes:Number(process.env.TCX_MARKET_FABRIC_ARCHIVE_BUDGET_BYTES||80*1024*1024),
-      maxMigrationsPerRun:1
+      maxArchivedBytes:marketFabricArchiveBudgetBytes,
+      migrateExisting:storagePressure.state==='NORMAL',
+      maxMigrationsPerRun:storagePressure.state==='NORMAL'?1:0
     });
-    if(rotation.rotated||archive.migratedSegments||archive.budgetExceeded){
-      console.info('[TCX_MARKET_FABRIC_RUNTIME_ARCHIVE]',JSON.stringify(archive));
+    marketFabricArchiveBudgetBlocked=archive.budgetBlocked===true||archive.budgetExceeded===true;
+    if(rotation.rotated||archive.migratedSegments||archive.recompressedSegments||archive.budgetBlocked||archive.budgetExceeded){
+      console.info('[TCX_MARKET_FABRIC_RUNTIME_ARCHIVE]',JSON.stringify({
+        ...archive,
+        writeAdmission:marketFabricArchiveBudgetBlocked?'BLOCKED':'ALLOWED'
+      }));
     }
   }).catch(err=>console.error('market fabric maintenance error',err instanceof Error?err.message:String(err)));
   await marketFabricMaintenanceQueue;
