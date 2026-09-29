@@ -104,7 +104,7 @@ export function buildDiscordSystemPayload(snapshot={}){
 
 export function buildDiscordPerformancePayload(snapshot={}){
   const p=snapshot?.portfolio||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance getrennt von Research/Probes**',fields:[
+  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance getrennt von Research/Probes · keine echten Orders**',fields:[
     {name:'Primary Equity',value:money(p?.equityQuote),inline:true},
     {name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},
     {name:'Primary Return',value:percent(p?.returnPct),inline:true},
