@@ -51,6 +51,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'telegram-mutation-command-handlers.mjs',
   'discord-telegram-bridge.mjs',
   'discord-component-ids.mjs',
+  'discord-serial-dedupe-queue.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
