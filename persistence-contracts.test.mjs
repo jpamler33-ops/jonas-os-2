@@ -80,3 +80,17 @@ test('candidate registry corruption degrades serving while promotion remains fai
   assert.equal(detail?.status,'DEGRADED');
   assert.equal(detail?.criticality,'DEGRADE');
 });
+
+
+test('shadow portfolio corruption degrades research without blocking serving',()=>{
+  const stores=healthyStores();
+  stores.SHADOW_PORTFOLIO={healthy:false,recoveredFromCorrupt:true};
+  const r=evaluatePersistenceCompatibility({stores});
+  assert.equal(r.state,'DEGRADED');
+  assert.equal(r.compatible,true);
+  assert.ok(r.warningReasons.includes('SHADOW_PORTFOLIO_UNHEALTHY'));
+  assert.ok(r.warningReasons.includes('SHADOW_PORTFOLIO_RECOVERED_FROM_CORRUPT'));
+  const detail=r.details.find(x=>x.id==='SHADOW_PORTFOLIO');
+  assert.equal(detail?.criticality,'DEGRADE');
+  assert.equal(detail?.status,'DEGRADED');
+});
