@@ -1,7 +1,11 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
-import { gzip as gzipCallback, gunzip as gunzipCallback } from 'node:zlib';
+import { createGzip, gzip as gzipCallback, gunzip as gunzipCallback } from 'node:zlib';
 
 const gzip=promisify(gzipCallback);
 const gunzip=promisify(gunzipCallback);
@@ -76,6 +80,48 @@ function journalStorePath(filePath,slot){
 
 function isGzipBuffer(value){
   return Buffer.isBuffer(value)&&value.length>=2&&value[0]===0x1f&&value[1]===0x8b;
+}
+
+function* jsonArrayStoreBuffers({version,arrayKey,rows,projectRow=null}){
+  yield Buffer.from('{"version":'+JSON.stringify(version)+','+JSON.stringify(String(arrayKey))+':[','utf8');
+  let first=true;
+  for(const row of Array.isArray(rows)?rows:[]){
+    const serialized=JSON.stringify(projectRow?projectRow(row):row);
+    const value=serialized===undefined?'null':serialized;
+    yield Buffer.from((first?'':',')+value,'utf8');
+    first=false;
+  }
+  yield Buffer.from(']}','utf8');
+}
+
+function fingerprintJsonArrayStore({version,arrayKey,rows,projectRow=null}){
+  const hash=createHash('sha256');
+  let logicalBytes=0;
+  for(const chunk of jsonArrayStoreBuffers({version,arrayKey,rows,projectRow})){
+    logicalBytes+=chunk.length;
+    hash.update(chunk);
+  }
+  return {sha256:hash.digest('hex'),logicalBytes};
+}
+
+async function writeGzipJsonArrayStore({filePath,version,arrayKey,rows,projectRow=null,level=1}){
+  const hash=createHash('sha256');
+  let logicalBytes=0;
+  const audit=new Transform({
+    transform(chunk,_encoding,callback){
+      logicalBytes+=chunk.length;
+      hash.update(chunk);
+      callback(null,chunk);
+    }
+  });
+  await pipeline(
+    Readable.from(jsonArrayStoreBuffers({version,arrayKey,rows,projectRow})),
+    audit,
+    createGzip({level}),
+    createWriteStream(filePath,{flags:'w',mode:0o600})
+  );
+  const storageBytes=(await stat(filePath)).size;
+  return {sha256:hash.digest('hex'),logicalBytes,storageBytes};
 }
 
 function manifestComponentsFromSnapshot(snapshot){
@@ -816,15 +862,11 @@ function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={
   };
 }
 
-function trackerArchiveForPersistence(snapshot){
-  const records=Array.isArray(snapshot?.tracker?.records)?snapshot.tracker.records:[];
+function trackerArchiveRowForPersistence(record){
   return {
-    version:FORECAST_TRACKER_ARCHIVE_VERSION,
-    records:records.map(record=>({
-      id:record.id,
-      issueState:clone(record.issueState),
-      revisions:clone(Array.isArray(record.revisions)?record.revisions:[])
-    }))
+    id:record?.id,
+    issueState:record?.issueState,
+    revisions:Array.isArray(record?.revisions)?record.revisions:[]
   };
 }
 
@@ -934,9 +976,16 @@ export async function saveInstitutionalForecastRuntime(runtime){
       };
     }
     if(externalizeArchives){
-      const trackerArchive=trackerArchiveForPersistence(payload.intelligence);
-      const archiveSerialized=JSON.stringify(trackerArchive);
-      const archiveLogicalBytes=Buffer.byteLength(archiveSerialized);
+      const trackerRows=Array.isArray(payload?.intelligence?.tracker?.records)
+        ?payload.intelligence.tracker.records
+        :[];
+      const archiveFingerprint=fingerprintJsonArrayStore({
+        version:FORECAST_TRACKER_ARCHIVE_VERSION,
+        arrayKey:'records',
+        rows:trackerRows,
+        projectRow:trackerArchiveRowForPersistence
+      });
+      const archiveLogicalBytes=archiveFingerprint.logicalBytes;
       const maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
       if(archiveLogicalBytes>maxTrackerArchiveBytes){
         throw Object.assign(new Error('forecast tracker archive exceeds configured persistence limit'),{
@@ -945,29 +994,38 @@ export async function saveInstitutionalForecastRuntime(runtime){
           maxTrackerArchiveBytes
         });
       }
-      const archiveHash=sha256(archiveSerialized);
+      const archiveHash=archiveFingerprint.sha256;
       let slot=runtime.trackerArchiveSlot;
       let archiveBytes=runtime.lastTrackerArchiveBytes;
       if(!slot||runtime.trackerArchiveHash!==archiveHash){
         slot=runtime.trackerArchiveSlot==='a'?'b':'a';
-        const packed=await gzip(Buffer.from(archiveSerialized,'utf8'),{level:1});
         const archivePath=trackerArchivePath(runtime.filePath,slot);
         const archiveTmp=archivePath+'.tmp-'+process.pid;
         try{
-          await writeFile(archiveTmp,packed,{mode:0o600});
+          const streamed=await writeGzipJsonArrayStore({
+            filePath:archiveTmp,
+            version:FORECAST_TRACKER_ARCHIVE_VERSION,
+            arrayKey:'records',
+            rows:trackerRows,
+            projectRow:trackerArchiveRowForPersistence,
+            level:1
+          });
+          if(streamed.sha256!==archiveHash||streamed.logicalBytes!==archiveLogicalBytes){
+            throw new Error('forecast tracker archive streaming fingerprint mismatch');
+          }
+          archiveBytes=streamed.storageBytes;
           await rename(archiveTmp,archivePath);
         }catch(err){
           await rm(archiveTmp,{force:true}).catch(()=>{});
           throw err;
         }
-        archiveBytes=packed.length;
       }
-      const revisionCount=trackerArchive.records.reduce((n,row)=>n+row.revisions.length,0);
+      const revisionCount=trackerRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
       trackerArchiveMeta={
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         slot,
         sha256:archiveHash,
-        recordCount:trackerArchive.records.length,
+        recordCount:trackerRows.length,
         revisionCount,
         storageBytes:archiveBytes,
         logicalBytes:archiveLogicalBytes
@@ -978,12 +1036,12 @@ export async function saveInstitutionalForecastRuntime(runtime){
       };
     }
     if(externalizeArchives){
-      const storePayload={
+      const storeFingerprint=fingerprintJsonArrayStore({
         version:FORECAST_ISSUANCE_STORE_VERSION,
-        issuances:payload.issuances
-      };
-      const storeSerialized=JSON.stringify(storePayload);
-      const storeLogicalBytes=Buffer.byteLength(storeSerialized);
+        arrayKey:'issuances',
+        rows:payload.issuances
+      });
+      const storeLogicalBytes=storeFingerprint.logicalBytes;
       const maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
       if(storeLogicalBytes>maxIssuanceStoreBytes){
         throw Object.assign(new Error('forecast issuance store exceeds configured persistence limit'),{
@@ -992,22 +1050,30 @@ export async function saveInstitutionalForecastRuntime(runtime){
           maxIssuanceStoreBytes
         });
       }
-      const storeHash=sha256(storeSerialized);
+      const storeHash=storeFingerprint.sha256;
       let slot=runtime.issuanceStoreSlot;
       let storeBytes=runtime.lastIssuanceStoreBytes;
       if(!slot||runtime.issuanceStoreHash!==storeHash){
         slot=runtime.issuanceStoreSlot==='a'?'b':'a';
-        const packed=await gzip(Buffer.from(storeSerialized,'utf8'),{level:1});
         const storePath=issuanceStorePath(runtime.filePath,slot);
         const storeTmp=storePath+'.tmp-'+process.pid;
         try{
-          await writeFile(storeTmp,packed,{mode:0o600});
+          const streamed=await writeGzipJsonArrayStore({
+            filePath:storeTmp,
+            version:FORECAST_ISSUANCE_STORE_VERSION,
+            arrayKey:'issuances',
+            rows:payload.issuances,
+            level:1
+          });
+          if(streamed.sha256!==storeHash||streamed.logicalBytes!==storeLogicalBytes){
+            throw new Error('forecast issuance streaming fingerprint mismatch');
+          }
+          storeBytes=streamed.storageBytes;
           await rename(storeTmp,storePath);
         }catch(err){
           await rm(storeTmp,{force:true}).catch(()=>{});
           throw err;
         }
-        storeBytes=packed.length;
       }
       issuanceStoreMeta={
         version:FORECAST_ISSUANCE_STORE_VERSION,
