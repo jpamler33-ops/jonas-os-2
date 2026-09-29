@@ -10,6 +10,7 @@ import {
   researchFeatureCatalogManifest,
   validateResearchFeatureRows
 } from './research-feature-catalog.mjs';
+import { researchSourceContract } from './research-source-contracts.mjs';
 import {
   createResearchDataGovernanceState,
   governResearchSnapshot,
@@ -246,4 +247,14 @@ test('retired aggregate FRED quarantine is ignored after per-series contract mig
   assert.equal(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_GRAPH_CSV_CURRENT'),false);
   assert.ok(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_DFF_CURRENT'));
   assert.ok(summary.sources.some(x=>x.sourceKey==='MACRO:FRED_WALCL_CURRENT'));
+});
+
+
+test('finalized entity-flow contract allows Ethereum finality headroom without changing finality requirement',()=>{
+  const contract=researchSourceContract('ENTITY_FLOW','VERIFIED_ENTITY_FINALIZED_FLOW');
+  assert.ok(contract);
+  assert.equal(contract.requiredFinality,'FINALIZED');
+  assert.equal(contract.maxPublicationLagMs,30*60_000);
+  assert.equal(contract.minCompleteness,1);
+  assert.equal(contract.maxIngestLagMs,60_000);
 });
