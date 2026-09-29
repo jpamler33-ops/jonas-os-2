@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import readline from 'node:readline';
 
 const LEDGER_SCHEMA=1;
 const GENESIS='0'.repeat(64);
@@ -245,35 +247,100 @@ export function verifyLedgerRecords(records){
   return {ok:true,count:records.length,tailHash:prev,lastSeq:expectedSeq-1};
 }
 
-export async function openAuditLedger(filePath){
+export async function openAuditLedger(filePath,{maxInMemoryRecords=1000}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  let records=[];
+  const keep=Math.max(1,Math.floor(Number(maxInMemoryRecords)||1000));
+  const ring=new Array(keep);
+  let retainedCount=0,ringPos=0,total=0;
+  let prev=GENESIS,expectedSeq=1;
+  let healthy=true,error=null,detail=null;
+
   try{
-    const raw=await readFile(filePath,'utf8');
-    const lines=raw.split(/\r?\n/).filter(Boolean);
-    records=lines.map((line,i)=>{
-      try{return JSON.parse(line);}
-      catch{throw new Error(`Invalid ledger JSON at line ${i+1}`);}
-    });
+    const input=createReadStream(filePath,{encoding:'utf8'});
+    const rl=readline.createInterface({input,crlfDelay:Infinity});
+    let lineNo=0;
+    for await(const line of rl){
+      lineNo++;
+      if(!line.trim()) continue;
+      let record;
+      try{record=JSON.parse(line);}
+      catch(err){
+        healthy=false;
+        error='LEDGER_READ_OR_PARSE_FAILURE';
+        detail='Invalid ledger JSON at line '+lineNo+': '+String(err instanceof Error?err.message:err);
+        break;
+      }
+
+      if(Number(record.seq)!==expectedSeq){
+        healthy=false;error='SEQ_GAP';detail='seq '+String(record.seq)+' expected '+String(expectedSeq);break;
+      }
+      if(record.prevHash!==prev){
+        healthy=false;error='PREV_HASH_MISMATCH';detail='seq '+String(record.seq);break;
+      }
+      if(record.payloadHash!==sha256(record.payload)){
+        healthy=false;error='PAYLOAD_HASH_MISMATCH';detail='seq '+String(record.seq);break;
+      }
+      const expectedHash=hashLedgerRecord(record);
+      if(record.recordHash!==expectedHash){
+        healthy=false;error='RECORD_HASH_MISMATCH';detail='seq '+String(record.seq);break;
+      }
+
+      ring[ringPos]=record;
+      ringPos=(ringPos+1)%keep;
+      retainedCount=Math.min(retainedCount+1,keep);
+      prev=record.recordHash;
+      expectedSeq++;
+      total++;
+    }
   }catch(err){
-    if(err?.code!=='ENOENT'){
+    if(err?.code==='ENOENT'){
       return {
         filePath,
-        healthy:false,
-        verification:{ok:false,error:'LEDGER_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
+        healthy:true,
+        verification:{ok:true,count:0,tailHash:GENESIS,lastSeq:0,retainedRecords:0},
         seq:0,
         tailHash:GENESIS,
+        totalRecords:0,
+        maxInMemoryRecords:keep,
         records:[]
       };
     }
+    return {
+      filePath,
+      healthy:false,
+      verification:{ok:false,error:'LEDGER_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
+      seq:0,
+      tailHash:GENESIS,
+      totalRecords:0,
+      maxInMemoryRecords:keep,
+      records:[]
+    };
   }
-  const verification=verifyLedgerRecords(records);
+
+  if(!healthy){
+    return {
+      filePath,
+      healthy:false,
+      verification:{ok:false,error:error||'LEDGER_READ_OR_PARSE_FAILURE',detail},
+      seq:0,
+      tailHash:GENESIS,
+      totalRecords:total,
+      maxInMemoryRecords:keep,
+      records:[]
+    };
+  }
+
+  const records=total<=keep
+    ?ring.slice(0,retainedCount)
+    :[...ring.slice(ringPos),...ring.slice(0,ringPos)];
   return {
     filePath,
-    healthy:verification.ok,
-    verification,
-    seq:verification.ok?verification.lastSeq:0,
-    tailHash:verification.ok?verification.tailHash:GENESIS,
+    healthy:true,
+    verification:{ok:true,count:total,tailHash:prev,lastSeq:expectedSeq-1,retainedRecords:records.length},
+    seq:expectedSeq-1,
+    tailHash:prev,
+    totalRecords:total,
+    maxInMemoryRecords:keep,
     records
   };
 }
@@ -292,6 +359,16 @@ export async function appendAuditRecord(ledger,{kind,payload,occurredAt=Date.now
   ledger.seq=record.seq;
   ledger.tailHash=record.recordHash;
   ledger.records.push(record);
+  const keep=Math.max(1,Math.floor(Number(ledger.maxInMemoryRecords)||1000));
+  while(ledger.records.length>keep) ledger.records.shift();
+  ledger.totalRecords=ledger.seq;
+  ledger.verification={
+    ok:true,
+    count:ledger.seq,
+    lastSeq:ledger.seq,
+    tailHash:ledger.tailHash,
+    retainedRecords:ledger.records.length
+  };
   return record;
 }
 
