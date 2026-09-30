@@ -126,6 +126,13 @@ import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } fr
 import { createDiscordTelegramBridge, isDiscordChatId } from './discord-telegram-bridge.mjs';
 import { buildBiggjDiscordObservabilitySnapshot } from './biggj-discord-observability.mjs';
 import {
+  loadAutonomousResearchTrainingFactory,
+  saveAutonomousResearchTrainingFactory,
+  refreshAutonomousResearchTrainingFactory,
+  autonomousResearchTrainingFactorySummary,
+  AUTONOMOUS_RESEARCH_TRAINING_FACTORY_VERSION
+} from './autonomous-research-training-factory.mjs';
+import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
@@ -411,6 +418,7 @@ const auditLedgerRotateBytes = Math.max(
     Number(process.env.TCX_AUDIT_LEDGER_ROTATE_BYTES||Math.floor(auditLedgerMaxBytes*0.70))
   )
 );
+const autonomousResearchFactoryRefreshMs=Math.max(15_000,Number(process.env.TCX_AUTONOMOUS_RESEARCH_FACTORY_REFRESH_MS||60_000));
 const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
 const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
 const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
@@ -891,6 +899,10 @@ let experimentGovernorState = await loadExperimentGovernor(experimentGovernorFil
 const modelCandidateRegistryFile=process.env.TCX_MODEL_CANDIDATE_REGISTRY_FILE||'/data/tcx-model-candidate-registry.jsonl';
 const modelCandidateRegistry=await openModelCandidateRegistry(modelCandidateRegistryFile);
 let modelPromotionReviewLastSummary=null;
+const autonomousResearchFactoryFile=process.env.TCX_AUTONOMOUS_RESEARCH_FACTORY_FILE||'/data/tcx-autonomous-research-training-factory.json';
+let autonomousResearchFactoryState=await loadAutonomousResearchTrainingFactory(autonomousResearchFactoryFile);
+let autonomousResearchFactoryHealthy=true;
+let autonomousResearchFactoryLastError=null;
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
 let featureResearchState = await loadFeatureResearch(featureResearchFile);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
@@ -8900,6 +8912,87 @@ function currentOperationalReadiness(){
   });
 }
 
+function autonomousResearchFactoryInputs(now=Date.now()){
+  const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
+  const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
+  return {
+    livingResearchState:biggjLivingResearchState,
+    experimentGovernorSummary:experimentGovernorSummary(experimentGovernorState||{}),
+    modelCandidateRegistrySummary:modelCandidateRegistrySummary(modelCandidateRegistry),
+    learnedChallengerSummary:learnedChallengerSummary(challengerLab),
+    featureResearchSummary:featureResearchSummary(featureResearchState||{}),
+    strategyLeagueSummary:strategyLeagueSummary(strategyLeagueLedger,{asOf:now}),
+    researchDataPlaneSummary:researchDataPlaneSummary(researchDataPlane),
+    researchDataGovernanceSummary:researchDataGovernanceSummary(researchDataGovernance,{now}),
+    historyStats:{
+      rows:forecastRuntime.engine.historySize(),
+      progressAt:forecastRuntime.engine.historyProgressAt(Number.POSITIVE_INFINITY,{limit:shadowCompetitionHistoryRows})
+    }
+  };
+}
+
+async function refreshAutonomousResearchFactory(reason='PERIODIC_REFRESH'){
+  const started=Date.now();
+  try{
+    const now=Date.now();
+    const refreshed=refreshAutonomousResearchTrainingFactory(
+      autonomousResearchFactoryState,
+      {...autonomousResearchFactoryInputs(now),asOf:now,reason}
+    );
+    if(refreshed.changed){
+      autonomousResearchFactoryState=refreshed.state;
+      const admission=await storageWriteAdmission('autonomous-research-training-factory');
+      if(admission.allowed){
+        await saveAutonomousResearchTrainingFactory(autonomousResearchFactoryFile,autonomousResearchFactoryState);
+        autonomousResearchFactoryHealthy=true;
+        autonomousResearchFactoryLastError=null;
+      }else{
+        autonomousResearchFactoryHealthy=false;
+        autonomousResearchFactoryLastError=admission.reason||'STORAGE_WRITE_BLOCKED';
+        console.warn('[TCX_AUTONOMOUS_RESEARCH_FACTORY_PERSIST_DEFERRED]',JSON.stringify({
+          reason:autonomousResearchFactoryLastError,
+          mode:autonomousResearchFactoryState.mode,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+      const summary=autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState);
+      console.log('[TCX_AUTONOMOUS_RESEARCH_FACTORY]',JSON.stringify({
+        reason,
+        mode:summary.mode,
+        operatorDataOnly:summary.operatorDataOnly,
+        automatic:summary.automatic,
+        manual:summary.manual,
+        dataNeeds:summary.dataNeeds.slice(0,8),
+        nextTasks:summary.nextTasks.slice(0,5).map(x=>({type:x.type,subject:x.subject,handler:x.autoHandler})),
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false,
+        automaticPrimaryMutation:false
+      }));
+    }else if(autonomousResearchFactoryHealthy){
+      autonomousResearchFactoryLastError=null;
+    }
+    recordOperation(observability,{name:'autonomous_research_training_factory',ok:autonomousResearchFactoryHealthy,latencyMs:Date.now()-started,error:autonomousResearchFactoryLastError});
+    return autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState);
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    autonomousResearchFactoryHealthy=false;
+    autonomousResearchFactoryLastError=msg;
+    recordError(observability,{scope:'autonomous_research_training_factory',message:msg});
+    recordOperation(observability,{name:'autonomous_research_training_factory',ok:false,latencyMs:Date.now()-started,error:msg});
+    console.error('[TCX_AUTONOMOUS_RESEARCH_FACTORY_ERROR]',msg);
+    return autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState);
+  }
+}
+
+async function autonomousResearchFactoryWatcher(){
+  while(running){
+    await sleep(autonomousResearchFactoryRefreshMs);
+    if(!running)break;
+    await refreshAutonomousResearchFactory('PERIODIC_REFRESH');
+  }
+}
+
 function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
@@ -8923,6 +9016,14 @@ function missionControlData(){
     healthy:biggjLivingResearchHealthy,
     recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
     file:biggjLivingResearchFile
+  },
+  autonomousResearchFactory:{
+    ...autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+    version:AUTONOMOUS_RESEARCH_TRAINING_FACTORY_VERSION,
+    healthy:autonomousResearchFactoryHealthy,
+    lastError:autonomousResearchFactoryLastError,
+    file:autonomousResearchFactoryFile,
+    refreshMs:autonomousResearchFactoryRefreshMs
   },
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
@@ -9164,6 +9265,14 @@ const server = http.createServer((req,res) => {
         healthy:researchGovernanceHealthy,
         lastError:researchGovernanceLastError
       },
+      autonomousResearchFactory:{
+        ...autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+        version:AUTONOMOUS_RESEARCH_TRAINING_FACTORY_VERSION,
+        healthy:autonomousResearchFactoryHealthy,
+        lastError:autonomousResearchFactoryLastError,
+        file:autonomousResearchFactoryFile,
+        refreshMs:autonomousResearchFactoryRefreshMs
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
@@ -9189,6 +9298,9 @@ async function gracefulShutdown(signal) {
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
   await persistForecastRuntime(`shutdown:${signal}`,{force:true});
+  await saveAutonomousResearchTrainingFactory(autonomousResearchFactoryFile,autonomousResearchFactoryState).catch(err=>{
+    console.error('[TCX_AUTONOMOUS_RESEARCH_FACTORY_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
+  });
   await biggjLivingResearchRefreshQueue.catch(()=>{});
   await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState).catch(err=>{
     console.error('[TCX_BIGGJ_LIVING_RESEARCH_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
@@ -9208,6 +9320,7 @@ process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 liquidationResearchStream.start();
 await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
+await refreshAutonomousResearchFactory('STARTUP');
 const me = await tg('getMe',{});
 if(discordBridge){
   try{
@@ -9234,6 +9347,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
+  autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   auditLedger:{
     healthy:auditLedger.healthy,
     fileBytes:Number(auditLedger.fileBytes||0),
@@ -9326,4 +9440,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher()]);

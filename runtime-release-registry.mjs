@@ -57,6 +57,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'discord-component-ids.mjs',
   'discord-serial-dedupe-queue.mjs',
   'biggj-discord-observability.mjs',
+  'autonomous-research-training-factory.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
