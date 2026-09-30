@@ -476,17 +476,7 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       everStaleAssumptionIdsBeforeMaturity:Array.isArray(thesisRevisionState?.everStaleAssumptionIdsBeforeMaturity)
         ?[...new Set(thesisRevisionState.everStaleAssumptionIdsBeforeMaturity.map(String))].sort()
         :[],
-      transientFlickerAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.transientFlickerAssumptionIdsAtMaturity)
-        ?[...new Set(thesisRevisionState.transientFlickerAssumptionIdsAtMaturity.map(String))].sort()
-        :[],
-      persistentStaleAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.persistentStaleAssumptionIdsAtMaturity)
-        ?[...new Set(thesisRevisionState.persistentStaleAssumptionIdsAtMaturity.map(String))].sort()
-        :[],
-      everPersistentStaleAssumptionIdsBeforeMaturity:Array.isArray(thesisRevisionState?.everPersistentStaleAssumptionIdsBeforeMaturity)
-        ?[...new Set(thesisRevisionState.everPersistentStaleAssumptionIdsBeforeMaturity.map(String))].sort()
-        :[],
       firstStaleAt:thesisRevisionState?.firstStaleAt==null?null:Number.isFinite(Number(thesisRevisionState.firstStaleAt))?Number(thesisRevisionState.firstStaleAt):null,
-      firstPersistentStaleAt:thesisRevisionState?.firstPersistentStaleAt==null?null:Number.isFinite(Number(thesisRevisionState.firstPersistentStaleAt))?Number(thesisRevisionState.firstPersistentStaleAt):null,
       firstWatchAt:thesisRevisionState?.firstWatchAt==null?null:Number.isFinite(Number(thesisRevisionState.firstWatchAt))?Number(thesisRevisionState.firstWatchAt):null,
       firstForecastInvalidatedAt:thesisRevisionState?.firstForecastInvalidatedAt==null
         ?null
@@ -496,10 +486,23 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       firstWarningAt:thesisRevisionState?.firstWarningAt==null?null:Number.isFinite(Number(thesisRevisionState.firstWarningAt))?Number(thesisRevisionState.firstWarningAt):null,
       warningAvailableBeforeMaturity:thesisRevisionState?.warningAvailableBeforeMaturity===true,
       warningLeadMs:thesisRevisionState?.warningLeadMs==null?null:Number.isFinite(Number(thesisRevisionState.warningLeadMs))?Number(thesisRevisionState.warningLeadMs):null,
-      firstStructuralWarningAt:thesisRevisionState?.firstStructuralWarningAt==null?null:Number.isFinite(Number(thesisRevisionState.firstStructuralWarningAt))?Number(thesisRevisionState.firstStructuralWarningAt):null,
-      structuralWarningAvailableBeforeMaturity:thesisRevisionState?.structuralWarningAvailableBeforeMaturity===true,
-      structuralWarningLeadMs:thesisRevisionState?.structuralWarningLeadMs==null?null:Number.isFinite(Number(thesisRevisionState.structuralWarningLeadMs))?Number(thesisRevisionState.structuralWarningLeadMs):null,
       forecastInvalidatedBeforeMaturity:thesisRevisionState?.forecastInvalidatedBeforeMaturity===true,
+      ...(thesisRevisionState?.stabilityVersion?{
+        stabilityVersion:String(thesisRevisionState.stabilityVersion),
+        transientFlickerAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.transientFlickerAssumptionIdsAtMaturity)
+          ?[...new Set(thesisRevisionState.transientFlickerAssumptionIdsAtMaturity.map(String))].sort()
+          :[],
+        persistentStaleAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.persistentStaleAssumptionIdsAtMaturity)
+          ?[...new Set(thesisRevisionState.persistentStaleAssumptionIdsAtMaturity.map(String))].sort()
+          :[],
+        everPersistentStaleAssumptionIdsBeforeMaturity:Array.isArray(thesisRevisionState?.everPersistentStaleAssumptionIdsBeforeMaturity)
+          ?[...new Set(thesisRevisionState.everPersistentStaleAssumptionIdsBeforeMaturity.map(String))].sort()
+          :[],
+        firstPersistentStaleAt:thesisRevisionState?.firstPersistentStaleAt==null?null:Number.isFinite(Number(thesisRevisionState.firstPersistentStaleAt))?Number(thesisRevisionState.firstPersistentStaleAt):null,
+        firstStructuralWarningAt:thesisRevisionState?.firstStructuralWarningAt==null?null:Number.isFinite(Number(thesisRevisionState.firstStructuralWarningAt))?Number(thesisRevisionState.firstStructuralWarningAt):null,
+        structuralWarningAvailableBeforeMaturity:thesisRevisionState?.structuralWarningAvailableBeforeMaturity===true,
+        structuralWarningLeadMs:thesisRevisionState?.structuralWarningLeadMs==null?null:Number.isFinite(Number(thesisRevisionState.structuralWarningLeadMs))?Number(thesisRevisionState.structuralWarningLeadMs):null
+      }:null),
       interpretation:'PRE_OUTCOME_REVISION_SIGNAL_NOT_CAUSAL_PROOF'
     }:null,
     semantics:{
@@ -510,7 +513,7 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       doesNotChangeForecastEvaluation:true,
       pairedResearchComparisonOnly:true,
       preOutcomeRevisionStateUsesOnlyEventsKnownByMaturity:true,
-      transientFlickerAndPersistentStaleAreSeparated:true,
+      ...(thesisRevisionState?.stabilityVersion?{transientFlickerAndPersistentStaleAreSeparated:true}:null),
       outcomeAssociationIsNotCausation:true
     },
     execution:'SHADOW_ONLY',
