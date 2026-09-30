@@ -1,9 +1,8 @@
 import { sha256 } from './institutional-kernel.mjs';
 import { createResearchFeatureSnapshot } from './research-data-plane.mjs';
 
-export const NEWS_RESEARCH_ADAPTER_VERSION='TCX_NEWS_RESEARCH_ADAPTER_V1';
+export const NEWS_RESEARCH_ADAPTER_VERSION='TCX_NEWS_RESEARCH_ADAPTER_V2';
 
-const ASSET_SYMBOLS=Object.freeze({BTC:'BTCUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT',DOGE:'DOGEUSDT'});
 const FAMILY_CODE=Object.freeze({OTHER:0,CRYPTO:1,GEOPOLITICS:2,MACRO:3,TECHNOLOGY:4,CORPORATE:5,COMMODITIES:6});
 const STATUS_SCORE=Object.freeze({WATCH:.25,DEVELOPING:.6,HIGH_IMPACT:1});
 const clamp=x=>Math.max(0,Math.min(1,Number(x)||0));
@@ -28,8 +27,9 @@ function sourceReliability(event){
 
 export function newsEventToResearchSnapshot(event,{symbol,ingestedAt=Date.now(),ttlMs=6*60*60_000}={}){
   if(!event||!relevantToSymbol(event,symbol)) return null;
-  const availableAt=finite(event.availableAt??event.timestamp);
-  if(availableAt==null||availableAt>Number(ingestedAt)+5000) return null;
+  const observedAt=Number(ingestedAt);
+  const publishedAt=finite(event.availableAt??event.timestamp);
+  if(publishedAt==null||!Number.isFinite(observedAt)||publishedAt>observedAt+5000) return null;
   const family=String(event.eventFamily||event.family||'OTHER').toUpperCase();
   const status=String(event.status||'WATCH').toUpperCase();
   const confirmation=clamp(event.independentConfirmation);
@@ -50,10 +50,12 @@ export function newsEventToResearchSnapshot(event,{symbol,ingestedAt=Date.now(),
     domain:'NEWS_EVENT',
     source:String(event.sourceId||event.source||'PUBLIC_NEWS'),
     sourceVersion:NEWS_RESEARCH_ADAPTER_VERSION,
-    sourceEventId:String(event.id||sha256({url:event.url,title:event.title,availableAt})),
-    eventTime:availableAt,
-    availableAt,
-    ingestedAt:Number(ingestedAt),
+    sourceEventId:String(event.id||sha256({url:event.url,title:event.title,publishedAt})),
+    eventTime:publishedAt,
+    // A publisher timestamp is not proof BIGGJ possessed the headline then.
+    // Availability is therefore the actual observation/ingestion time.
+    availableAt:observedAt,
+    ingestedAt:observedAt,
     ttlMs,
     finality:verified?'CONFIRMED':'PROVISIONAL',
     quality:{
@@ -67,6 +69,8 @@ export function newsEventToResearchSnapshot(event,{symbol,ingestedAt=Date.now(),
       adapterVersion:NEWS_RESEARCH_ADAPTER_VERSION,
       headline:String(event.title||event.headline||'').slice(0,500),
       url:String(event.url||'').slice(0,1000),
+      publishedAt,
+      observedAt,
       eventFamily:family,
       status,
       affectedAssets:[...(event.affectedAssets||[])].map(String).slice(0,12),
