@@ -257,3 +257,65 @@ test('DEX Screener trending context enters the governed research plane',()=>{
   assert.equal(rows[0].provenance.timestampSemantics,'CAPTURE_TIME_CURRENT_SNAPSHOT');
   assert.ok(rows[0].features.some(x=>x.id==='research.dex.trendingTopLiquidityShare'&&x.value===.75));
 });
+
+
+test('DefiLlama stablecoin supply enters its own governed context',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'ETHUSDT',
+    ingestedAt:2_000_000,
+    publicContextSnapshot:{
+      capturedAt:1_999_900,
+      defi:{totalTvlUsd:500},
+      stablecoins:{
+        totalSupplyUsd:1000,
+        chainCount:4,
+        ethereumSupplyUsd:600,
+        tronSupplyUsd:250,
+        solanaSupplyUsd:100,
+        baseSupplyUsd:50,
+        top5SupplyShare:1,
+        source:'DefiLlama Stablecoins Public API',
+        endpoint:'/stablecoinchains',
+        epistemic:'CURRENT_STABLECOIN_SUPPLY_SNAPSHOT_NOT_FLOW_OR_FORECAST'
+      }
+    }
+  });
+  const stable=rows.find(x=>x.domain==='STABLECOIN_CONTEXT');
+  assert.ok(stable);
+  assert.equal(stable.source,'DEFILLAMA_STABLECOIN_CHAINS');
+  assert.equal(stable.quality.completeness,1);
+  assert.equal(stable.eventTime,1_999_900);
+  assert.equal(stable.provenance.timestampSemantics,'CAPTURE_TIME_CURRENT_SNAPSHOT');
+  assert.ok(stable.features.some(x=>x.id==='research.stablecoin.ethereumSupplyShare'&&x.value===.6));
+  assert.ok(stable.features.some(x=>x.id==='research.stablecoin.supplyToDefiTvlRatio'&&x.value===2));
+});
+
+test('DEX Screener promotion radar stays isolated from ordinary DEX context',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'SOLUSDT',
+    ingestedAt:2_000_000,
+    dexPromotionSnapshot:{
+      capturedAt:1_999_900,
+      source:'DEXSCREENER_PUBLIC_API',
+      rows:[
+        {chainId:'solana',boost:{amount:10,totalAmount:50},pair:{liquidityUsd:100,volumeH1:200,buysH1:8,sellsH1:2,priceChangeH1:10}},
+        {chainId:'base',boost:{amount:5,totalAmount:20},pair:{liquidityUsd:300,volumeH1:100,buysH1:3,sellsH1:7,priceChangeH1:-2}}
+      ]
+    }
+  });
+  assert.equal(rows.length,1);
+  const promo=rows[0];
+  assert.equal(promo.domain,'DEX_PROMOTION_CONTEXT');
+  assert.equal(promo.source,'DEXSCREENER_PROMOTION_RADAR');
+  assert.equal(promo.provenance.promotionBiased,true);
+  assert.equal(promo.provenance.causalClaim,false);
+  assert.equal(promo.provenance.researchOnly,true);
+  assert.ok(promo.features.some(x=>x.id==='research.dex.promotionTopLiquidityShare'&&x.value===.75));
+});
+
+test('adapter rejects null ingest time instead of converting it to epoch zero',()=>{
+  assert.throws(()=>buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:null
+  }),/ingestedAt must be finite/);
+});
