@@ -614,6 +614,7 @@ export function claimAssumptionResearchEvaluationSummary(value){
     readiness:structuredClone(value?.readiness??null),
     conclusion:structuredClone(value?.conclusion??null),
     primary:structuredClone(value?.primary??null),
+    preOutcomeRevision:structuredClone(value?.preOutcomeRevision??null),
     overhead:structuredClone(value?.overhead??null),
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
