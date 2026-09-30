@@ -257,7 +257,14 @@ export function refreshBiggjAutonomousOperator(state,{
   }
 
   const factoryMode=String(factorySummary?.mode||'UNINITIALIZED');
-  if(factoryMode==='RESEARCH_STALLED'){
+  const waitableDataStall=
+    factoryMode==='RESEARCH_STALLED'&&
+    finite(factorySummary?.automatic)>0&&
+    finite(factorySummary?.manual)===0&&
+    finite(factorySummary?.unowned)===0&&
+    finite(factorySummary?.dataOnly)===finite(factorySummary?.automatic)&&
+    assessments.every(x=>['HEALTHY','WARMING_UP'].includes(x.state));
+  if(factoryMode==='RESEARCH_STALLED'&&!waitableDataStall){
     add('RESEARCH_STALLED','RESEARCH_FACTORY','NO_MEASURABLE_RESEARCH_PROGRESS','REFRESH_RESEARCH_STACK');
   }
   if(factoryMode==='MANUAL_REVIEW_REQUIRED'&&!assessments.some(x=>x.state==='APPROVAL_REQUIRED')){
@@ -291,6 +298,7 @@ export function refreshBiggjAutonomousOperator(state,{
   if(operatorNeeded)mode='ESCALATION_REQUIRED';
   else if(actions.length)mode='SELF_HEALING';
   else if(Object.keys(incidents).length)mode='AUTO_MONITORING';
+  else if(waitableDataStall)mode='WAITING_FOR_DATA';
   else if(factoryMode==='MANUAL_REVIEW_REQUIRED')mode='ESCALATION_REQUIRED';
 
   const humanJobRemaining=operatorNeeded
@@ -319,6 +327,7 @@ export function refreshBiggjAutonomousOperator(state,{
     humanJobRemaining,
     factoryMode,
     factoryOperatorDataOnly:factorySummary?.operatorDataOnly===true,
+    waitableDataStall,
     automationCoverage:tasks.length?assessments.filter(x=>!['UNOWNED','DISABLED'].includes(x.state)).length/tasks.length:1,
     incidents:Object.fromEntries(Object.entries(incidents).slice(-p.maxIncidentHistory)),
     ownerAssessments:assessments,
@@ -372,6 +381,7 @@ export function biggjAutonomousOperatorSummary(state){
     operatorNeeded:state?.operatorNeeded===true,
     humanJobRemaining:String(state?.humanJobRemaining||'UNKNOWN'),
     factoryMode:String(state?.factoryMode||'UNKNOWN'),
+    waitableDataStall:state?.waitableDataStall===true,
     automationCoverage:finite(state?.automationCoverage,0),
     activeIncidents:incidents.length,
     approvalRequired:incidents.filter(x=>x.kind==='APPROVAL_REQUIRED').length,
