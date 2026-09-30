@@ -250,6 +250,34 @@ test('research-context evidence is retained but cannot unlock the maturity ladde
   assert.ok(progress.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
 });
 
+test('legacy persisted evidence without validationEligible is reclassified from provenance without rewriting history',()=>{
+  let tree=createBiggjSkillTree({asOf:1_000_000});
+  const skill=tree.nodes.find(x=>x.capabilityId==='LIQUIDITY_SWEEP_REVERSAL');
+  tree=addEvidence(tree,skill.skillId,3,{start:2_000_000});
+
+  const legacy=structuredClone(tree);
+  const node=legacy.nodes.find(x=>x.skillId===skill.skillId);
+  for(const row of node.evidence) delete row.validationEligible;
+  for(const key of Object.keys(node.evidenceSummary)){
+    if(key.startsWith('validation')) delete node.evidenceSummary[key];
+  }
+
+  const generic=evaluateBiggjSkillProgress(legacy,skill.skillId);
+  assert.equal(generic.evidenceSummary.validationTotal,3);
+  assert.equal(generic.evidenceSummary.validationIndependentEpisodes,3);
+  assert.equal(generic.recommendedStatus,'LEARNING');
+
+  for(const row of node.evidence){
+    row.provenance=[{kind:'PROSPECTIVE_PERSISTENT_CASE'}];
+  }
+  const context=evaluateBiggjSkillProgress(legacy,skill.skillId);
+  assert.equal(context.evidenceSummary.total,3);
+  assert.equal(context.evidenceSummary.independentEpisodes,3);
+  assert.equal(context.evidenceSummary.validationTotal,0);
+  assert.equal(context.evidenceSummary.validationIndependentEpisodes,0);
+  assert.equal(context.recommendedStatus,'DISCOVERING');
+});
+
 test('ordinary evidence remains validation-eligible by default for backward-compatible callers',()=>{
   let tree=createBiggjSkillTree({asOf:1_000_000});
   const skill=tree.nodes.find(x=>x.capabilityId==='LIQUIDITY_SWEEP_REVERSAL');
