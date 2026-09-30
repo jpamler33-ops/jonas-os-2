@@ -46,6 +46,18 @@ test('shadow research corruption degrades instead of blocking forecast core',()=
   assert.ok(r.warningReasons.includes('SHADOW_OMS_RECOVERED_FROM_CORRUPT'));
 });
 
+test('living research corruption degrades only the autonomous research layer',()=>{
+  const stores=healthyStores();
+  stores.BIGGJ_LIVING_RESEARCH={healthy:true,recoveredFromCorrupt:true};
+  const r=evaluatePersistenceCompatibility({stores});
+  assert.equal(r.state,'DEGRADED');
+  assert.equal(r.compatible,true);
+  assert.ok(r.warningReasons.includes('BIGGJ_LIVING_RESEARCH_RECOVERED_FROM_CORRUPT'));
+  const detail=r.details.find(x=>x.id==='BIGGJ_LIVING_RESEARCH');
+  assert.equal(detail?.status,'DEGRADED');
+  assert.equal(detail?.criticality,'DEGRADE');
+});
+
 test('supported user-state legacy schema becomes migration warning',()=>{
   const stores=healthyStores();
   stores.USER_STATE={healthy:true,migrationNeeded:true,loadedSchema:1};
