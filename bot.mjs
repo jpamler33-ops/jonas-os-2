@@ -6117,6 +6117,13 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
             assessment:x.forecastAssessmentStatus,
             supportLost:x.supportLostSinceIssueIds,
             unsupported:x.currentUnsupportedAssumptionIds,
+            stabilityTransitions:(x.event?.stabilityTransitions||[]).map(t=>({
+              assumptionId:t.assumptionId,
+              type:t.type,
+              from:t.fromState,
+              to:t.toState
+            })),
+            persistentStale:(x.event?.currentPersistentStaleAssumptionIds||[]),
             eventId:x.event?.eventId??null
           })),
         execution:'SHADOW_ONLY',
@@ -6399,6 +6406,12 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       thesisRevisionChanged:Number(thesisRevisionObservation?.changed||0),
       thesisRevisionSupportLosses:(thesisRevisionObservation?.results||[])
         .reduce((n,x)=>n+(x?.supportLostSinceIssueIds?.length||0),0),
+      thesisPersistentStaleTransitions:(thesisRevisionObservation?.results||[])
+        .reduce((n,x)=>n+(x?.event?.stabilityTransitions||[])
+          .filter(t=>t?.type==='PERSISTENT_STALE_CONFIRMED').length,0),
+      thesisTransientFlickerTransitions:(thesisRevisionObservation?.results||[])
+        .reduce((n,x)=>n+(x?.event?.stabilityTransitions||[])
+          .filter(t=>t?.type==='TRANSIENT_FLICKER_STARTED').length,0),
       autoShadowTradePlaced:autoShadowTrade?.placed===true,
       autoShadowTradeEligible:autoShadowTrade?.eligible===true,
       autoShadowTradeReason:autoShadowTrade?.reason||null,

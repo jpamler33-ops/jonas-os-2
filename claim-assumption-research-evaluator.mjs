@@ -290,6 +290,26 @@ function preOutcomeRevisionSummary(rows){
   const successWarnings=successes.filter(x=>x.preOutcomeThesisRevisionState?.warningAvailableBeforeMaturity===true);
   const invalidated=withState.filter(x=>x.preOutcomeThesisRevisionState?.forecastInvalidatedBeforeMaturity===true);
   const leads=warning.map(x=>x.preOutcomeThesisRevisionState?.warningLeadMs).map(finiteOrNull).filter(x=>x!=null);
+
+  const structuralAvailable=withState.filter(x=>
+    typeof x?.preOutcomeThesisRevisionState?.structuralWarningAvailableBeforeMaturity==='boolean'
+  );
+  const structuralWarnings=structuralAvailable.filter(x=>
+    x.preOutcomeThesisRevisionState.structuralWarningAvailableBeforeMaturity===true
+  );
+  const structuralFailures=structuralAvailable.filter(primaryFailure);
+  const structuralSuccesses=structuralAvailable.filter(primarySuccess);
+  const structuralFailureWarnings=structuralFailures.filter(x=>
+    x.preOutcomeThesisRevisionState.structuralWarningAvailableBeforeMaturity===true
+  );
+  const structuralSuccessWarnings=structuralSuccesses.filter(x=>
+    x.preOutcomeThesisRevisionState.structuralWarningAvailableBeforeMaturity===true
+  );
+  const structuralLeads=structuralWarnings
+    .map(x=>x.preOutcomeThesisRevisionState?.structuralWarningLeadMs)
+    .map(finiteOrNull)
+    .filter(x=>x!=null);
+
   return {
     observationsWithRevisionState:withState.length,
     observationsWithoutRevisionState:rows.length-withState.length,
@@ -304,6 +324,20 @@ function preOutcomeRevisionSummary(rows){
     forecastInvalidatedBeforeMaturity:invalidated.length,
     medianWarningLeadMs:median(leads),
     meanWarningLeadMs:mean(leads),
+    structural:{
+      observations:structuralAvailable.length,
+      warningsBeforeMaturity:structuralWarnings.length,
+      warningRate:wilson95(structuralWarnings.length,structuralAvailable.length),
+      primaryFailures:structuralFailures.length,
+      failuresWithPriorWarning:structuralFailureWarnings.length,
+      failureCaptureRate:wilson95(structuralFailureWarnings.length,structuralFailures.length),
+      primarySuccesses:structuralSuccesses.length,
+      successesWithPriorWarning:structuralSuccessWarnings.length,
+      falseWarningRate:wilson95(structuralSuccessWarnings.length,structuralSuccesses.length),
+      medianWarningLeadMs:median(structuralLeads),
+      meanWarningLeadMs:mean(structuralLeads),
+      interpretation:'PERSISTENCE_FILTERED_WARNING_ASSOCIATION_NOT_CAUSAL_OR_COUNTERFACTUAL_PROOF'
+    },
     interpretation:'PROSPECTIVE_PRE_OUTCOME_WARNING_ASSOCIATION_NOT_CAUSAL_OR_COUNTERFACTUAL_PROOF'
   };
 }
@@ -334,6 +368,23 @@ function preOutcomeStaleAssumptionBreakdown(rows){
     const stableFailureRate=safeRate(stableFailures,notStale.length);
     const staleIntervalRate=safeRate(staleMisses,stale.length);
     const stableIntervalRate=safeRate(stableMisses,notStale.length);
+
+    const persistenceKnown=declared.filter(row=>
+      Array.isArray(row?.preOutcomeThesisRevisionState?.everPersistentStaleAssumptionIdsBeforeMaturity)
+    );
+    const persistent=persistenceKnown.filter(row=>
+      row.preOutcomeThesisRevisionState.everPersistentStaleAssumptionIdsBeforeMaturity.includes(assumptionId)
+    );
+    const neverPersistent=persistenceKnown.filter(row=>!persistent.includes(row));
+    const persistentFailures=persistent.filter(primaryFailure).length;
+    const neverPersistentFailures=neverPersistent.filter(primaryFailure).length;
+    const persistentMisses=persistent.filter(intervalFailure).length;
+    const neverPersistentMisses=neverPersistent.filter(intervalFailure).length;
+    const persistentFailureRate=safeRate(persistentFailures,persistent.length);
+    const neverPersistentFailureRate=safeRate(neverPersistentFailures,neverPersistent.length);
+    const persistentIntervalRate=safeRate(persistentMisses,persistent.length);
+    const neverPersistentIntervalRate=safeRate(neverPersistentMisses,neverPersistent.length);
+
     return {
       assumptionId,
       observations:declared.length,
@@ -348,7 +399,26 @@ function preOutcomeStaleAssumptionBreakdown(rows){
       intervalMissRateDifference:
         staleIntervalRate==null||stableIntervalRate==null?null:staleIntervalRate-stableIntervalRate,
       associationReady:stale.length>=20&&notStale.length>=20,
-      interpretation:'PROSPECTIVE_STALENESS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF'
+      persistenceFiltered:{
+        observations:persistenceKnown.length,
+        persistentStaleBeforeMaturity:persistent.length,
+        neverPersistentStaleBeforeMaturity:neverPersistent.length,
+        directionFailureWhenPersistentStale:wilson95(persistentFailures,persistent.length),
+        directionFailureWhenNeverPersistentStale:wilson95(neverPersistentFailures,neverPersistent.length),
+        directionFailureRateDifference:
+          persistentFailureRate==null||neverPersistentFailureRate==null
+            ?null
+            :persistentFailureRate-neverPersistentFailureRate,
+        intervalMissWhenPersistentStale:wilson95(persistentMisses,persistent.length),
+        intervalMissWhenNeverPersistentStale:wilson95(neverPersistentMisses,neverPersistent.length),
+        intervalMissRateDifference:
+          persistentIntervalRate==null||neverPersistentIntervalRate==null
+            ?null
+            :persistentIntervalRate-neverPersistentIntervalRate,
+        associationReady:persistent.length>=20&&neverPersistent.length>=20,
+        interpretation:'PERSISTENCE_FILTERED_STALENESS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF'
+      },
+      interpretation:'RAW_SUPPORT_LOSS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF'
     };
   });
 }
@@ -553,8 +623,8 @@ export function evaluateClaimAssumptionResearch(dataset,{config={},evaluatedAt=n
       unsupportedOrInvalidAssumptionDefectDetection:'MEASURED_BY_ISSUANCE_GRAPH_ALERTS',
       assumptionLevelOutcomeAssociation:'MEASURED_PROSPECTIVELY_BY_FROZEN_SUPPORT_STATE',
       outcomeAssociation:'MEASURED_PROSPECTIVELY',
-      revisionPrecision:'MEASURED_AS_PRE_OUTCOME_WARNING_CAPTURE_AND_FALSE_WARNING_RATE',
-      staleAssumptionDetection:'MEASURED_PROSPECTIVELY_BY_SUPPORT_TRANSITION_MEMORY',
+      revisionPrecision:'MEASURED_AS_RAW_AND_PERSISTENCE_FILTERED_PRE_OUTCOME_WARNING_CAPTURE',
+      staleAssumptionDetection:'MEASURED_WITH_HYSTERESIS_SEPARATING_TRANSIENT_FLICKER_FROM_PERSISTENT_STALE',
       reproducibility:'SUPPORTED_BY_PERSISTED_FINGERPRINTED_ARTIFACTS',
       runtimeCpuCost:'NOT_MEASURED'
     },
@@ -567,6 +637,8 @@ export function evaluateClaimAssumptionResearch(dataset,{config={},evaluatedAt=n
       causalInterpretation:false,
       outcomeDoesNotValidateIndividualAssumptions:true,
       preOutcomeWarningsUseOnlyEventsKnownByHorizonMaturity:true,
+      persistenceFilteredWarningsRequireRepeatedPITEvidence:true,
+      transientFlickerIsNotCountedAsPersistentStaleness:true,
       warningLeadTimeIsDescriptiveNotCounterfactualCausation:true,
       noRandomizedTrafficSplitRequired:true
     },

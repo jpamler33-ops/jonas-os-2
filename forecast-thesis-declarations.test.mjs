@@ -81,6 +81,17 @@ test('strong PIT thesis produces explicit material declarations without unsuppor
   assert.ok(d.evidence.every(x=>x.availableAt===1010));
 });
 
+test('material thesis assumptions expose every support input used by their predicate',()=>{
+  const d=buildForecastThesisDeclarations(strongInput());
+  const alignment=d.assumptions.find(x=>x.assumptionId==='THESIS_EVIDENCE_ALIGNMENT_ADEQUATE');
+  const disagreement=d.assumptions.find(x=>x.assumptionId==='THESIS_DISAGREEMENT_WITHIN_TOLERANCE');
+  assert.deepEqual(alignment.evidenceIds,['THESIS_EVIDENCE_STATE','THESIS_MECHANISM_STATE']);
+  assert.deepEqual(disagreement.evidenceIds,['THESIS_EVIDENCE_STATE','THESIS_WITNESS_STATE']);
+  const evidence=d.evidence.find(x=>x.evidenceId==='THESIS_EVIDENCE_STATE');
+  assert.ok(evidence.provenanceIds.some(x=>x.startsWith('CONTRADICTION_SCORE:')));
+  assert.equal(d.semantics.assumptionEvidenceListsCoverAllDeclaredSupportInputs,true);
+});
+
 test('weak thesis exposes unsupported assumptions instead of fabricating confidence',()=>{
   const input=strongInput();
   input.state.memoryDashboard.regime='UNKNOWN';

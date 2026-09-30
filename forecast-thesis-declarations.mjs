@@ -195,6 +195,7 @@ export function buildForecastThesisDeclarations({
       provenanceIds:[
         'INDEX:'+String(evidenceIndex??'UNKNOWN'),
         'DISAGREEMENT_COUNT:'+String(disagreementCount),
+        'CONTRADICTION_SCORE:'+String(Number(audit?.contradictionScore??1)),
         'GATE:'+evidenceGate,
         'FINGERPRINT:'+String(evidenceRecord?.fingerprint??''),
         ...disagreementLayers.map(x=>'CONFLICT_LAYER:'+x)
@@ -259,7 +260,9 @@ export function buildForecastThesisDeclarations({
     {
       assumptionId:'THESIS_EVIDENCE_ALIGNMENT_ADEQUATE',
       statement:'The pre-outcome evidence alignment is strong enough to support the declared thesis.',
-      evidenceIds:supportIds(thesisEvidenceAdequate,'THESIS_EVIDENCE_STATE'),
+      evidenceIds:thesisEvidenceAdequate
+        ?['THESIS_EVIDENCE_STATE','THESIS_MECHANISM_STATE']
+        :[],
       requiresEvidence:true,
       availableAt:issuedAt
     },
@@ -273,7 +276,9 @@ export function buildForecastThesisDeclarations({
     {
       assumptionId:'THESIS_DISAGREEMENT_WITHIN_TOLERANCE',
       statement:'Observed cross-source and model disagreement is not large enough to invalidate this thesis.',
-      evidenceIds:supportIds(disagreementWithinTolerance,'THESIS_EVIDENCE_STATE'),
+      evidenceIds:disagreementWithinTolerance
+        ?['THESIS_EVIDENCE_STATE','THESIS_WITNESS_STATE']
+        :[],
       requiresEvidence:true,
       availableAt:issuedAt
     },
@@ -425,6 +430,7 @@ export function buildForecastThesisDeclarations({
       declarationsArePointInTime:true,
       mechanismIsNotCausallyIdentified:causalStatus!=='IDENTIFIED',
       absenceOfSupportIsNotEvidenceOfOppositeDirection:true,
+      assumptionEvidenceListsCoverAllDeclaredSupportInputs:true,
       graphAuditMustNotChangeForecastGate:true,
       noOutcomeInformationUsed:true
     },

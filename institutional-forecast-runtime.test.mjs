@@ -372,11 +372,33 @@ test('live thesis revision memory records support loss before maturity and expos
   assert.equal(revised.changed,1);
   assert.ok(revised.results[0].supportLostSinceIssueIds.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
 
-  const memory=r.intelligence.get(issued.forecastId).thesisMemory;
+  let memory=r.intelligence.get(issued.forecastId).thesisMemory;
   assert.equal(memory.firstStaleAt,next.asOf+100);
+  assert.equal(memory.firstPersistentStaleAt,null);
+  assert.equal(
+    memory.assumptions.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE').stability.state,
+    'TRANSIENT_FLICKER'
+  );
   assert.ok(memory.events[0].supportTransitions.some(x=>
     x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE'&&x.transition==='SUPPORT_LOST'
   ));
+
+  const second=input(inp.asOf+120_000,inp.price*1.0005);
+  const secondLive=observeInstitutionalForecastRuntime(r,{input:second,quality:1});
+  const secondDeclarations=thesisDeclarations(second,{witnessSupported:false,generatedAt:second.asOf+100});
+  const confirmed=observeInstitutionalForecastThesisRevisions(r,{
+    currentDeclarations:secondDeclarations,
+    observedAt:second.asOf+100,
+    currentInputFingerprint:second.inputFingerprint,
+    forecastRevisions:secondLive.revisions
+  });
+  assert.equal(confirmed.changed,1);
+  memory=r.intelligence.get(issued.forecastId).thesisMemory;
+  assert.equal(memory.firstPersistentStaleAt,second.asOf+100);
+  assert.equal(
+    memory.assumptions.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE').stability.state,
+    'PERSISTENT_STALE'
+  );
 
   const due=observeInstitutionalForecastRuntime(r,{input:input(inp.asOf+300_000,65100)});
   assert.equal(due.evaluations.length,1);
@@ -384,7 +406,10 @@ test('live thesis revision memory records support loss before maturity and expos
   assert.ok(revisionState);
   assert.equal(revisionState.warningAvailableBeforeMaturity,true);
   assert.ok(revisionState.warningLeadMs>0);
+  assert.equal(revisionState.structuralWarningAvailableBeforeMaturity,true);
+  assert.ok(revisionState.structuralWarningLeadMs>0);
   assert.ok(revisionState.everStaleAssumptionIdsBeforeMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
+  assert.ok(revisionState.everPersistentStaleAssumptionIdsBeforeMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
   assert.equal(revisionState.interpretation,'PRE_OUTCOME_REVISION_SIGNAL_NOT_CAUSAL_PROOF');
 });
 

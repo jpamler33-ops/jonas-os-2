@@ -10,7 +10,10 @@ import {
   applyForecastThesisRevision,
   verifyForecastThesisRevisionMemory,
   verifyForecastThesisRevisionArtifact,
-  forecastThesisPreOutcomeRevisionState
+  forecastThesisPreOutcomeRevisionState,
+  upgradeForecastThesisRevisionMemory,
+  LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION,
+  FORECAST_THESIS_REVISION_MEMORY_VERSION
 } from './forecast-thesis-revision-memory.mjs';
 
 function context(asOf=1000,generatedAt=1010){
@@ -123,8 +126,51 @@ test('initial memory freezes issue support without rewriting the sidecar',()=>{
   assert.equal(m.firstStaleAt,null);
   assert.equal(m.firstForecastInvalidatedAt,null);
   assert.ok(m.assumptions.every(x=>x.issueSupported===true&&x.currentSupported===true));
+  assert.ok(m.assumptions.every(x=>x.stability.state==='SUPPORTED_STABLE'));
+  assert.equal(m.firstPersistentStaleAt,null);
   assert.equal(m.canInfluencePrimary,false);
   assert.equal(m.canExecuteLive,false);
+});
+
+test('legacy V1 revision memory upgrades without inventing historical stability',()=>{
+  const i=issuance();
+  const fresh=createInitialForecastThesisRevisionMemory({forecastId:'BTCUSDT:1000',issuance:i});
+  const legacyCore={
+    ...structuredClone(fresh),
+    version:LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION
+  };
+  delete legacyCore.fingerprint;
+  delete legacyCore.firstPersistentStaleAt;
+  delete legacyCore.stabilityEventCount;
+  for(const row of legacyCore.assumptions) delete row.stability;
+  legacyCore.semantics={
+    immutableIssueState:true,
+    revisionEventsAreProspective:true,
+    supportLossDoesNotProveForecastFailure:true,
+    invalidationAssessmentIsNotCausalProof:true,
+    noOutcomeInformationUsed:true
+  };
+  const legacy={...legacyCore,fingerprint:sha256(legacyCore)};
+  assert.equal(verifyForecastThesisRevisionMemory(legacy).ok,true);
+
+  const upgraded=upgradeForecastThesisRevisionMemory(legacy,{migratedAt:200_000});
+  assert.equal(upgraded.version,FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.equal(upgraded.migration.fromVersion,LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.equal(upgraded.migration.migratedAt,200_000);
+  assert.equal(upgraded.migration.historicalStabilityBackfilled,false);
+  assert.equal(upgraded.firstPersistentStaleAt,null);
+  assert.ok(upgraded.assumptions.every(x=>x.stability.state==='LEGACY_UNKNOWN'));
+  assert.ok(upgraded.assumptions.every(x=>x.stability.migration==='LEGACY_V1_NO_HISTORICAL_STABILITY_BACKFILL'));
+  assert.equal(verifyForecastThesisRevisionMemory(upgraded).ok,true);
+
+  const legacyMatured=forecastThesisPreOutcomeRevisionState(legacy,{maturedAt:150_000});
+  const migratedHistorical=forecastThesisPreOutcomeRevisionState(upgraded,{maturedAt:150_000});
+  assert.deepEqual(migratedHistorical,legacyMatured);
+  assert.equal('stabilityVersion' in migratedHistorical,false);
+
+  const postMigration=forecastThesisPreOutcomeRevisionState(upgraded,{maturedAt:250_000});
+  assert.equal(postMigration.version,FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.ok(postMigration.stabilityVersion);
 });
 
 test('later support loss records exact assumption transition and forecast watch state',()=>{
@@ -168,7 +214,7 @@ test('later support loss records exact assumption transition and forecast watch 
   ));
 });
 
-test('repeating the same stale state does not create revision spam',()=>{
+test('repeated support loss becomes persistent once, then identical stale state does not create event spam',()=>{
   const i=issuance();
   let m=createInitialForecastThesisRevisionMemory({forecastId:'BTCUSDT:1000',issuance:i});
   const current=declarations(61_000,61_010,x=>{
@@ -180,18 +226,76 @@ test('repeating the same stale state does not create revision spam',()=>{
     forecastRevisionAssessment:{status:'WATCH',score:.4,reasons:[],warnings:[]}
   });
   m=applyForecastThesisRevision(m,first).memory;
+  assert.equal(
+    m.assumptions.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE').stability.state,
+    'TRANSIENT_FLICKER'
+  );
 
   const later=declarations(121_000,121_010,x=>{
     x.witnessReport.independentWitnessSatisfied=false;
     x.witnessReport.externalWitnessCount=1;
   });
-  const repeated=createForecastThesisRevisionArtifact({
+  const persistent=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
     issuance:i,currentDeclarations:later,observedAt:121_010,
     forecastRevisionAssessment:{status:'WATCH',score:.42,reasons:[],warnings:[]}
+  }));
+  assert.equal(persistent.changed,true);
+  assert.equal(persistent.memory.firstPersistentStaleAt,121_010);
+  assert.ok(persistent.event.stabilityTransitions.some(x=>
+    x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE'&&x.type==='PERSISTENT_STALE_CONFIRMED'
+  ));
+  assert.equal(
+    persistent.memory.assumptions.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE').stability.state,
+    'PERSISTENT_STALE'
+  );
+
+  const again=declarations(181_000,181_010,x=>{
+    x.witnessReport.independentWitnessSatisfied=false;
+    x.witnessReport.externalWitnessCount=1;
   });
-  const applied=applyForecastThesisRevision(m,repeated);
-  assert.equal(applied.changed,false);
-  assert.equal(applied.memory.eventCount,1);
+  const noSpam=applyForecastThesisRevision(persistent.memory,createForecastThesisRevisionArtifact({
+    issuance:i,currentDeclarations:again,observedAt:181_010,
+    forecastRevisionAssessment:{status:'WATCH',score:.43,reasons:[],warnings:[]}
+  }));
+  assert.equal(noSpam.changed,false);
+  assert.equal(noSpam.memory.eventCount,persistent.memory.eventCount);
+});
+
+test('pre-outcome structural warning ignores one-cycle flicker but includes persistent staleness',()=>{
+  const i=issuance();
+  let m=createInitialForecastThesisRevisionMemory({forecastId:'BTCUSDT:1000',issuance:i});
+
+  const firstLost=declarations(61_000,61_010,x=>{
+    x.witnessReport.independentWitnessSatisfied=false;
+    x.witnessReport.externalWitnessCount=1;
+  });
+  m=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
+    issuance:i,currentDeclarations:firstLost,observedAt:61_010,
+    forecastRevisionAssessment:{status:'VALID',score:.1,reasons:[],warnings:[]}
+  })).memory;
+
+  const flickerView=forecastThesisPreOutcomeRevisionState(m,{maturedAt:100_000});
+  assert.equal(flickerView.warningAvailableBeforeMaturity,true);
+  assert.equal(flickerView.structuralWarningAvailableBeforeMaturity,false);
+  assert.ok(flickerView.transientFlickerAssumptionIdsAtMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
+  assert.deepEqual(flickerView.everPersistentStaleAssumptionIdsBeforeMaturity,[]);
+
+  const secondLost=declarations(121_000,121_010,x=>{
+    x.witnessReport.independentWitnessSatisfied=false;
+    x.witnessReport.externalWitnessCount=1;
+  });
+  m=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
+    issuance:i,currentDeclarations:secondLost,observedAt:121_010,
+    forecastRevisionAssessment:{status:'VALID',score:.12,reasons:[],warnings:[]}
+  })).memory;
+
+  const persistentView=forecastThesisPreOutcomeRevisionState(m,{maturedAt:180_000});
+  assert.equal(persistentView.structuralWarningAvailableBeforeMaturity,true);
+  assert.equal(persistentView.firstPersistentStaleAt,121_010);
+  assert.equal(persistentView.firstStructuralWarningAt,121_010);
+  assert.equal(persistentView.structuralWarningLeadMs,58_990);
+  assert.ok(persistentView.persistentStaleAssumptionIdsAtMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
+  assert.ok(persistentView.everPersistentStaleAssumptionIdsBeforeMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
 });
 
 test('support restoration is a separate prospective event',()=>{

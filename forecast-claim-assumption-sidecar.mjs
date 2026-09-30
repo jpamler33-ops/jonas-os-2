@@ -487,6 +487,22 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       warningAvailableBeforeMaturity:thesisRevisionState?.warningAvailableBeforeMaturity===true,
       warningLeadMs:thesisRevisionState?.warningLeadMs==null?null:Number.isFinite(Number(thesisRevisionState.warningLeadMs))?Number(thesisRevisionState.warningLeadMs):null,
       forecastInvalidatedBeforeMaturity:thesisRevisionState?.forecastInvalidatedBeforeMaturity===true,
+      ...(thesisRevisionState?.stabilityVersion?{
+        stabilityVersion:String(thesisRevisionState.stabilityVersion),
+        transientFlickerAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.transientFlickerAssumptionIdsAtMaturity)
+          ?[...new Set(thesisRevisionState.transientFlickerAssumptionIdsAtMaturity.map(String))].sort()
+          :[],
+        persistentStaleAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.persistentStaleAssumptionIdsAtMaturity)
+          ?[...new Set(thesisRevisionState.persistentStaleAssumptionIdsAtMaturity.map(String))].sort()
+          :[],
+        everPersistentStaleAssumptionIdsBeforeMaturity:Array.isArray(thesisRevisionState?.everPersistentStaleAssumptionIdsBeforeMaturity)
+          ?[...new Set(thesisRevisionState.everPersistentStaleAssumptionIdsBeforeMaturity.map(String))].sort()
+          :[],
+        firstPersistentStaleAt:thesisRevisionState?.firstPersistentStaleAt==null?null:Number.isFinite(Number(thesisRevisionState.firstPersistentStaleAt))?Number(thesisRevisionState.firstPersistentStaleAt):null,
+        firstStructuralWarningAt:thesisRevisionState?.firstStructuralWarningAt==null?null:Number.isFinite(Number(thesisRevisionState.firstStructuralWarningAt))?Number(thesisRevisionState.firstStructuralWarningAt):null,
+        structuralWarningAvailableBeforeMaturity:thesisRevisionState?.structuralWarningAvailableBeforeMaturity===true,
+        structuralWarningLeadMs:thesisRevisionState?.structuralWarningLeadMs==null?null:Number.isFinite(Number(thesisRevisionState.structuralWarningLeadMs))?Number(thesisRevisionState.structuralWarningLeadMs):null
+      }:null),
       interpretation:'PRE_OUTCOME_REVISION_SIGNAL_NOT_CAUSAL_PROOF'
     }:null,
     semantics:{
@@ -497,6 +513,7 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       doesNotChangeForecastEvaluation:true,
       pairedResearchComparisonOnly:true,
       preOutcomeRevisionStateUsesOnlyEventsKnownByMaturity:true,
+      ...(thesisRevisionState?.stabilityVersion?{transientFlickerAndPersistentStaleAreSeparated:true}:null),
       outcomeAssociationIsNotCausation:true
     },
     execution:'SHADOW_ONLY',
