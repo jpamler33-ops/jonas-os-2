@@ -537,6 +537,110 @@ export function evaluateBiggjSkillProgress(tree,skillId){
   });
 }
 
+export function advanceBiggjResearchLifecycleStep(tree,{
+  skillId,
+  asOf=Date.now()
+}={}){
+  verifyTreeShape(tree);
+  const t=finite(asOf);
+  if(t==null) throw new Error('asOf must be finite');
+  const node=tree.nodes.find(x=>x.skillId===skillId);
+  if(!node) throw new Error('skill missing');
+  if(node.kind!=='DISCOVERED_SKILL'){
+    return finalized({
+      version:BIGGJ_SKILL_TREE_VERSION,
+      skillId,
+      changed:false,
+      reviewRequired:false,
+      reason:'AUTO_RESEARCH_LIFECYCLE_ONLY_FOR_DISCOVERED_SKILLS',
+      currentStatus:node.status,
+      recommendedStatus:node.status,
+      execution:'SHADOW_ONLY',
+      action:'ABSTAIN',
+      canExecuteLive:false,
+      productionMutationPerformed:false
+    });
+  }
+  const evaluation=evaluateBiggjSkillProgress(tree,skillId);
+  const current=String(node.status||'UNKNOWN').toUpperCase();
+  const recommended=String(evaluation.recommendedStatus||current).toUpperCase();
+  const allowed=
+    (current==='DISCOVERING'&&recommended==='LEARNING')||
+    (current==='LEARNING'&&recommended==='TESTING');
+
+  if(!allowed){
+    const reviewRequired=
+      (current==='TESTING'&&recommended==='VALIDATED')||
+      (current==='VALIDATED'&&recommended==='TRUSTED')||
+      recommended==='DECAYING'||
+      recommended==='RETIRED';
+    return finalized({
+      version:BIGGJ_SKILL_TREE_VERSION,
+      skillId,
+      changed:false,
+      reviewRequired,
+      reason:reviewRequired
+        ?'EXPLICIT_REVIEW_REQUIRED_BEYOND_RESEARCH_LIFECYCLE'
+        :'NO_RESEARCH_LIFECYCLE_TRANSITION_READY',
+      currentStatus:current,
+      recommendedStatus:recommended,
+      evaluationFingerprint:evaluation.fingerprint,
+      execution:'SHADOW_ONLY',
+      action:'ABSTAIN',
+      canExecuteLive:false,
+      productionMutationPerformed:false
+    });
+  }
+
+  const transitioned=applyBiggjSkillStatusTransition(tree,{
+    skillId,
+    toStatus:recommended,
+    evaluation,
+    asOf:t,
+    promotionRecordId:null
+  });
+  const core=cloneTree(transitioned);
+  core.researchLifecycleTransitions=Array.isArray(core.researchLifecycleTransitions)
+    ?core.researchLifecycleTransitions
+    :[];
+  const transitionCore={
+    skillId,
+    fromStatus:current,
+    toStatus:recommended,
+    at:t,
+    evaluationFingerprint:evaluation.fingerprint,
+    authority:'AUTONOMOUS_RESEARCH_LIFECYCLE',
+    scope:'RESEARCH_ONLY',
+    explicitPromotionRequiredBeyondTesting:true,
+    productionMutationPerformed:false,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  const transition={
+    ...transitionCore,
+    transitionId:'research-lifecycle:'+sha256(transitionCore).slice(0,24)
+  };
+  if(!core.researchLifecycleTransitions.some(x=>x.transitionId===transition.transitionId)){
+    core.researchLifecycleTransitions.push(transition);
+  }
+  core.asOf=Math.max(Number(core.asOf||0),t);
+  return finalized({
+    version:BIGGJ_SKILL_TREE_VERSION,
+    skillId,
+    changed:true,
+    reviewRequired:false,
+    reason:'AUTONOMOUS_RESEARCH_STAGE_ADVANCE',
+    currentStatus:current,
+    recommendedStatus:recommended,
+    transition,
+    tree:finalized(core),
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecuteLive:false,
+    productionMutationPerformed:false
+  });
+}
+
 export function applyBiggjSkillStatusTransition(tree,{
   skillId,
   toStatus,
