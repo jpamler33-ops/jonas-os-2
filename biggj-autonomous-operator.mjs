@@ -22,6 +22,29 @@ function arr(v){ return Array.isArray(v)?v:[]; }
 function clone(v){ return v==null?v:structuredClone(v); }
 function uniq(xs){ return [...new Set(arr(xs).filter(Boolean).map(String))]; }
 
+const PASSIVE_DATA_NEEDS=new Set([
+  'MORE_POINT_IN_TIME_DATA',
+  'FORWARD_SHADOW_OBSERVATIONS',
+  'INDEPENDENT_EPISODES',
+  'REGIME_DIVERSITY',
+  'LABELLED_FORWARD_OUTCOMES',
+  'FRESH_FORWARD_EVIDENCE',
+  'OOS_FORECAST_OUTCOMES',
+  'CHALLENGER_FORWARD_TRADES',
+  'INDEPENDENT_SHADOW_TRADES',
+  'MULTI_REGIME_OUTCOMES',
+  'FEATURE_COMPLETE_FORWARD_ROWS'
+]);
+
+function isPassiveDataWait(factorySummary,assessments,tasks){
+  const needs=arr(factorySummary?.dataNeeds).map(String);
+  if(String(factorySummary?.mode)!=='RESEARCH_STALLED')return false;
+  if(!needs.length||!tasks.length)return false;
+  if(!needs.every(x=>PASSIVE_DATA_NEEDS.has(x)))return false;
+  if(!tasks.every(x=>x?.automaticShadowEligible===true&&x?.manualReviewRequired!==true))return false;
+  return assessments.every(x=>['HEALTHY','WARMING_UP'].includes(String(x?.state)));
+}
+
 function finalized(core){
   return Object.freeze({...core,fingerprint:sha256(core)});
 }
@@ -257,7 +280,8 @@ export function refreshBiggjAutonomousOperator(state,{
   }
 
   const factoryMode=String(factorySummary?.mode||'UNINITIALIZED');
-  if(factoryMode==='RESEARCH_STALLED'){
+  const waitingForData=isPassiveDataWait(factorySummary,assessments,tasks);
+  if(factoryMode==='RESEARCH_STALLED'&&!waitingForData){
     add('RESEARCH_STALLED','RESEARCH_FACTORY','NO_MEASURABLE_RESEARCH_PROGRESS','REFRESH_RESEARCH_STACK');
   }
   if(factoryMode==='MANUAL_REVIEW_REQUIRED'&&!assessments.some(x=>x.state==='APPROVAL_REQUIRED')){
@@ -290,6 +314,7 @@ export function refreshBiggjAutonomousOperator(state,{
   let mode='HANDS_OFF';
   if(operatorNeeded)mode='ESCALATION_REQUIRED';
   else if(actions.length)mode='SELF_HEALING';
+  else if(waitingForData)mode='WAITING_FOR_DATA';
   else if(Object.keys(incidents).length)mode='AUTO_MONITORING';
   else if(factoryMode==='MANUAL_REVIEW_REQUIRED')mode='ESCALATION_REQUIRED';
 
@@ -297,11 +322,20 @@ export function refreshBiggjAutonomousOperator(state,{
     ?uniq(escalationIncidents.map(x=>x.kind)).join(',')
     :'EXCEPTIONS_ONLY';
 
-  const recoveryHistory=arr(base.recoveryHistory).slice(-(p.maxRecoveryHistory-1));
+  const recoveryHistory=arr(base.recoveryHistory)
+    .map(row=>{
+      if(row?.result!=='EXECUTED'||!row?.incidentKey)return row;
+      if(!incidents[row.incidentKey]){
+        return {...row,result:'VERIFIED_RESOLVED',verifiedAt:t};
+      }
+      return {...row,result:'EXECUTED_UNRESOLVED',verifiedAt:t};
+    })
+    .slice(-(p.maxRecoveryHistory-1));
   for(const action of actions){
     recoveryHistory.push({
       at:t,
       actionId:action.actionId,
+      incidentKey:action.incidentKey,
       type:action.type,
       subject:action.subject,
       attempt:action.attempt,
@@ -318,6 +352,7 @@ export function refreshBiggjAutonomousOperator(state,{
     operatorNeeded,
     humanJobRemaining,
     factoryMode,
+    waitingForData,
     factoryOperatorDataOnly:factorySummary?.operatorDataOnly===true,
     automationCoverage:tasks.length?assessments.filter(x=>!['UNOWNED','DISABLED'].includes(x.state)).length/tasks.length:1,
     incidents:Object.fromEntries(Object.entries(incidents).slice(-p.maxIncidentHistory)),
@@ -353,7 +388,7 @@ export function recordBiggjAutonomousOperatorActionResults(state,results,{asOf=D
     return {
       ...row,
       completedAt:t,
-      result:result.ok===true?'SUCCESS':'FAILED',
+      result:result.ok===true?'EXECUTED':'FAILED',
       error:result.ok===true?null:String(result.error||'UNKNOWN').slice(0,240)
     };
   }).slice(-DEFAULT_AUTONOMOUS_OPERATOR_POLICY.maxRecoveryHistory);
@@ -372,11 +407,14 @@ export function biggjAutonomousOperatorSummary(state){
     operatorNeeded:state?.operatorNeeded===true,
     humanJobRemaining:String(state?.humanJobRemaining||'UNKNOWN'),
     factoryMode:String(state?.factoryMode||'UNKNOWN'),
+    waitingForData:state?.waitingForData===true,
     automationCoverage:finite(state?.automationCoverage,0),
     activeIncidents:incidents.length,
     approvalRequired:incidents.filter(x=>x.kind==='APPROVAL_REQUIRED').length,
     selfHealing:arr(state?.plannedActions).length,
     exhaustedRecoveries:incidents.filter(x=>x.exhausted===true).length,
+    verifiedResolvedRecoveries:arr(state?.recoveryHistory).filter(x=>x?.result==='VERIFIED_RESOLVED').length,
+    unresolvedRecoveries:arr(state?.recoveryHistory).filter(x=>x?.result==='EXECUTED_UNRESOLVED').length,
     ownerAssessments:arr(state?.ownerAssessments).slice(0,12),
     plannedActions:arr(state?.plannedActions).slice(0,8),
     recoveryHistory:arr(state?.recoveryHistory).slice(-12),
