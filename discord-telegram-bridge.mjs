@@ -249,25 +249,46 @@ function academyLessonPayload(topic='basics'){
     }
   };
   const x=lessons[topic]||lessons.basics;
-  return {embeds:[{title:'BIGGJ ACADEMY // '+x.title,description:['**Ziel:** '+x.goal,'',...x.body,'','**Modus: PAPER / SHADOW ONLY · keine echten Orders**'].join('\n'),footer:{text:'BIGGJ_ACADEMY_LESSON:'+topic},timestamp:new Date().toISOString()}],components:academyLessonComponents(),allowedMentions:{parse:[]}};
+  return {embeds:[{title:'BIGGJ ACADEMY // '+x.title,description:['**Ziel:** '+x.goal,'',...x.body,'','**Modus: PAPER / SHADOW ONLY · keine echten Orders**'].join('\n'),footer:{text:'BIGGJ_ACADEMY_LESSON:'+topic},timestamp:new Date().toISOString()}],components:academyLessonComponents(topic),allowedMentions:{parse:[]}};
 }
-function academyLessonComponents(){return [
-  {type:1,components:[
-    {type:2,style:1,label:'1 Grundlagen',custom_id:'dc5:lesson:basics'},
-    {type:2,style:2,label:'2 Struktur',custom_id:'dc5:lesson:structure'},
-    {type:2,style:2,label:'3 Risiko',custom_id:'dc5:lesson:risk'}
-  ]},
-  {type:1,components:[
-    {type:2,style:2,label:'4 Liquidität',custom_id:'dc5:lesson:liquidity'},
-    {type:2,style:2,label:'5 Setup',custom_id:'dc5:lesson:setup'},
-    {type:2,style:2,label:'6 Journal',custom_id:'dc5:lesson:journal'}
-  ]},
-  {type:1,components:[
-    {type:2,style:1,label:'BTC 5m Chart',custom_id:'dc3:chart:BTCUSDT:5m'},
-    {type:2,style:2,label:'BTC Struktur',custom_id:'dc3:structure:BTCUSDT'},
-    {type:2,style:2,label:'BTC Replay',custom_id:'dc3:tradereplay:BTCUSDT'}
-  ]}
-];}
+function academyLessonComponents(topic=null){
+  const rows=[
+    {type:1,components:[
+      {type:2,style:1,label:'1 Grundlagen',custom_id:'dc5:lesson:basics'},
+      {type:2,style:2,label:'2 Struktur',custom_id:'dc5:lesson:structure'},
+      {type:2,style:2,label:'3 Risiko',custom_id:'dc5:lesson:risk'}
+    ]},
+    {type:1,components:[
+      {type:2,style:2,label:'4 Liquidität',custom_id:'dc5:lesson:liquidity'},
+      {type:2,style:2,label:'5 Setup',custom_id:'dc5:lesson:setup'},
+      {type:2,style:2,label:'6 Journal',custom_id:'dc5:lesson:journal'}
+    ]}
+  ];
+  const practical={
+    structure:[
+      {type:2,style:1,label:'BTC Chart',custom_id:'dc3:chart:BTCUSDT:5m'},
+      {type:2,style:2,label:'Struktur prüfen',custom_id:'dc3:structure:BTCUSDT'}
+    ],
+    risk:[
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
+      {type:2,style:2,label:'Risiko prüfen',custom_id:'dc3:terminal:risk:BTCUSDT'}
+    ],
+    liquidity:[
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
+      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:BTCUSDT'}
+    ],
+    setup:[
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
+      {type:2,style:2,label:'Warum?',custom_id:'dc3:why:BTCUSDT'}
+    ],
+    journal:[
+      {type:2,style:1,label:'BTC Replay',custom_id:'dc3:tradereplay:BTCUSDT'}
+    ]
+  };
+  const actions=practical[String(topic||'').toLowerCase()]||null;
+  if(actions?.length)rows.push({type:1,components:actions});
+  return rows;
+}
 function academyStaticPayload(kind){
   const base={allowedMentions:{parse:[]}};
   if(kind==='start')return {...base,embeds:[{title:'BIGGJ // TRADING ACADEMY',description:[
@@ -824,15 +845,79 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     state.lastExperienceRefreshAt=Date.now();
     return count;
   }
+  function newsEventKey(event){
+    const raw=String(event?.id||event?.url||[event?.title,event?.availableAt].join('|')||'event');
+    return Buffer.from(raw).toString('base64url').slice(0,72);
+  }
+  function newsEventPayload(event,{world=false}={}){
+    const verified=event?.verified===true||Number(event?.independentConfirmation||0)>=.45;
+    const source=String(event?.source||'PUBLIC_NEWS');
+    const family=String(event?.family||event?.eventFamily||'OTHER');
+    const status=String(event?.status||'WATCH');
+    const assets=(Array.isArray(event?.affectedAssets)?event.affectedAssets:[]).slice(0,8);
+    const rawUrl=String(event?.url||'').trim();
+    const url=/^https?:\/\//i.test(rawUrl)?rawUrl:undefined;
+    const observedAt=Number(event?.availableAt||event?.timestamp||Date.now());
+    const key=newsEventKey(event);
+    const title=(world?'WORLD // ':'NEWS // ')+String(event?.title||event?.headline||'Event').slice(0,230);
+    return {
+      embeds:[{
+        title,
+        ...(url?{url}:{}),
+        description:[
+          '**'+status.replaceAll('_',' ')+'** · '+family.replaceAll('_',' '),
+          verified?'✓ independently corroborated/verified in current state':'◐ discovered · not independently verified',
+          assets.length?'Affected: '+assets.join(' · '):'Affected markets: not established'
+        ].join('\n').slice(0,4096),
+        fields:[
+          {name:'Source',value:source.slice(0,1024),inline:true},
+          {name:'Market reaction',value:String(event?.marketStatus||'AWAITING_MARKET_DATA').replaceAll('_',' ').slice(0,1024),inline:true},
+          {name:'Epistemic',value:String(event?.epistemic||'PUBLIC_EVENT').replaceAll('_',' ').slice(0,1024),inline:false}
+        ],
+        footer:{text:'BIGGJ_NEWS_EVENT:'+key+' · '+(verified?'VERIFIED/CORROBORATED':'DISCOVERY_ONLY')},
+        timestamp:new Date(Number.isFinite(observedAt)?observedAt:Date.now()).toISOString()
+      }],
+      allowedMentions:{parse:[]}
+    };
+  }
+  async function syncNewsChannel(channelName,{world=false}={}){
+    const c=channelCache.get(channelName);
+    if(!c)return 0;
+    const snapshot=await safeMissionSnapshot();
+    const recent=Array.isArray(snapshot?.health?.globalIntel?.recent)?snapshot.health.globalIntel.recent:[];
+    const rows=recent
+      .filter(x=>!world||['GEOPOLITICS','MACRO','COMMODITIES'].includes(String(x?.family||x?.eventFamily||'').toUpperCase()))
+      .sort((a,b)=>Number(a?.availableAt||a?.timestamp||0)-Number(b?.availableAt||b?.timestamp||0));
+    let messages;
+    try{messages=await c.messages.fetch({limit:100});}catch(err){fail(channelName+'-history',err);messages=null;}
+    const seen=new Set();
+    if(messages){
+      for(const m of messages.values()){
+        for(const e of m.embeds||[]){
+          const footer=String(e?.footer?.text||'');
+          const hit=/BIGGJ_NEWS_EVENT:([A-Za-z0-9_-]+)/.exec(footer);
+          if(hit)seen.add(hit[1]);
+        }
+      }
+    }
+    let posted=0;
+    for(const event of rows){
+      const key=newsEventKey(event);
+      if(seen.has(key))continue;
+      await c.send(newsEventPayload(event,{world}));
+      seen.add(key);
+      posted++;
+      if(posted>=12)break;
+    }
+    return posted;
+  }
   async function refreshNewsFeed(){
-    const c=channelCache.get('news-feed');
-    if(c)try{return await refreshCorePanel(c,'news:all',{components:[]});}catch(err){fail('news-feed',err);}
-    return null;
+    try{return await syncNewsChannel('news-feed',{world:false});}
+    catch(err){fail('news-feed',err);return 0;}
   }
   async function refreshWorldWatch(){
-    const c=channelCache.get('world-watch');
-    if(c)try{return await refreshCorePanel(c,'news:geopolitics',{components:[]});}catch(err){fail('world-watch',err);}
-    return null;
+    try{return await syncNewsChannel('world-watch',{world:true});}
+    catch(err){fail('world-watch',err);return 0;}
   }
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
