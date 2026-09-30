@@ -253,7 +253,7 @@ function tasksFromFeatureResearch(summary={}){
   const status=normalizedStatus(summary?.status);
   const experiments=arr(summary?.experiments);
   if(status!=='ACTIVE'&&experiments.length===0)return [];
-  const unresolved=experiments.filter(x=>!['REJECTED','PROMOTION_CANDIDATE','COMPLETE'].includes(normalizedStatus(x?.status))).length;
+  const unresolved=experiments.filter(x=>!['REJECTED','SUPPORTED'].includes(normalizedStatus(x?.status))).length;
   if(unresolved<=0)return [];
   return [task({
     type:'CONTINUE_FEATURE_RESEARCH',
