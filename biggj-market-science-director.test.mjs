@@ -11,6 +11,10 @@ import {
   buildBiggjMarketScienceDirector,
   biggjMarketScienceDirectorSummary
 } from './biggj-market-science-director.mjs';
+import {
+  createAutonomousResearchTrainingFactory,
+  refreshAutonomousResearchTrainingFactory
+} from './autonomous-research-training-factory.mjs';
 
 const T0=Date.UTC(2026,8,30,20,0,0);
 
@@ -214,6 +218,54 @@ test('summary exposes the knowledge frontier and preserves fail-closed semantics
   assert.equal(s.automaticExperimentLaunchAllowed,false);
   assert.equal(s.primaryMutationAllowed,false);
   assert.equal(s.canExecuteLive,false);
+});
+
+test('research factory automatically converts safe evidence gaps into shadow data collection',()=>{
+  let ledger=createEpistemicLedger({asOf:T0});
+  const r=addTheory(ledger);
+  ledger=r.ledger;
+  ledger=addEvidence(ledger,r.theory.theoryId,0).ledger;
+  const director=buildBiggjMarketScienceDirector(ledger,{asOf:T0+60_000});
+  const summary=biggjMarketScienceDirectorSummary(director);
+  const factory=createAutonomousResearchTrainingFactory({asOf:T0});
+  const refreshed=refreshAutonomousResearchTrainingFactory(factory,{
+    marketScienceDirectorSummary:summary,
+    asOf:T0+60_000,
+    reason:'SCIENCE_DIRECTOR_TEST'
+  });
+  const task=refreshed.state.queue.find(x=>x.source==='BIGGJ_MARKET_SCIENCE_DIRECTOR');
+  assert.ok(task);
+  assert.equal(task.type,'COLLECT_FORWARD_DATA');
+  assert.equal(task.automaticShadowEligible,true);
+  assert.equal(task.primaryMutationAllowed,false);
+  assert.equal(task.canExecuteLive,false);
+});
+
+test('research factory keeps broken-theory analysis manual and non-executing',()=>{
+  let ledger=createEpistemicLedger({asOf:T0});
+  const r=addTheory(ledger,{title:'Broken research law'});
+  ledger=r.ledger;
+  ledger=addEvidence(ledger,r.theory.theoryId,0,{
+    polarity:'CONTRA',
+    falsifierHit:true,
+    episode:'fatal',
+    controller:'independent'
+  }).ledger;
+  const director=buildBiggjMarketScienceDirector(ledger,{asOf:T0+60_000});
+  const summary=biggjMarketScienceDirectorSummary(director);
+  const factory=createAutonomousResearchTrainingFactory({asOf:T0});
+  const refreshed=refreshAutonomousResearchTrainingFactory(factory,{
+    marketScienceDirectorSummary:summary,
+    asOf:T0+60_000,
+    reason:'SCIENCE_DIRECTOR_BROKEN_TEST'
+  });
+  const task=refreshed.state.queue.find(x=>x.source==='BIGGJ_MARKET_SCIENCE_DIRECTOR');
+  assert.ok(task);
+  assert.equal(task.type,'RESEARCH_DEFINITION');
+  assert.equal(task.manualReviewRequired,true);
+  assert.equal(task.automaticShadowEligible,false);
+  assert.equal(task.primaryMutationAllowed,false);
+  assert.equal(task.canExecuteLive,false);
 });
 
 test('director output is deterministic for the same ledger and as-of',()=>{
