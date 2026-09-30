@@ -447,22 +447,45 @@ export function buildDiscordDataHealthPayload(snapshot={}){
 }
 function closedTradePayload(position={}){
   const pnl=Number(position?.realizedNetPnlQuote),ret=Number(position?.realizedReturnPct);
-  return {embeds:[{title:'TCX CLOSED · '+String(position?.symbol||'UNKNOWN').replace('USDT','/USDT')+' · '+String(position?.side||'—').toUpperCase(),description:'**CLOSED · SHADOW_ONLY**',fields:[
-    {name:'Entry',value:String(position?.entryPrice??'—'),inline:true},
-    {name:'Exit',value:String(position?.exitPrice??position?.lastMark?.price??'—'),inline:true},
-    {name:'Net PnL',value:Number.isFinite(pnl)?money(pnl):'—',inline:true},
-    {name:'Return',value:Number.isFinite(ret)?percent(ret):'—',inline:true},
-    {name:'Reason',value:String(position?.closeReason||'UNKNOWN'),inline:true},
-    {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true}
-  ],footer:{text:'CLOSED:'+String(position?.positionId||'UNKNOWN')},timestamp:new Date(Number(position?.closedAt)||Date.now()).toISOString()}],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
+  const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT');
+  const side=String(position?.side||'—').toUpperCase();
+  const result=Number.isFinite(pnl)?(pnl>0?'WIN':pnl<0?'LOSS':'FLAT'):'CLOSED';
+  return {embeds:[{
+    title:'BIGGJ // TRADE REVIEW · '+symbol,
+    description:'**'+side+' · '+result+' · SHADOW_ONLY**',
+    fields:[
+      {name:'RESULT',value:(Number.isFinite(pnl)?money(pnl):'—')+' · '+(Number.isFinite(ret)?percent(ret):'—'),inline:false},
+      {name:'ENTRY → EXIT',value:String(position?.entryPrice??'—')+' → '+String(position?.exitPrice??position?.lastMark?.price??'—'),inline:false},
+      {name:'WHY CLOSED',value:String(position?.closeReason||position?.exitReason||'UNKNOWN'),inline:true},
+      {name:'SETUP',value:String(position?.setupType||position?.strategyId||'UNKNOWN'),inline:true},
+      {name:'LEARNING',value:'Replay the Point-in-Time thesis before judging the result. Good process and profitable outcome are separate.',inline:false}
+    ],
+    footer:{text:'CLOSED:'+String(position?.positionId||'UNKNOWN')},
+    timestamp:new Date(Number(position?.closedAt)||Date.now()).toISOString()
+  }],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
 }
 function shadowTradePayload(position={}){
-  const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT'),side=String(position?.side||'—').toUpperCase();
+  const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT');
+  const side=String(position?.side||'—').toUpperCase();
   const pnl=Number(position?.lastMark?.unrealizedNetPnlQuote),ret=Number(position?.lastMark?.unrealizedReturnPct);
-  return {embeds:[{title:'TCX SHADOW TRADE · '+symbol+' · '+side,description:'**OPEN · SHADOW_ONLY**',fields:[
-    {name:'Entry',value:String(position?.entryPrice??'—'),inline:true},{name:'PnL',value:Number.isFinite(pnl)?money(pnl):'—',inline:true},{name:'Return',value:Number.isFinite(ret)?percent(ret):'—',inline:true},
-    {name:'Setup',value:String(position?.setupType||'UNKNOWN'),inline:true},{name:'Horizon',value:String(position?.horizonId||'—'),inline:true},{name:'Mode',value:String(position?.entryMode||'STANDARD'),inline:true}
-  ],footer:{text:String(position?.positionId||'TCX_SHADOW_POSITION')},timestamp:new Date(Number(position?.openedAt)||Date.now()).toISOString()}],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
+  const stop=position?.stopPrice??position?.risk?.stopPrice??position?.metadata?.stopPrice;
+  const target=position?.takeProfitPrice??position?.targetPrice??position?.risk?.takeProfitPrice??position?.metadata?.takeProfitPrice;
+  const thesis=position?.thesisHealth??position?.metadata?.thesisHealth;
+  return {embeds:[{
+    title:'BIGGJ // LIVE TRADE · '+symbol,
+    description:'**'+side+' · OPEN · SHADOW_ONLY**\n'+String(position?.setupType||position?.strategyId||'UNKNOWN')+' · '+String(position?.entryMode||'STANDARD'),
+    fields:[
+      {name:'LIVE PnL',value:(Number.isFinite(pnl)?money(pnl):'—')+' · '+(Number.isFinite(ret)?percent(ret):'—'),inline:false},
+      {name:'ENTRY',value:String(position?.entryPrice??'—'),inline:true},
+      {name:'STOP',value:String(stop??'—'),inline:true},
+      {name:'TARGET',value:String(target??'—'),inline:true},
+      {name:'THESIS',value:Number.isFinite(Number(thesis))?pct0(thesis):'Use Living Thesis',inline:true},
+      {name:'HORIZON',value:String(position?.horizonId||'—'),inline:true},
+      {name:'NEXT',value:'Chart → Thesis → Why → Risk. Deep tools remain available through commands.',inline:false}
+    ],
+    footer:{text:String(position?.positionId||'TCX_SHADOW_POSITION')},
+    timestamp:new Date(Number(position?.openedAt)||Date.now()).toISOString()
+  }],components:position?.symbol?marketActionComponents(position.symbol):[],allowedMentions:{parse:[]}};
 }
 function berlinParts(){
   const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
@@ -494,18 +517,14 @@ function marketActionComponents(symbol){
   const s=normalizeDiscordSymbol(symbol)||'BTCUSDT';
   return [
     {type:1,components:[
-      {type:2,style:1,label:'SuperChart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
-      {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s},
-      {type:2,style:2,label:'Warum?',custom_id:'dc3:why:'+s},
-      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:'+s},
-      {type:2,style:1,label:'Living Thesis',custom_id:'dc4:thesis:'+s}
+      {type:2,style:1,label:'Chart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
+      {type:2,style:1,label:'Thesis',custom_id:'dc4:thesis:'+s},
+      {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s}
     ]},
     {type:1,components:[
-      {type:2,style:2,label:'Flow',custom_id:'dc3:flow:'+s},
-      {type:2,style:2,label:'Liquidations',custom_id:'dc3:liqmap:'+s+':5m'},
-      {type:2,style:2,label:'X-Ray',custom_id:'dc3:xray:'+s},
-      {type:2,style:2,label:'Events',custom_id:'dc3:events:'+s},
-      {type:2,style:2,label:'Accuracy',custom_id:'dc3:accuracy:'+s}
+      {type:2,style:2,label:'Why',custom_id:'dc3:why:'+s},
+      {type:2,style:2,label:'Risk',custom_id:'dc3:terminal:risk:'+s},
+      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:'+s}
     ]},
     marketSelectRow()
   ];
@@ -606,7 +625,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
