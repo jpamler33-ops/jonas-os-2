@@ -493,6 +493,10 @@ function bindResearchEvidence(tree,{
       Number(a.firstSeenByLivingResearchAt||0)-Number(b.firstSeenByLivingResearchAt||0)||
       String(a.caseId).localeCompare(String(b.caseId))
     );
+  const episodePlan=resolveBiggjResearchEpisodes(cases,{
+    hypothesisCreatedAt:Number(skill.createdAt),
+    asOf:Number(asOf)
+  });
 
   const discoveryCases=cases.filter(row=>
     Number(row.firstSeenByLivingResearchAt||Infinity)<=Number(skill.createdAt)
@@ -562,17 +566,24 @@ function bindResearchEvidence(tree,{
     skill=researchSkillForTemplate(next,template);
     if(evidenceHasProvenance(skill,'persistentCaseId',row.caseId)) continue;
     const knownAt=Number(row.firstSeenByLivingResearchAt||asOf);
+    const episodeAssignment=researchEpisodeAssignment(episodePlan,row.caseId);
+    const independentEpisodeId=episodeAssignment?.independenceResolved===true
+      ?episodeAssignment.independentEpisodeId
+      :null;
     next=recordBiggjSkillEvidence(next,{
       skillId:skill.skillId,
       epistemicClass:'INFERRED',
       asOf:knownAt,
       availableAt:knownAt,
       sourceId:'THESIS_STABILITY_MEMORY',
-      independentEpisodeId:null,
+      independentEpisodeId,
       statement:
         'A new prospective forecast case entered persistent staleness for '+
         template.assumptionId+
-        ' after the research hypothesis already existed. Case identity is retained, but independence is intentionally unresolved.',
+        ' after the research hypothesis already existed. '+
+        (independentEpisodeId
+          ?'The case was assigned to a conservative common-cause episode; cases sharing that episode cannot inflate the independent-episode count.'
+          :'Episode independence remains unresolved and contributes no independent-episode count.'),
       outcome:'NEUTRAL',
       metricDelta:null,
       forwardShadow:true,
@@ -592,7 +603,14 @@ function bindResearchEvidence(tree,{
         firstPersistentStaleAt:row.firstPersistentStaleAt,
         firstSeenByLivingResearchAt:row.firstSeenByLivingResearchAt,
         sampledAfterFirstTwenty:i>=20,
-        independenceResolved:false,
+        episodeResolverVersion:BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION,
+        independentEpisodeId,
+        episodeStatus:episodeAssignment?.status??'UNRESOLVED',
+        episodeReasons:[...(episodeAssignment?.reasons||[])],
+        episodeAnchorCaseId:episodeAssignment?.episodeAnchorCaseId??null,
+        independenceResolved:episodeAssignment?.independenceResolved===true,
+        statisticalIndependenceProven:false,
+        crossSymbolAloneNeverCreatesIndependence:true,
         causalInterpretation:false
       }]
     });
@@ -653,7 +671,11 @@ function bindResearchEvidence(tree,{
     }
   }
 
-  return {tree:next,boundEvidenceIds:uniq(bound)};
+  return {
+    tree:next,
+    boundEvidenceIds:uniq(bound),
+    episodePlan
+  };
 }
 
 function livingResearchEvidenceSummary(tree){
@@ -698,6 +720,7 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     observedForecastIds:[],
     persistentCaseRegistry:[],
     stabilityEventRegistry:[],
+    researchEpisodeResolution:[],
     assumptionSignals:[],
     agenda:[],
     discoveredSkillIds:[],
@@ -814,6 +837,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
   }
 
   const boundEvidenceIds=[];
+  const researchEpisodeResolution=[];
   for(const signal of signals){
     if(!signal.researchRequired) continue;
     const template=templateByAssumption().get(signal.assumptionId);
@@ -826,6 +850,15 @@ export function refreshBiggjLivingResearchRuntime(state,{
     });
     tree=binding.tree;
     boundEvidenceIds.push(...binding.boundEvidenceIds);
+    if(binding.episodePlan){
+      researchEpisodeResolution.push({
+        assumptionId:signal.assumptionId,
+        version:binding.episodePlan.version,
+        fingerprint:binding.episodePlan.fingerprint,
+        counts:{...binding.episodePlan.counts},
+        policy:{...binding.episodePlan.policy}
+      });
+    }
   }
 
   const agenda=signals
@@ -847,6 +880,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
     observedForecastIds,
     persistentCaseRegistry,
     stabilityEventRegistry,
+    researchEpisodeResolution,
     assumptionSignals:signals,
     agenda,
     discoveredSkillIds:uniq([...(state.discoveredSkillIds||[]),...discovered]),
@@ -947,6 +981,11 @@ export function biggjLivingResearchRuntimeSummary(value){
     observedForecasts:(value?.observedForecastIds||[]).length,
     retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
     retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
+    researchEpisodeResolverVersion:BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION,
+    resolvedResearchEpisodes:(value?.researchEpisodeResolution||[])
+      .reduce((n,x)=>n+Number(x?.counts?.independentEpisodes||0),0),
+    unresolvedResearchCases:(value?.researchEpisodeResolution||[])
+      .reduce((n,x)=>n+Number(x?.counts?.unresolvedCases||0),0),
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
     researchEvidence:verifyBiggjSkillTree(value?.skillTree).ok
       ?livingResearchEvidenceSummary(value.skillTree)
