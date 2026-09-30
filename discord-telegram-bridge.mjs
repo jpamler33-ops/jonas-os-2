@@ -826,17 +826,17 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
   async function refreshNewsFeed(){
     const c=channelCache.get('news-feed');
-    if(c)try{return await refreshCorePanel(c,'news:all');}catch(err){fail('news-feed',err);}
+    if(c)try{return await refreshCorePanel(c,'news:all',{components:[]});}catch(err){fail('news-feed',err);}
     return null;
   }
   async function refreshWorldWatch(){
     const c=channelCache.get('world-watch');
-    if(c)try{return await refreshCorePanel(c,'news:geopolitics');}catch(err){fail('world-watch',err);}
+    if(c)try{return await refreshCorePanel(c,'news:geopolitics',{components:[]});}catch(err){fail('world-watch',err);}
     return null;
   }
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
-    if(c)try{return await refreshCorePanel(c,'home:memecoins');}catch(err){fail('memecoin-lab',err);}
+    if(c)try{return await refreshCorePanel(c,'home:memecoins',{components:[]});}catch(err){fail('memecoin-lab',err);}
     return null;
   }
   async function experienceCommand(interaction,channelName){
@@ -855,14 +855,14 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await interaction.editReply(buildBiggjDiscordObservabilityPayload(view,brain));
   }
   async function latestBotMessage(channel){try{const messages=await channel.messages.fetch({limit:20});return messages.find(m=>m.author?.id===client.user?.id)||null;}catch{return null;}}
-  async function renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto=false}={}){
+  async function renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto=false,components=null}={}){
     const chatId=fakeChatId(guildId,channel.id,'panel');
     await handleUpdate({update_id:'discord:auto:'+Date.now()+':'+channel.id,callback_query:{id:'discordcb:auto:'+Date.now()+':'+channel.id,from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},data:String(callbackData),message:{message_id:String(msg.id),chat:{id:chatId},text:String(msg.content||''),...((forcePhoto||msg.attachments?.size)?{photo:[{}]}:{})}}});
     try{
       const refreshed=await channel.messages.fetch(String(msg.id));
       const symbol=/:(\w+USDT)(?::|$)/.exec(String(callbackData||''))?.[1]||null;
-      const components=symbol?marketActionComponents(symbol):commandCenterComponents();
-      await refreshed.edit({components,allowedMentions:{parse:[]}});
+      const finalComponents=components??(symbol?marketActionComponents(symbol):commandCenterComponents());
+      await refreshed.edit({components:finalComponents,allowedMentions:{parse:[]}});
       return refreshed;
     }catch(err){fail('panel-components',err);return null;}
   }
@@ -916,9 +916,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return result;
   }
 
-  async function refreshCorePanel(channel,callbackData){
-    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'TCX // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
-    return renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto:Boolean(msg.attachments?.size)});
+  async function refreshCorePanel(channel,callbackData,{components=null}={}){
+    let msg=await latestBotMessage(channel); if(!msg)msg=await channel.send({content:'BIGGJ // PANEL\nInitialisierung …',allowedMentions:{parse:[]}});
+    return renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto:Boolean(msg.attachments?.size),components});
   }
   async function refreshMarketPanels(){
     let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
