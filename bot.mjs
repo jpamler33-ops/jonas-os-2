@@ -3588,7 +3588,7 @@ async function showMarkets(chatId,messageId) {
     chat_id:chatId,
     text:[
       '📊 COIN ANALYSIEREN','',
-      'Wähle einen Coin. Die Decision-Application zeigt dir danach auf einen Blick:'
+      'Wähle einen Coin. Die Decision-Application zeigt dir danach auf einen Blick:',
       '• aktuellen Preis und 24h-Bewegung',
       '• Richtung und Marktphase',
       '• Kauf-/Verkaufsdruck',
