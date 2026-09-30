@@ -6,6 +6,8 @@ import {
   createBiggjSkillTree,
   reconcileBiggjSkillTreeWithCapabilityMap,
   proposeBiggjChildSkill,
+  recordBiggjSkillEvidence,
+  evaluateBiggjSkillProgress,
   buildBiggjResearchQueue,
   biggjSkillTreeSnapshot,
   verifyBiggjSkillTree
