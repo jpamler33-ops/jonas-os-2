@@ -106,7 +106,8 @@ export function createInitialForecastThesisRevisionMemory({
     forecastId:id,
     issuanceId:text(issuance?.issuanceId),
     symbol:text(issuance?.symbol).toUpperCase(),
-    issuedAt:finite(issuance?.asOf,'issuance.asOf'),
+    decisionAsOf:finite(issuance?.asOf,'issuance.asOf'),
+    issueKnowledgeAt:finite(sidecar?.generatedAt,'sidecar.generatedAt'),
     issueGraphFingerprint:text(sidecar?.graphFingerprint),
     issueSidecarFingerprint:text(sidecar?.fingerprint),
     assumptionCount:assumptions.length,
@@ -142,7 +143,9 @@ export function verifyForecastThesisRevisionMemory(value){
       reasons.push('SAFETY_INVARIANT_INVALID');
     }
     if(!text(value?.forecastId)) reasons.push('FORECAST_ID_MISSING');
-    if(!Number.isFinite(Number(value?.issuedAt))) reasons.push('ISSUED_AT_INVALID');
+    if(!Number.isFinite(Number(value?.decisionAsOf))) reasons.push('DECISION_ASOF_INVALID');
+    if(!Number.isFinite(Number(value?.issueKnowledgeAt))) reasons.push('ISSUE_KNOWLEDGE_AT_INVALID');
+    if(Number(value?.issueKnowledgeAt)<Number(value?.decisionAsOf)) reasons.push('ISSUE_TIME_ORDER_INVALID');
     if(!Array.isArray(value?.assumptions)) reasons.push('ASSUMPTIONS_INVALID');
     if(!Array.isArray(value?.events)) reasons.push('EVENTS_INVALID');
     const expected=sha256(coreOf(value));
@@ -167,7 +170,7 @@ export function createForecastThesisRevisionArtifact({
     throw new Error('current thesis declarations version invalid');
   }
   const at=finite(observedAt,'observedAt');
-  if(at<Number(issuance.asOf)) throw new Error('observedAt cannot predate issuance');
+  if(at<Number(sidecar.generatedAt)) throw new Error('observedAt cannot predate issue knowledge time');
   if(Number(currentDeclarations.asOf)>at) throw new Error('current declarations cannot be from the future');
   if(Number(currentDeclarations.generatedAt)>at) throw new Error('revision cannot predate declaration knowledge time');
 
@@ -240,7 +243,8 @@ export function createForecastThesisRevisionArtifact({
     forecastId:text(issuance?.forecast?.forecastId),
     issuanceId:text(issuance?.issuanceId),
     symbol:text(issuance?.symbol).toUpperCase(),
-    issuedAt:finite(issuance?.asOf,'issuance.asOf'),
+    decisionAsOf:finite(issuance?.asOf,'issuance.asOf'),
+    issueKnowledgeAt:finite(sidecar?.generatedAt,'sidecar.generatedAt'),
     currentStateAsOf:finite(currentDeclarations?.asOf,'currentDeclarations.asOf'),
     observedAt:at,
     issueGraphFingerprint:text(sidecar?.graphFingerprint),
@@ -280,7 +284,8 @@ export function verifyForecastThesisRevisionArtifact(value){
     if(value?.execution!=='SHADOW_ONLY'||value?.action!=='ABSTAIN'||value?.canInfluencePrimary!==false||value?.canExecuteLive!==false){
       reasons.push('SAFETY_INVARIANT_INVALID');
     }
-    if(Number(value?.observedAt)<Number(value?.issuedAt)) reasons.push('TIME_ORDER_INVALID');
+    if(Number(value?.issueKnowledgeAt)<Number(value?.decisionAsOf)) reasons.push('ISSUE_TIME_ORDER_INVALID');
+    if(Number(value?.observedAt)<Number(value?.issueKnowledgeAt)) reasons.push('TIME_ORDER_INVALID');
     if(!Array.isArray(value?.assumptions)) reasons.push('ASSUMPTIONS_INVALID');
     const expected=sha256(coreOf(value));
     if(value?.fingerprint!==expected) reasons.push('FINGERPRINT_MISMATCH');
@@ -298,7 +303,7 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96}={}){
   if(memory.forecastId!==artifact.forecastId||memory.issuanceId!==artifact.issuanceId){
     throw new Error('thesis revision identity mismatch');
   }
-  if(Number(artifact.observedAt)<Number(memory.issuedAt)) throw new Error('revision predates issue');
+  if(Number(artifact.observedAt)<Number(memory.issueKnowledgeAt)) throw new Error('revision predates issue knowledge');
 
   const priorById=new Map(memory.assumptions.map(x=>[x.assumptionId,x]));
   const supportTransitions=[];
