@@ -339,3 +339,26 @@ test('source-event preflight deduplicates repeated events inside one capture bat
   assert.equal(result.novel.length,1);
   assert.equal(result.duplicates,1);
 });
+
+
+test('preflight conflictPolicy SKIP preserves first immutable source event and continues batch',async()=>{
+  const p=await plane();
+  const original=snap({sourceEventId:'immutable-event',features:[{id:'research.x',value:1}]});
+  await appendResearchDataPlane(p,[original]);
+  const conflict=snap({sourceEventId:'immutable-event',features:[{id:'research.x',value:9}]});
+  const novel=snap({sourceEventId:'next-event',features:[{id:'research.x',value:2}]});
+  const result=preflightResearchDataPlaneInputs(p,[conflict,novel],{conflictPolicy:'SKIP'});
+  assert.equal(result.conflicts.length,1);
+  assert.equal(result.conflicts[0].sourceEventId,'immutable-event');
+  assert.equal(result.novel.length,1);
+  assert.equal(result.novel[0].sourceEventId,'next-event');
+  assert.equal(p.seq,1);
+});
+
+test('preflight still throws on source-event conflict by default',async()=>{
+  const p=await plane();
+  const original=snap({sourceEventId:'strict-event',features:[{id:'research.x',value:1}]});
+  await appendResearchDataPlane(p,[original]);
+  const conflict=snap({sourceEventId:'strict-event',features:[{id:'research.x',value:3}]});
+  assert.throws(()=>preflightResearchDataPlaneInputs(p,[conflict]),/SOURCE_EVENT_ID_CONFLICT:strict-event/);
+});
