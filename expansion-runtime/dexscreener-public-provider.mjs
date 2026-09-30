@@ -27,6 +27,44 @@ function bestPair(rows=[]){
   })[0]||null;
 }
 
+function log1pNonNegative(v){
+  const n=finite(v);
+  return n!=null&&n>=0?Math.log1p(n):null;
+}
+
+export function dexScreenerLearningContextToExtraFeatures(context){
+  const radarRows=Array.isArray(context?.radar?.rows)?context.radar.rows:[];
+  const metaRows=Array.isArray(context?.metas?.rows)?context.metas.rows:[];
+  const pairs=radarRows.map(x=>x?.pair).filter(Boolean);
+  const rows=[];
+  const add=(id,value)=>{
+    const n=finite(value);
+    if(n!=null) rows.push({id,value:n});
+  };
+
+  if(pairs.length){
+    const liquidity=pairs.map(x=>finite(x?.liquidityUsd)).filter(x=>x!=null&&x>=0);
+    const volumeH1=pairs.map(x=>finite(x?.volumeH1)).filter(x=>x!=null&&x>=0);
+    const buys=pairs.reduce((s,x)=>s+Math.max(0,Math.floor(finite(x?.buysH1)??0)),0);
+    const sells=pairs.reduce((s,x)=>s+Math.max(0,Math.floor(finite(x?.sellsH1)??0)),0);
+    add('research.dex.boostedPairCount',pairs.length);
+    add('research.dex.boostedLiquidityLog',log1pNonNegative(liquidity.reduce((a,b)=>a+b,0)));
+    add('research.dex.boostedVolumeH1Log',log1pNonNegative(volumeH1.reduce((a,b)=>a+b,0)));
+    add('research.dex.boostedBuySellImbalanceH1',buys+sells>0?(buys-sells)/(buys+sells):0);
+  }
+
+  if(metaRows.length){
+    const liquidity=metaRows.map(x=>finite(x?.liquidity)).filter(x=>x!=null&&x>=0);
+    const volume=metaRows.map(x=>finite(x?.volume)).filter(x=>x!=null&&x>=0);
+    const tokenCount=metaRows.reduce((s,x)=>s+Math.max(0,Math.floor(finite(x?.tokenCount)??0)),0);
+    add('research.dex.trendingMetaLiquidityLog',log1pNonNegative(liquidity.reduce((a,b)=>a+b,0)));
+    add('research.dex.trendingMetaVolumeLog',log1pNonNegative(volume.reduce((a,b)=>a+b,0)));
+    add('research.dex.trendingMetaTokenCountLog',log1pNonNegative(tokenCount));
+  }
+
+  return rows;
+}
+
 function normalizePair(pair){
   if(!pair) return null;
   const h1=pair?.txns?.h1||{};
@@ -202,11 +240,42 @@ export function createDexScreenerPublicProvider({
     },{force});
   }
 
+  async function fetchLearningContext({
+    force=false,
+    radarLimit=6,
+    metaLimit=8,
+    chainIds=['solana','base','ethereum']
+  }={}){
+    const [radarResult,metaResult]=await Promise.allSettled([
+      fetchMemecoinRadar({limit:radarLimit,chainIds,force}),
+      fetchTrendingMetas({limit:metaLimit,force})
+    ]);
+    const radar=radarResult.status==='fulfilled'?radarResult.value:null;
+    const metas=metaResult.status==='fulfilled'?metaResult.value:null;
+    const errors=[
+      ...(radar?.errors||[]),
+      ...(radarResult.status==='rejected'?[{source:'memecoin-radar',error:radarResult.reason instanceof Error?radarResult.reason.message:String(radarResult.reason)}]:[]),
+      ...(metaResult.status==='rejected'?[{source:'trending-metas',error:metaResult.reason instanceof Error?metaResult.reason.message:String(metaResult.reason)}]:[])
+    ];
+    return Object.freeze({
+      version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+      capturedAt:Date.now(),
+      ok:Boolean(radar||metas),
+      radar,
+      metas,
+      errors:Object.freeze(errors),
+      source:'DEXSCREENER_PUBLIC_API',
+      epistemic:'PROMOTION_BIASED_DEX_ACTIVITY_CONTEXT_NOT_FORECAST_PROBABILITY'
+    });
+  }
+
   return Object.freeze({
     version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
     fetchTopBoosts,
     fetchTokenPairs,
     fetchMemecoinRadar,
-    fetchTrendingMetas
+    fetchTrendingMetas,
+    fetchLearningContext,
+    dexScreenerLearningContextToExtraFeatures
   });
 }
