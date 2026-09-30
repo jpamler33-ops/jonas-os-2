@@ -46,7 +46,8 @@ export function createTelegramChatLifecycle({
       idleForMs,
       hadExpired,
       wasResetDone,
-      trackedUiMessages:s.uiMessageIds.length
+      trackedUiMessages:s.uiMessageIds.length,
+      expiredUiMessageIds:hadExpired?[...s.uiMessageIds]:[]
     };
   }
 
@@ -69,6 +70,14 @@ export function createTelegramChatLifecycle({
     const before=s.uiMessageIds.length;
     s.uiMessageIds=s.uiMessageIds.filter(x=>x!==id);
     return s.uiMessageIds.length!==before;
+  }
+
+  function clearUiMessages(chatId){
+    const s=chats.get(key(chatId));
+    if(!s)return 0;
+    const count=s.uiMessageIds.length;
+    s.uiMessageIds=[];
+    return count;
   }
 
   function claimExpired({at=now(),limit=50}={}){
@@ -103,8 +112,9 @@ export function createTelegramChatLifecycle({
     const s=chats.get(key(chatId));
     if(!s)return false;
     s.resetInFlight=false;
-    s.resetDone=true;
+    s.resetDone=false;
     s.lastResetAt=now();
+    s.lastActivityAt=now();
     return true;
   }
 
@@ -126,6 +136,7 @@ export function createTelegramChatLifecycle({
     touch,
     recordUiMessage,
     forgetUiMessage,
+    clearUiMessages,
     claimExpired,
     completeReset,
     failReset,
