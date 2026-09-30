@@ -8,8 +8,12 @@ import {
   buildBiggjDiscordObservabilityPanelMap,
   buildBiggjDiscordObservabilityPayload
 } from './biggj-discord-observability.mjs';
+import {
+  BIGGJ_EXPERIENCE_LAYOUT,
+  buildBiggjExperiencePanelMap
+} from './biggj-experience-center.mjs';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V5';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -45,6 +49,11 @@ const COMMANDS=[
   {name:'experiments',description:'BIGGJ Research Experimente öffnen'},
   {name:'skills',description:'BIGGJ Skill Tree öffnen'},
   {name:'reviews',description:'BIGGJ Research Review Queue öffnen'},
+  {name:'timeline',description:'BIGGJ Learning Timeline öffnen'},
+  {name:'needs',description:'Was BIGGJ aktuell für maximale Effizienz braucht'},
+  {name:'learned',description:'BIGGJ Learned Playbook öffnen'},
+  {name:'traders',description:'BIGGJ Profit Trader Watch öffnen'},
+  {name:'cockpit',description:'BIGGJ Trade Cockpit öffnen'},
   {name:'progress',description:'BIGGJ Lernfortschritt öffnen'},
   {name:'evidence_log',description:'BIGGJ Evidence Ledger öffnen'},
   {name:'decisions',description:'BIGGJ Decision Trace öffnen'},
@@ -63,25 +72,26 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'}
   ]},
   ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT,
+  ...BIGGJ_EXPERIENCE_LAYOUT,
   {category:'TCX • MARKETS',channels:[
     {name:'market-overview',topic:'Übersicht der wichtigsten beobachteten Märkte.'},
     {name:'btc',topic:'BTC/USDT Live-Marktpanel von TCX.'},
     {name:'eth',topic:'ETH/USDT Live-Marktpanel von TCX.'},
     {name:'sol',topic:'SOL/USDT Live-Marktpanel von TCX.'},
-    {name:'memecoins',topic:'Memecoin Research und Watchlist. SHADOW_ONLY.'}
+    {name:'memecoins',topic:'Memecoin Intelligence Lab: Live DEX Trends, Liquidität, Risikoindikatoren, Datenlücken und Research. SHADOW_ONLY.'}
   ]},
   {category:'TCX • INTELLIGENCE',channels:[
     {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
-    {name:'global-intel',topic:'Global Events und Markt-Kontext aus TCX.'},
+    {name:'global-intel',topic:'Legacy Global-Intel Oberfläche; neue Nutzerflächen sind #news-feed und #world-watch.'},
     {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'},
     {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'},
     {name:'theses',topic:'BIGGJ Living Theses, Ghost Paths und Trade DNA für aktive Shadow-Trades.'}
   ]},
   {category:'TCX • SHADOW',channels:[
-    {name:'live-trades',topic:'Offene TCX Shadow-Trades. Keine echten Orders.'},
+    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades mit kompakter Thesis, Risiko, PnL und Live-Chart-Thread. Keine echten Orders.'},
     {name:'closed-trades',topic:'Abgeschlossene Shadow-Trades mit Ergebnis und Exit-Grund.'},
     {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
-    {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen.'}
+    {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen mit Point-in-Time Kontext.'}
   ]},
   {category:'BIGGJ • TRADING ACADEMY',channels:[
     {name:'academy-start',topic:'Startpunkt für Trading lernen mit BIGGJ. Paper/Shadow only.'},
@@ -579,6 +589,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const tradeCards=new Map();
   const thesisCards=new Map();
   const observabilityPanelDigests=new Map();
+  const experiencePanelDigests=new Map();
   const closedPosted=new Set();
   const timers=new Set();
   const visualRefreshQueue=createSerialDedupeQueue({maxSize:64});
@@ -595,7 +606,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
