@@ -39,6 +39,7 @@ test('maps strong DOWN forecast to shadow SELL',()=>{
   const d=deriveAutonomousShadowTrade(x,{now:1_030_000});
   assert.equal(d.eligible,true);
   assert.equal(d.side,'SELL');
+  assert.equal(d.notionalQuote,200);
 });
 
 test('CAUTION requires stronger edge than PASS',()=>{
