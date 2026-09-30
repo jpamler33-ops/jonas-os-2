@@ -9789,6 +9789,7 @@ function missionControlData(){
   claimAssumptionResearch:health.claimAssumptionResearch,
   researchCoverage,
   discovery,
+  autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   asOf:now
  });
  health.experienceNeeds=deriveBiggjExperienceNeeds({health});
