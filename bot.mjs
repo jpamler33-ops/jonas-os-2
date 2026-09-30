@@ -141,6 +141,11 @@ import {
   BIGGJ_AUTONOMOUS_OPERATOR_VERSION
 } from './biggj-autonomous-operator.mjs';
 import {
+  buildBiggjGovernanceTriage,
+  biggjGovernanceTriageSummary,
+  BIGGJ_GOVERNANCE_TRIAGE_VERSION
+} from './biggj-governance-triage.mjs';
+import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
@@ -8624,6 +8629,15 @@ async function shadowCompetitionWatcher(){
             rejected:promotionReviews.rejected,
             promotionReady:promotionReviews.promotionReady,
             failed:promotionReviews.failed,
+            decisions:(promotionReviews.results||[]).map(row=>({
+              candidateId:row?.candidateId??null,
+              ok:row?.ok===true,
+              decision:row?.ok===true?row?.review?.evaluation?.decision??null:null,
+              nextAction:row?.ok===true?row?.review?.nextAction??null:null,
+              missingProofs:row?.ok===true&&Array.isArray(row?.review?.missingProofs)?row.review.missingProofs:[],
+              reviewedAt:row?.ok===true?row?.review?.reviewedAt??null:null,
+              error:row?.ok===true?null:row?.error??'UNKNOWN_REVIEW_ERROR'
+            })),
             at:Date.now()
           };
           if(promotionReviews.candidates>0){
@@ -8939,6 +8953,7 @@ function autonomousResearchFactoryInputs(now=Date.now()){
   return {
     livingResearchState:biggjLivingResearchState,
     experimentGovernorSummary:experimentGovernorSummary(experimentGovernorState||{}),
+    modelPromotionReviewSummary:modelPromotionReviewLastSummary,
     modelCandidateRegistrySummary:modelCandidateRegistrySummary(modelCandidateRegistry),
     learnedChallengerSummary:learnedChallengerSummary(challengerLab),
     featureResearchSummary:featureResearchSummary(featureResearchState||{}),
@@ -9090,6 +9105,12 @@ function autonomousOperatorOwnerPolicies(){
       maxSilentMs:max3(shadowCompetitionEvalMs,300_000),
       recoveryAction:null
     },
+    MODEL_PROMOTION_REVIEW_SERVICE:{
+      enabled:shadowCompetitionEnabled===true&&shadowCompetitionServingWorkerEnabled===true,
+      operations:['forecast_shadow_competition'],
+      maxSilentMs:max3(shadowCompetitionEvalMs,300_000),
+      recoveryAction:null
+    },
     LEARNED_CHALLENGER_ENGINE:{
       enabled:autoLearnEnabled===true,
       operations:['forecast_autolearn_cycle'],
@@ -9209,6 +9230,11 @@ async function autonomousOperatorWatcher(){
 function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
+ const governanceTriage=buildBiggjGovernanceTriage({
+  livingResearchState:biggjLivingResearchState,
+  modelPromotionReviewSummary:modelPromotionReviewLastSummary,
+  asOf:now
+ });
  const health={
   ok:true,
   operationalReadiness:currentOperationalReadiness(),
@@ -9245,6 +9271,10 @@ function missionControlData(){
     lastError:autonomousOperatorLastError,
     file:autonomousOperatorFile,
     refreshMs:autonomousOperatorRefreshMs
+  },
+  governanceTriage:{
+    ...biggjGovernanceTriageSummary(governanceTriage),
+    version:BIGGJ_GOVERNANCE_TRIAGE_VERSION
   },
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
