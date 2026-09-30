@@ -469,7 +469,7 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · V7',description:[
+function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANNEL UX V7',description:[
   '**Ein Einstiegspunkt für das komplette BIGGJ Research OS — ohne durch alle Channels scrollen zu müssen.**',
   '',
   '**TÄGLICH · 90%-PFAD**',
@@ -683,6 +683,7 @@ function buildChannelSupervisorPayload(managerState={},translationHealth=null){
     description:'**Jeder Channel hat einen eigenen Manager. Dieser Supervisor überwacht wiederum alle Manager.**\nManager prüfen Zweck, Freshness, Fehler, Layout und nächsten Handlungsbedarf.',
     fields:[
       {name:'Gesamtzustand',value:String(managerState?.supervisor?.status||'—')+' · '+String(managerState?.healthy||0)+' gesund / '+String(managerState?.managers||0)+' Manager',inline:false},
+      {name:'Meta-Supervisor',value:String(managerState?.metaSupervisor?.status||'—')+' · Coverage '+Math.round(Number(managerState?.metaSupervisor?.managerCoverage||0)*100)+'% · Blindspots '+String(managerState?.metaSupervisor?.unprofiledManagers||0),inline:false},
       {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
       {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
       {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
@@ -900,7 +901,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -934,81 +935,14 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const snap=channelManagers.snapshot();
     state.channelManagerProblems=snap.problems;
     state.channelSupervisorStatus=snap.supervisor.status;
+    state.channelMetaSupervisorStatus=snap.metaSupervisor?.status||'UNKNOWN';
     state.translationHealth=germanTranslator.health();
     return snap;
   }
 
-  function noteChannelSuccess(name,detail='OK'){
-    channelManagers.observe(name,{exists:true,botMessageCount:1,lastMessageAt:Date.now(),lastDetail:detail});
-    channelManagers.success(name,detail);
-  }
   function snowflakeTime(id){
     try{return Number((BigInt(String(id))>>22n)+1420070400000n);}catch{return null;}
   }
-  function auditCachedChannels(){
-    for(const section of SERVER_LAYOUT){
-      for(const spec of section.channels){
-        const ch=channelCache.get(spec.name);
-        const desired=decoratedChannelTopic(spec);
-        channelManagers.observe(spec.name,{
-          exists:Boolean(ch),
-          parentMatches:ch?String(ch.parent?.name||'')===String(section.category):false,
-          topicMatches:ch?String(ch.topic||'')===String(desired||''):false,
-          lastMessageAt:ch?.lastMessageId?snowflakeTime(ch.lastMessageId):null
-        });
-      }
-    }
-    return managerSnapshot();
-  }
-  function managerStatusIcon(status){
-    if(status==='HEALTHY'||status==='IDLE_OK')return '●';
-    if(status==='DEGRADED'||status==='STALE')return '◐';
-    return '!';
-  }
-  function channelSupervisorPayload(){
-    const snap=auditCachedChannels();
-    const bad=snap.topProblems.slice(0,10).map(x=>
-      managerStatusIcon(x.status)+' **#'+x.name+'** · '+x.status+' · '+x.decision+'\n'+clip(x.reason,240)
-    ).join('\n\n')||'● Alle Channel-Manager melden aktuell einen gesunden/erwarteten Zustand.';
-    const translation=germanTranslator.health();
-    return {embeds:[{
-      title:'BIGGJ // CHANNEL SUPERVISOR',
-      description:'**Hierarchie:** Channel → eigener Manager → Supervisor → Meta-Check. Jeder Manager prüft Sollzustand, Freshness, Fehler und nächste Aktion.',
-      fields:[
-        {name:'Manager-Netz',value:'Verwaltet **'+snap.managers+'** Channels · gesund/idle **'+snap.healthy+'** · Probleme **'+snap.problems+'**',inline:false},
-        {name:'Supervisor',value:String(snap.supervisor.status)+' · Coverage '+Math.round(Number(snap.supervisor.coverage||0)*100)+'%',inline:true},
-        {name:'Deutsch-Layer',value:(translation.ok?'● OK':'◐ DEGRADED')+' · Cache '+String(translation.cacheSize)+' · Fehler '+String(translation.failures),inline:true},
-        {name:'Top Abweichungen',value:bad.slice(0,1024),inline:false},
-        {name:'Regel',value:'Layoutfehler werden automatisch repariert. Stale/Empty Live-Channels werden gezielt neu aufgebaut. Event-Channels werden nicht künstlich mit Spam gefüllt.',inline:false}
-      ],
-      footer:{text:'BIGGJ_CHANNEL_SUPERVISOR_V1'},
-      timestamp:new Date().toISOString()
-    }],components:[
-      {type:1,components:[
-        {type:2,style:1,label:'Datenstatus',custom_id:'dc3:home:data'},
-        {type:2,style:2,label:'Research Queue',custom_id:'dc6:brain:research'},
-        {type:2,style:2,label:'Entscheidungen',custom_id:'dc6:brain:decisions'}
-      ]}
-    ],allowedMentions:{parse:[]}};
-  }
-  function channelImprovementPayload(){
-    const snap=auditCachedChannels();
-    const actions=snap.supervisor.nextActions.slice(0,10).map((x,i)=>
-      '**'+(i+1)+'. #'+x.channel+' · '+x.decision+'**\n'+clip(x.suggestion,300)
-    ).join('\n\n')||'Aktuell keine priorisierten Reparaturen. Manager beobachten weiter Freshness, Funktion und Layout.';
-    return {embeds:[{
-      title:'BIGGJ // CHANNEL IMPROVEMENTS',
-      description:'**Automatisch erzeugte Verbesserungsliste aus echtem Channel-State.** Nur erkannte Abweichungen und konkrete Hebel.',
-      fields:[
-        {name:'JETZT',value:actions.slice(0,1024),inline:false},
-        {name:'Entscheidungslogik',value:'BROKEN/DEGRADED → reparieren · STALE/EMPTY → neu laden · HEALTHY → nichts ändern · EVENT FEED → auf Ereignis warten',inline:false},
-        {name:'Meta-Regel',value:'Der Supervisor bewertet die Manager selbst über Coverage und offene Problemzahl. Ein Manager darf seinen eigenen Status nicht als Beweis für Funktion behandeln.',inline:false}
-      ],
-      footer:{text:'BIGGJ_CHANNEL_IMPROVEMENTS_V1'},
-      timestamp:new Date().toISOString()
-    }],components:[],allowedMentions:{parse:[]}};
-  }
-
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
     const ctx=contexts.get(String(chatId)); const chunks=splitText(body.text,2000); let first=null;
@@ -2060,6 +1994,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       lastExperienceRefreshAt:state.lastExperienceRefreshAt,
       academyLastRefreshAt:state.academyLastRefreshAt,
       channelManagerStatus:managers.supervisor.status,
+      channelManagerMetaStatus:managers.metaSupervisor?.status||'UNKNOWN',
+      channelManagerCoverage:managers.metaSupervisor?.managerCoverage??null,
       channelManagerHealthy:managers.healthy,
       channelManagerProblems:managers.problems,
       translation:germanTranslator.health()
