@@ -24,20 +24,27 @@ function baseArtifacts({defect=false,custom=true}={}){
   const scientificValidity={fingerprint:'b'.repeat(64),gate:'PASS'};
   const admission={fingerprint:'c'.repeat(64),gate:'PASS'};
   const declarations=custom?{
+    evidence:defect?[]:[{
+      evidenceId:'THESIS_TEST_SUPPORT_EVIDENCE',
+      classification:'INFERRED',
+      statement:'Synthetic prospective thesis-support evidence for evaluator tests.',
+      provenanceIds:['TEST'],
+      availableAt:1010
+    }],
     assumptions:[{
-      assumptionId:defect?'CUSTOM-REQUIRES-EVIDENCE':'CUSTOM-DECLARED',
-      statement:defect?'This assumption requires missing evidence.':'Custom declared assumption.',
-      evidenceIds:[],
-      requiresEvidence:defect,
+      assumptionId:'THESIS_TEST_SUPPORT',
+      statement:'The synthetic thesis support condition is adequate.',
+      evidenceIds:defect?[]:['THESIS_TEST_SUPPORT_EVIDENCE'],
+      requiresEvidence:true,
       availableAt:1010
     }],
     claims:[{
-      claimId:'CUSTOM-CLAIM',
-      statement:'Custom thesis claim.',
+      claimId:'THESIS_TEST_CLAIM',
+      statement:'Synthetic thesis claim for paired evaluator tests.',
       epistemicClass:'INFERRED',
       required:true,
-      assumptionIds:[defect?'CUSTOM-REQUIRES-EVIDENCE':'CUSTOM-DECLARED'],
-      evidenceIds:[],
+      assumptionIds:['THESIS_TEST_SUPPORT'],
+      evidenceIds:defect?[]:['THESIS_TEST_SUPPORT_EVIDENCE'],
       availableAt:1010
     }]
   }:null;
@@ -181,6 +188,23 @@ test('invalid observation blocks research conclusion instead of silently droppin
   assert.equal(r.rejectedObservationCount,1);
   assert.equal(r.conclusion.state,'DATA_INTEGRITY_BLOCKED');
   assert.equal(r.conclusion.killReviewEligible,false);
+});
+
+test('evaluator attributes prospective outcome association to frozen thesis assumption support',()=>{
+  const rows=[];
+  let i=0;
+  for(let n=0;n<30;n++) rows.push(observation(i++,{challenger:true,baseline:false,topCorrect:n>=20}));
+  for(let n=0;n<30;n++) rows.push(observation(i++,{challenger:false,baseline:false,topCorrect:n>=5}));
+  const r=evaluateClaimAssumptionResearch(dataset(rows),{config:lowThresholds});
+  const a=r.byThesisAssumption.find(x=>x.assumptionId==='THESIS_TEST_SUPPORT');
+  assert.ok(a);
+  assert.equal(a.declaredObservations,60);
+  assert.equal(a.unsupportedObservations,30);
+  assert.equal(a.supportedObservations,30);
+  assert.ok(a.directionFailureRateDifference>0);
+  assert.equal(a.associationReady,true);
+  assert.equal(a.interpretation,'PROSPECTIVE_ASSOCIATION_ONLY_NOT_ASSUMPTION_TRUTH_OR_CAUSATION');
+  assert.equal(r.methodology.outcomeDoesNotValidateIndividualAssumptions,true);
 });
 
 test('same frozen dataset produces same evaluation fingerprint',()=>{

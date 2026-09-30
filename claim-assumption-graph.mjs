@@ -294,6 +294,23 @@ export function buildClaimAssumptionGraph({
     .filter(d=>claimRows.find(c=>c.claimId===d.claimId)?.required)
     .map(d=>d.claimId));
 
+  // Assumption-level defects must propagate through the declared assumption
+  // dependency graph to every required claim that depends on them. Without
+  // this, a REQUIRED_SUPPORT_MISSING assumption could raise the graph gate
+  // while diagnostics incorrectly reported zero affected required claims.
+  const defectiveAssumptionIds=new Set([
+    ...assumptionDefects.map(d=>d.assumptionId).filter(x=>assumptionMap.has(x)),
+    ...dependencyDefects.map(d=>d.assumptionId).filter(x=>assumptionMap.has(x)),
+    ...cycleDefects.flatMap(d=>Array.isArray(d.path)?d.path:[]).filter(x=>assumptionMap.has(x))
+  ]);
+  const impactByAssumption=new Map(impacts.map(x=>[x.assumptionId,x]));
+  for(const assumptionId of defectiveAssumptionIds){
+    for(const claimId of impactByAssumption.get(assumptionId)?.affectedRequiredClaimIds||[]){
+      requiredClaimDefects.add(claimId);
+    }
+  }
+  const affectedRequiredClaimIds=[...requiredClaimDefects].sort();
+
   const core={
     version:CLAIM_ASSUMPTION_GRAPH_VERSION,
     subjectId:subject,
@@ -314,7 +331,8 @@ export function buildClaimAssumptionGraph({
       assumptionCycles:cycles,
       defects,
       defectCount:defects.length,
-      affectedRequiredClaimCount:requiredClaimDefects.size,
+      affectedRequiredClaimCount:affectedRequiredClaimIds.length,
+      affectedRequiredClaimIds,
       researchGate:defects.length?'AUDIT_DEFECTS_PRESENT':'AUDIT_GRAPH_READY'
     },
     assumptionImpacts:impacts,

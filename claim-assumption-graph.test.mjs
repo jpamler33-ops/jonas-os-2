@@ -146,6 +146,29 @@ test('an explicit assumption without evidence is allowed unless support was decl
   ));
 });
 
+test('required assumption support defects propagate to dependent required claims',()=>{
+  const input=base();
+  input.assumptions[1].requiresEvidence=true;
+  const g=buildClaimAssumptionGraph(input);
+  assert.ok(g.diagnostics.defects.some(x=>
+    x.kind==='REQUIRED_ASSUMPTION_SUPPORT_MISSING'&&x.assumptionId==='A-LIQUIDITY'
+  ));
+  assert.equal(g.diagnostics.affectedRequiredClaimCount,1);
+  assert.deepEqual(g.diagnostics.affectedRequiredClaimIds,['C-DIRECTION']);
+});
+
+test('assumption defects propagate transitively but optional claims do not inflate required-claim impact',()=>{
+  const input=base();
+  input.assumptions[0].evidenceIds=[];
+  input.assumptions[0].requiresEvidence=true;
+  const g=buildClaimAssumptionGraph(input);
+  assert.equal(g.diagnostics.affectedRequiredClaimCount,1);
+  assert.deepEqual(g.diagnostics.affectedRequiredClaimIds,['C-DIRECTION']);
+  const impact=claimAssumptionInvalidationImpact(g,'A-REGIME');
+  assert.ok(impact.affectedClaimIds.includes('C-PATH'));
+  assert.ok(impact.affectedRequiredClaimIds.includes('C-DIRECTION'));
+});
+
 test('expired assumptions remain visible but invalidate dependent required claims in the audit',()=>{
   const input=base();
   input.assumptions[0].validUntil=950;

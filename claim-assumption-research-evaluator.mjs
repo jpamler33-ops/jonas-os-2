@@ -226,6 +226,55 @@ function overheadSummary(rows){
   };
 }
 
+function thesisAssumptionBreakdown(rows){
+  const ids=unique(rows.flatMap(row=>
+    Array.isArray(row?.issuanceAuditState?.thesisAssumptionIds)
+      ?row.issuanceAuditState.thesisAssumptionIds
+      :[]
+  )).sort();
+
+  return ids.map(assumptionId=>{
+    const declared=rows.filter(row=>
+      Array.isArray(row?.issuanceAuditState?.thesisAssumptionIds)&&
+      row.issuanceAuditState.thesisAssumptionIds.includes(assumptionId)
+    );
+    const unsupported=declared.filter(row=>
+      Array.isArray(row?.issuanceAuditState?.thesisUnsupportedAssumptionIds)&&
+      row.issuanceAuditState.thesisUnsupportedAssumptionIds.includes(assumptionId)
+    );
+    const supported=declared.filter(row=>!unsupported.includes(row));
+    const unsupportedFailures=unsupported.filter(primaryFailure).length;
+    const supportedFailures=supported.filter(primaryFailure).length;
+    const unsupportedMisses=unsupported.filter(intervalFailure).length;
+    const supportedMisses=supported.filter(intervalFailure).length;
+    const unsupportedFailureRate=safeRate(unsupportedFailures,unsupported.length);
+    const supportedFailureRate=safeRate(supportedFailures,supported.length);
+    const unsupportedIntervalMissRate=safeRate(unsupportedMisses,unsupported.length);
+    const supportedIntervalMissRate=safeRate(supportedMisses,supported.length);
+
+    return {
+      assumptionId,
+      declaredObservations:declared.length,
+      unsupportedObservations:unsupported.length,
+      supportedObservations:supported.length,
+      directionFailureWhenUnsupported:wilson95(unsupportedFailures,unsupported.length),
+      directionFailureWhenSupported:wilson95(supportedFailures,supported.length),
+      directionFailureRateDifference:
+        unsupportedFailureRate==null||supportedFailureRate==null
+          ?null
+          :unsupportedFailureRate-supportedFailureRate,
+      intervalMissWhenUnsupported:wilson95(unsupportedMisses,unsupported.length),
+      intervalMissWhenSupported:wilson95(supportedMisses,supported.length),
+      intervalMissRateDifference:
+        unsupportedIntervalMissRate==null||supportedIntervalMissRate==null
+          ?null
+          :unsupportedIntervalMissRate-supportedIntervalMissRate,
+      associationReady:unsupported.length>=20&&supported.length>=20,
+      interpretation:'PROSPECTIVE_ASSOCIATION_ONLY_NOT_ASSUMPTION_TRUTH_OR_CAUSATION'
+    };
+  });
+}
+
 function horizonBreakdown(rows){
   const ids=[...new Set(rows.map(x=>String(x?.horizonId??'UNKNOWN')))].sort();
   return ids.map(horizonId=>{
@@ -418,9 +467,11 @@ export function evaluateClaimAssumptionResearch(dataset,{config={},evaluatedAt=n
     continuousErrors:continuousErrorSummary(accepted),
     overhead:overheadSummary(accepted),
     byHorizon:horizonBreakdown(accepted),
+    byThesisAssumption:thesisAssumptionBreakdown(accepted),
     conclusion,
     dimensions:{
       unsupportedOrInvalidAssumptionDefectDetection:'MEASURED_BY_ISSUANCE_GRAPH_ALERTS',
+      assumptionLevelOutcomeAssociation:'MEASURED_PROSPECTIVELY_BY_FROZEN_SUPPORT_STATE',
       outcomeAssociation:'MEASURED_PROSPECTIVELY',
       revisionPrecision:'NOT_YET_MEASURED_NO_GRAPH_REVISION_STREAM',
       staleAssumptionDetection:'NOT_YET_MEASURED_NO_GRAPH_REVISION_STREAM',

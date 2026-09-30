@@ -110,6 +110,7 @@ test('institutional staged release set hashes forecast, science, admission and t
     'claim-assumption-graph.mjs',
     'forecast-claim-assumption-sidecar.mjs',
     'claim-assumption-research-evaluator.mjs',
+    'forecast-thesis-declarations.mjs',
     'institutional-forecast-issuance.mjs',
     'institutional-forecast-runtime.mjs',
     'forecast-product.mjs',
