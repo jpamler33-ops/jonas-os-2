@@ -153,7 +153,7 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/COMMODITIES/);
   assert.match(source,/DISCOVERY_ONLY/);
   assert.match(source,/noch nicht unabhängig verifiziert/);
-  assert.match(source,/slice\(-12\)/);
+  assert.match(source,/slice\(0,12\)/);
 });
 
 test('channel manager supervisor is wired across all declared channels without runtime dependencies',async()=>{
@@ -214,5 +214,27 @@ test('German news translation is bounded and concurrent so Discord startup canno
   assert.match(source,/TCX_DISCORD_NEWS_TRANSLATION_ATTEMPT_LIMIT\|\|18/);
   assert.match(source,/mapWithConcurrency\(candidates,newsTranslationConcurrency/);
   assert.match(source,/slice\(0,newsTranslationAttemptLimit\)/);
-  assert.match(source,/posted===0&&candidates\.length>0&&translationFailures>0&&strictGermanNews/);
+  assert.match(source,/mutations===0&&candidates\.length>0&&translationFailures>0&&strictGermanNews/);
+});
+
+
+test('legacy English news cards are progressively Germanized without sacrificing bounded startup work',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/existingByKey/);
+  assert.match(source,/migration:Boolean/);
+  assert.match(source,/DE_V1/);
+  assert.match(source,/Bestand germanisiert/);
+  assert.match(source,/existing\.message\.edit\(payload\)/);
+  assert.match(source,/mapWithConcurrency\(candidates,newsTranslationConcurrency/);
+  assert.match(source,/slice\(0,newsTranslationAttemptLimit\)/);
+});
+
+test('channel operations expose manager domain director and meta supervision layers',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/Domain-Supervisoren/);
+  assert.match(source,/Operations-Director/);
+  assert.match(source,/Meta-Supervisor/);
+  assert.match(source,/finalState\.operationsDirector/);
 });
