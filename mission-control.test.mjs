@@ -1,4 +1,46 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {missionControlSnapshot,renderMissionControlHtml} from './mission-control.mjs';
-test('mission control is explicitly shadow only',()=>{const s=missionControlSnapshot({health:{ok:true}});assert.equal(s.canExecuteLive,false);assert.match(renderMissionControlHtml(s),/SHADOW_ONLY/);});
-test('embedded state cannot inject a script tag',()=>{const h=renderMissionControlHtml(missionControlSnapshot({health:{x:'<script>'}}));assert.ok(!h.includes('"x":"<script>"'));assert.match(h,/"x":"\\u003cscript>"/);});
-test('mission control renders governed living research state',()=>{const s=missionControlSnapshot({health:{biggjLivingResearch:{healthy:true,integrity:'VALID',activeAgendaItems:1,researchRequired:1,discoveredResearchOnlySkills:1,discoveredResearchOnlySkillIds:['skill:research'],topResearchBottlenecks:[{assumptionId:'THESIS_WITNESS_SUPPORT_ADEQUATE',status:'RESEARCH_REQUIRED',informationValue:.73,primaryCapabilityId:'EVIDENCE_INDEPENDENCE'}],skillTree:{nodeCount:40,discovered:1,trusted:0,counts:{DISCOVERING:1}},researchProtocols:{total:1},researchReviews:{open:0},execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false}}});const h=renderMissionControlHtml(s);assert.match(h,/LIVING RESEARCH/);assert.match(h,/Research required/);assert.match(h,/Research-only skills/);assert.match(h,/"nodeCount":40/);assert.match(h,/skill\.nodeCount/);assert.match(h,/NONE · SHADOW_ONLY · ABSTAIN/);assert.equal(s.canExecuteLive,false);});
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
+
+test('mission control V2 remains explicitly shadow only',()=>{
+  const s=missionControlSnapshot({health:{ok:true}});
+  assert.equal(MISSION_CONTROL_VERSION,'TCX_MISSION_CONTROL_V2');
+  assert.equal(s.canExecuteLive,false);
+  assert.equal(s.execution,'SHADOW_ONLY');
+  const html=renderMissionControlHtml(s);
+  assert.match(html,/SHADOW_ONLY/);
+  assert.match(html,/BIGGJ/);
+});
+
+test('embedded state cannot inject a script tag',()=>{
+  const html=renderMissionControlHtml(missionControlSnapshot({health:{x:'<script>'}}));
+  assert.ok(!html.includes('"x":"<script>"'));
+  assert.match(html,/"x":"\\u003cscript>"/);
+});
+
+test('mobile command center exposes autonomy learning trades intel and system tabs',()=>{
+  const s=missionControlSnapshot({
+    health:{
+      autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false,automationCoverage:1},
+      autonomousResearchFactory:{mode:'DATA_COLLECTION_ONLY'},
+      researchCoverage:{averageCoverage:.75,blocked:0},
+      biggjObservability:{
+        maturityIndex:.6,
+        trustedSkills:2,
+        knowledge:[{skillId:'s1',title:'Structure',status:'VALIDATED',uncertainty:.2}],
+        researchQueue:[{skillId:'s2',title:'Liquidity',nextGate:'FORWARD_SHADOW',priority:.7,uncertainty:.4}],
+        learningTimeline:{events:[]}
+      },
+      experienceNeeds:[{priority:2,label:'More live data',detail:'coverage gap'}],
+      globalIntel:{eventCount:0,recent:[]},
+      traderWatch:{sourceReady:false,nextNeed:'PIT public performance source'}
+    },
+    portfolio:{equityQuote:1000,openPositions:0,closedTrades:0,netPnlQuote:0,positions:[],recentClosed:[]}
+  });
+  const html=renderMissionControlHtml(s);
+  for(const x of ['data-tab="home"','data-tab="learn"','data-tab="trades"','data-tab="intel"','data-tab="system"','What BIGGJ needs','Trader watch']){
+    assert.match(html,new RegExp(x));
+  }
+  assert.match(html,/app\.webmanifest/);
+  assert.match(html,/serviceWorker/);
+});
