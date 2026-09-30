@@ -230,6 +230,7 @@ export function verifyBiggjSignalLab(value){
   if(value?.version!==BIGGJ_SIGNAL_LAB_VERSION)reasons.push('VERSION_INVALID');
   if(value?.safety?.execution!=='SHADOW_ONLY'||value?.safety?.action!=='ABSTAIN'||value?.safety?.canExecute!==false||value?.safety?.canExecuteLive!==false)reasons.push('SAFETY_INVALID');
   if(value?.probability?.displayAllowed!==true&&value?.probability?.calibrated!=null)reasons.push('SUPPRESSED_PROBABILITY_LEAK');
+  if(value?.modeView?.status!=='AVAILABLE'&&value?.state!=='ABSTAIN')reasons.push('INSUFFICIENT_MODE_MUST_ABSTAIN');
   const {fingerprint,...core}=value||{};
   if(fingerprint!==sha256(core))reasons.push('FINGERPRINT_MISMATCH');
   return {ok:reasons.length===0,reasons};
