@@ -8336,41 +8336,102 @@ async function syncExperimentGovernor({evaluate=false}={}){
   return experimentGovernorState;
 }
 
+function currentShadowCompetitionAdmission(mode=shadowCompetitionWorkerMode){
+  const memory=process.memoryUsage();
+  return evaluateShadowWorkerAdmission({
+    mode,
+    heapUsedMb:Math.round(memory.heapUsed/1024/1024),
+    rssMb:Math.round(memory.rss/1024/1024),
+    externalMb:Math.round(memory.external/1024/1024),
+    autoHeapMb:shadowCompetitionAutoHeapMb,
+    autoRssMb:shadowCompetitionAutoRssMb,
+    autoExternalMb:shadowCompetitionAutoExternalMb,
+    hardHeapMb:300,
+    hardRssMb:900,
+    hardExternalMb:shadowCompetitionHardExternalMb
+  });
+}
+
+async function acquireShadowCompetitionResearchSlot(){
+  let attempts=0;
+  let headroomWaitMs=0;
+  let slotWaitMs=0;
+  let lastAdmission=null;
+  const maxAttempts=Math.max(
+    1,
+    Math.ceil(shadowCompetitionHeadroomRetryMs/shadowCompetitionHeadroomPollMs)
+  );
+
+  while(running){
+    const slotStarted=Date.now();
+    while(running&&activeBackgroundResearchJob) await sleep(250);
+    slotWaitMs+=Date.now()-slotStarted;
+    if(!running){
+      return {
+        acquired:false,
+        admission:lastAdmission,
+        attempts,
+        headroomWaitMs,
+        slotWaitMs,
+        reason:'SHUTDOWN'
+      };
+    }
+
+    const admission=currentShadowCompetitionAdmission();
+    lastAdmission=admission;
+    if(admission.allowed){
+      activeBackgroundResearchJob='shadow-competition';
+      return {
+        acquired:true,
+        admission,
+        attempts,
+        headroomWaitMs,
+        slotWaitMs,
+        recovered:attempts>0,
+        reason:attempts>0?'HEADROOM_RECOVERED':'HEADROOM_AVAILABLE'
+      };
+    }
+
+    const policy=shadowWorkerHeadroomRetryPolicy(admission,{
+      attempt:attempts,
+      elapsedMs:headroomWaitMs,
+      maxAttempts,
+      maxWaitMs:shadowCompetitionHeadroomRetryMs,
+      pollMs:shadowCompetitionHeadroomPollMs
+    });
+    if(!policy.retry){
+      return {
+        acquired:false,
+        admission,
+        attempts,
+        headroomWaitMs,
+        slotWaitMs,
+        recovered:false,
+        reason:policy.terminalReason
+      };
+    }
+
+    attempts++;
+    await sleep(policy.delayMs);
+    headroomWaitMs+=policy.delayMs;
+  }
+
+  return {
+    acquired:false,
+    admission:lastAdmission,
+    attempts,
+    headroomWaitMs,
+    slotWaitMs,
+    recovered:false,
+    reason:'SHUTDOWN'
+  };
+}
+
 async function shadowCompetitionWatcher(){
   while(running){
     const started=Date.now();
     try{
       if(shadowCompetitionEnabled&&shadowCompetitionServingWorkerEnabled&&forecastRuntime.healthy){
-        const memory=process.memoryUsage();
-        const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
-        const rssMb=Math.round(memory.rss/1024/1024);
-        const externalMb=Math.round(memory.external/1024/1024);
-        const admission=evaluateShadowWorkerAdmission({
-          mode:shadowCompetitionWorkerMode,
-          heapUsedMb,
-          rssMb,
-          externalMb,
-          autoHeapMb:shadowCompetitionAutoHeapMb,
-          autoRssMb:shadowCompetitionAutoRssMb,
-          autoExternalMb:shadowCompetitionAutoExternalMb,
-          hardHeapMb:300,
-          hardRssMb:900,
-          hardExternalMb:shadowCompetitionHardExternalMb
-        });
-        shadowCompetitionWorkerLastDecision={...admission,at:Date.now()};
-        if(!admission.allowed){
-          shadowCompetitionWorkerMemoryDeferrals++;
-          console.warn('shadow competition deferred for memory headroom',JSON.stringify({
-            mode:shadowCompetitionWorkerMode,
-            reason:admission.reason,
-            heapUsedMb,rssMb,externalMb,
-            historyRows:forecastRuntime.engine.historySize(),
-            limits:admission.limits
-          }));
-          recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'DEFERRED_'+admission.reason});
-          await sleep(shadowCompetitionEvalMs);
-          continue;
-        }
         const preflightHistoryProgressAt=forecastRuntime.engine.historyProgressAt(
           Number.POSITIVE_INFINITY,
           {limit:shadowCompetitionHistoryRows}
@@ -8381,7 +8442,7 @@ async function shadowCompetitionWatcher(){
         ){
           shadowCompetitionWorkerNoChangeSkips++;
           shadowCompetitionWorkerLastDecision={
-            ...admission,
+            ...currentShadowCompetitionAdmission(),
             at:Date.now(),
             allowed:false,
             reason:'NO_NEW_PIT_HISTORY',
@@ -8391,14 +8452,52 @@ async function shadowCompetitionWatcher(){
           await sleep(shadowCompetitionEvalMs);
           continue;
         }
-        const slotWaitStarted=Date.now();
-        while(running&&activeBackgroundResearchJob) await sleep(250);
-        if(!running) break;
-        const slotWaitMs=Date.now()-slotWaitStarted;
-        activeBackgroundResearchJob='shadow-competition';
+        const slot=await acquireShadowCompetitionResearchSlot();
+        shadowCompetitionWorkerLastDecision={
+          ...(slot.admission||{}),
+          at:Date.now(),
+          allowed:slot.acquired,
+          reason:slot.reason,
+          stage:'HEADROOM_WINDOW',
+          attempts:slot.attempts,
+          headroomWaitMs:slot.headroomWaitMs,
+          slotWaitMs:slot.slotWaitMs
+        };
+        if(!slot.acquired){
+          shadowCompetitionWorkerMemoryDeferrals++;
+          const detail={
+            mode:shadowCompetitionWorkerMode,
+            reason:slot.reason,
+            attempts:slot.attempts,
+            headroomWaitMs:slot.headroomWaitMs,
+            slotWaitMs:slot.slotWaitMs,
+            memory:slot.admission?.memory||null,
+            limits:slot.admission?.limits||null,
+            historyRows:forecastRuntime.engine.historySize()
+          };
+          if(slot.admission?.reason==='HARD_MEMORY_PRESSURE') console.warn('shadow competition hard memory defer',JSON.stringify(detail));
+          else console.info('shadow competition headroom window exhausted',JSON.stringify(detail));
+          recordOperation(observability,{
+            name:'forecast_shadow_competition',
+            ok:true,
+            latencyMs:Date.now()-started,
+            error:'DEFERRED_HEADROOM_WINDOW_'+String(slot.reason||'UNKNOWN')
+          });
+          await sleep(shadowCompetitionEvalMs);
+          continue;
+        }
+        if(slot.recovered){
+          console.info('shadow competition headroom recovered',JSON.stringify({
+            attempts:slot.attempts,
+            headroomWaitMs:slot.headroomWaitMs,
+            slotWaitMs:slot.slotWaitMs,
+            memory:slot.admission?.memory||null,
+            thresholds:slot.admission?.limits||null
+          }));
+        }
 
+        const slotWaitMs=slot.slotWaitMs;
         let result=null;
-        let freshAdmission=null;
         let payloadAdmission=null;
         let history=null;
         let historyProgressAt=preflightHistoryProgressAt;
