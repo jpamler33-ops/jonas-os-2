@@ -54,6 +54,11 @@ const COMMANDS=[
   {name:'learned',description:'BIGGJ Learned Playbook öffnen'},
   {name:'traders',description:'BIGGJ Profit Trader Watch öffnen'},
   {name:'cockpit',description:'BIGGJ Trade Cockpit öffnen'},
+  {name:'charts',description:'BIGGJ One-Tap Chart Desk öffnen'},
+  {name:'news',description:'BIGGJ relevanten Live-News-Feed öffnen'},
+  {name:'world',description:'BIGGJ Weltlage öffnen'},
+  {name:'memecoins',description:'BIGGJ Memecoin Live-Radar öffnen'},
+  {name:'app',description:'BIGGJ Mobile Command Center öffnen'},
   {name:'progress',description:'BIGGJ Lernfortschritt öffnen'},
   {name:'evidence_log',description:'BIGGJ Evidence Ledger öffnen'},
   {name:'decisions',description:'BIGGJ Decision Trace öffnen'},
@@ -1428,8 +1433,10 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='lesson'){await lessonCommand(interaction);return;}
     const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
-    const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit'};
+    const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
     if(experienceViews[name]){await experienceCommand(interaction,experienceViews[name]);return;}
+    const liveSurfaceCallbacks={news:'news:all',world:'news:geopolitics',memecoins:'home:memecoins'};
+    if(liveSurfaceCallbacks[name]){await runCoreCallback(interaction,liveSurfaceCallbacks[name]);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
     const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
