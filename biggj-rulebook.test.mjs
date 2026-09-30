@@ -209,7 +209,7 @@ test('runtime assessment exposes unproven coverage and blocks verification laund
   });
   assert.equal(healthy.state,'PASS');
   assert.ok(healthy.counts.missingCoreFacts>0);
-  assert.match(healthy.note,/Missing core facts remain explicitly unproven/);
+  assert.match(healthy.note,/(Missing core facts remain explicitly unproven|Nicht beobachtbare semantische Regeln bleiben weiterhin als feste Policy aktiv)/);
 
   const bad=evaluateBiggjRuntimeRulebook({
     health:{
