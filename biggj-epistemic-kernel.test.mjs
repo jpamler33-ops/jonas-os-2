@@ -83,6 +83,16 @@ test('a theory cannot be registered without a falsifier and null hypothesis',()=
   );
 });
 
+test('scientific theory identity is independent of source tags',()=>{
+  let ledger=createEpistemicLedger({asOf:T0});
+  const first=registerTheory(ledger,{...theoryInput(),tags:['source-a','skill-a']},{at:T0});
+  ledger=first.ledger;
+  const second=registerTheory(ledger,{...theoryInput(),tags:['source-b','skill-b']},{at:T0+1});
+  assert.equal(second.created,false);
+  assert.equal(second.reason,'THEORY_ALREADY_EXISTS');
+  assert.equal(second.existingTheoryId,first.theory.theoryId);
+});
+
 test('synthetic worlds can stress a theory but never count as empirical support',()=>{
   const {ledger:base,theory}=newTheory();
   const x=appendTheoryEvidence(base,theory.theoryId,{
