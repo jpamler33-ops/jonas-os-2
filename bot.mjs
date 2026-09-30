@@ -449,7 +449,7 @@ const forecastHotIssuances = Math.max(200, Math.min(800, Math.floor(Number(proce
 const forecastHotTracked = Math.max(200, Math.min(800, Math.floor(Number(process.env.TCX_FORECAST_HOT_TRACKED || 400) || 400)));
 const forecastColdBatchThreshold = Math.max(50, Math.min(300, Math.floor(Number(process.env.TCX_FORECAST_COLD_BATCH_THRESHOLD || 100) || 100)));
 const forecastColdMinAgeMs = Math.max(4*60*60_000, Math.min(24*60*60_000, Number(process.env.TCX_FORECAST_COLD_MIN_AGE_MS || 6*60*60_000)));
-const researchPlaneMaxMemoryRecords = Math.max(1500, Math.min(5000, Math.floor(Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS || 3000) || 3000)));
+const researchPlaneMaxMemoryRecords = Math.max(1000, Math.min(5000, Math.floor(Number(process.env.TCX_RESEARCH_DATA_PLANE_MAX_MEMORY_RECORDS || 2000) || 2000)));
 const marketFabricMaxMemoryEvents = Math.max(2000, Math.min(8000, Math.floor(Number(process.env.TCX_MARKET_FABRIC_MAX_MEMORY_EVENTS || 4000) || 4000)));
 const auditLedgerMaxMemoryRecords = Math.max(50, Math.min(2000, Math.floor(Number(process.env.TCX_AUDIT_LEDGER_MAX_MEMORY_RECORDS || 500) || 500)));
 const auditLedgerMaxBytes = Math.max(48*1024*1024, Math.min(128*1024*1024, Number(process.env.TCX_AUDIT_LEDGER_MAX_BYTES || 64*1024*1024)));
@@ -736,7 +736,7 @@ const forecastRuntimeLegacyFile=configuredForecastRuntimeFile?null:'/data/tcx-fo
 const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFile,{
   legacyFilePath:forecastRuntimeLegacyFile,
   snapshotCompression:'gzip',
-  maxHistoryRows:Math.max(2000,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||2000)))),
+  maxHistoryRows:Math.max(1200,Math.min(8000,Math.floor(Number(process.env.TCX_FORECAST_MAX_HISTORY_ROWS||1600)))),
   maxSnapshotBytes:Math.max(64*1024*1024,Math.min(96*1024*1024,Math.floor(Number(process.env.TCX_FORECAST_MAX_SNAPSHOT_BYTES||80*1024*1024)))),
   maxJournalEntries:forecastJournalMaxEntries,
   maxAuditEvents:forecastAuditMaxEvents,
@@ -8399,10 +8399,14 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture',{skipPrevio
     const submitted=(Array.isArray(inputs)?inputs:[]).filter(Boolean);
     const observedFilter=skipPreviouslyObservedSourceEvents
       ?filterPreviouslyObservedNewsSnapshots(researchDataPlane,submitted)
-      :{candidates:submitted,previouslyObserved:0};
+      :{candidates:submitted,previouslyObserved:0,batchDuplicates:0};
     const candidateInputs=observedFilter.candidates;
-    const previouslyObserved=observedFilter.previouslyObserved;
-    const preflight=preflightResearchDataPlaneInputs(researchDataPlane,candidateInputs);
+    const previouslyObserved=Number(observedFilter.previouslyObserved||0);
+    const batchDuplicates=Number(observedFilter.batchDuplicates||0);
+    // Runtime ingestion is fail-closed per conflicting source event: keep the
+    // already persisted immutable event, skip only the conflicting capture,
+    // and continue the rest of the batch. Direct RDP callers still THROW by default.
+    const preflight=preflightResearchDataPlaneInputs(researchDataPlane,candidateInputs,{conflictPolicy:'SKIP'});
     const nextGovernance=structuredClone(researchDataGovernance);
     refreshResearchSourceFreshness(nextGovernance,{
       now:started,
@@ -8432,8 +8436,11 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture',{skipPrevio
     return {
       ok:true,
       appended:result.appended.length,
-      duplicates:previouslyObserved+preflight.duplicates+result.duplicates,
+      duplicates:previouslyObserved+batchDuplicates+preflight.duplicates+result.duplicates,
       previouslyObserved,
+      batchDuplicates,
+      sourceEventConflicts:preflight.conflicts.length,
+      sourceEventConflictSamples:preflight.conflicts.slice(0,4),
       governed:governed.length,
       restrictedSources:governanceSummary.quarantinedSources.length,
       governanceFingerprint:governanceSummary.fingerprint
