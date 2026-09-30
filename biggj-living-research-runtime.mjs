@@ -24,6 +24,12 @@ import {
   researchProtocolSummary,
   BIGGJ_RESEARCH_PROTOCOL_VERSION
 } from './biggj-research-protocol-compiler.mjs';
+import {
+  buildBiggjResearchReviewQueue,
+  applyBiggjResearchReviewDecision,
+  verifyBiggjResearchReviewQueue,
+  BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION
+} from './biggj-research-review-queue.mjs';
 
 export const BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION='TCX_BIGGJ_LIVING_RESEARCH_RUNTIME_V1';
 export const BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION='TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2';
@@ -754,6 +760,8 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     stabilityEventRegistry:[],
     researchEpisodeResolution:[],
     researchProtocols:[],
+    researchReviewQueue:buildBiggjResearchReviewQueue({tree:skillTree,protocols:[],asOf:t}),
+    researchReviewDecisions:[],
     assumptionSignals:[],
     agenda:[],
     discoveredSkillIds:[],
@@ -794,6 +802,11 @@ export function verifyBiggjLivingResearchRuntime(value){
     if(!Array.isArray(value?.observedForecastIds)) reasons.push('OBSERVED_FORECAST_IDS_INVALID');
     if(!Array.isArray(value?.persistentCaseRegistry)) reasons.push('PERSISTENT_CASE_REGISTRY_INVALID');
     if(!Array.isArray(value?.stabilityEventRegistry)) reasons.push('STABILITY_EVENT_REGISTRY_INVALID');
+    const rqv=verifyBiggjResearchReviewQueue(value?.researchReviewQueue);
+    if(!rqv.ok) reasons.push('RESEARCH_REVIEW_QUEUE_INVALID:'+rqv.reasons.join('|'));
+    if(value?.researchReviewDecisions!=null&&!Array.isArray(value.researchReviewDecisions)){
+      reasons.push('RESEARCH_REVIEW_DECISIONS_INVALID');
+    }
     if(value?.researchProtocols!=null&&!Array.isArray(value.researchProtocols)){
       reasons.push('RESEARCH_PROTOCOLS_INVALID');
     }else{
@@ -963,6 +976,12 @@ export function refreshBiggjLivingResearchRuntime(state,{
     stabilityEventRegistry,
     researchEpisodeResolution,
     researchProtocols,
+    researchReviewQueue:buildBiggjResearchReviewQueue({
+      tree,
+      protocols:researchProtocols,
+      asOf:t
+    }),
+    researchReviewDecisions:[...(state.researchReviewDecisions||[])].slice(-256),
     assumptionSignals:signals,
     agenda,
     discoveredSkillIds:uniq([...(state.discoveredSkillIds||[]),...discovered]),
@@ -1031,6 +1050,58 @@ export async function openBiggjLivingResearchRuntime(filePath,{asOf=Date.now()}=
   };
 }
 
+export function applyBiggjLivingResearchReviewDecision(state,{
+  ticketId,
+  approved,
+  asOf=Date.now(),
+  reviewer='OPERATOR'
+}={}){
+  const v=verifyBiggjLivingResearchRuntime(state);
+  if(!v.ok) throw new Error('living research runtime invalid: '+v.reasons.join(','));
+  const ticket=(state?.researchReviewQueue?.tickets||[]).find(x=>x.ticketId===ticketId);
+  if(!ticket) throw new Error('research review ticket missing');
+  const result=applyBiggjResearchReviewDecision({
+    tree:state.skillTree,
+    ticket,
+    approved,
+    asOf,
+    reviewer
+  });
+  const nextTree=result.tree;
+  const nextQueue=buildBiggjResearchReviewQueue({
+    tree:nextTree,
+    protocols:state.researchProtocols||[],
+    asOf
+  });
+  const core={
+    ...coreOf(state),
+    updatedAt:Number(asOf),
+    revision:Number(state.revision||0)+1,
+    skillTree:nextTree,
+    researchReviewQueue:nextQueue,
+    researchReviewDecisions:[
+      ...(state.researchReviewDecisions||[]),
+      structuredClone(result.decision)
+    ].slice(-256),
+    canonicalResearchQueue:buildBiggjResearchQueue(nextTree,{limit:20}).queue,
+    lastRefreshReason:'EXPLICIT_RESEARCH_REVIEW_DECISION',
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  };
+  return deepFreeze({
+    changed:result.changed,
+    state:finalized(core),
+    decision:result.decision,
+    productionMutationPerformed:false,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  });
+}
+
 export async function saveBiggjLivingResearchRuntime(filePath,state){
   const v=verifyBiggjLivingResearchRuntime(state);
   if(!v.ok) throw new Error('living research runtime invalid: '+v.reasons.join(','));
@@ -1079,6 +1150,20 @@ export function biggjLivingResearchRuntimeSummary(value){
     unresolvedResearchCases:(value?.researchEpisodeResolution||[])
       .reduce((n,x)=>n+Number(x?.counts?.unresolvedCases||0),0),
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
+    researchReviews:{
+      version:BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION,
+      open:Number(value?.researchReviewQueue?.ticketCount||0),
+      blocked:Number(value?.researchReviewQueue?.blockedCount||0),
+      decisions:(value?.researchReviewDecisions||[]).length,
+      automaticApply:false,
+      topTickets:(value?.researchReviewQueue?.tickets||[]).slice(0,8).map(x=>({
+        ticketId:x.ticketId,
+        skillId:x.skillId,
+        fromStatus:x.fromStatus,
+        proposedStatus:x.proposedStatus,
+        evidenceState:x.evidenceState
+      }))
+    },
     researchProtocols:{
       version:BIGGJ_RESEARCH_PROTOCOL_VERSION,
       total:protocols.length,
