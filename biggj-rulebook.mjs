@@ -576,3 +576,34 @@ export function biggjRulebookInstructionPacket({domains=null}={}){
     canExecuteLive:false
   });
 }
+
+
+export function renderBiggjRulebookMarkdown(){
+  const lines=[
+    '# BIGGJ INTERNAL RULEBOOK',
+    '',
+    '**Version:** '+BIGGJ_RULEBOOK_VERSION,
+    '',
+    '**Hierarchie:** HARD > HIGH > MEDIUM. Downstream darf nur gleich streng oder strenger werden.',
+    '',
+    'Das Rulebook beschreibt für jede Regel sowohl den Sollzustand als auch den expliziten Nicht-Sollzustand.',
+    ''
+  ];
+  for(const [domain,description] of Object.entries(BIGGJ_RULEBOOK_DOMAINS)){
+    lines.push('## '+domain,'',String(description),'');
+    for(const rule of BIGGJ_RULEBOOK_RULES.filter(x=>x.domain===domain)){
+      lines.push('### '+rule.id+' · '+rule.title,'');
+      lines.push('- **Severity:** '+rule.severity);
+      lines.push('- **Art:** '+rule.kind);
+      lines.push('- **MUSS:** '+rule.must);
+      lines.push('- **DARF NICHT:** '+rule.mustNot);
+      lines.push('- **WARUM:** '+rule.why);
+      lines.push('- **ERKENNUNG:** '+(rule.detect.length?rule.detect.join(' · '):'manueller/semantischer Audit'));
+      lines.push('- **REAKTION:** '+rule.response);
+      if(rule.badExamples.length)lines.push('- **Negativbeispiel:** '+rule.badExamples.join(' · '));
+      if(rule.goodExamples.length)lines.push('- **Gutes Gegenbeispiel:** '+rule.goodExamples.join(' · '));
+      lines.push('');
+    }
+  }
+  return lines.join('\n');
+}
