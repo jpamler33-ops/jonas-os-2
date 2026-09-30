@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   NEWS_RESEARCH_ADAPTER_VERSION,
   buildNewsResearchSnapshots,
+  filterPreviouslyObservedNewsSnapshots,
   newsEventToResearchSnapshot,
   newsResearchSnapshotKey
 } from './news-research-adapter.mjs';
@@ -98,4 +99,14 @@ test('registered official NEWS_EVENT snapshot passes central source governance r
   assert.equal(governed.governance.decision,'ACCEPT');
   assert.equal(governed.governance.usableForResearch,true);
   assert.equal(governed.governance.canExecute,false);
+});
+
+
+test('previously persisted source event is skipped before payload-conflict preflight',()=>{
+  const first=newsEventToResearchSnapshot(official,{symbol:'BTCUSDT',ingestedAt:OBSERVED});
+  const repeated=newsEventToResearchSnapshot(official,{symbol:'BTCUSDT',ingestedAt:OBSERVED+60_000});
+  const plane={sourcePayload:new Map([[newsResearchSnapshotKey(first),'existing-payload-hash']])};
+  const filtered=filterPreviouslyObservedNewsSnapshots(plane,[repeated]);
+  assert.equal(filtered.previouslyObserved,1);
+  assert.deepEqual(filtered.candidates,[]);
 });
