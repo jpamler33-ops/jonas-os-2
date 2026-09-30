@@ -12,7 +12,8 @@ import {
   saveBiggjLivingResearchRuntime,
   verifyBiggjLivingResearchRuntime,
   biggjLivingResearchRuntimeSummary,
-  biggjAssumptionResearchTemplates
+  biggjAssumptionResearchTemplates,
+  BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION
 } from './biggj-living-research-runtime.mjs';
 
 function thesisMemory({
@@ -63,6 +64,7 @@ function report({
   ready=false,
   direction=.0,
   interval=.0,
+  observations=80,
   evaluatedAt=5000
 }={}){
   const core={
@@ -70,9 +72,9 @@ function report({
     byPreOutcomeStaleAssumption:[{
       assumptionId,
       persistenceFiltered:{
-        observations:80,
-        persistentStaleBeforeMaturity:30,
-        neverPersistentStaleBeforeMaturity:50,
+        observations,
+        persistentStaleBeforeMaturity:Math.floor(observations*.375),
+        neverPersistentStaleBeforeMaturity:observations-Math.floor(observations*.375),
         associationReady:ready,
         directionFailureRateDifference:direction,
         intervalMissRateDifference:interval,
@@ -142,7 +144,7 @@ test('one or two persistent forecasts stay in evidence collection',()=>{
   assert.equal(out.discoveredSkillIds.length,0);
 });
 
-test('three independent persistent forecast cases create one deterministic research-only child skill',()=>{
+test('three distinct persistent forecast cases create one deterministic research-only child skill',()=>{
   const initial=createBiggjLivingResearchRuntime({asOf:1000});
   const memories=[
     thesisMemory({forecastId:'F1',observedAt:2000}),
@@ -169,6 +171,18 @@ test('three independent persistent forecast cases create one deterministic resea
   assert.equal(skill.parentSkillId,'seed:EVIDENCE_INDEPENDENCE');
   assert.equal(skill.productionMutationAllowed,false);
   assert.equal(skill.canExecuteLive,false);
+  assert.equal(skill.evidenceSummary.total,1);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
+  assert.equal(skill.evidenceSummary.independentEpisodes,0);
+  assert.equal(skill.evidenceSummary.auditReady,0);
+  assert.equal(skill.evidenceSummary.sciencePassed,0);
+  assert.equal(out.boundEvidenceIds.length,1);
+  const discoveryEvidence=skill.evidence[0];
+  assert.equal(discoveryEvidence.epistemicClass,'INFERRED');
+  assert.equal(discoveryEvidence.forwardShadow,false);
+  assert.equal(discoveryEvidence.independentEpisodeId,null);
+  assert.equal(discoveryEvidence.provenance[0].kind,'DISCOVERY_COHORT');
+  assert.equal(discoveryEvidence.provenance[0].inSampleDiscoveryEvidence,true);
 
   const duplicate=refreshBiggjLivingResearchRuntime(out.state,{
     thesisMemories:memories,
@@ -178,6 +192,107 @@ test('three independent persistent forecast cases create one deterministic resea
   assert.equal(duplicate.changed,false);
   assert.deepEqual(duplicate.discoveredSkillIds,[]);
   assert.equal(duplicate.state.skillTree.nodes.length,out.state.skillTree.nodes.length);
+});
+
+test('new post-hypothesis persistent cases bind as prospective evidence but cannot advance maturity alone',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+
+  const next=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[thesisMemory({forecastId:'F4',observedAt:6000})],
+    asOf:7000,
+    reason:'PROSPECTIVE_CASE'
+  });
+  const skill=next.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(next.boundEvidenceIds.length,1);
+  assert.equal(skill.evidenceSummary.total,2);
+  assert.equal(skill.evidenceSummary.forwardShadow,1);
+  assert.equal(skill.evidenceSummary.independentEpisodes,0);
+  const prospective=skill.evidence.find(x=>x.forwardShadow===true);
+  assert.ok(prospective);
+  assert.equal(prospective.epistemicClass,'INFERRED');
+  assert.equal(prospective.independentEpisodeId,null);
+  assert.equal(prospective.provenance[0].kind,'PROSPECTIVE_PERSISTENT_CASE');
+  assert.equal(prospective.provenance[0].independenceResolved,false);
+
+  const summary=biggjLivingResearchRuntimeSummary(next.state);
+  const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
+  assert.equal(row.status,'DISCOVERING');
+  assert.equal(row.recommendedStatus,'DISCOVERING');
+  assert.equal(row.independentEpisodes,0);
+  assert.ok(row.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
+
+  const repeated=refreshBiggjLivingResearchRuntime(next.state,{
+    thesisMemories:[thesisMemory({forecastId:'F4',observedAt:6000})],
+    asOf:8000,
+    reason:'REPEAT_CASE'
+  });
+  assert.equal(repeated.changed,false);
+  assert.equal(repeated.state.skillTree.nodes.find(x=>x.skillId===skillId).evidenceSummary.total,2);
+});
+
+test('association milestones bind modelled non-causal evidence without becoming independent validation',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000})
+    ],
+    claimAssumptionReport:report({
+      ready:true,
+      observations:80,
+      direction:.18,
+      interval:.12,
+      evaluatedAt:5000
+    }),
+    asOf:5000,
+    reason:'ASSOCIATION_DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+  let skill=created.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(skill.evidenceSummary.total,2);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
+  const firstAssociation=skill.evidence.find(x=>x.epistemicClass==='MODELLED');
+  assert.ok(firstAssociation);
+  assert.equal(firstAssociation.forwardShadow,false);
+  assert.equal(firstAssociation.independentEpisodeId,null);
+  assert.equal(firstAssociation.provenance[0].associationMilestone,'THESIS_WITNESS_SUPPORT_ADEQUATE:80');
+  assert.equal(firstAssociation.provenance[0].causalInterpretation,false);
+
+  const updated=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[],
+    claimAssumptionReport:report({
+      ready:true,
+      observations:100,
+      direction:.20,
+      interval:.14,
+      evaluatedAt:7000
+    }),
+    asOf:7000,
+    reason:'ASSOCIATION_MILESTONE'
+  });
+  skill=updated.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(updated.boundEvidenceIds.length,1);
+  assert.equal(skill.evidenceSummary.total,3);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
+  assert.equal(skill.evidenceSummary.independentEpisodes,0);
+  assert.equal(skill.status,'DISCOVERING');
+  const secondAssociation=skill.evidence.find(x=>
+    x.provenance?.some(p=>p.associationMilestone==='THESIS_WITNESS_SUPPORT_ADEQUATE:100')
+  );
+  assert.ok(secondAssociation);
+  assert.equal(secondAssociation.forwardShadow,false);
+  assert.equal(secondAssociation.independentEpisodeId,null);
+  assert.equal(secondAssociation.provenance[0].postHypothesisSubsetResolved,false);
 });
 
 test('persistent research cases survive removal from hot forecast tracker',()=>{
@@ -266,6 +381,25 @@ test('association evidence can raise research priority but remains explicitly no
   assert.equal(out.discoveredSkillIds.length,1);
 });
 
+test('evidence binding semantics are versioned and future-dated inputs fail closed',()=>{
+  assert.equal(
+    BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
+    'TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V1'
+  );
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+
+  assert.throws(()=>refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[],
+    claimAssumptionReport:report({evaluatedAt:5001}),
+    asOf:5000
+  }),/future claim-assumption research report blocked/);
+
+  assert.throws(()=>refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[thesisMemory({forecastId:'FUTURE',observedAt:6000})],
+    asOf:5000
+  }),/future thesis persistence state blocked|future assumption persistence state blocked|future thesis stability event blocked/);
+});
+
 test('all assumption templates target canonical skill nodes',()=>{
   const state=createBiggjLivingResearchRuntime({asOf:1000});
   const ids=new Set(state.skillTree.nodes.map(x=>x.skillId));
@@ -328,6 +462,10 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.ok(summary.observedForecasts>=3);
   assert.ok(summary.retainedPersistentCases>=3);
   assert.ok(summary.retainedStabilityEvents>=3);
+  assert.ok(summary.researchEvidence);
+  assert.ok(summary.researchEvidence.skillCount>=1);
+  assert.ok(summary.researchEvidence.evidenceTotal>=1);
+  assert.equal(summary.researchEvidence.independentEpisodes,0);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.automaticKill,false);
   assert.equal(summary.automaticExperimentLaunch,false);
