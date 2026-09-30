@@ -151,9 +151,39 @@ test('successful recovery result is recorded without granting authority',()=>{
   });
   const action=planned.actions[0];
   const next=recordBiggjAutonomousOperatorActionResults(planned.state,[{actionId:action.actionId,ok:true}],{asOf:now+1});
-  assert.equal(next.recoveryHistory.at(-1).result,'SUCCESS');
+  assert.equal(next.recoveryHistory.at(-1).result,'EXECUTED');
   assert.equal(next.plannedActions.length,0);
   assert.equal(next.safety.canExecuteLive,false);
+});
+
+test('executed recovery is only marked resolved after a later verification cycle',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const planned=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'AUTONOMOUS_RESEARCH_ACTIVE',
+      nextTasks:[task({taskId:'feature',subject:'FEATURE_RESEARCH',autoHandler:'FORECAST_FEATURE_RESEARCH'})]
+    }),
+    operations:{forecast_feature_research_sync:{lastAt:now-600_000,lastError:'stale'}},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const action=planned.actions[0];
+  const executed=recordBiggjAutonomousOperatorActionResults(planned.state,[{actionId:action.actionId,ok:true}],{asOf:now+1});
+  assert.equal(executed.recoveryHistory.at(-1).result,'EXECUTED');
+
+  const verified=refreshBiggjAutonomousOperator(executed,{
+    factorySummary:factory({
+      mode:'AUTONOMOUS_RESEARCH_ACTIVE',
+      nextTasks:[task({taskId:'feature',subject:'FEATURE_RESEARCH',autoHandler:'FORECAST_FEATURE_RESEARCH'})]
+    }),
+    operations:{forecast_feature_research_sync:{lastAt:now+2,lastError:null}},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now+3
+  });
+  assert.equal(verified.state.recoveryHistory.at(-1).result,'VERIFIED_RESOLVED');
+  assert.equal(biggjAutonomousOperatorSummary(verified.state).verifiedResolvedRecoveries,1);
 });
 
 test('repeated failed self-healing eventually escalates instead of looping forever',()=>{
@@ -176,6 +206,46 @@ test('repeated failed self-healing eventually escalates instead of looping forev
   assert.equal(summary.operatorNeeded,true);
   assert.equal(summary.mode,'ESCALATION_REQUIRED');
   assert.ok(summary.exhaustedRecoveries>=1);
+});
+
+test('passive point-in-time data wait does not trigger pointless research restart',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'RESEARCH_STALLED',
+      operatorDataOnly:false,
+      dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+      nextTasks:[task({taskId:'pit',subject:'seed:PIT_EVENT_CLOCK'})]
+    }),
+    operations:{forecast_shadow_competition:{lastAt:now-10_000,lastError:null}},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.mode,'WAITING_FOR_DATA');
+  assert.equal(summary.waitingForData,true);
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(out.actions.length,0);
+});
+
+test('startup grace also treats passive stalled research as data wait rather than self-heal',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-1_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'RESEARCH_STALLED',
+      operatorDataOnly:false,
+      dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+      nextTasks:[task({taskId:'pit',subject:'seed:PIT_EVENT_CLOCK'})]
+    }),
+    operations:{},
+    ownerPolicies:policies(),
+    uptimeMs:30_000,
+    asOf:now
+  });
+  assert.equal(out.state.ownerAssessments[0].state,'WARMING_UP');
+  assert.equal(out.state.mode,'WAITING_FOR_DATA');
+  assert.equal(out.actions.length,0);
 });
 
 test('research stall is self-diagnosed before human escalation',()=>{
