@@ -477,6 +477,9 @@ function bindResearchEvidence(tree,{
         ...discoveryCases.map(x=>Number(x.firstSeenByLivingResearchAt||0)),
         Number(skill.createdAt||0)
       );
+      const persistentTimes=discoveryCases
+        .map(x=>finite(x.firstPersistentStaleAt))
+        .filter(x=>x!=null);
       next=recordBiggjSkillEvidence(next,{
         skillId:skill.skillId,
         epistemicClass:'INFERRED',
@@ -505,7 +508,7 @@ function bindResearchEvidence(tree,{
           assumptionId:template.assumptionId,
           caseCount:discoveryCases.length,
           caseSetFingerprint:sha256(cohortCaseIds),
-          earliestPersistentStaleAt:Math.min(...discoveryCases.map(x=>Number(x.firstPersistentStaleAt??Infinity))),
+          earliestPersistentStaleAt:persistentTimes.length?Math.min(...persistentTimes):null,
           latestFirstSeenByLivingResearchAt:Math.max(...discoveryCases.map(x=>Number(x.firstSeenByLivingResearchAt||0))),
           inSampleDiscoveryEvidence:true,
           causalInterpretation:false
@@ -589,7 +592,7 @@ function bindResearchEvidence(tree,{
           '. This is an association snapshot only; it does not prove assumption truth, causality, or counterfactual benefit.',
         outcome:'NEUTRAL',
         metricDelta:null,
-        forwardShadow:Number(reportAt||0)>Number(skill.createdAt||0),
+        forwardShadow:false,
         pointInTime:true,
         futureLeakage:false,
         auditReady:false,
@@ -608,6 +611,7 @@ function bindResearchEvidence(tree,{
           directionFailureRateDifference:association.directionFailureRateDifference,
           intervalMissRateDifference:association.intervalMissRateDifference,
           interpretation:association.interpretation,
+          postHypothesisSubsetResolved:false,
           causalInterpretation:false
         }]
       });
