@@ -25,7 +25,7 @@ function ineligible(reason,extra={}){
 
 export function deriveAutonomousShadowTrade(issuance,{
   now=Date.now(),
-  notionalQuote=100,
+  notionalQuote=200,
   maxAgeMs=10*60_000,
   minExpectedReturn=0.002,
   minDirectionalProbability=0.55,
@@ -157,7 +157,7 @@ export function deriveAutonomousShadowTrade(issuance,{
     reason:'ADMITTED_SHADOW_TRADE',
     decisionKey:sha256(decisionCore),
     type:'MARKET',
-    notionalQuote:Math.max(1,Number(notionalQuote)||100),
+    notionalQuote:Math.max(1,Number(notionalQuote)||200),
     horizonMs:Number(h.horizonMs),
     probabilityEdge,
     thresholds:{
