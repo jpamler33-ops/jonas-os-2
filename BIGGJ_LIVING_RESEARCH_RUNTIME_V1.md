@@ -27,7 +27,7 @@ It produces:
 
 1. Read current persisted thesis memories.
 2. Distinguish transient flicker from persistent stale assumptions.
-3. Count independent affected forecasts, repeated falsifiers, recovery failures and recurrence.
+3. Count distinct affected forecasts, repeated falsifiers, recovery failures and recurrence. Distinct forecast IDs are not treated as statistically independent episodes.
 4. Join prospective association evidence only when the evaluator says it is sample-ready.
 5. Map the issue to canonical capabilities.
 6. Weight research urgency by persistence + recurrence + falsifier diversity + dependency leverage + optional prospective association strength.
@@ -101,6 +101,7 @@ This prevents hot-to-cold forecast compaction from erasing already-observed rese
 
 A normalized source fingerprint is built from:
 
+- Evidence Bridge semantics version,
 - relevant thesis assumption stability state,
 - stability events,
 - current falsifier codes,
@@ -109,6 +110,76 @@ A normalized source fingerprint is built from:
 If this source fingerprint is unchanged, the refresh is a no-op.
 
 The same persistent research gap cannot create duplicate child skills because skill identity is deterministic.
+
+## Research Evidence Bridge
+
+Discovered research skills now receive governed evidence from the same living runtime.
+
+Evidence is deliberately split into three classes:
+
+### Discovery cohort
+
+The persistent cases already known when a child research skill is created are bound once as an INFERRED discovery cohort.
+
+They are:
+
+- in-sample,
+- not forward shadow,
+- not independent episodes,
+- not audit-ready validation,
+- not scientific-guard-passed validation.
+
+They explain why the research question exists. They do not validate it.
+
+### Prospective persistence cases
+
+Persistent cases first seen after the child skill exists may be bound as forward-shadow research evidence.
+
+To keep state growth bounded:
+
+- the first 20 prospective cases are retained,
+- later cases are deterministically sampled by case ID,
+- the sampling rule is stable across replay/order changes.
+
+These records remain INFERRED and carry:
+
+- independentEpisodeId: null,
+- independenceResolved: false,
+- auditReady: false,
+- scientificGuardsPassed: false.
+
+Therefore recurring cases alone cannot autonomously advance the skill through the maturity ladder.
+
+### Outcome-association milestones
+
+When the Claim-Assumption evaluator reaches a new 20-observation persistence-filtered milestone, a MODELLED association snapshot may be attached.
+
+Aggregate association snapshots are never labelled forward-shadow validation because the report can contain observations collected before the child hypothesis was created.
+
+They remain explicitly:
+
+- association only,
+- non-causal,
+- non-counterfactual,
+- independence unresolved,
+- insufficient for autonomous promotion.
+
+## Maturity firewall
+
+The Evidence Bridge writes evidence only.
+
+It never calls a skill status transition.
+
+A research skill can therefore accumulate real evidence while staying DISCOVERING until future infrastructure separately demonstrates:
+
+- independent episode identity,
+- audit completeness,
+- scientific-guard success,
+- chronology robustness,
+- forward-shadow sample sufficiency,
+- stress requirements.
+
+This prevents the self-evolving loop from converting recurrence into trust.
 
 ## Scientific constraints
 
