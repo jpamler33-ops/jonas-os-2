@@ -9749,7 +9749,7 @@ function currentOperationalReadiness(){
 function autonomousResearchFactoryInputs(now=Date.now()){
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
-  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
+  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now,worldModelSummary:biggjWorldModelRuntimeState});
   return {
     livingResearchState:biggjLivingResearchState,
     marketScienceDirectorSummary:biggjMarketScienceDirectorSummary(marketScienceDirector),
@@ -10031,7 +10031,7 @@ async function autonomousOperatorWatcher(){
 function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
- const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
+ const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now,worldModelSummary:biggjWorldModelRuntimeState});
  const governanceTriage=buildBiggjGovernanceTriage({
   livingResearchState:biggjLivingResearchState,
   modelPromotionReviewSummary:modelPromotionReviewLastSummary,
