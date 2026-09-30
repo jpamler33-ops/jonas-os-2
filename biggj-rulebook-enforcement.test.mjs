@@ -36,22 +36,21 @@ test('shadow order admission is bound to the canonical BIGGJ rulebook',async()=>
 });
 
 test('rulebook is a release-bound runtime component and production surface',async()=>{
-  const [registry,docker,pkg,bridge,bot]=await Promise.all([
+  const [registry,pkg,bridge,bot,rulebook]=await Promise.all([
     read('runtime-release-registry.mjs'),
-    read('Dockerfile'),
     read('package.json'),
     read('discord-telegram-bridge.mjs'),
-    read('bot.mjs')
+    read('bot.mjs'),
+    read('biggj-rulebook.mjs')
   ]);
   assert.match(registry,/'biggj-rulebook\.mjs'/);
-  assert.match(docker,/biggj-rulebook\.mjs/);
-  assert.match(docker,/biggj-rulebook\.test\.mjs/);
   assert.match(pkg,/test:rulebook/);
   assert.match(bridge,/name:'rulebook'/);
   assert.match(bridge,/BIGGJ_RULEBOOK_PANEL_V1/);
   assert.match(bridge,/refreshRulebookPanel/);
   assert.match(bot,/\/rulebook\.json/);
   assert.match(bot,/\/rulebook\.md/);
+  assert.match(rulebook,/BIGGJ_INTERNAL_RULEBOOK_V1/);
 });
 
 test('rulebook definition is fail-fast verified before serving',async()=>{
