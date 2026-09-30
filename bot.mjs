@@ -9374,6 +9374,22 @@ function missionControlData(){
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
   researchCoverage,
+  marketRadar:{
+    capturedAt:now,
+    rows:requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r)return null;
+      return {
+        symbol,
+        capturedAt:Number(r.capturedAt||0)||null,
+        status:r.status||'UNKNOWN',
+        regime:r.regime||'UNKNOWN',
+        witnessAgreement:Number.isFinite(Number(r.witnessAgreement))?Number(r.witnessAgreement):null,
+        support:Number(r.support||0),
+        score:Number.isFinite(Number(r.score))?Number(r.score):null
+      };
+    }).filter(Boolean).sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,18)
+  },
   globalIntel:{
     version:BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION,
     sourceReady:globalIntelEvents.length>0&&globalIntelLastRefreshAt!=null,
