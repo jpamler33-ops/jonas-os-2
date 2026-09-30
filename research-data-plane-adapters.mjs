@@ -763,7 +763,9 @@ function officialPrimaryInputs(symbol,context,ingestedAt){
       sourceEventId:makeSourceEventId({
         symbol,
         source:'US_TREASURY_FISCAL_DATA_AUCTIONS',
-        sourceEventId:snapshot?.sourceEventId||null
+        sourceEventId:snapshot?.sourceEventId||null,
+        recordDate:snapshot?.recordDate||null,
+        features:features.map(x=>[x.id,x.value])
       }),
       eventTime,
       availableAt,
@@ -871,7 +873,7 @@ function officialPrimaryInputs(symbol,context,ingestedAt){
         finality:'OBSERVED',
         quality:{
           completeness:Math.min(1,features.length/13),
-          sourceCount:2,
+          sourceCount:Math.max(0,Math.min(2,Number(snapshot?.venueSourceCount||0))),
           expectedSourceCount:2,
           status:'OFFICIAL_EXCHANGE_STATUS_AND_MARKET_UNIVERSE'
         },
