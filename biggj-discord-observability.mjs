@@ -280,12 +280,26 @@ export function biggjObservabilityNavComponents(){
   ]}];
 }
 function payload(title,description,fields,marker,snapshot){
+  const safeTitle=clip(title,256);
+  const safeDescription=clip(description,3500);
+  const footerText=clip(marker+' · '+String(snapshot?.execution||'SHADOW_ONLY')+' · structured state, not hidden chain-of-thought',512);
+  let budget=Math.max(0,5850-safeTitle.length-safeDescription.length-footerText.length);
+  const fitted=[];
+  for(const input of arr(fields).slice(0,25)){
+    if(budget<24)break;
+    const name=clip(input?.name,Math.min(256,Math.max(1,budget-8)));
+    budget-=name.length;
+    if(budget<4)break;
+    const value=clip(input?.value,Math.min(1024,Math.max(1,budget)));
+    budget-=value.length;
+    fitted.push({name,value,inline:Boolean(input?.inline)});
+  }
   return {
     embeds:[{
-      title,
-      description:clip(description,4096),
-      fields:arr(fields).slice(0,25).map(x=>safeField(x.name,x.value,x.inline)),
-      footer:{text:marker+' · '+String(snapshot?.execution||'SHADOW_ONLY')+' · structured state, not hidden chain-of-thought'},
+      title:safeTitle,
+      description:safeDescription,
+      fields:fitted,
+      footer:{text:footerText},
       timestamp:new Date(finite(snapshot?.generatedAt,Date.now())).toISOString()
     }],
     components:biggjObservabilityNavComponents(),
