@@ -27,9 +27,9 @@ export function dexScreenerTrendingMetasToExtraFeatures(snapshot){
   const volumes=rows.map(x=>finite(x?.volume)).filter(x=>x!=null&&x>=0);
   const h1=rows.map(x=>finite(x?.marketCapChange?.h1)).filter(x=>x!=null);
   const h24=rows.map(x=>finite(x?.marketCapChange?.h24)).filter(x=>x!=null);
-  const totalMarketCap=marketCaps.reduce((a,b)=>a+b,0);
-  const totalLiquidity=liquidities.reduce((a,b)=>a+b,0);
-  const totalVolume=volumes.reduce((a,b)=>a+b,0);
+  const totalMarketCap=marketCaps.length?marketCaps.reduce((a,b)=>a+b,0):null;
+  const totalLiquidity=liquidities.length?liquidities.reduce((a,b)=>a+b,0):null;
+  const totalVolume=volumes.length?volumes.reduce((a,b)=>a+b,0):null;
   const topLiquidity=liquidities.length?Math.max(...liquidities):null;
   const candidates=[
     ['research.dex.trendingMetaCountLog',log1pNonNegative(rows.length)],
