@@ -1,4 +1,4 @@
-export const BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION='BIGGJ_PUBLIC_NEWS_PROVIDER_V3';
+export const BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION='BIGGJ_PUBLIC_NEWS_PROVIDER_V4';
 
 const DEFAULT_GENERAL_QUERY='(bitcoin OR ethereum OR crypto OR markets OR economy OR inflation OR "federal reserve" OR tariffs OR sanctions OR oil OR gold OR AI OR semiconductor)';
 const DEFAULT_WORLD_QUERY='(war OR ceasefire OR sanctions OR tariffs OR geopolitics OR "central bank" OR inflation OR oil OR gas OR Taiwan OR China OR Russia OR Ukraine OR "Middle East" OR NATO OR trade)';
@@ -155,6 +155,7 @@ export function createBiggjPublicNewsProvider({
   fetchImpl=globalThis.fetch,
   baseUrl='https://api.gdeltproject.org/api/v2/doc/doc',
   secondaryBaseUrl='https://news.google.com/rss/search',
+  officialProvider=null,
   timeoutMs=18000,
   secondaryTimeoutMs=8000,
   gdeltCooldownMs=10*60_000,
@@ -292,6 +293,7 @@ export function createBiggjPublicNewsProvider({
     const t=Number(now());
     if(!force&&cache&&t-cache.at<cacheTtlMs)return cache.value;
     const settled=await Promise.allSettled([
+      typeof officialProvider?.fetchFeed==='function'?officialProvider.fetchFeed({force}):Promise.resolve(null),
       queryWithFallback(generalQuery,generalFallbackQuery,generalSecondaryQuery,'GENERAL'),
       queryWithFallback(worldQuery,worldFallbackQuery,worldSecondaryQuery,'WORLD')
     ]);
@@ -299,7 +301,39 @@ export function createBiggjPublicNewsProvider({
     const recoveries=[];
     const rows=[];
     const providerHealth={};
-    settled.forEach((r,i)=>{
+
+    const officialResult=settled[0];
+    if(officialResult.status==='fulfilled'&&officialResult.value){
+      const official=officialResult.value;
+      rows.push(...(Array.isArray(official.events)?official.events:[]));
+      for(const issue of Array.isArray(official.errors)?official.errors:[]){
+        errors.push({
+          queryClass:'OFFICIAL:'+String(issue?.sourceId||'UNKNOWN'),
+          error:String(issue?.error||'OFFICIAL_SOURCE_FAILED')
+        });
+      }
+      providerHealth.official=Object.freeze({
+        provider:'OFFICIAL_PRIMARY_RSS',
+        rows:Number(official.articleCount||official.events?.length||0),
+        sourceCount:Number(official.sourceCount||0),
+        healthySourceCount:Number(official.healthySourceCount||0),
+        failedSourceCount:Number(official.failedSourceCount||0),
+        sources:official.providerHealth||{}
+      });
+    }else if(officialResult.status==='rejected'){
+      const error=errText(officialResult.reason);
+      errors.push({queryClass:'OFFICIAL',error});
+      providerHealth.official=Object.freeze({
+        provider:'OFFICIAL_PRIMARY_RSS',
+        rows:0,
+        sourceCount:0,
+        healthySourceCount:0,
+        failedSourceCount:1,
+        error
+      });
+    }
+
+    settled.slice(1).forEach((r,i)=>{
       const queryClass=i===0?'GENERAL':'WORLD';
       if(r.status==='fulfilled'){
         rows.push(...r.value.rows);
@@ -321,9 +355,12 @@ export function createBiggjPublicNewsProvider({
     const all=dedupe(rows).sort((a,b)=>rank(b)-rank(a)||Number(b.availableAt)-Number(a.availableAt)).slice(0,120);
     const world=all.filter(x=>x.worldRelevant).slice(0,60);
     const sourceIds=uniq(all.map(x=>x.sourceId));
-    const source=sourceIds.length===1
-      ?(sourceIds[0]==='GDELT_DOC_API'?'GDELT DOC 2.1':'Google News RSS')
-      :sourceIds.length>1?'GDELT DOC 2.1 + Google News RSS':'GDELT DOC 2.1 / Google News RSS';
+    const sourceParts=[
+      all.some(x=>x?.primarySource===true)?'Official primary feeds':null,
+      sourceIds.includes('GDELT_DOC_API')?'GDELT DOC 2.1':null,
+      sourceIds.includes('GOOGLE_NEWS_RSS')?'Google News RSS':null
+    ].filter(Boolean);
+    const source=sourceParts.length?sourceParts.join(' + '):'GDELT DOC 2.1 / Google News RSS';
     const value=Object.freeze({
       version:BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION,
       capturedAt:t,
@@ -331,6 +368,7 @@ export function createBiggjPublicNewsProvider({
       source,
       sourceUrl:'https://www.gdeltproject.org/',
       secondarySourceUrl:'https://news.google.com/',
+      officialPrimarySources:providerHealth.official||null,
       articleCount:all.length,
       worldCount:world.length,
       events:Object.freeze(all),
@@ -340,7 +378,7 @@ export function createBiggjPublicNewsProvider({
       fallbackUsed:recoveries.some(x=>x.strategy==='SECONDARY_PROVIDER_FALLBACK'||x.strategy==='GDELT_COOLDOWN_BYPASS'),
       gdeltCooldownUntil:gdeltCooldownUntil||null,
       providerHealth:Object.freeze(providerHealth),
-      epistemic:'PUBLIC_NEWS_DISCOVERY_NOT_FACT_VERIFICATION'
+      epistemic:'MIXED_PUBLIC_DISCOVERY_AND_OFFICIAL_PUBLICATIONS_NOT_INDEPENDENT_CORROBORATION'
     });
     cache={at:t,value};
     return value;
