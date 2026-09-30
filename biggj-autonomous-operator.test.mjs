@@ -397,6 +397,8 @@ test('previously unresolved recovery stays unresolved while its incident remains
     uptimeMs:600_000,
     asOf:now
   });
-  assert.equal(out.state.recoveryHistory.at(-1).result,'EXECUTED_UNRESOLVED');
+  const prior=out.state.recoveryHistory.find(x=>x.actionId==='old-action');
+  assert.equal(prior.result,'EXECUTED_UNRESOLVED');
   assert.equal(biggjAutonomousOperatorSummary(out.state).unresolvedRecoveries,1);
+  assert.equal(out.state.recoveryHistory.some(x=>x.result==='PLANNED'),true);
 });
