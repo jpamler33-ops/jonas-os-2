@@ -12,6 +12,8 @@ import {
   BIGGJ_EXPERIENCE_LAYOUT,
   buildBiggjExperiencePanelMap
 } from './biggj-experience-center.mjs';
+import { createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
+import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
 export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V7';
@@ -109,6 +111,10 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'academy-progress',topic:'Lernfortschritt, Meilensteine und Checkliste.'},
     {name:'academy-questions',topic:'Fragen stellen mit sauberem Analyse-Template.'}
   ]},
+  {category:'BIGGJ • OPERATIONS',channels:[
+    {name:'channel-supervisor',topic:'Meta-Überwachung aller Channel-Manager: Zustand, Freshness, Fehler, Entscheidungen und Auto-Reparaturen.'},
+    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'}
+  ]},
   {category:'TCX • SYSTEM',channels:[
     {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
     {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
@@ -121,7 +127,7 @@ const CHANNEL_PROFILE_GROUPS=Object.freeze({
   LIVE_60:new Set([
     'tcx-terminal','performance','system-status','data-health',
     'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
-    'forecasts','anomalies','trade-replay','errors'
+    'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements'
   ]),
   LIVE_90:new Set(['market-overview']),
   LIVE_120:new Set([
@@ -140,14 +146,14 @@ const CHANNEL_PROFILE_GROUPS=Object.freeze({
 
 export function biggjChannelExperienceProfile(name){
   const key=String(name||'');
-  if(CHANNEL_PROFILE_GROUPS.HOME.has(key))return {mode:'HOME',cadence:'STARTUP + ON DEMAND'};
-  if(CHANNEL_PROFILE_GROUPS.LIVE_60.has(key))return {mode:'LIVE PANEL',cadence:'~60s'};
-  if(CHANNEL_PROFILE_GROUPS.LIVE_90.has(key))return {mode:'LIVE PANEL',cadence:'~90s'};
-  if(CHANNEL_PROFILE_GROUPS.LIVE_120.has(key))return {mode:'LIVE PANEL',cadence:'~120s'};
-  if(CHANNEL_PROFILE_GROUPS.ACADEMY_120.has(key))return {mode:'LEARNING PANEL',cadence:'~120s · kept at bottom'};
-  if(CHANNEL_PROFILE_GROUPS.FEED_120.has(key))return {mode:'DEDUPED LIVE FEED',cadence:'~120s'};
-  if(CHANNEL_PROFILE_GROUPS.TRADE_STREAM.has(key))return {mode:'TRADE STREAM',cadence:'~20–120s'};
-  if(CHANNEL_PROFILE_GROUPS.EVENT_FEED.has(key))return {mode:'EVENT FEED',cadence:'on change'};
+  if(CHANNEL_PROFILE_GROUPS.HOME.has(key))return {mode:'HOME',cadence:'STARTUP + ON DEMAND',cadenceMs:null,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_60.has(key))return {mode:'LIVE PANEL',cadence:'~60s',cadenceMs:60_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_90.has(key))return {mode:'LIVE PANEL',cadence:'~90s',cadenceMs:90_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_120.has(key))return {mode:'LIVE PANEL',cadence:'~120s',cadenceMs:120_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.ACADEMY_120.has(key))return {mode:'LEARNING PANEL',cadence:'~120s · kept at bottom',cadenceMs:120_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.FEED_120.has(key))return {mode:'DEDUPED LIVE FEED',cadence:'~120s',cadenceMs:120_000,requiresContent:false};
+  if(CHANNEL_PROFILE_GROUPS.TRADE_STREAM.has(key))return {mode:'TRADE STREAM',cadence:'~20–120s',cadenceMs:120_000,requiresContent:false};
+  if(CHANNEL_PROFILE_GROUPS.EVENT_FEED.has(key))return {mode:'EVENT FEED',cadence:'on change',cadenceMs:null,requiresContent:false,eventDriven:true};
   return null;
 }
 
