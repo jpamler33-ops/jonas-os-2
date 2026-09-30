@@ -149,6 +149,13 @@ import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } 
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
 import { buildForecastThesisDeclarations, forecastThesisDeclarationSummary, FORECAST_THESIS_DECLARATIONS_VERSION } from './forecast-thesis-declarations.mjs';
+import {
+  openBiggjLivingResearchRuntime,
+  saveBiggjLivingResearchRuntime,
+  refreshBiggjLivingResearchRuntime,
+  biggjLivingResearchRuntimeSummary,
+  BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
+} from './biggj-living-research-runtime.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
