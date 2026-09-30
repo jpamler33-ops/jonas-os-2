@@ -1897,7 +1897,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const result=await bootstrapV2();
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
-    await interaction.editReply('BIGGJ Discord V6 eingerichtet: '+result.channels+' Channels · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    const managers=managerSnapshot();
+    await interaction.editReply('BIGGJ Discord V7 eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
   }
   async function thesisCommand(interaction){
     const symbol=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
