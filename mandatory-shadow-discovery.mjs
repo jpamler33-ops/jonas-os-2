@@ -28,7 +28,7 @@ function no(reason,extra={}){
 
 export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
   now=Date.now(),
-  notionalQuote=12,
+  notionalQuote=25,
   maxAgeMs=10*60_000,
   minDirectionalProbability=.505,
   minAbsoluteExpectedReturn=.0004,
@@ -122,7 +122,7 @@ export function deriveMandatoryShadowDiscovery(issuance,qualityModel,{
     reason:'MANDATORY_SHADOW_EXPLORATION_CANDIDATE',
     decisionKey:sha256({...core,entryMode}),
     type:'MARKET',
-    notionalQuote:Math.max(1,Number(notionalQuote)||12),
+    notionalQuote:Math.max(1,Number(notionalQuote)||25),
     entryMode,
     admissionReasons:Array.isArray(issuance.admission?.reasons)?issuance.admission.reasons.slice(0,12).map(String):[],
     searchRequired:true,
