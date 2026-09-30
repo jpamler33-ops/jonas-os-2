@@ -8733,6 +8733,11 @@ function currentPersistenceCompatibility(){
       RESEARCH_DATA_GOVERNANCE:{
         healthy:researchGovernanceHealthy,
         recoveredFromCorrupt:researchDataGovernance.recoveredFromCorrupt===true
+      },
+      BIGGJ_LIVING_RESEARCH:{
+        healthy:biggjLivingResearchHealthy,
+        recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
+        loadedSchema:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
       }
     },
     localFilePersistence:true,
@@ -8786,6 +8791,12 @@ function missionControlData(){
     execution:'SHADOW_ONLY',
     canInfluencePrimary:false,
     canExecuteLive:false
+  },
+  biggjLivingResearch:{
+    ...biggjLivingResearchRuntimeSummary(biggjLivingResearchState),
+    healthy:biggjLivingResearchHealthy,
+    recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
+    file:biggjLivingResearchFile
   },
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
