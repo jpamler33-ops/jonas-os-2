@@ -46,6 +46,9 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
   assert.equal(snapshot.primaryMutationAllowed,false);
   assert.equal(snapshot.automaticPromotion,false);
   assert.equal(snapshot.automaticExperimentLaunch,false);
+  assert.equal(snapshot.researchReviews.automaticApply,false);
+  assert.equal(snapshot.researchReviews.open,0);
+  assert.ok(Array.isArray(snapshot.researchReviews.tickets));
   assert.equal(snapshot.semantics.visibleReasoningIsStructuredStateNotHiddenChainOfThought,true);
 
   const channels=BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.flatMap(section=>section.channels.map(x=>x.name));
