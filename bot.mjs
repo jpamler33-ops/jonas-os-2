@@ -4,6 +4,7 @@ import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobil
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
+import { buildNewsResearchSnapshots, newsResearchSnapshotKey, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
@@ -3846,6 +3847,8 @@ let globalIntelRecoveries=[];
 let globalIntelFallbackUsed=false;
 let globalIntelProviderHealth=null;
 let globalIntelGdeltCooldownUntil=null;
+let newsResearchLastResult=null;
+let newsResearchLastError=null;
 let memecoinExperienceSnapshot=null;
 let memecoinExperienceLastError=null;
 
@@ -3884,6 +3887,52 @@ async function refreshPublicExperienceIntel(reason='periodic'){
     globalIntelFallbackUsed=feed.fallbackUsed===true;
     globalIntelProviderHealth=feed.providerHealth||null;
     globalIntelGdeltCooldownUntil=Number(feed.gdeltCooldownUntil||0)||null;
+
+    const observedAt=Date.now();
+    try{
+      const snapshots=buildNewsResearchSnapshots(feed,{
+        symbols:autoLearnSymbols,
+        ingestedAt:observedAt,
+        maxEvents:60,
+        maxAgeMs:24*60*60_000
+      });
+      const result=await appendResearchDataPlaneQueued(
+        snapshots,
+        'public-news:'+reason,
+        {skipPreviouslyObservedSourceEvents:true}
+      );
+      newsResearchLastResult=Object.freeze({
+        version:NEWS_RESEARCH_ADAPTER_VERSION,
+        at:observedAt,
+        candidates:snapshots.length,
+        ...result
+      });
+      newsResearchLastError=result?.ok===true?null:String(result?.reason||'NEWS_RESEARCH_INGESTION_FAILED');
+      recordOperation(observability,{
+        name:'news_research_ingestion',
+        ok:result?.ok===true,
+        latencyMs:Date.now()-observedAt,
+        error:newsResearchLastError
+      });
+    }catch(err){
+      newsResearchLastError=err instanceof Error?err.message:String(err);
+      newsResearchLastResult=Object.freeze({
+        version:NEWS_RESEARCH_ADAPTER_VERSION,
+        at:observedAt,
+        ok:false,
+        candidates:0,
+        appended:0,
+        duplicates:0,
+        reason:newsResearchLastError
+      });
+      recordError(observability,{scope:'news_research_ingestion',message:newsResearchLastError});
+      recordOperation(observability,{
+        name:'news_research_ingestion',
+        ok:false,
+        latencyMs:Date.now()-observedAt,
+        error:newsResearchLastError
+      });
+    }
   }else{
     globalIntelLastError=newsResult.reason instanceof Error?newsResult.reason.message:String(newsResult.reason);
     globalIntelRecoveries=[];
@@ -3927,6 +3976,8 @@ async function refreshPublicExperienceIntel(reason='periodic'){
     newsGdeltCooldownUntil:globalIntelGdeltCooldownUntil,
     newsTimeoutMs:globalNewsTimeoutMs,
     newsSecondaryTimeoutMs:globalNewsSecondaryTimeoutMs,
+    newsResearch:newsResearchLastResult,
+    newsResearchError:newsResearchLastError,
     memecoins:memecoinExperienceSnapshot?.rows?.length||0,
     metas:memecoinExperienceSnapshot?.metas?.length||0,
     memecoinError:memecoinExperienceLastError,
@@ -8253,15 +8304,27 @@ async function venueQualityWatcher() {
   }
 }
 
-async function appendResearchDataPlaneQueued(inputs,reason='capture'){
-  if(!researchDataPlane.healthy) return {ok:false,appended:0,duplicates:0,reason:'RDP_UNHEALTHY'};
+async function appendResearchDataPlaneQueued(inputs,reason='capture',{skipPreviouslyObservedSourceEvents=false}={}){
+  if(!researchDataPlane.healthy) return {ok:false,appended:0,duplicates:0,previouslyObserved:0,reason:'RDP_UNHEALTHY'};
   const job=researchDataPlaneAppendQueue.then(async()=>{
     const started=Date.now();
     const admission=await storageWriteAdmission('RESEARCH_DATA_PLANE');
     if(!admission.allowed){
-      return {ok:false,appended:0,duplicates:0,governed:0,restrictedSources:0,governanceFingerprint:null,reason:admission.reason,storagePressure:admission.state};
+      return {ok:false,appended:0,duplicates:0,previouslyObserved:0,governed:0,restrictedSources:0,governanceFingerprint:null,reason:admission.reason,storagePressure:admission.state};
     }
-    const preflight=preflightResearchDataPlaneInputs(researchDataPlane,inputs);
+    const submitted=(Array.isArray(inputs)?inputs:[]).filter(Boolean);
+    let previouslyObserved=0;
+    const candidateInputs=skipPreviouslyObservedSourceEvents
+      ?submitted.filter(input=>{
+          const key=newsResearchSnapshotKey(input);
+          if(key&&researchDataPlane.sourcePayload.has(key)){
+            previouslyObserved++;
+            return false;
+          }
+          return true;
+        })
+      :submitted;
+    const preflight=preflightResearchDataPlaneInputs(researchDataPlane,candidateInputs);
     const nextGovernance=structuredClone(researchDataGovernance);
     refreshResearchSourceFreshness(nextGovernance,{
       now:started,
@@ -8291,7 +8354,8 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture'){
     return {
       ok:true,
       appended:result.appended.length,
-      duplicates:preflight.duplicates+result.duplicates,
+      duplicates:previouslyObserved+preflight.duplicates+result.duplicates,
+      previouslyObserved,
       governed:governed.length,
       restrictedSources:governanceSummary.quarantinedSources.length,
       governanceFingerprint:governanceSummary.fingerprint
