@@ -227,6 +227,11 @@ import {
   biggjWorldModelRuntimeSummary,
   BIGGJ_WORLD_MODEL_RUNTIME_VERSION
 } from './biggj-world-model-runtime.mjs';
+import {
+  buildBiggjAutopilotSupervisor,
+  biggjAutopilotSupervisorSummary,
+  BIGGJ_AUTOPILOT_SUPERVISOR_VERSION
+} from './biggj-autopilot-supervisor.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -10227,6 +10232,11 @@ function missionControlData(){
    healthy:biggjRulebookVerification.ok&&rulebookRuntime.state!=='BLOCKED'
  };
  if(!health.biggjRulebook.healthy)health.ok=false;
+ const autopilotSupervisor=buildBiggjAutopilotSupervisor({health},{asOf:now});
+ health.biggjAutopilotSupervisor={
+   ...biggjAutopilotSupervisorSummary(autopilotSupervisor),
+   version:BIGGJ_AUTOPILOT_SUPERVISOR_VERSION
+ };
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
