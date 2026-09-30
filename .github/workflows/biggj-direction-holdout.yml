@@ -1,0 +1,25 @@
+name: BIGGJ Direction Holdout
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  direction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test BIGGJ stack
+        run: node --test biggj/*.test.mjs
+      - name: Run sealed direction holdout
+        run: node biggj/run-direction-holdout.mjs > direction-console.json
+      - name: Verify safety and artifact
+        run: node -e "const r=require('./biggj-direction-holdout.json');if(r.canExecuteLive!==false||r.mode!=='SHADOW_ONLY'||r.purpose!=='RESEARCH_ONLY')process.exit(1);console.log(r.evaluations)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: biggj-direction-holdout-${{ github.run_id }}
+          path: biggj-direction-holdout.json
+          retention-days: 90

@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {buildStrategyEdgeDecayMap,edgeDecayDecision} from './strategy-edge-decay.mjs';
+const p=(i,pnl)=>({execution:'SHADOW_ONLY',canExecuteLive:false,status:'CLOSED',entryMode:'STANDARD',assetClass:'CORE',symbol:'BTCUSDT',side:'BUY',horizonId:'15m',admissionGate:'PASS',closedAt:i,realizedNetPnlQuote:pnl});
+test('does not kill sparse DNA',()=>{const m=buildStrategyEdgeDecayMap({positions:Array.from({length:10},(_,i)=>p(i+1,-2))});assert.equal(m.cells[0].blocked,false);});
+test('disables mature DNA after sustained negative recent evidence',()=>{const rows=[...Array.from({length:30},(_,i)=>p(i+1,3)),...Array.from({length:18},(_,i)=>p(31+i,-4))];const m=buildStrategyEdgeDecayMap({positions:rows});assert.equal(m.cells[0].status,'DISABLE');assert.equal(edgeDecayDecision(m,{assetClass:'CORE',symbol:'BTCUSDT',side:'BUY',horizonId:'15m',admissionGate:'PASS'}).blocked,true);});

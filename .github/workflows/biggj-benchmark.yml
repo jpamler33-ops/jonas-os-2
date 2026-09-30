@@ -1,0 +1,33 @@
+name: BIGGJ Historical Benchmark
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Candles per interval (50-1000)'
+        required: false
+        default: '1000'
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run BIGGJ tests
+        run: node --test biggj/*.test.mjs
+      - name: Run real BTC historical benchmark
+        env:
+          BIGGJ_LIMIT: ${{ inputs.limit }}
+        run: node biggj/run-benchmark.mjs > biggj-benchmark.json
+      - name: Verify shadow-only output
+        run: |
+          node -e "const r=require('./biggj-benchmark.json'); if(r.canExecuteLive!==false||r.mode!=='SHADOW_ONLY') process.exit(1); console.log('benchmark sets:',r.results.length)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: biggj-benchmark-${{ github.run_id }}
+          path: biggj-benchmark.json
+          retention-days: 30

@@ -1,0 +1,200 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, forecastKeyboard, researchDependencyKeyboard } from './forecast-product.mjs';
+
+test('quality diagnostic is bounded and explicitly non-probabilistic',()=>{
+  const q=deriveForecastRuntimeQuality({
+    safety:{state:'NORMAL'},
+    marketAudit:{ok:true},
+    witnessAudit:{ok:true},
+    engineAudit:{ok:true},
+    witnessReport:{externalWitnessCount:2},
+    dashboard:{biasScore:6},
+    extraFeatureCount:10
+  });
+  assert.equal(q.dataQuality,1);
+  assert.equal(q.regimeConfidence,1);
+  assert.match(q.epistemic.dataQuality,/NOT_PROBABILITY/);
+});
+
+test('SAFE_STOP collapses runtime input quality',()=>{
+  const q=deriveForecastRuntimeQuality({
+    safety:{state:'SAFE_STOP'},
+    marketAudit:{ok:true},
+    witnessAudit:{ok:true},
+    engineAudit:{ok:true},
+    witnessReport:{externalWitnessCount:2},
+    dashboard:{biasScore:6},
+    extraFeatureCount:10
+  });
+  assert.equal(q.dataQuality,0);
+});
+
+test('forecast card suppresses unavailable probabilities',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1100,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    admission:{gate:'INSUFFICIENT',researchDisposition:'ABSTAIN'},
+    trace:{validity:{state:'BASELINE'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'INSUFFICIENT',overallGate:'INSUFFICIENT',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'INSUFFICIENT',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:false,suppressionReasons:['CALIBRATION_INSUFFICIENT'],probabilities:null},
+        support:{analogCount:3,effectiveSamples:2},
+        calibration:{status:'INSUFFICIENT'}
+      }],
+      path:{coherence:'INSUFFICIENT',dominantArchetype:'UNKNOWN'}
+    }
+  };
+  const text=renderInstitutionalForecastCard(issuance,{now:1200});
+  assert.match(text,/Wahrscheinlichkeit: noch nicht freigegeben/);
+  assert.doesNotMatch(text,/P↑/);
+  assert.match(text,/SHADOW_ONLY/);
+});
+
+test('forecast callback data remains compact',()=>{
+  const kb=forecastKeyboard('BTCUSDT');
+  for(const row of kb.inline_keyboard) for(const b of row){
+    assert.ok(Buffer.byteLength(b.callback_data,'utf8')<=64);
+  }
+});
+
+
+test('audit failure suppresses otherwise displayable probability',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1100,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    probabilityDisplayAllowed:true,
+    admission:{gate:'PASS',researchDisposition:'ADMIT_RESEARCH'},
+    trace:{validity:{state:'VALID'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'PASS',overallGate:'PASS',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'PASS',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:true,suppressionReasons:[],probabilities:{up:.6,flat:.2,down:.2}},
+        support:{analogCount:50,effectiveSamples:25},
+        calibration:{status:'CALIBRATED'}
+      }],
+      path:{coherence:'COHERENT',dominantArchetype:'TREND'}
+    }
+  };
+  const text=renderInstitutionalForecastCard(issuance,{auditBound:false,now:1200});
+  assert.match(text,/Audit: FEHLER → Forecast gesperrt/);
+  assert.match(text,/Probability: SUPPRESSED/);
+  assert.doesNotMatch(text,/P↑/);
+});
+
+
+test('audit failure suppresses otherwise displayable probabilities',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1000,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    admission:{gate:'PASS',researchDisposition:'ADMIT_RESEARCH'},
+    trace:{validity:{state:'VALID'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'PASS',overallGate:'PASS',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'PASS',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:true,suppressionReasons:[],probabilities:{up:.6,flat:.2,down:.2}},
+        support:{analogCount:50,effectiveSamples:30},
+        calibration:{status:'CALIBRATED'}
+      }]
+    }
+  };
+  const text=renderInstitutionalForecastCard(issuance,{now:1100,auditHealthy:false});
+  assert.match(text,/ABSTAIN \/ SHADOW_ONLY/);
+  assert.match(text,/Probability: SUPPRESSED/);
+  assert.doesNotMatch(text,/P↑/);
+  assert.match(text,/Audit: FEHLER → Forecast gesperrt/);
+});
+
+
+test('forecast card explains the signal in plain German',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1000,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    probabilityDisplayAllowed:false,
+    admission:{gate:'INSUFFICIENT',researchDisposition:'ABSTAIN'},
+    trace:{validity:{state:'VALID'},safety:{state:'NORMAL'}},
+    forecast:{
+      scienceGate:'INSUFFICIENT',overallGate:'INSUFFICIENT',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'INSUFFICIENT',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:false,suppressionReasons:['CALIBRATION_INSUFFICIENT'],probabilities:null},
+        support:{analogCount:3,effectiveSamples:2},
+        calibration:{status:'INSUFFICIENT'}
+      }],
+      path:{coherence:'INSUFFICIENT',dominantArchetype:'UNKNOWN'}
+    }
+  };
+  const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
+  assert.match(rendered,/KURZ GESAGT/);
+  assert.match(rendered,/eher steigend/);
+  assert.match(rendered,/WAS DAS FÜR DICH BEDEUTET/);
+  assert.match(rendered,/noch nicht freigegeben/);
+  assert.doesNotMatch(rendered,/P↑/);
+  assert.match(rendered,/SHADOW_ONLY/);
+});
+
+
+test('forecast card explains governed research dependency coverage',()=>{
+  const issuance={
+    symbol:'BTCUSDT',asOf:1000,generatedAt:1000,traceId:'a'.repeat(64),issuanceId:'b'.repeat(64),
+    probabilityDisplayAllowed:false,
+    admission:{gate:'INSUFFICIENT',researchDisposition:'ABSTAIN'},
+    trace:{
+      validity:{state:'VALID'},
+      safety:{state:'NORMAL'},
+      evidence:[{type:'RESEARCH_DEPENDENCY_GRAPH',totalFeatures:12,usableFeatures:10,blockedFeatures:2}]
+    },
+    forecast:{
+      scienceGate:'INSUFFICIENT',overallGate:'INSUFFICIENT',
+      horizons:[{
+        horizonId:'5m',direction:'UP',gate:'INSUFFICIENT',expectedReturn:.01,
+        interval:{q10:-.01,q90:.02},
+        display:{probabilityDisplayAllowed:false,suppressionReasons:['CALIBRATION_INSUFFICIENT'],probabilities:null}
+      }]
+    }
+  };
+  const rendered=renderInstitutionalForecastCard(issuance,{now:1100});
+  assert.match(rendered,/Forschungsdaten: 🟡 10\/12 Zusatzmerkmale nutzbar · 2 gesperrt/);
+});
+
+
+test('research dependency card explains lineage in beginner-first language',()=>{
+  const graph={
+    streamKey:'BTCUSDT',
+    gate:'CAUTION',
+    fingerprint:'f'.repeat(64),
+    impact:{
+      usableFeatures:4,totalFeatures:5,blockedFeatures:0,degradedFeatures:1,coverage:.8,
+      impactedSourceKeys:['ONCHAIN:ETHEREUM_PUBLIC_RPC'],
+      blockedFeatureIds:[]
+    },
+    nodes:[
+      {type:'SOURCE',state:'HEALTHY',domain:'DERIVATIVES'},
+      {type:'SOURCE',state:'DEGRADED',domain:'ONCHAIN'},
+      {type:'FACTOR',domain:'DERIVATIVES',state:'HEALTHY',featureCount:2},
+      {type:'FACTOR',domain:'ONCHAIN',state:'DEGRADED',featureCount:3}
+    ]
+  };
+  const rendered=renderResearchDependencyCard(graph,{symbol:'BTCUSDT',latestForecast:{generatedAt:1000},now:2000});
+  assert.match(rendered,/DATENWEG · BTC\/USDT/);
+  assert.match(rendered,/Nutzbare Zusatzmerkmale: 4\/5/);
+  assert.match(rendered,/Datenquelle → Messpunkt → Merkmal → Faktor → Prognose/);
+  assert.match(rendered,/Blockchain: 🟡 eingeschränkt/);
+  assert.match(rendered,/ABSTAIN \/ SHADOW_ONLY/);
+});
+
+test('research dependency and forecast keyboards expose compact lineage navigation',()=>{
+  const forecast=forecastKeyboard('BTCUSDT');
+  const lineage=researchDependencyKeyboard('BTCUSDT');
+  assert.ok(forecast.inline_keyboard.flat().some(x=>x.callback_data==='lineage:BTCUSDT'));
+  assert.ok(lineage.inline_keyboard.flat().some(x=>x.callback_data==='forecast:BTCUSDT'));
+  for(const kb of [forecast,lineage]){
+    for(const row of kb.inline_keyboard) for(const button of row){
+      assert.ok(Buffer.byteLength(button.callback_data,'utf8')<=64);
+    }
+  }
+});

@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {parseBinanceKline,fetchBinanceCandles} from './binance-history.mjs';
+test('parses official Binance kline tuple',()=>{const x=parseBinanceKline([1609459200000,'29000','29500','28800','29300','123',1609462799999,'0',1,'0','0','0']);assert.equal(x.close,29300);assert.equal(x.openTime,'2021-01-01T00:00:00.000Z');});
+test('loader requests BTCUSDT and returns normalized candles',async()=>{let url='';const fake=async u=>{url=String(u);return {ok:true,json:async()=>[[1609459200000,'1','2','.5','1.5','10',1609462799999,'0',1,'0','0','0']]}};const xs=await fetchBinanceCandles({fetchImpl:fake});assert.equal(xs.length,1);assert.match(url,/symbol=BTCUSDT/);assert.match(url,/interval=1h/);});

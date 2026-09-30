@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {fitCandidateThresholds,createFrozenRegistry,verifyFrozenRegistry} from './freeze-thresholds.mjs';
+const spec={id:'X',interval:'1h',horizon:12,features:['a','b'],sides:[1,1]};const rows=Array.from({length:200},(_,i)=>({features:{a:i/200,b:(i%50)/50},label:{largeMove:i>150}}));
+test('thresholds are fitted from supplied training rows',()=>{const x=fitCandidateThresholds(spec,rows);assert.equal(x.thresholds.length,2);assert.ok(x.support>=25);});
+test('registry hash detects any post-freeze mutation',()=>{const r=createFrozenRegistry([spec],{'1h:12':rows},{trainingCutoff:'2026-01-01T00:00:00Z',sourceRun:'test'});assert.equal(verifyFrozenRegistry(r),true);const bad=structuredClone(r);bad.candidates[0].thresholds[0]+=1;assert.equal(verifyFrozenRegistry(bad),false);});
