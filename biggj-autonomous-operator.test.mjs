@@ -283,3 +283,33 @@ test('data-only stall stops being waitable when its owner heartbeat is stale',()
   assert.notEqual(summary.mode,'WAITING_FOR_DATA');
   assert.ok(summary.activeIncidents>=1);
 });
+
+
+test('intentional worker deferral is backpressure, not a crash or operator escalation',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'RESEARCH_STALLED',
+      automatic:12,
+      manual:0,
+      dataOnly:12,
+      unowned:0,
+      nextTasks:[task()]
+    }),
+    operations:{
+      forecast_shadow_competition:{
+        lastAt:now-10_000,
+        lastError:'DEFERRED_PRE_SNAPSHOT_HARD_MEMORY_PRESSURE'
+      }
+    },
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.ownerAssessments[0].state,'BACKPRESSURE');
+  assert.equal(summary.mode,'WAITING_FOR_DATA');
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.activeIncidents,0);
+  assert.equal(out.actions.length,0);
+});
