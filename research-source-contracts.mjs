@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V5';
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V6';
 
 const contracts=[
   {id:'BINANCE_USDM_DERIVATIVES',domain:'DERIVATIVES',source:'BINANCE_USDM_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
@@ -24,6 +24,8 @@ const contracts=[
   {id:'FRED_UNRATE_CURRENT',domain:'MACRO',source:'FRED_UNRATE_CURRENT',minCompleteness:1,maxPublicationLagMs:3888000000,maxIngestLagMs:1200000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'ALTERNATIVE_FEAR_GREED',domain:'SENTIMENT',source:'ALTERNATIVE_ME_FEAR_GREED',minCompleteness:.66,maxPublicationLagMs:172800000,maxIngestLagMs:600000,maxSilenceMs:259200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'ALTERNATIVE_GLOBAL_MARKET',domain:'MARKET_CONTEXT',source:'ALTERNATIVE_ME_GLOBAL',minCompleteness:.66,maxPublicationLagMs:1800000,maxIngestLagMs:600000,maxSilenceMs:7200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'DEFILLAMA_PUBLIC_CHAINS',domain:'DEFI_CONTEXT',source:'DEFILLAMA_PUBLIC_CHAINS',minCompleteness:.5,maxPublicationLagMs:1800000,maxIngestLagMs:600000,maxSilenceMs:7200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'DEXSCREENER_TRENDING_METAS',domain:'DEX_CONTEXT',source:'DEXSCREENER_TRENDING_METAS',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:600000,maxSilenceMs:3600000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'POLYMARKET_CONFIGURED',domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:1800000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},
   {id:'PUBLIC_WALLET_COHORT',domain:'WALLET_COHORT',source:'PUBLIC_WALLET_COHORT_RPC',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null}
