@@ -242,6 +242,36 @@ export function buildBiggjDiscordObservabilitySnapshot({
     capabilityGaps:arr(skill?.capabilityGaps).slice(0,8),
     dependencyBottlenecks:arr(skill?.dependencyBottlenecks).slice(0,10),
     compositionReadiness:arr(skill?.compositionReadiness).slice(0,10),
+    researchReviews:{
+      open:finite(living?.researchReviews?.open,finite(state?.researchReviewQueue?.ticketCount)),
+      blocked:finite(living?.researchReviews?.blocked,finite(state?.researchReviewQueue?.blockedCount)),
+      decisions:finite(living?.researchReviews?.decisions,arr(state?.researchReviewDecisions).length),
+      automaticApply:false,
+      tickets:arr(state?.researchReviewQueue?.tickets).slice(0,12).map(x=>({
+        ticketId:String(x?.ticketId||'UNKNOWN'),
+        skillId:String(x?.skillId||'UNKNOWN'),
+        fromStatus:String(x?.fromStatus||'UNKNOWN'),
+        proposedStatus:String(x?.proposedStatus||'UNKNOWN'),
+        evidenceState:String(x?.evidenceState||'UNKNOWN'),
+        validationPhase:String(x?.validationPhase||'UNKNOWN'),
+        validationReadinessScore:clamp(x?.validationReadinessScore)
+      })),
+      blockedItems:arr(state?.researchReviewQueue?.blocked).slice(0,12).map(x=>({
+        protocolId:String(x?.protocolId||'UNKNOWN'),
+        skillId:String(x?.skillId||'UNKNOWN'),
+        reason:String(x?.reason||'UNKNOWN'),
+        details:arr(x?.details).map(String).slice(0,6)
+      })),
+      recentDecisions:[...arr(state?.researchReviewDecisions)].slice(-10).reverse().map(x=>({
+        ticketId:String(x?.ticketId||'UNKNOWN'),
+        skillId:String(x?.skillId||'UNKNOWN'),
+        decision:String(x?.decision||'UNKNOWN'),
+        reviewer:String(x?.reviewer||'UNKNOWN'),
+        decidedAt:finite(x?.decidedAt,null),
+        fromStatus:String(x?.fromStatus||''),
+        toStatus:String(x?.toStatus||'')
+      }))
+    },
     claimAssumptionResearch:{
       state:String(claim?.state||'NOT_EVALUATED'),
       observations:finite(claim?.observations),
@@ -344,6 +374,7 @@ export function buildBiggjBrainPulsePayload(snapshot={}){
         'Maturity index '+pct(snapshot.maturityIndex)+' (diagnostic)',
         'Trusted '+fmt(snapshot.trustedSkills)+' · Validated '+fmt(snapshot?.skillCounts?.VALIDATED)+' · Testing '+fmt(snapshot?.skillCounts?.TESTING),
         'Research-required '+fmt(snapshot.researchRequired)+' · Persistent cases '+fmt(snapshot.persistentCases),
+        'Manual review tickets '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked),
         'Observed forecasts '+fmt(snapshot.observedForecasts)
       ].join('\n'))
     ],
@@ -435,6 +466,10 @@ export function buildBiggjExperimentsPayload(snapshot={}){
     ].filter(Boolean).join('\n')
   ));
   if(!fields.length)fields.push(safeField('Registered protocols','Noch keine Research-Protokolle.'));
+  const reviewTickets=arr(snapshot?.researchReviews?.tickets).slice(0,6).map(x=>
+    '**'+clip(x.skillId,64)+'** · '+clip(x.fromStatus,18)+' → '+clip(x.proposedStatus,18)+' · '+pct(x.validationReadinessScore)+' · '+clip(x.evidenceState,52)
+  ).join('\n')||'Keine offenen Review-Tickets.';
+  fields.push(safeField('MANUAL REVIEW QUEUE',reviewTickets));
   fields.push(safeField('NEXT EXPERIMENTS',nextExperimentLines(snapshot,5)));
   return payload(
     'BIGGJ // EXPERIMENT LAB',
@@ -490,6 +525,10 @@ export function buildBiggjProgressPayload(snapshot={}){
         'Discovered research skills '+fmt(snapshot.discoveredResearchOnlySkills)
       ].join('\n')),
       safeField('VALIDATION PHASES',Object.entries(phases).map(([k,v])=>k+' '+fmt(v)).join(' · ')||'—'),
+      safeField('MANUAL REVIEW QUEUE',[
+        'Open '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked)+' · decisions '+fmt(snapshot?.researchReviews?.decisions),
+        'Automatic apply OFF · explicit operator approval required'
+      ].join('\n')),
       safeField('NEXT HIGH-LEVERAGE WORK',queueLines(snapshot,5))
     ],
     BIGGJ_DISCORD_OBSERVABILITY_MARKERS.progress,
@@ -543,6 +582,10 @@ export function buildBiggjDecisionTracePayload(snapshot={}){
         'Manual promotion review '+(claim.manualPromotionReviewEligible?'ELIGIBLE':'NOT ELIGIBLE'),
         'Kill review '+(claim.killReviewEligible?'ELIGIBLE':'NOT ELIGIBLE'),
         claimReasons
+      ].join('\n')),
+      safeField('MANUAL RESEARCH REVIEWS',[
+        'Open '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked),
+        ...arr(snapshot?.researchReviews?.tickets).slice(0,5).map(x=>'• '+clip(x.skillId,54)+' '+clip(x.fromStatus,16)+' → '+clip(x.proposedStatus,16)+' · '+clip(x.evidenceState,44))
       ].join('\n')),
       safeField('WHAT BIGGJ WILL NOT DO','Keine automatische Promotion · kein automatischer Kill · keine stillen PRIMARY-Änderungen · keine echten Orders.'),
       safeField('CURRENT NEXT STEP',nextExperimentLines(snapshot,5))
