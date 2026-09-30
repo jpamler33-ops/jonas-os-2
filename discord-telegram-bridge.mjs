@@ -16,7 +16,7 @@ import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } fr
 import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V7';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V8';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -44,6 +44,7 @@ const COMMANDS=[
   {name:'memory',description:'Episode Memory für einen Markt',options:[symbolOption()]},
   {name:'evidence',description:'Evidence-Diagnostik für einen Markt',options:[symbolOption()]},
   {name:'validity',description:'Research-Validity für einen Markt',options:[symbolOption()]},
+  {name:'executive',description:'BIGGJ Executive State öffnen'},
   {name:'brain',description:'BIGGJ Brain Pulse öffnen'},
   {name:'knowledge',description:'BIGGJ Wissens- und Capability-Map öffnen'},
   {name:'research',description:'BIGGJ Research Queue öffnen'},
@@ -135,7 +136,7 @@ const CHANNEL_PROFILE_GROUPS=Object.freeze({
   ]),
   LIVE_90:new Set(['market-overview']),
   LIVE_120:new Set([
-    'brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
+    'executive-state','brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
     'review-queue','learning-timeline','progress','evidence-ledger','decision-trace',
     'btc','eth','sol','memecoins','global-intel'
   ]),
@@ -2027,7 +2028,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       await interaction.editReply(buildRulebookPayload(await safeMissionSnapshot()));
       return;
     }
-    const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
+    const operatorViews={executive:'executive',brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
     const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
     if(experienceViews[name]){await experienceCommand(interaction,experienceViews[name]);return;}
