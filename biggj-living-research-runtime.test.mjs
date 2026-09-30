@@ -106,6 +106,9 @@ test('initial living research runtime is a governed research-only skill graph',(
   assert.deepEqual(state.observedForecastIds,[]);
   assert.deepEqual(state.persistentCaseRegistry,[]);
   assert.deepEqual(state.stabilityEventRegistry,[]);
+  assert.deepEqual(state.researchProtocols,[]);
+  assert.equal(state.invariants.researchProtocolsArePreregistered,true);
+  assert.equal(state.invariants.retrospectiveConfirmatoryRelabelingForbidden,true);
   assert.ok(state.skillTree.nodes.length>=159);
 });
 
@@ -167,8 +170,18 @@ test('three distinct persistent forecast cases create one deterministic research
   assert.equal(signal.researchRequired,true);
   assert.equal(signal.distinctPersistentForecasts,3);
   assert.equal(out.discoveredSkillIds.length,1);
+  assert.equal(out.createdProtocolIds.length,1);
+  assert.equal(out.state.researchProtocols.length,1);
 
   const skill=out.state.skillTree.nodes.find(x=>x.skillId===out.discoveredSkillIds[0]);
+  const protocol=out.state.researchProtocols[0];
+  assert.equal(protocol.skillId,skill.skillId);
+  assert.equal(protocol.registeredAt,5000);
+  assert.equal(protocol.skillCreatedAt,5000);
+  assert.equal(protocol.backfilledForExistingSkill,false);
+  assert.equal(protocol.preregistration.confirmatoryEvidenceMustBeKnownAfter,5000);
+  assert.equal(protocol.authority.automaticExperimentLaunch,false);
+  assert.equal(protocol.authority.automaticSkillStatusTransition,false);
   assert.ok(skill);
   assert.equal(skill.kind,'DISCOVERED_SKILL');
   assert.equal(skill.status,'DISCOVERING');
@@ -197,6 +210,8 @@ test('three distinct persistent forecast cases create one deterministic research
   });
   assert.equal(duplicate.changed,false);
   assert.deepEqual(duplicate.discoveredSkillIds,[]);
+  assert.deepEqual(duplicate.createdProtocolIds,[]);
+  assert.equal(duplicate.state.researchProtocols.length,1);
   assert.equal(duplicate.state.skillTree.nodes.length,out.state.skillTree.nodes.length);
 });
 
@@ -484,6 +499,46 @@ test('all assumption templates target canonical skill nodes',()=>{
   }
 });
 
+test('existing research skill without a protocol is backfilled at current knowledge time without relabeling old evidence',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'DISCOVERY'
+  });
+  const legacy=structuredClone(created.state);
+  delete legacy.fingerprint;
+  delete legacy.researchProtocols;
+  const legacyState={...legacy,fingerprint:sha256(legacy)};
+  assert.equal(verifyBiggjLivingResearchRuntime(legacyState).ok,true);
+
+  const backfilled=refreshBiggjLivingResearchRuntime(legacyState,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:9000,
+    reason:'PROTOCOL_BACKFILL'
+  });
+  assert.equal(backfilled.changed,true);
+  assert.equal(backfilled.discoveredSkillIds.length,0);
+  assert.equal(backfilled.createdProtocolIds.length,1);
+  assert.equal(backfilled.state.researchProtocols.length,1);
+  const protocol=backfilled.state.researchProtocols[0];
+  assert.equal(protocol.registeredAt,9000);
+  assert.equal(protocol.backfilledForExistingSkill,true);
+
+  const summary=biggjLivingResearchRuntimeSummary(backfilled.state);
+  assert.equal(summary.researchProtocols.backfilled,1);
+  assert.equal(summary.researchProtocols.stateCounts.AWAITING_PROSPECTIVE_EVIDENCE,1);
+  assert.equal(summary.researchProtocols.protocols[0].postRegistrationEvidence.total,0);
+});
+
 test('runtime persistence round-trip preserves fingerprint and research state',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'biggj-living-research-'));
   const file=path.join(dir,'runtime.json');
@@ -501,6 +556,8 @@ test('runtime persistence round-trip preserves fingerprint and research state',a
   assert.equal(reopened.recoveredFromCorrupt,false);
   assert.equal(reopened.state.fingerprint,out.state.fingerprint);
   assert.equal(verifyBiggjLivingResearchRuntime(reopened.state).ok,true);
+  assert.equal(reopened.state.researchProtocols.length,out.state.researchProtocols.length);
+  assert.deepEqual(reopened.state.researchProtocols,out.state.researchProtocols);
   const raw=JSON.parse(await readFile(file,'utf8'));
   assert.equal(raw.fingerprint,out.state.fingerprint);
 });
@@ -539,6 +596,11 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.ok(summary.researchEvidence.skillCount>=1);
   assert.ok(summary.researchEvidence.evidenceTotal>=1);
   assert.equal(summary.researchEvidence.independentEpisodes,0);
+  assert.equal(summary.researchProtocols.total,1);
+  assert.equal(summary.researchProtocols.backfilled,0);
+  assert.equal(summary.researchProtocols.stateCounts.AWAITING_PROSPECTIVE_EVIDENCE,1);
+  assert.equal(summary.researchProtocols.protocols[0].automaticExperimentLaunch,false);
+  assert.equal(summary.researchProtocols.protocols[0].automaticSkillStatusTransition,false);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.automaticKill,false);
   assert.equal(summary.automaticExperimentLaunch,false);
