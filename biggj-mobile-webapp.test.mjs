@@ -111,3 +111,11 @@ test('canonical mission-control renderer delegates to the V2 mobile app',async()
   assert.match(source,/import \{ renderBiggjMobileApp \} from '\.\/biggj-mobile-webapp\.mjs'/);
   assert.match(source,/return renderBiggjMobileApp\(snapshot\)/);
 });
+
+
+test('canonical route serves mobile V2 and legacy route keeps technical dashboard',async()=>{
+  const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(source,/renderBiggjMobileApp\(snapshot\)/);
+  assert.match(source,/req\.url === '\/mission-control\/legacy'/);
+  assert.match(source,/renderMissionControlHtml\(snapshot\)/);
+});
