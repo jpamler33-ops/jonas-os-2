@@ -99,6 +99,22 @@ define('research.marketContext.volumeToCapRatio','MARKET_CONTEXT',{unit:'RATIO',
 define('research.marketContext.activeCryptocurrenciesLog','MARKET_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p active crypto assets'});
 define('research.marketContext.activeMarketsLog','MARKET_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p active crypto markets'});
 
+define('research.defi.totalTvlLog','DEFI_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate DeFi TVL across DefiLlama chains'});
+define('research.defi.chainCountLog','DEFI_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p number of chains with observable DefiLlama TVL'});
+define('research.defi.ethereumTvlShare','DEFI_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Ethereum share of observed aggregate DeFi TVL'});
+define('research.defi.solanaTvlShare','DEFI_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Solana share of observed aggregate DeFi TVL'});
+define('research.defi.bitcoinTvlShare','DEFI_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Bitcoin share of observed aggregate DeFi TVL'});
+define('research.defi.top10TvlShare','DEFI_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Top ten chains share of observed aggregate DeFi TVL'});
+
+define('research.dex.trendingMetaCountLog','DEX_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p number of DEX Screener trending meta groups'});
+define('research.dex.trendingMarketCapLog','DEX_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate market cap across trending meta groups'});
+define('research.dex.trendingLiquidityLog','DEX_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate liquidity across trending meta groups'});
+define('research.dex.trendingVolumeLog','DEX_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate volume across trending meta groups'});
+define('research.dex.trendingVolumeLiquidityRatio','DEX_CONTEXT',{unit:'RATIO',min:0,description:'Aggregate trending DEX volume divided by aggregate liquidity'});
+define('research.dex.trendingTopLiquidityShare','DEX_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Largest trending meta liquidity share'});
+define('research.dex.trendingH1MedianPct','DEX_CONTEXT',{unit:'PERCENT',min:-100,max:1000000,description:'Median one-hour market-cap change across trending DEX metas'});
+define('research.dex.trendingH24MedianPct','DEX_CONTEXT',{unit:'PERCENT',min:-100,max:1000000,description:'Median 24-hour market-cap change across trending DEX metas'});
+
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
   define('research.entityflow.eth.grossExternal'+window,'ENTITY_FLOW',{unit:'LOG_ETH',min:0,description:'log1p verified entity gross external flow'});
