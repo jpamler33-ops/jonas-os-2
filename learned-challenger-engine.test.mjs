@@ -163,3 +163,21 @@ test('stress gate can only reduce challenger notional',()=>{
   assert.equal(out.candidates[0].notionalQuote,2.5);
   assert.equal(out.candidates[0].canExecuteLive,false);
 });
+
+test('unconstrained LAB outcomes cannot seed NORMAL challenger rules',()=>{
+  const base=baseLedger();
+  const lab=Array.from({length:40},(_,i)=>({
+    ...pos(1000+i,{good:true}),
+    entryMode:'LAB_UNCONSTRAINED',
+    walletId:'LAB',
+    realizedNetPnlQuote:100,
+    realizedReturnPct:.20
+  }));
+  const normalModel=buildShadowTradeQualityModel(base,{asOf:2000});
+  const mixedModel=buildShadowTradeQualityModel({positions:[...base.positions,...lab]},{asOf:2000});
+  assert.equal(mixedModel.samples,normalModel.samples);
+  const normalLab=buildLearnedChallengerLab(normalModel,base,{asOf:2000});
+  const mixedLab=buildLearnedChallengerLab(mixedModel,{positions:[...base.positions,...lab]},{asOf:2000});
+  assert.equal(mixedLab.sourceSamples,normalLab.sourceSamples);
+  assert.deepEqual(mixedLab.candidateRules.map(x=>x.ruleId),normalLab.candidateRules.map(x=>x.ruleId));
+});
