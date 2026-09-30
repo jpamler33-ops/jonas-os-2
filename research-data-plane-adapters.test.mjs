@@ -424,3 +424,91 @@ test('SEC filing is not fanned out to unrelated asset without broad CRYPTO tag',
   });
   assert.equal(rows.some(x=>x.domain==='SEC_FILING'),false);
 });
+
+
+test('IBIT issuer holdings enter BTC research with PIT and non-flow semantics',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    issuerEtfContextSnapshot:{
+      ok:true,
+      rows:[{
+        ok:true,
+        source:'ISHARES_DIGITAL_ASSET_HOLDINGS',
+        fundTicker:'IBIT',
+        fundName:'iShares Bitcoin Trust ETF',
+        assetTicker:'BTC',
+        asOfDate:1_500_000,
+        capturedAt:1_999_900,
+        availableAt:1_999_900,
+        sharesOutstanding:1_400_000_000,
+        assetQuantity:800_000,
+        assetMarketValueUsd:66_000_000_000,
+        cashUsd:20_000,
+        prior:{asOfDate:1_413_600,assetQuantity:790_000,sharesOutstanding:1_380_000_000},
+        assetQuantityChangeShare:10_000/790_000,
+        sharesOutstandingChangeShare:20_000_000/1_380_000_000,
+        observationDayGap:1,
+        endpoint:'https://www.ishares.com/ibit.csv',
+        deltaSemantics:'CONSECUTIVE_ISSUER_HOLDINGS_CHANGE_NOT_NET_FUND_FLOW',
+        epistemic:'ISSUER_PUBLISHED_HOLDINGS_LEVEL_NOT_NET_FUND_FLOW_OR_FORECAST'
+      }]
+    }
+  });
+  assert.equal(rows.length,1);
+  const etf=rows[0];
+  assert.equal(etf.domain,'ETF_HOLDINGS');
+  assert.equal(etf.source,'ISHARES_DIGITAL_ASSET_HOLDINGS');
+  assert.equal(etf.eventTime,1_500_000);
+  assert.equal(etf.availableAt,1_999_900);
+  assert.equal(etf.provenance.fundTicker,'IBIT');
+  assert.equal(etf.provenance.netFundFlowClaim,false);
+  assert.equal(etf.provenance.directionalClaim,false);
+  assert.equal(etf.provenance.causalClaim,false);
+  assert.ok(etf.features.some(x=>x.id==='research.etf.assetQuantityChangeShare'));
+  assert.ok(etf.features.some(x=>x.id==='research.etf.sharesOutstandingChangeShare'));
+});
+
+test('ETHA maps only to ETH and SOL fabricates no ETF source',()=>{
+  const context={
+    ok:true,
+    rows:[{
+      ok:true,
+      source:'ISHARES_DIGITAL_ASSET_HOLDINGS',
+      fundTicker:'ETHA',
+      fundName:'iShares Ethereum Trust ETF',
+      assetTicker:'ETH',
+      asOfDate:1_500_000,
+      capturedAt:1_999_900,
+      availableAt:1_999_900,
+      sharesOutstanding:200_000_000,
+      assetQuantity:3_000_000,
+      assetMarketValueUsd:12_000_000_000,
+      cashUsd:10_000,
+      observationDayGap:null,
+      deltaSemantics:'NO_PRIOR_ISSUER_OBSERVATION'
+    }]
+  };
+  const eth=buildResearchDataPlaneSnapshots({symbol:'ETHUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:context});
+  const sol=buildResearchDataPlaneSnapshots({symbol:'SOLUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:context});
+  assert.equal(eth.length,1);
+  assert.equal(eth[0].provenance.fundTicker,'ETHA');
+  assert.equal(eth[0].provenance.assetTicker,'ETH');
+  assert.equal(sol.some(x=>x.domain==='ETF_HOLDINGS'),false);
+});
+
+test('same issuer date with revised holdings receives revision-safe source identity',()=>{
+  const base={
+    ok:true,source:'ISHARES_DIGITAL_ASSET_HOLDINGS',fundTicker:'IBIT',
+    fundName:'iShares Bitcoin Trust ETF',assetTicker:'BTC',
+    asOfDate:1_500_000,capturedAt:1_999_900,availableAt:1_999_900,
+    sharesOutstanding:1_400_000_000,assetQuantity:800_000,assetMarketValueUsd:66_000_000_000,cashUsd:20_000
+  };
+  const first=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:{ok:true,rows:[base]}
+  })[0];
+  const revised=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:{ok:true,rows:[{...base,assetQuantity:800_100}]}
+  })[0];
+  assert.notEqual(first.sourceEventId,revised.sourceEventId);
+});
