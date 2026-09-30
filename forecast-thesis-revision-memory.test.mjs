@@ -137,7 +137,7 @@ test('later support loss records exact assumption transition and forecast watch 
   const artifact=createForecastThesisRevisionArtifact({
     issuance:i,
     currentDeclarations:current,
-    observedAt:61_000,
+    observedAt:61_010,
     currentInputFingerprint:context(61_000,61_010).inputFingerprint,
     forecastRevisionAssessment:{
       status:'WATCH',
@@ -155,8 +155,8 @@ test('later support loss records exact assumption transition and forecast watch 
 
   const applied=applyForecastThesisRevision(m,artifact);
   assert.equal(applied.changed,true);
-  assert.equal(applied.memory.firstStaleAt,61_000);
-  assert.equal(applied.memory.firstWatchAt,61_000);
+  assert.equal(applied.memory.firstStaleAt,61_010);
+  assert.equal(applied.memory.firstWatchAt,61_010);
   assert.equal(applied.memory.eventCount,1);
   assert.ok(applied.event.supportTransitions.some(x=>
     x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE'&&x.transition==='SUPPORT_LOST'
@@ -176,7 +176,7 @@ test('repeating the same stale state does not create revision spam',()=>{
     x.witnessReport.externalWitnessCount=1;
   });
   const first=createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:current,observedAt:61_000,
+    issuance:i,currentDeclarations:current,observedAt:61_010,
     forecastRevisionAssessment:{status:'WATCH',score:.4,reasons:[],warnings:[]}
   });
   m=applyForecastThesisRevision(m,first).memory;
@@ -186,7 +186,7 @@ test('repeating the same stale state does not create revision spam',()=>{
     x.witnessReport.externalWitnessCount=1;
   });
   const repeated=createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:later,observedAt:121_000,
+    issuance:i,currentDeclarations:later,observedAt:121_010,
     forecastRevisionAssessment:{status:'WATCH',score:.42,reasons:[],warnings:[]}
   });
   const applied=applyForecastThesisRevision(m,repeated);
@@ -202,13 +202,13 @@ test('support restoration is a separate prospective event',()=>{
     x.witnessReport.externalWitnessCount=1;
   });
   m=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:lost,observedAt:61_000,
+    issuance:i,currentDeclarations:lost,observedAt:61_010,
     forecastRevisionAssessment:{status:'WATCH',score:.4,reasons:[],warnings:[]}
   })).memory;
 
   const restored=declarations(121_000,121_010);
   const applied=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:restored,observedAt:121_000,
+    issuance:i,currentDeclarations:restored,observedAt:121_010,
     forecastRevisionAssessment:{status:'VALID',score:.1,reasons:[],warnings:[]}
   }));
   assert.equal(applied.changed,true);
@@ -225,7 +225,7 @@ test('forecast invalidation is timestamped independently of assumption support l
   const m=createInitialForecastThesisRevisionMemory({forecastId:'BTCUSDT:1000',issuance:i});
   const current=declarations(181_000,181_010);
   const applied=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:current,observedAt:181_000,
+    issuance:i,currentDeclarations:current,observedAt:181_010,
     forecastRevisionAssessment:{
       status:'INVALIDATED',
       score:.91,
@@ -234,7 +234,7 @@ test('forecast invalidation is timestamped independently of assumption support l
       regimeChanged:true
     }
   }));
-  assert.equal(applied.memory.firstForecastInvalidatedAt,181_000);
+  assert.equal(applied.memory.firstForecastInvalidatedAt,181_010);
   assert.equal(applied.memory.firstStaleAt,null);
   assert.equal(applied.event.forecastAssessmentTransition.to,'INVALIDATED');
 });
@@ -247,25 +247,25 @@ test('pre-outcome view only uses revisions known before maturity and reports war
     x.witnessReport.externalWitnessCount=1;
   });
   m=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:lost,observedAt:61_000,
+    issuance:i,currentDeclarations:lost,observedAt:61_010,
     forecastRevisionAssessment:{status:'WATCH',score:.4,reasons:[],warnings:[]}
   })).memory;
   const invalidated=declarations(241_000,241_010);
   m=applyForecastThesisRevision(m,createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:invalidated,observedAt:241_000,
+    issuance:i,currentDeclarations:invalidated,observedAt:241_010,
     forecastRevisionAssessment:{status:'INVALIDATED',score:.9,reasons:['path breach'],warnings:[]}
   })).memory;
 
   const before=forecastThesisPreOutcomeRevisionState(m,{maturedAt:180_000});
   assert.equal(before.warningAvailableBeforeMaturity,true);
-  assert.equal(before.firstWarningAt,61_000);
-  assert.equal(before.warningLeadMs,119_000);
+  assert.equal(before.firstWarningAt,61_010);
+  assert.equal(before.warningLeadMs,118_990);
   assert.equal(before.forecastInvalidatedBeforeMaturity,false);
   assert.ok(before.everStaleAssumptionIdsBeforeMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
 
   const after=forecastThesisPreOutcomeRevisionState(m,{maturedAt:300_000});
   assert.equal(after.forecastInvalidatedBeforeMaturity,true);
-  assert.equal(after.firstForecastInvalidatedAt,241_000);
+  assert.equal(after.firstForecastInvalidatedAt,241_010);
 });
 
 test('a missing declaration is audited but is not silently converted into support loss',()=>{
@@ -283,7 +283,7 @@ test('a missing declaration is audited but is not silently converted into suppor
     dependencies:current.dependencies
   });
   const artifact=createForecastThesisRevisionArtifact({
-    issuance:i,currentDeclarations:current,observedAt:61_000,
+    issuance:i,currentDeclarations:current,observedAt:61_010,
     forecastRevisionAssessment:{status:'VALID',score:.1,reasons:[],warnings:[]}
   });
   const row=artifact.assumptions.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE');
