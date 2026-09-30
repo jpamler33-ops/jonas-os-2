@@ -84,7 +84,7 @@ test('autolearn admission blocks external-memory pressure even when heap and rss
   assert.equal(r.allowed,false);
   assert.deepEqual(r.exceeded,['EXTERNAL']);
   assert.equal(r.reason,'MEMORY_PRESSURE');
-  assert.equal(AUTOLEARN_MEMORY_ADMISSION_VERSION,'TCX_AUTOLEARN_MEMORY_ADMISSION_V1');
+  assert.equal(AUTOLEARN_MEMORY_ADMISSION_VERSION,'TCX_AUTOLEARN_MEMORY_ADMISSION_V2');
 });
 
 test('autolearn resume uses lower hysteresis thresholds',()=>{
@@ -116,4 +116,44 @@ test('autolearn resume uses lower hysteresis thresholds',()=>{
   });
   assert.equal(resume.allowed,false);
   assert.deepEqual(resume.exceeded,['HEAP']);
+});
+
+
+test('autolearn V2 resumes at production idle baseline while retaining issue headroom',()=>{
+  const resumed=evaluateAutoLearnMemoryAdmission({
+    phase:'RESUME',
+    heapUsedMb:283,
+    rssMb:559,
+    externalMb:7,
+    issueHeapMb:320,
+    issueRssMb:720,
+    issueExternalMb:64
+  });
+  assert.equal(resumed.allowed,true);
+  assert.deepEqual(resumed.exceeded,[]);
+  assert.equal(resumed.limits.heapUsedMb,300);
+
+  const hysteresisEdge=evaluateAutoLearnMemoryAdmission({
+    phase:'RESUME',
+    heapUsedMb:300,
+    rssMb:559,
+    externalMb:7,
+    issueHeapMb:320,
+    issueRssMb:720,
+    issueExternalMb:64
+  });
+  assert.equal(hysteresisEdge.allowed,false);
+  assert.deepEqual(hysteresisEdge.exceeded,['HEAP']);
+
+  const issueStillProtected=evaluateAutoLearnMemoryAdmission({
+    phase:'ISSUE',
+    heapUsedMb:320,
+    rssMb:559,
+    externalMb:7,
+    issueHeapMb:320,
+    issueRssMb:720,
+    issueExternalMb:64
+  });
+  assert.equal(issueStillProtected.allowed,false);
+  assert.deepEqual(issueStillProtected.exceeded,['HEAP']);
 });

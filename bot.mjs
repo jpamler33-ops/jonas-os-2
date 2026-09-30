@@ -358,7 +358,7 @@ const autoLearnRssHeadroomMb = Math.max(620, Math.min(820, Number(process.env.TC
 const autoLearnExternalHeadroomMb = Math.max(32, Math.min(160, Number(process.env.TCX_AUTOLEARN_EXTERNAL_HEADROOM_MB || 64)));
 const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 1) || 1)));
 const autoLearnInterIssueMs = Math.max(2000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 8000)));
-const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || 280)));
+const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || (autoLearnHeapHeadroomMb-20))));
 const autoLearnResumeRssMb = Math.max(450, Math.min(autoLearnRssHeadroomMb-40, Number(process.env.TCX_AUTOLEARN_RESUME_RSS_MB || 620)));
 const autoLearnResumeExternalMb = Math.max(16, Math.min(autoLearnExternalHeadroomMb-8, Number(process.env.TCX_AUTOLEARN_RESUME_EXTERNAL_MB || 48)));
 const autoLearnMemoryBackoffMs = Math.max(30000, Math.min(180000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 90000)));
@@ -8026,10 +8026,16 @@ async function shadowPortfolioWatcher(){
 
       if(changed) await persistShadowPortfolio('watcher');
       const summary=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
+      const researchSummary=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:Date.now()});
       recordOperation(observability,{name:'shadow_portfolio_watch',ok:true,latencyMs:Date.now()-started,error:null});
       if(opened||closed){
         console.log('shadow portfolio cycle',JSON.stringify({
-          opened,closed,openPositions:summary.openPositions,closedTrades:summary.closedTrades,
+          opened,closed,
+          primaryOpenPositions:summary.openPositions,
+          primaryClosedTrades:summary.closedTrades,
+          researchOpenPositions:researchSummary.openPositions,
+          researchClosedTrades:researchSummary.closedTrades,
+          ledgerPositions:(shadowPortfolioLedger.positions||[]).length,
           netPnlQuote:summary.netPnlQuote,equityQuote:summary.equityQuote,
           academyStage:evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).activeStage,
           academyLevel:evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone}).achievedLevel
@@ -8545,6 +8551,17 @@ async function autoLearnForecastWatcher() {
         await sleep(autoLearnSweepMs);
         continue;
       }
+      console.log('autolearn memory headroom restored',JSON.stringify({
+        ...resumeAdmission.memory,
+        threshold:resumeAdmission.limits,
+        action:'RETRY_IMMEDIATELY',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+      // Do not burn the recovered low-memory window by sleeping another full
+      // sweep. The next loop iteration performs the normal ISSUE admission
+      // check again before any forecast work begins.
+      continue;
     }
     await sleep(autoLearnSweepMs);
   }
