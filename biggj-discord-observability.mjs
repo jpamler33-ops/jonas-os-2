@@ -21,6 +21,7 @@ export const BIGGJ_DISCORD_OBSERVABILITY_LAYOUT=Object.freeze([
     {name:'experiments',topic:'Präregistrierte Research-Protokolle, Validierungsphasen und nächste Tests.'},
     {name:'skill-tree',topic:'BIGGJ Skill Tree: Reifegrade, Dependency-Bottlenecks und Capability-Gaps.'},
     {name:'review-queue',topic:'Evidenzreife Skill-Transitions, manuelle Reviews, Blocker und Governance.'},
+    {name:'learning-timeline',topic:'Chronologische BIGGJ Lern-, Review-, Protokoll- und Revisionsereignisse mit 24h/7d Aktivität.'},
     {name:'progress',topic:'Messbarer Lernfortschritt: Evidence, Episoden, Reifegrad und Research-Momentum.'},
     {name:'evidence-ledger',topic:'Evidence-Qualität, PIT/Audit/Science-Status und Research-Coverage.'},
     {name:'decision-trace',topic:'Nachvollziehbare Systementscheidungen und Begründungen aus explizitem State.'}
@@ -36,6 +37,7 @@ export const BIGGJ_DISCORD_OBSERVABILITY_MARKERS=Object.freeze({
   experiments:'BIGGJ_OBSERVABILITY_EXPERIMENTS_V1',
   skills:'BIGGJ_OBSERVABILITY_SKILL_TREE_V1',
   reviews:'BIGGJ_OBSERVABILITY_REVIEW_QUEUE_V1',
+  timeline:'BIGGJ_OBSERVABILITY_LEARNING_TIMELINE_V1',
   progress:'BIGGJ_OBSERVABILITY_PROGRESS_V1',
   evidence:'BIGGJ_OBSERVABILITY_EVIDENCE_V1',
   decisions:'BIGGJ_OBSERVABILITY_DECISION_TRACE_V1'
@@ -166,6 +168,75 @@ function revisionRows(state){
     }));
 }
 
+function learningTimeline(state,nodes,asOf){
+  const now=finite(asOf);
+  const events=[];
+  const push=(at,kind,title,detail='',ref='')=>{
+    const t=finite(at,null);
+    if(t==null||t<=0||t>now)return;
+    events.push({
+      at:t,
+      kind:String(kind||'EVENT'),
+      title:String(title||'UNKNOWN'),
+      detail:String(detail||''),
+      ref:String(ref||'')
+    });
+  };
+  for(const row of arr(state?.researchProtocols)){
+    push(row?.registeredAt,'PROTOCOL_REGISTERED',row?.skillId||'UNKNOWN',row?.protocolId||'',row?.protocolId||'');
+  }
+  for(const row of arr(state?.stabilityEventRegistry)){
+    const codes=arr(row?.repeatedFalsifierCodes||row?.falsifierCodes).map(String).slice(0,4);
+    push(
+      row?.at??row?.observedAt??row?.eventAt,
+      'ASSUMPTION_REVISION',
+      row?.assumptionId||row?.type||'STATE_CHANGE',
+      [row?.symbol,...codes].filter(Boolean).join(' · '),
+      row?.forecastId||''
+    );
+  }
+  for(const row of arr(state?.researchReviewQueue?.tickets)){
+    push(
+      row?.createdAt,
+      'REVIEW_READY',
+      row?.skillId||'UNKNOWN',
+      String(row?.fromStatus||'UNKNOWN')+' → '+String(row?.proposedStatus||'UNKNOWN'),
+      row?.ticketId||''
+    );
+  }
+  for(const row of arr(state?.researchReviewDecisions)){
+    push(
+      row?.decidedAt,
+      'REVIEW_DECISION',
+      row?.skillId||'UNKNOWN',
+      String(row?.decision||'UNKNOWN')+(row?.fromStatus||row?.toStatus?' · '+String(row?.fromStatus||'')+' → '+String(row?.toStatus||''):''),
+      row?.ticketId||''
+    );
+  }
+  for(const row of arr(nodes)){
+    if(String(row?.kind||'')!=='DISCOVERED_SKILL')continue;
+    push(
+      row?.createdAt??row?.updatedAt,
+      'SKILL_DISCOVERED',
+      row?.title||row?.skillId||'UNKNOWN',
+      String(row?.status||'UNKNOWN'),
+      row?.skillId||''
+    );
+  }
+  const ordered=events.sort((a,b)=>b.at-a.at||a.kind.localeCompare(b.kind)||a.title.localeCompare(b.title));
+  const summarize=windowMs=>{
+    const rows=ordered.filter(x=>x.at>=now-windowMs&&x.at<=now);
+    const byKind={};
+    for(const row of rows)byKind[row.kind]=(byKind[row.kind]||0)+1;
+    return {total:rows.length,byKind};
+  };
+  return {
+    events:ordered.slice(0,40),
+    last24h:summarize(24*60*60*1000),
+    last7d:summarize(7*24*60*60*1000)
+  };
+}
+
 export function buildBiggjDiscordObservabilitySnapshot({
   livingResearchState,
   claimAssumptionResearch=null,
@@ -197,6 +268,7 @@ export function buildBiggjDiscordObservabilitySnapshot({
   }));
   const claim=claimAssumptionResearch||{};
   const updatedAt=finite(state?.updatedAt,finite(asOf));
+  const timeline=learningTimeline(state,nodes,updatedAt);
   return Object.freeze({
     version:BIGGJ_DISCORD_OBSERVABILITY_VERSION,
     generatedAt:updatedAt,
@@ -221,6 +293,7 @@ export function buildBiggjDiscordObservabilitySnapshot({
     researchQueue:queue.length?queue:arr(skill?.researchQueue).slice(0,20),
     protocols:protocolRows(state),
     revisions:revisionRows(state),
+    learningTimeline:timeline,
     validation:{
       discoveredSkillCount:finite(validation?.discoveredSkillCount),
       manualTransitionReviewEligible:finite(validation?.manualTransitionReviewEligible),
@@ -325,7 +398,7 @@ export function biggjObservabilityNavComponents(){
       {type:2,style:2,label:'Evidence',custom_id:'dc6:brain:evidence'},
       {type:2,style:2,label:'Decisions',custom_id:'dc6:brain:decisions'},
       {type:2,style:2,label:'Experiments',custom_id:'dc6:brain:experiments'},
-      {type:2,style:2,label:'Knowledge',custom_id:'dc6:brain:knowledge'}
+      {type:2,style:2,label:'Timeline',custom_id:'dc6:brain:timeline'}
     ]}
   ];
 }
@@ -574,6 +647,11 @@ export function buildBiggjProgressPayload(snapshot={}){
         'Open '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked)+' · decisions '+fmt(snapshot?.researchReviews?.decisions),
         'Automatic apply OFF · explicit operator approval required'
       ].join('\n')),
+      safeField('ACTIVITY WINDOWS',[
+        '24h '+fmt(snapshot?.learningTimeline?.last24h?.total)+' events · '+Object.entries(snapshot?.learningTimeline?.last24h?.byKind||{}).map(([k,v])=>k+' '+fmt(v)).join(' · '),
+        '7d '+fmt(snapshot?.learningTimeline?.last7d?.total)+' events · '+Object.entries(snapshot?.learningTimeline?.last7d?.byKind||{}).map(([k,v])=>k+' '+fmt(v)).join(' · '),
+        'Activity is not quality; maturity/evidence gates remain separate.'
+      ].join('\n')),
       safeField('NEXT HIGH-LEVERAGE WORK',queueLines(snapshot,5))
     ],
     BIGGJ_DISCORD_OBSERVABILITY_MARKERS.progress,
@@ -610,6 +688,27 @@ export function buildBiggjEvidencePayload(snapshot={}){
     snapshot
   );
 }
+export function buildBiggjLearningTimelinePayload(snapshot={}){
+  const timeline=snapshot?.learningTimeline||{};
+  const events=arr(timeline.events).slice(0,22);
+  const lines=events.length?events.map(x=>
+    when(x.at)+' · **'+clip(x.kind,32)+'** · '+clip(x.title,62)+(x.detail?' · '+clip(x.detail,130):'')
+  ).join('\n'):'Noch keine zeitlich zuordenbaren Lern-/Review-Ereignisse im gespeicherten Research-State.';
+  const kinds=(window={})=>Object.entries(window?.byKind||{}).map(([k,v])=>k+' '+fmt(v)).join(' · ')||'keine';
+  return payload(
+    'BIGGJ // LEARNING TIMELINE',
+    '**Was hat sich wann verändert?** Diese Seite ordnet gespeicherte Research-Ereignisse chronologisch ein. Aktivität ist nicht automatisch Fortschritt; Qualität bleibt über Evidence-, Validation- und Review-Gates getrennt.',
+    [
+      safeField('LAST 24 HOURS','Events '+fmt(timeline?.last24h?.total)+' · '+kinds(timeline?.last24h)),
+      safeField('LAST 7 DAYS','Events '+fmt(timeline?.last7d?.total)+' · '+kinds(timeline?.last7d)),
+      safeField('LATEST EVENTS',lines),
+      safeField('INTERPRETATION','PROTOCOL_REGISTERED = Test vorregistriert · ASSUMPTION_REVISION = gespeicherter Revisions-/Stability-Event · REVIEW_READY = evidenzreif für manuelle Prüfung · REVIEW_DECISION = explizite Review-Entscheidung · SKILL_DISCOVERED = neue Research-Capability.')
+    ],
+    BIGGJ_DISCORD_OBSERVABILITY_MARKERS.timeline,
+    snapshot
+  );
+}
+
 export function buildBiggjReviewQueuePayload(snapshot={}){
   const reviews=snapshot?.researchReviews||{};
   const tickets=arr(reviews.tickets).slice(0,7);
@@ -694,6 +793,7 @@ export function buildBiggjDiscordObservabilityPayload(view='pulse',snapshot={}){
   if(key==='experiments')return buildBiggjExperimentsPayload(snapshot);
   if(key==='skills')return buildBiggjSkillTreePayload(snapshot);
   if(key==='reviews')return buildBiggjReviewQueuePayload(snapshot);
+  if(key==='timeline')return buildBiggjLearningTimelinePayload(snapshot);
   if(key==='progress')return buildBiggjProgressPayload(snapshot);
   if(key==='evidence')return buildBiggjEvidencePayload(snapshot);
   if(key==='decisions')return buildBiggjDecisionTracePayload(snapshot);
@@ -710,6 +810,7 @@ export function buildBiggjDiscordObservabilityPanelMap(snapshot={}){
     {channel:'experiments',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.experiments,payload:buildBiggjExperimentsPayload(snapshot)},
     {channel:'skill-tree',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.skills,payload:buildBiggjSkillTreePayload(snapshot)},
     {channel:'review-queue',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.reviews,payload:buildBiggjReviewQueuePayload(snapshot)},
+    {channel:'learning-timeline',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.timeline,payload:buildBiggjLearningTimelinePayload(snapshot)},
     {channel:'progress',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.progress,payload:buildBiggjProgressPayload(snapshot)},
     {channel:'evidence-ledger',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.evidence,payload:buildBiggjEvidencePayload(snapshot)},
     {channel:'decision-trace',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.decisions,payload:buildBiggjDecisionTracePayload(snapshot)}
