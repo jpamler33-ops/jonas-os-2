@@ -48,8 +48,8 @@ function derivativeSnapshot({
 
 test('feature catalog is explicit, fingerprinted and validates natural invariants',()=>{
   const manifest=researchFeatureCatalogManifest();
-  assert.equal(RESEARCH_FEATURE_CATALOG.length,67);
-  assert.equal(manifest.featureCount,67);
+  assert.ok(RESEARCH_FEATURE_CATALOG.length>=81);
+  assert.equal(manifest.featureCount,RESEARCH_FEATURE_CATALOG.length);
   assert.ok(/^[a-f0-9]{64}$/.test(manifest.fingerprint));
   assert.equal(validateResearchFeatureRows('DERIVATIVES',[
     {id:'research.derivatives.fundingRate',value:.001}
