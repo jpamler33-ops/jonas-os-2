@@ -9599,8 +9599,10 @@ function currentOperationalReadiness(){
 function autonomousResearchFactoryInputs(now=Date.now()){
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
+  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
   return {
     livingResearchState:biggjLivingResearchState,
+    marketScienceDirectorSummary:biggjMarketScienceDirectorSummary(marketScienceDirector),
     experimentGovernorSummary:experimentGovernorSummary(experimentGovernorState||{}),
     modelPromotionReviewSummary:modelPromotionReviewLastSummary,
     modelCandidateRegistrySummary:modelCandidateRegistrySummary(modelCandidateRegistry),
