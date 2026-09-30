@@ -145,6 +145,19 @@ This is storage/representation overhead only.
 
 CPU/runtime overhead is not yet measured.
 
+## Assumption-level attribution
+
+For THESIS_* assumptions the evaluator also compares later outcomes between:
+
+- observations where the assumption had explicit support at issuance,
+- observations where the exact same assumption had REQUIRED_SUPPORT_MISSING at issuance.
+
+Per assumption it records direction-error and interval-miss rates with 95% Wilson intervals.
+
+An assumption-level row becomes association-ready only after at least 20 supported and 20 unsupported observations.
+
+This remains prospective association, not proof that the assumption was true, false, or causal.
+
 ## Not yet measured
 
 V1 does not yet claim evidence for:
