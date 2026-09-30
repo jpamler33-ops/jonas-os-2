@@ -107,8 +107,10 @@ export function parseOfficialIntelFeed(xml,source,{now=Date.now(),limit=30}={}){
       domain,
       sourceCountry:source.country||'',
       language:'en',
-      availableAt:publishedAt??observedAt,
-      timestamp:publishedAt??observedAt,
+      // Knowledge-time safety: BIGGJ only owns the publication once this
+      // polling cycle actually observed it. Keep publisher time separately.
+      availableAt:observedAt,
+      timestamp:observedAt,
       publishedAt,
       observedAt,
       family,
