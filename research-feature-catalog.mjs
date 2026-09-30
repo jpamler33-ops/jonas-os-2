@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V2';
+export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V3';
 
 const defs=[];
 
@@ -133,6 +133,17 @@ define('research.dex.promotionBoostAmountLog','DEX_PROMOTION_CONTEXT',{unit:'LOG
 define('research.dex.promotionTotalBoostAmountLog','DEX_PROMOTION_CONTEXT',{unit:'LOG_INDEX',min:0,description:'log1p aggregate cumulative DEX Screener boost amount units; promotion signal, not USD'});
 define('research.dex.promotionH1MedianPct','DEX_PROMOTION_CONTEXT',{unit:'PERCENT',min:-100,max:1000000,description:'Median one-hour price change across promoted-token radar pairs'});
 define('research.dex.promotionTopLiquidityShare','DEX_PROMOTION_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Largest pair share of observed promoted-token radar liquidity'});
+
+define('research.news.present','NEWS_EVENT',{unit:'BINARY',min:1,max:1,description:'Observed relevant news event present at BIGGJ knowledge time'});
+define('research.news.familyCode','NEWS_EVENT',{unit:'CATEGORY_CODE',min:0,max:6,description:'Non-directional event-family code'});
+define('research.news.impactPriority','NEWS_EVENT',{unit:'HEURISTIC_PRIORITY',min:0,max:1,description:'Headline priority heuristic, not probability or expected return'});
+define('research.news.independentConfirmation','NEWS_EVENT',{unit:'SHARE',min:0,max:1,description:'Observed independent-confirmation metadata from upstream event processing'});
+define('research.news.contentVerified','NEWS_EVENT',{unit:'BINARY',min:0,max:1,description:'Whether event content is independently verified; official source origin alone does not set this'});
+define('research.news.worldRelevant','NEWS_EVENT',{unit:'BINARY',min:0,max:1,description:'Broad world/macro relevance flag'});
+define('research.news.affectedAssetCount','NEWS_EVENT',{unit:'COUNT',min:0,max:16,description:'Number of explicitly tagged affected assets or risk factors'});
+define('research.news.primarySource','NEWS_EVENT',{unit:'BINARY',min:0,max:1,description:'Direct primary-source publication flag'});
+define('research.news.sourceOriginVerified','NEWS_EVENT',{unit:'BINARY',min:0,max:1,description:'Verified direct source origin; not verification of substantive claims'});
+define('research.news.sourceClassCode','NEWS_EVENT',{unit:'CATEGORY_CODE',min:0,max:2,description:'Source class code: unknown 0, discovery aggregator 1, official primary 2'});
 
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
