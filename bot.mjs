@@ -9606,6 +9606,11 @@ function missionControlData(){
     fallbackUsed:globalIntelFallbackUsed,
     providerHealth:globalIntelProviderHealth,
     gdeltCooldownUntil:globalIntelGdeltCooldownUntil,
+    researchIngestion:{
+      version:NEWS_RESEARCH_ADAPTER_VERSION,
+      lastResult:newsResearchLastResult,
+      lastError:newsResearchLastError
+    },
     eventCount:globalIntelEvents.length,
     recent:[...globalIntelSnapshot()]
       .sort((a,b)=>Number(b?.availableAt||b?.timestamp||0)-Number(a?.availableAt||a?.timestamp||0))
@@ -9617,6 +9622,10 @@ function missionControlData(){
         status:x?.status||'WATCH',
         verified:x?.verified===true,
         independentConfirmation:Number(x?.independentConfirmation||0),
+        primarySource:x?.primarySource===true,
+        publicationAuthenticity:x?.publicationAuthenticity||null,
+        publishedAt:Number(x?.publishedAt||0)||null,
+        observedAt:Number(x?.observedAt||0)||null,
         source:x?.source||x?.domain||'PUBLIC_NEWS',
         url:x?.url||null,
         epistemic:x?.epistemic||'PUBLIC_EVENT',
