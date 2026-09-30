@@ -8,6 +8,41 @@ function finite(v){
 function text(v){
   return String(v??'').trim();
 }
+function log1pNonNegative(v){
+  const n=finite(v);
+  return n!=null&&n>=0?Math.log1p(n):null;
+}
+function median(values){
+  const xs=(Array.isArray(values)?values:[]).map(finite).filter(x=>x!=null).sort((a,b)=>a-b);
+  if(!xs.length) return null;
+  const m=Math.floor(xs.length/2);
+  return xs.length%2?xs[m]:(xs[m-1]+xs[m])/2;
+}
+
+export function dexScreenerTrendingMetasToExtraFeatures(snapshot){
+  const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
+  if(!rows.length) return [];
+  const marketCaps=rows.map(x=>finite(x?.marketCap)).filter(x=>x!=null&&x>=0);
+  const liquidities=rows.map(x=>finite(x?.liquidity)).filter(x=>x!=null&&x>=0);
+  const volumes=rows.map(x=>finite(x?.volume)).filter(x=>x!=null&&x>=0);
+  const h1=rows.map(x=>finite(x?.marketCapChange?.h1)).filter(x=>x!=null);
+  const h24=rows.map(x=>finite(x?.marketCapChange?.h24)).filter(x=>x!=null);
+  const totalMarketCap=marketCaps.reduce((a,b)=>a+b,0);
+  const totalLiquidity=liquidities.reduce((a,b)=>a+b,0);
+  const totalVolume=volumes.reduce((a,b)=>a+b,0);
+  const topLiquidity=liquidities.length?Math.max(...liquidities):null;
+  const candidates=[
+    ['research.dex.trendingMetaCountLog',log1pNonNegative(rows.length)],
+    ['research.dex.trendingMarketCapLog',log1pNonNegative(totalMarketCap)],
+    ['research.dex.trendingLiquidityLog',log1pNonNegative(totalLiquidity)],
+    ['research.dex.trendingVolumeLog',log1pNonNegative(totalVolume)],
+    ['research.dex.trendingVolumeLiquidityRatio',totalLiquidity>0?totalVolume/totalLiquidity:null],
+    ['research.dex.trendingTopLiquidityShare',topLiquidity!=null&&totalLiquidity>0?topLiquidity/totalLiquidity:null],
+    ['research.dex.trendingH1MedianPct',median(h1)],
+    ['research.dex.trendingH24MedianPct',median(h24)]
+  ];
+  return candidates.filter(([,value])=>finite(value)!=null).map(([id,value])=>({id,value:Number(value)}));
+}
 
 function clampInt(v,min,max,fallback){
   const n=Math.floor(Number(v));
