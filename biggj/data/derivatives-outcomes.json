@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-09-29T22:11:51.453Z",
+  "updatedAt": "2026-09-30T02:03:57.416Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -94,7 +94,14 @@
       },
       "evidenceClassification": "OBSERVED_DERIVED",
       "status": "OPEN",
-      "outcomes": {},
+      "outcomes": {
+        "h1": {
+          "observedAt": "2026-09-30T02:03:57.416Z",
+          "price": 83423.6,
+          "return": -0.0019226098681210946,
+          "direction": -1
+        }
+      },
       "caseId": "5e153287a3cc18a89c44654a3c0c2ce5069ace444c5a225708ee9532c1e3eba2"
     }
   ],
@@ -107,9 +114,9 @@
         "cases": 3,
         "horizons": {
           "h1": {
-            "n": 2,
-            "meanReturn": -0.0013427222401885541,
-            "positiveRate": 0.5
+            "n": 3,
+            "meanReturn": -0.0015360181161660675,
+            "positiveRate": 0.3333333333333333
           },
           "h4": {
             "n": 2,
@@ -140,10 +147,10 @@
         "cases": 3,
         "horizons": {
           "h1": {
-            "n": 2,
-            "meanReturn": -0.0013427222401885541,
-            "hitRate": 0.5,
-            "wilsonLower95": 0.09452865480086611,
+            "n": 3,
+            "meanReturn": -0.0015360181161660675,
+            "hitRate": 0.3333333333333333,
+            "wilsonLower95": 0.061490315276160515,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
