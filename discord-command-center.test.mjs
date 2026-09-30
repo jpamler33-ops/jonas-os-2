@@ -139,6 +139,9 @@ test('BIGGJ V6 academy keeps the current panel at the bottom and lesson actions 
 test('BIGGJ V6.1 exposes one-tap user commands',()=>{
   for(const required of [
     "name:'signal'",
+    'signalModeOption',
+    "value:'LIQUIDITY'",
+    "value:'MACRO'",
     "name:'proof'",
     "name:'charts'",
     "name:'news'",
