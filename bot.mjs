@@ -702,6 +702,93 @@ let claimAssumptionResearchLastRunAt=0;
 let claimAssumptionResearchLastState=null;
 let claimAssumptionResearchLastLoggedObservationCount=0;
 let claimAssumptionResearchLastSummary=null;
+let claimAssumptionResearchLastReport=null;
+let biggjLivingResearchLastLoggedFingerprint=null;
+
+async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
+  const started=Date.now();
+  try{
+    const thesisMemories=(forecastRuntime?.intelligence?.all?.()||[])
+      .map(x=>x?.thesisMemory)
+      .filter(Boolean);
+    const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
+      thesisMemories,
+      claimAssumptionReport:report,
+      asOf:Date.now(),
+      reason
+    });
+    if(refreshed.changed){
+      const admission=await storageWriteAdmission('biggj-living-research');
+      if(!admission.allowed){
+        biggjLivingResearchHealthy=false;
+        console.warn('[TCX_BIGGJ_LIVING_RESEARCH_PERSIST_DEFERRED]',JSON.stringify({
+          reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+          refreshReason:reason,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+        return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+      }
+      await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
+      biggjLivingResearchState=refreshed.state;
+      biggjLivingResearchHealthy=true;
+      const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+      if(
+        refreshed.discoveredSkillIds.length>0||
+        biggjLivingResearchLastLoggedFingerprint!==biggjLivingResearchState.fingerprint
+      ){
+        biggjLivingResearchLastLoggedFingerprint=biggjLivingResearchState.fingerprint;
+        console.log('[TCX_BIGGJ_LIVING_RESEARCH]',JSON.stringify({
+          reason,
+          revision:summary.revision,
+          activeAgendaItems:summary.activeAgendaItems,
+          researchRequired:summary.researchRequired,
+          discoveredResearchOnlySkills:summary.discoveredResearchOnlySkills,
+          newSkillIds:refreshed.discoveredSkillIds,
+          topAgenda:summary.topAgenda,
+          automaticPromotion:false,
+          automaticKill:false,
+          automaticExperimentLaunch:false,
+          primaryMutationAllowed:false,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+      recordOperation(observability,{
+        name:'biggj_living_research_refresh',
+        ok:true,
+        latencyMs:Date.now()-started,
+        error:null
+      });
+      return summary;
+    }
+    recordOperation(observability,{
+      name:'biggj_living_research_refresh',
+      ok:true,
+      latencyMs:Date.now()-started,
+      error:null
+    });
+    return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+  }catch(err){
+    biggjLivingResearchHealthy=false;
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'biggj_living_research',message:msg});
+    recordOperation(observability,{
+      name:'biggj_living_research_refresh',
+      ok:false,
+      latencyMs:Date.now()-started,
+      error:msg
+    });
+    console.error('[TCX_BIGGJ_LIVING_RESEARCH_ERROR]',JSON.stringify({
+      reason,
+      error:msg,
+      primaryMutationAllowed:false,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+    return null;
+  }
+}
 
 function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
   const now=Date.now();
@@ -713,6 +800,7 @@ function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=
     const report=evaluateForecastClaimAssumptionResearch(forecastRuntime,{
       limit:forecastJournalMaxEntries
     });
+    claimAssumptionResearchLastReport=report;
     const state=String(report?.conclusion?.state||'UNKNOWN');
     const observations=Number(report?.acceptedObservationCount||0);
     const summary={
