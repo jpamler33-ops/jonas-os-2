@@ -755,7 +755,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return count;
   }
   async function operatorCommand(interaction,view){
-    await interaction.deferReply();
+    const component=typeof interaction.isButton==='function'&&interaction.isButton();
+    if(component)await interaction.deferUpdate();else await interaction.deferReply();
     const snapshot=await safeMissionSnapshot();
     const brain=snapshot?.health?.biggjObservability;
     if(!brain){await interaction.editReply('BIGGJ Observability ist gerade nicht verfügbar.');return;}
