@@ -1,5 +1,7 @@
 import http from 'node:http';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
+import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
+import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
@@ -9279,6 +9281,28 @@ function missionControlData(){
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
   researchCoverage,
+  globalIntel:{
+    eventCount:globalIntelEvents.length,
+    recent:[...globalIntelSnapshot()]
+      .sort((a,b)=>Number(b?.availableAt||b?.timestamp||0)-Number(a?.availableAt||a?.timestamp||0))
+      .slice(0,40)
+      .map(x=>({
+        title:x?.title||x?.headline||x?.eventType||'Event',
+        family:x?.family||x?.eventFamily||'OTHER',
+        status:x?.status||'WATCH',
+        verified:x?.verified===true,
+        availableAt:Number(x?.availableAt||x?.timestamp||0)||null,
+        affectedAssets:Array.isArray(x?.affectedAssets||x?.assets)?(x.affectedAssets||x.assets).slice(0,8):[],
+        marketStatus:x?.cryptoImpactStatus||x?.marketStatus||'AWAITING_MARKET_DATA'
+      }))
+  },
+  traderWatch:{
+    sourceReady:false,
+    nextNeed:'Öffentliche, Point-in-Time erfassbare Trader-/Wallet-Performancequelle mit stabiler Identität, realisierter PnL-Historie und mehreren unabhängigen Trades.',
+    entityRegistry:entityRegistrySummary(entityRegistry),
+    entityFlow:entityFlowMemorySummary(entityFlowMemory),
+    privacy:'PUBLIC_DATA_ONLY'
+  },
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
@@ -9295,13 +9319,29 @@ function missionControlData(){
   discovery,
   asOf:now
  });
+ health.experienceNeeds=deriveBiggjExperienceNeeds({health});
  return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer((req,res) => {
+  if (req.url === '/app.webmanifest') {
+    res.writeHead(200,{'content-type':'application/manifest+json; charset=utf-8','cache-control':'public, max-age=300'});
+    res.end(biggjWebManifest());
+    return;
+  }
+  if (req.url === '/biggj-icon.svg') {
+    res.writeHead(200,{'content-type':'image/svg+xml; charset=utf-8','cache-control':'public, max-age=86400'});
+    res.end(biggjAppIconSvg());
+    return;
+  }
+  if (req.url === '/sw.js') {
+    res.writeHead(200,{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'});
+    res.end(biggjServiceWorker());
+    return;
+  }
   if (req.url === '/mission-control') {
     const snapshot=missionControlData();
-    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"});
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
     res.end(renderMissionControlHtml(snapshot));
     return;
   }
@@ -9329,6 +9369,7 @@ const server = http.createServer((req,res) => {
     res.end(JSON.stringify({
       ok:true,
       service:'TCX Telegram',
+      mobileWebApp:{version:BIGGJ_MOBILE_WEBAPP_VERSION,path:'/mission-control',installable:true},
       execution:'SHADOW_ONLY',
       markets:markets.map(x => x.symbol),
       sessions:sessions.size,

@@ -57,6 +57,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'discord-component-ids.mjs',
   'discord-serial-dedupe-queue.mjs',
   'biggj-discord-observability.mjs',
+  'biggj-experience-center.mjs',
+  'biggj-mobile-webapp.mjs',
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
   'biggj-autonomous-operator.mjs',
