@@ -20,7 +20,7 @@ function freeze(v){
 function baselineClosed(ledger){
   return (ledger?.positions||[]).filter(p=>
     p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED'&&
-    String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER'&&
+    !['CHALLENGER','LAB_UNCONSTRAINED'].includes(String(p.entryMode||'STANDARD').toUpperCase())&&
     finite(p.realizedReturnPct)!=null&&finite(p.realizedNetPnlQuote)!=null
   );
 }
