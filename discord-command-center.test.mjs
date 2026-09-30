@@ -178,3 +178,17 @@ test('BIGGJ V7 incoming news is German-first and strict on translation failure',
     'BIGGJ_GERMAN_NEWS'
   ]) assert.ok(source.includes(required),required);
 });
+
+
+test('BIGGJ V7 exposes the canonical rulebook as a managed Discord surface',()=>{
+  for(const required of [
+    "name:'rulebook'",
+    "category:'BIGGJ • OPERATIONS'",
+    "{name:'rulebook',topic:",
+    "rulebook:'BIGGJ_RULEBOOK_PANEL_V1'",
+    'buildRulebookPayload',
+    'refreshRulebookPanel',
+    "if(name==='rulebook')",
+    "addTimer(refreshRulebookPanel,60000)"
+  ]) assert.ok(source.includes(required),required);
+});
