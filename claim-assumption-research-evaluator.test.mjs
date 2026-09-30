@@ -104,6 +104,7 @@ function observation(i,{
       sidecarBytes:1600
     },
     thesisRevisionState:{
+      stabilityVersion:'TCX_FORECAST_ASSUMPTION_STABILITY_V1',
       eventsBeforeMaturity:(revisionWarning||structuralWarning)?1:0,
       staleAssumptionIdsAtMaturity:revisionWarning?[...staleAssumptionIds]:[],
       everStaleAssumptionIdsBeforeMaturity:revisionWarning?[...staleAssumptionIds]:[],
