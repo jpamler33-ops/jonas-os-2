@@ -22,7 +22,11 @@ const deepFreeze=value=>{
   return value;
 };
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,Number(v)||0));
-const finite=(v,f=null)=>Number.isFinite(Number(v))?Number(v):f;
+const finite=(v,f=null)=>{
+  if(v===null||v===undefined||v==='') return f;
+  const n=Number(v);
+  return Number.isFinite(n)?n:f;
+};
 const uniq=xs=>[...new Set((xs||[]).map(String).filter(Boolean))].sort();
 const coreOf=value=>{
   const {fingerprint,...core}=value||{};
