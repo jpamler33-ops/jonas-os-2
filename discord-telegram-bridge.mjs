@@ -1681,14 +1681,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
   }
   function healthDigest(snapshot={}){
-    const h=snapshot?.health||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
+    const a=snapshot?.health?.biggjAutopilotSupervisor||{};
     return JSON.stringify({
-      ready:r?.ready===true,
-      fabric:h?.marketDataFabric?.healthy===true,
-      oms:h?.shadowOms?.healthy===true,
-      forecast:f?.healthy===true||f?.status==='HEALTHY',
-      telegram:!h?.telegramPolling?.lastPollError,
-      rulebook:String(h?.biggjRulebook?.runtime?.state||'UNKNOWN').toUpperCase()==='PASS'
+      state:String(a?.state||'UNKNOWN'),
+      humanActionRequired:a?.humanActionRequired===true,
+      criticalCount:Array.isArray(a?.critical)?a.critical.length:0
     });
   }
   async function syncHealthAlerts(){
@@ -1699,9 +1696,15 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const previous=lastHealthDigest;lastHealthDigest=digest;
     const c=channelCache.get('alerts');if(!c)return;
     const now=JSON.parse(digest),before=JSON.parse(previous);
-    const labels={ready:'Runtime',fabric:'Marktdaten',oms:'Shadow OMS',forecast:'Forecast',telegram:'Telegram',rulebook:'Rulebook'};
-    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>(labels[k]||k)+': '+(before[k]?'OK':'PRÜFEN')+' → '+(now[k]?'OK':'PRÜFEN'));
-    await managed('alerts',()=>c.send({embeds:[{title:'TCX // STATUSÄNDERUNG',description:(changes.join('\n')||'Systemzustand hat sich geändert.').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}}),{detail:'Statusänderung gepostet',rethrow:false});
+    const enteredCritical=now.humanActionRequired===true&&before.humanActionRequired!==true;
+    const recovered=now.humanActionRequired!==true&&before.humanActionRequired===true;
+    if(!enteredCritical&&!recovered)return;
+    const a=snapshot?.health?.biggjAutopilotSupervisor||{};
+    const title=enteredCritical?'BIGGJ // AUTOPILOT EXCEPTION':'BIGGJ // AUTOPILOT RECOVERED';
+    const description=enteredCritical
+      ?['**Menschliche Aktion erforderlich.**',(a.critical||[]).join('\n')||'Unbekannte kritische Ausnahme.',a.recommendation||''].filter(Boolean).join('\n\n')
+      :'**BIGGJ kann wieder autonom weiterlaufen.**\nKeine menschliche Aktion erforderlich.';
+    await managed('alerts',()=>c.send({embeds:[{title,description:description.slice(0,1800),footer:{text:'BIGGJ_AUTOPILOT_ALERT_V1'},timestamp:new Date().toISOString()}],components:buildBiggjDiscordMarketSciencePayload('autopilot',snapshot).components,allowedMentions:{parse:[]}}),{detail:'Autopilot-Exception/Recovery gepostet',rethrow:false});
     state.lastAlertAt=Date.now();
   }
   function cachedMessage(channel,messageId){
@@ -2114,7 +2117,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
 
   async function onCommand(interaction){
-    if(String(interaction.guildId)!==guildId){await interaction.reply({content:'Dieser TCX-Bot ist für einen anderen Server konfiguriert.',ephemeral:true});return;}
+    if(String(interaction.guildId)!==guildId){await interaction.reply({content:'Dieser BIGGJ-Bot ist für einen anderen Server konfiguriert.',ephemeral:true});return;}
     const name=String(interaction.commandName||'').toLowerCase();
     if(name==='setup'){await setupCommand(interaction);return;}
     if(name==='start'){await startCommand(interaction);return;}
@@ -2123,6 +2126,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='thesis'){await thesisCommand(interaction);return;}
     if(name==='academy'){await academyCommand(interaction);return;}
     if(name==='lesson'){await lessonCommand(interaction);return;}
+    const scienceViews={science:'science',worldmodel:'world',lab:'lab',decision_intel:'decisions',autopilot:'autopilot'};
+    if(scienceViews[name]){await marketScienceCommand(interaction,scienceViews[name]);return;}
     if(name==='supervisor'){
       await interaction.deferReply();
       const mission=await safeMissionSnapshot();
@@ -2148,7 +2153,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(liveSurfaceCallbacks[name]){await runCoreCallback(interaction,liveSurfaceCallbacks[name]);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
-    const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
+    const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter BIGGJ-Befehl.',ephemeral:true});return;}
     await interaction.deferReply();
     const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id); const ctx={interaction:interaction,responded:false}; contexts.set(chatId,ctx);
     try{await handleUpdate({update_id:'discord:'+interaction.id,message:{message_id:interaction.id,chat:{id:chatId},from:{id:interaction.user.id,username:interaction.user.username},text:text}});if(!ctx.responded)await interaction.editReply('TCX hat keine Ausgabe erzeugt.');}
@@ -2158,6 +2163,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function onButton(interaction){
     if(String(interaction.guildId)!==guildId)return;
     const customId=decodeDiscordCallbackCustomId(interaction.customId);
+    if(customId.startsWith('dc7:science:')){
+      const view=String(customId.split(':')[2]||'science');
+      await marketScienceCommand(interaction,view);
+      return;
+    }
     if(customId.startsWith('dc6:brain:')){
       const view=String(customId.split(':')[2]||'pulse');
       await operatorCommand(interaction,view);
@@ -2224,6 +2234,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       tradeCards:tradeCards.size,
       thesisCards:thesisCards.size,
       academyPanels:state.academyPanels,
+      marketSciencePanels:state.marketSciencePanels,
+      lastMarketScienceRefreshAt:state.lastMarketScienceRefreshAt,
       observabilityPanels:state.observabilityPanels,
       experiencePanels:state.experiencePanels,
       lastExperienceRefreshAt:state.lastExperienceRefreshAt,
