@@ -37,7 +37,7 @@ test('public news provider normalizes live general + world events without claimi
       {title:'Nvidia AI chip demand expands',url:'https://tech.example/a',domain:'tech.example',seendate:'20260930T094000Z'}
     ]});
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW,cacheTtlMs:60_000});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW,cacheTtlMs:60_000});
   const out=await p.fetchFeed();
   assert.equal(out.version,BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION);
   assert.equal(out.ok,true);
@@ -56,7 +56,7 @@ test('future-dated GDELT articles are rejected to preserve point-in-time semanti
     {title:'Future headline',url:'https://future.example/a',seendate:'20261001T120000Z'},
     {title:'Observed headline',url:'https://now.example/a',seendate:'20260930T095500Z'}
   ]});
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW});
   const out=await p.fetchFeed();
   assert.equal(out.events.some(x=>x.title==='Future headline'),false);
   assert.equal(out.events.some(x=>x.title==='Observed headline'),true);
@@ -72,7 +72,7 @@ test('provider retries a compact GDELT query after a primary timeout',async()=>{
       {title:'Bitcoin market update after inflation data',url:'https://crypto.example/recovered',seendate:'20260930T095000Z'}
     ]});
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW});
   const out=await p.fetchFeed();
   assert.equal(out.ok,true);
   assert.equal(out.errors.length,0);
@@ -96,7 +96,7 @@ test('GDELT 429 falls through to Google News RSS and starts cooldown',async()=>{
       {title:'Ceasefire talks affect oil markets - Example',url:'https://news.google.com/articles/world',pubDate:'Wed, 30 Sep 2026 09:54:00 GMT',source:'Example World'}
     ]));
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW,gdeltCooldownMs:600_000});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW,gdeltCooldownMs:600_000});
   const out=await p.fetchFeed();
   assert.equal(out.ok,true);
   assert.equal(out.fallbackUsed,true);
@@ -122,7 +122,7 @@ test('GDELT cooldown bypass prevents repeated rate-limit requests',async()=>{
       {title:'Oil and inflation update - Example',url:'https://news.google.com/articles/oil',pubDate:'Wed, 30 Sep 2026 09:50:00 GMT',source:'Example'}
     ]));
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW,gdeltCooldownMs:600_000});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW,gdeltCooldownMs:600_000});
   await p.fetchFeed({force:true});
   const firstGdelt=gdeltCalls;
   const out=await p.fetchFeed({force:true});
@@ -140,7 +140,7 @@ test('future-dated RSS articles are rejected by the secondary provider',async()=
       {title:'Observed RSS headline about oil',url:'https://news.google.com/articles/now',pubDate:'Wed, 30 Sep 2026 09:50:00 GMT',source:'Example'}
     ]));
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW});
   const out=await p.fetchFeed();
   assert.equal(out.events.some(x=>x.title.includes('Future RSS headline')),false);
   assert.equal(out.events.some(x=>x.title.includes('Observed RSS headline')),true);
@@ -157,7 +157,7 @@ test('provider degrades partially when one class exhausts all sources',async()=>
       {title:'Tariff negotiations affect global trade',url:'https://world.example/tariff',seendate:'20260930T095000Z'}
     ]});
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW});
   const out=await p.fetchFeed();
   assert.equal(out.ok,true);
   assert.equal(out.errors.length,1);
@@ -172,9 +172,48 @@ test('provider caches the normalized feed inside its TTL',async()=>{
       {title:'Bitcoin market update',url:'https://crypto.example/cache',seendate:'20260930T095000Z'}
     ]});
   };
-  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW,cacheTtlMs:120_000});
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialSources:[],now:()=>NOW,cacheTtlMs:120_000});
   const a=await p.fetchFeed();
   const b=await p.fetchFeed();
   assert.equal(calls,2);
   assert.strictEqual(a,b);
+});
+
+
+test('public news feed merges official primary-source events without calling them independently confirmed',async()=>{
+  const officialSource={
+    id:'FED_PRESS',
+    authority:'Federal Reserve',
+    url:'https://official.test/fed.xml',
+    defaultFamily:'MACRO',
+    defaultAssets:['USD','RATES'],
+    worldRelevant:true
+  };
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='official.test'){
+      return rssResponse(rss([
+        {title:'Federal Reserve announces FOMC rate decision',url:'https://www.federalreserve.gov/rate',pubDate:'Wed, 30 Sep 2026 09:50:00 GMT',source:'Federal Reserve'}
+      ]));
+    }
+    return jsonResponse({articles:[
+      {title:'Bitcoin market context update',url:'https://news.example/btc',domain:'news.example',seendate:'20260930T094500Z'}
+    ]});
+  };
+  const p=createBiggjPublicNewsProvider({
+    fetchImpl,
+    officialSources:[officialSource],
+    now:()=>NOW
+  });
+  const out=await p.fetchFeed();
+  const official=out.events.find(x=>x.sourceId==='FED_PRESS');
+  assert.ok(official);
+  assert.equal(out.officialSourceCount,1);
+  assert.equal(out.officialArticleCount,1);
+  assert.equal(official.verifiedSource,true);
+  assert.equal(official.verified,false);
+  assert.equal(official.independentConfirmation,0);
+  assert.equal(official.sourceAuthority,'OFFICIAL_PRIMARY');
+  assert.equal(official.availableAt,NOW);
+  assert.equal(out.providerHealth.official.healthySources,1);
 });
