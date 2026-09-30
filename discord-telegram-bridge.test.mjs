@@ -118,37 +118,34 @@ test('refresh budgets are exposed in bridge source',async()=>{
 });
 
 
-test('BIGGJ Discord V6 operator and experience layers are wired into the bridge',async()=>{
+test('BIGGJ Discord V11 is science-first and keeps TCX downstream',async()=>{
   const fs=await import('node:fs/promises');
   const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
-  assert.match(source,/BIGGJ_DISCORD_COMMAND_CENTER_V6/);
+  const science=await fs.readFile(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
+  assert.match(source,/BIGGJ_DISCORD_MARKET_SCIENCE_V7/);
+  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST/);
+  assert.match(source,/\.\.\.BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT/);
   assert.match(source,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
   assert.match(source,/\.\.\.BIGGJ_EXPERIENCE_LAYOUT/);
-  assert.match(source,/name:'executive'/);
-  assert.match(source,/name:'signal'/);
-  assert.match(source,/name:'proof'/);
-  assert.match(source,/signalModeOption/);
-  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V10/);
-  assert.match(source,/Evidence-Linse/);
-  assert.match(source,/name:'brain'/);
-  assert.match(source,/name:'timeline'/);
-  assert.match(source,/name:'needs'/);
-  assert.match(source,/name:'learned'/);
-  assert.match(source,/name:'traders'/);
-  assert.match(source,/name:'cockpit'/);
-  assert.match(source,/name:'research'/);
-  assert.match(source,/name:'skills'/);
-  assert.match(source,/name:'progress'/);
-  assert.match(source,/name:'changes'/);
-  assert.match(source,/name:'decisions'/);
-  assert.match(source,/refreshBiggjObservabilityPanels/);
-  assert.match(source,/observabilityPanelDigests/);
-  assert.match(source,/experiencePanelDigests/);
-  assert.match(source,/refreshExperiencePanels/);
-  assert.match(source,/upsertMarkedAtBottom/);
-  assert.match(source,/dc6:brain:/);
+  assert.match(source,/name:'science'/);
+  assert.match(source,/name:'worldmodel'/);
+  assert.match(source,/name:'lab'/);
+  assert.match(source,/name:'autopilot'/);
+  assert.match(source,/name:'decision_intel'/);
+  assert.match(source,/refreshMarketSciencePanels/);
+  assert.match(source,/marketSciencePanelDigests/);
+  assert.match(source,/dc7:science:/);
+  assert.match(source,/BIGGJ • DECISION APPLICATIONS/);
+  assert.match(source,/BIGGJ • SHADOW TRADING/);
+  assert.doesNotMatch(source,/category:'TCX • CONTROL'/);
+  assert.doesNotMatch(source,/category:'TCX • SHADOW'/);
+  assert.match(science,/science-home/);
+  assert.match(science,/world-model/);
+  assert.match(science,/science-lab/);
+  assert.match(science,/autopilot-supervisor/);
+  assert.match(science,/Trading ist nur eine nachgelagerte Anwendung/);
+  assert.match(science,/PnL kann keine Theorie promoten/);
 });
-
 
 test('deduplicated news event stream uses stable markers and separates world families',async()=>{
   const fs=await import('node:fs/promises');
