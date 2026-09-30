@@ -25,6 +25,7 @@ import {
   BIGGJ_RESEARCH_PROTOCOL_VERSION
 } from './biggj-research-protocol-compiler.mjs';
 import { biggjResearchValidationSummary } from './biggj-research-validation-harness.mjs';
+import { biggjResearchExperimentPlannerSummary } from './biggj-research-experiment-planner.mjs';
 import {
   buildBiggjResearchReviewQueue,
   applyBiggjResearchReviewDecision,
@@ -1232,6 +1233,14 @@ export function biggjLivingResearchRuntimeSummary(value){
       :null,
     validationHarness:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjResearchValidationSummary(value.skillTree,{limit:5})
+      :null,
+    experimentPlanner:verifyBiggjSkillTree(value?.skillTree).ok
+      ?biggjResearchExperimentPlannerSummary({
+          tree:value.skillTree,
+          protocols:value?.researchProtocols||[],
+          limit:5,
+          plannedAt:value?.updatedAt??value?.skillTree?.asOf
+        })
       :null,
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
