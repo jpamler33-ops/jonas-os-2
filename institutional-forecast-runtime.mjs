@@ -1831,6 +1831,17 @@ export function institutionalForecastRuntimeSummary(runtime){
     staleThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
       (x?.thesisMemory?.assumptions||[]).some(a=>a?.issueSupported===true&&a?.currentSupported===false)
     ).length,
+    transientFlickerThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
+      (x?.thesisMemory?.assumptions||[]).some(a=>a?.stability?.state==='TRANSIENT_FLICKER')
+    ).length,
+    persistentStaleThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
+      (x?.thesisMemory?.assumptions||[]).some(a=>
+        a?.stability?.state==='PERSISTENT_STALE'||a?.stability?.state==='RECOVERING'
+      )
+    ).length,
+    thesisStabilityEvents:(runtime?.intelligence?.all?.()??[]).reduce((n,x)=>
+      n+Number(x?.thesisMemory?.stabilityEventCount||0),0
+    ),
     probabilityCalibration,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
