@@ -380,10 +380,112 @@ function competitionSets(ledger,{asOf}={}){
   return out.sort((a,b)=>b.entries.length-a.entries.length||a.competitionId.localeCompare(b.competitionId));
 }
 
+function worldModelResearchItems(worldModelSummary={},asOf=Date.now()){
+  const items=[];
+  const latent=worldModelSummary?.latentState||{};
+  const candidate=latent?.researchCandidate||{};
+  if(candidate?.status==='RESEARCH_CANDIDATE'){
+    const question='Does latent-state candidate '+String(candidate.candidateKey||'UNNAMED')+' remain stable and discriminative across unseen periods, markets and regimes?';
+    const priority=clamp(.55+.05*finite(candidate?.coverage?.populatedDimensions,0));
+    const core={
+      questionId:'rq_'+sha256({kind:'LATENT_STATE_VALIDATION',candidateKey:candidate.candidateKey,worldFingerprint:worldModelSummary?.fingerprint||null}).slice(0,22),
+      kind:'WORLD_MODEL_VALIDATION',
+      theoryId:null,
+      worldModelTarget:'LATENT_STATE_CANDIDATE',
+      question,
+      nextExperimentType:'TEMPORAL_OUT_OF_SAMPLE',
+      nextExperimentPurpose:'Freeze the candidate embedding and test state stability, regime transport and discriminatory value without granting decision authority.',
+      priority:clamp(priority),
+      expectedInformationGainProxy:clamp(priority),
+      scientificLeverage:clamp(priority),
+      computeCostProxy:1.6,
+      candidateFingerprint:worldModelSummary?.fingerprint||null,
+      automaticExperimentLaunchAllowed:false,
+      primaryMutationAllowed:false,
+      canInfluencePrimary:false,
+      canExecuteLive:false,
+      semantics:{
+        candidateStateIsModelledNotObserved:true,
+        validationDoesNotPromoteEstimatorAutomatically:true,
+        priorityIsHeuristicNotProbability:true
+      },
+      asOf
+    };
+    items.push(coreFingerprint(core));
+  }
+
+  const flows=(worldModelSummary?.informationFlowHypotheses?.candidates||[]).slice(0,3);
+  for(const edge of flows){
+    const question='Does the '+String(edge.leader)+' → '+String(edge.follower)+' lead/lag relation survive placebo lags, holdout periods and confounder controls?';
+    const evidence=Math.min(1,finite(edge.samples,0)/150);
+    const strength=clamp(Math.abs(finite(edge.rho,0)));
+    const priority=clamp(.35+.30*strength+.20*evidence);
+    const core={
+      questionId:'rq_'+sha256({kind:'FLOW_VALIDATION',leader:edge.leader,follower:edge.follower,lagBars:edge.lagBars,worldFingerprint:worldModelSummary?.fingerprint||null}).slice(0,22),
+      kind:'WORLD_MODEL_VALIDATION',
+      theoryId:null,
+      worldModelTarget:'INFORMATION_FLOW_HYPOTHESIS',
+      question,
+      nextExperimentType:'ADVERSARIAL_FALSIFICATION',
+      nextExperimentPurpose:'Run placebo-lag, direction-reversal, temporal holdout and cross-regime tests before treating the directed relation as more than a screen.',
+      priority,
+      expectedInformationGainProxy:priority,
+      scientificLeverage:priority,
+      computeCostProxy:1.8,
+      candidateFingerprint:worldModelSummary?.fingerprint||null,
+      automaticExperimentLaunchAllowed:false,
+      primaryMutationAllowed:false,
+      canInfluencePrimary:false,
+      canExecuteLive:false,
+      semantics:{
+        leadLagDoesNotEstablishCausality:true,
+        researchCandidateDoesNotAuthorizePrediction:true,
+        priorityIsHeuristicNotProbability:true
+      },
+      asOf
+    };
+    items.push(coreFingerprint(core));
+  }
+
+  const field=worldModelSummary?.forecastabilityField||{};
+  const insufficient=(field.markets||[]).filter(x=>x.status==='INSUFFICIENT');
+  if(insufficient.length){
+    const symbols=insufficient.slice(0,8).map(x=>x.symbol);
+    const priority=clamp(.30+.04*Math.min(8,symbols.length));
+    const core={
+      questionId:'rq_'+sha256({kind:'FORECASTABILITY_COVERAGE',symbols,worldFingerprint:worldModelSummary?.fingerprint||null}).slice(0,22),
+      kind:'EVIDENCE_GAP',
+      theoryId:null,
+      worldModelTarget:'FORECASTABILITY_FIELD',
+      question:'Which horizons for '+symbols.join(', ')+' need more independent resolved forward forecasts before forecastability can be measured responsibly?',
+      nextExperimentType:'PROSPECTIVE_OBSERVATION',
+      nextExperimentPurpose:'Collect additional point-in-time forward forecast outcomes without changing the frozen forecast policy.',
+      priority,
+      expectedInformationGainProxy:priority,
+      scientificLeverage:priority,
+      computeCostProxy:1,
+      candidateFingerprint:worldModelSummary?.fingerprint||null,
+      automaticExperimentLaunchAllowed:false,
+      primaryMutationAllowed:false,
+      canInfluencePrimary:false,
+      canExecuteLive:false,
+      semantics:{
+        insufficientForecastabilityIsNotUnpredictability:true,
+        forecastPerformanceIsNotIntrinsicPredictability:true,
+        priorityIsHeuristicNotProbability:true
+      },
+      asOf
+    };
+    items.push(coreFingerprint(core));
+  }
+  return items;
+}
+
 export function buildBiggjMarketScienceDirector(ledger,{
   asOf=Date.now(),
   limit=12,
-  scientificGateByTheory={}
+  scientificGateByTheory={},
+  worldModelSummary=null
 }={}){
   const verification=verifyEpistemicLedger(ledger);
   if(!verification.ok) throw new Error('EPISTEMIC_LEDGER_INVALID:'+verification.reasons.join(','));
@@ -396,7 +498,8 @@ export function buildBiggjMarketScienceDirector(ledger,{
     scientificGate:scientificGateByTheory?.[theory.theoryId]||'INSUFFICIENT'
   }));
   const unknownItems=orphanSurpriseQuestions(ledger,{asOf:t});
-  const agenda=[...theoryItems,...unknownItems]
+  const worldItems=worldModelResearchItems(worldModelSummary||{},t);
+  const agenda=[...theoryItems,...unknownItems,...worldItems]
     .sort((a,b)=>b.priority-a.priority||String(a.questionId).localeCompare(String(b.questionId)))
     .slice(0,maxItems);
   const dataRequests=missingVariableRequests(ledger,{asOf:t}).slice(0,maxItems);
@@ -411,7 +514,8 @@ export function buildBiggjMarketScienceDirector(ledger,{
     surpriseQuestions:theoryItems.filter(x=>x.kind==='SURPRISE').length+unknownItems.length,
     evidenceGapQuestions:theoryItems.filter(x=>x.kind==='EVIDENCE_GAP').length,
     recurringMissingVariables:dataRequests.length,
-    theoryCompetitions:competitions.length
+    theoryCompetitions:competitions.length,
+    worldModelQuestions:worldItems.length
   };
 
   const top=agenda[0]||null;
@@ -438,7 +542,8 @@ export function buildBiggjMarketScienceDirector(ledger,{
       prioritiesAreHeuristicsNotProbabilities:true,
       questionsDoNotBecomeClaims:true,
       dataRequestsDoNotAuthorizeCollection:true,
-      competitionDoesNotSelectTruthByScore:true
+      competitionDoesNotSelectTruthByScore:true,
+      worldModelCandidatesRequireIndependentValidation:true
     }
   };
   return coreFingerprint(core);
