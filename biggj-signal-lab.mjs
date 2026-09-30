@@ -402,13 +402,15 @@ export function buildBiggjProofFeed(entries=[],{
   const take=Math.max(1,Math.min(50,Math.floor(finite(limit,12))));
   const liveTake=Math.max(1,Math.min(20,Math.floor(finite(liveLimit,5))));
   const cutoff=finite(asOf,Date.now());
+  const learningGeneratedAt=finite(learningSummary?.generatedAt,null);
+  const effectiveLearningSummary=learningGeneratedAt!=null&&learningGeneratedAt<=cutoff?learningSummary:null;
   const scoped=arr(entries).filter(row=>{
     const issued=finite(row?.asOf);
     if(issued==null||issued>cutoff)return false;
     if(target&&String(row?.symbol||'').toUpperCase()!==target)return false;
     return true;
   });
-  const lifecycle=scoped.map(row=>proofLifecycleRow(row,{cutoff,learningSummary}));
+  const lifecycle=scoped.map(row=>proofLifecycleRow(row,{cutoff,learningSummary:effectiveLearningSummary}));
   const resolved=lifecycle
     .filter(x=>['MATURED','REVIEWED','LEARNED'].includes(x.currentStage))
     .sort((a,b)=>finite(b.resolvedAt,0)-finite(a.resolvedAt,0)||String(a.forecastId).localeCompare(String(b.forecastId)))
@@ -438,9 +440,10 @@ export function buildBiggjProofFeed(entries=[],{
     rows:resolved,
     counts,
     learning:{
-      phase:String(learningSummary?.phase||'UNKNOWN'),
-      generatedAt:finite(learningSummary?.generatedAt),
-      resolvedOutcomes:finite(learningSummary?.resolvedOutcomes,0),
+      phase:String(effectiveLearningSummary?.phase||'UNKNOWN'),
+      generatedAt:finite(effectiveLearningSummary?.generatedAt),
+      resolvedOutcomes:finite(effectiveLearningSummary?.resolvedOutcomes,0),
+      futureSummarySuppressed:learningGeneratedAt!=null&&learningGeneratedAt>cutoff,
       meaning:'LEARNED means included in the current aggregate learning summary; it does not mean skill promotion or production-policy mutation.'
     },
     policy:{
@@ -457,7 +460,8 @@ export function buildBiggjProofFeed(entries=[],{
       outcomeHashBindsResolutionToBeforeHash:true,
       hashesAreInternalNotIndependentAttestation:true,
       resolvedOutcomeDoesNotProveCausalityOrFutureProfitability:true,
-      lifecycleStagesAreDerivedFromStoredJournalState:true
+      lifecycleStagesAreDerivedFromStoredJournalState:true,
+      futureLearningSummaryIsSuppressed:true
     },
     safety:{
       execution:'SHADOW_ONLY',
