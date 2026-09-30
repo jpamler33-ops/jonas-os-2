@@ -68,7 +68,7 @@ export class ForecastIntelligenceService {
         const before = this.tracker.get(forecastId);
         const record = this.tracker.bindThesis(forecastId, memory);
         if (!before?.thesisMemory) {
-            this.emit('THESIS_MEMORY_BOUND', Number(memory?.issuedAt ?? record.issuedAt), record.symbol, record.id, {
+            this.emit('THESIS_MEMORY_BOUND', Number(memory?.issueKnowledgeAt ?? memory?.decisionAsOf ?? record.issuedAt), record.symbol, record.id, {
                 issueGraphFingerprint: memory?.issueGraphFingerprint ?? null,
                 assumptionCount: Number(memory?.assumptionCount ?? 0),
                 execution: 'SHADOW_ONLY',
