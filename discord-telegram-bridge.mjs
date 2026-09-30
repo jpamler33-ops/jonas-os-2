@@ -14,9 +14,10 @@ import {
 } from './biggj-experience-center.mjs';
 import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
 import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
+import { renderBiggjProofFeed } from './biggj-signal-lab.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V8';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V9';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -24,6 +25,8 @@ const COMMANDS=[
   {name:'dashboard',description:'TCX Mission Control öffnen'},
   {name:'market',description:'Marktübersicht öffnen',options:[symbolOption()]},
   {name:'forecast',description:'TCX Forecast anzeigen',options:[symbolOption()]},
+  {name:'signal',description:'BIGGJ Signal Lab öffnen',options:[symbolOption(),signalHorizonOption()]},
+  {name:'proof',description:'BIGGJ Forecast Proof Feed öffnen',options:[optionalSymbolOption()]},
   {name:'chart',description:'Marktchart anzeigen',options:[symbolOption(),intervalOption()]},
   {name:'superchart',description:'TCX SuperChart öffnen',options:[symbolOption(),intervalOption()]},
   {name:'deep',description:'Deep-Dive Analysezentrum öffnen',options:[symbolOption()]},
@@ -81,7 +84,9 @@ const COMMANDS=[
 const SERVER_LAYOUT=Object.freeze([
   {category:'TCX • CONTROL',channels:[
     {name:'start-here',topic:'Startpunkt, Befehle und Sicherheitsstatus von TCX.'},
-    {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'}
+    {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'},
+    {name:'signal-lab',topic:'3-Klick Signal Lab: Markt → Horizont → klare Bias-/ABSTAIN-Ausgabe mit Calibration-Gate.'},
+    {name:'proof-feed',topic:'Forecast BEFORE → Outcome AFTER. Zeigt Treffer und Fehler ohne Cherry-Picking.'}
   ]},
   ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT,
   ...BIGGJ_EXPERIENCE_LAYOUT,
@@ -130,7 +135,7 @@ const SERVER_LAYOUT=Object.freeze([
 const CHANNEL_PROFILE_GROUPS=Object.freeze({
   HOME:new Set(['start-here']),
   LIVE_60:new Set([
-    'tcx-terminal','performance','system-status','data-health',
+    'tcx-terminal','signal-lab','proof-feed','performance','system-status','data-health',
     'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
     'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements','rulebook'
   ]),
@@ -205,6 +210,8 @@ const MARKERS=Object.freeze({
   academyProgress:'BIGGJ_ACADEMY_PROGRESS_V1',
   academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1',
   forecasts:'BIGGJ_CHANNEL_FORECAST_DESK_V7',
+  signalLab:'BIGGJ_SIGNAL_LAB_DESK_V1',
+  proofFeed:'BIGGJ_PROOF_FEED_DESK_V1',
   intelHub:'BIGGJ_CHANNEL_INTEL_HUB_V7',
   anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
   replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
@@ -601,6 +608,49 @@ function buildForecastDeskPayload(snapshot={}){
   ],allowedMentions:{parse:[]}};
 }
 
+function buildSignalLabDeskPayload(snapshot={}){
+  const lab=snapshot?.health?.biggjSignalLab||{};
+  return {embeds:[{
+    title:'BIGGJ // SIGNAL LAB',
+    description:'**3 Klicks: Markt → Horizont → klare Bias-/ABSTAIN-Ausgabe.**\nWahrscheinlichkeiten erscheinen nur, wenn die Calibration-Gates sie ausdrücklich freigeben.',
+    fields:[
+      {name:'Safety',value:'SHADOW_ONLY · ACTION ABSTAIN · REAL ORDERS BLOCKED',inline:false},
+      {name:'Probability Policy',value:'Keine rohe Modell-Confidence. Bei fehlender Kalibrierung wird die Zahl unterdrückt.',inline:false},
+      {name:'Runtime',value:String(lab.version||'—')+' · Proof '+String(lab.proofVersion||'—'),inline:false}
+    ],
+    footer:{text:MARKERS.signalLab},
+    timestamp:new Date().toISOString()
+  }],components:[
+    {type:1,components:[
+      {type:2,style:1,label:'BTC · 1H',custom_id:'dc3:signallab:BTCUSDT:1h'},
+      {type:2,style:1,label:'ETH · 1H',custom_id:'dc3:signallab:ETHUSDT:1h'},
+      {type:2,style:1,label:'SOL · 1H',custom_id:'dc3:signallab:SOLUSDT:1h'}
+    ]},
+    {type:1,components:[
+      {type:2,style:2,label:'Proof Feed',custom_id:'dc3:proof:ALL'},
+      {type:2,style:2,label:'Super Radar',custom_id:'dc3:terminal:radar'}
+    ]}
+  ],allowedMentions:{parse:[]}};
+}
+
+function buildProofFeedDeskPayload(snapshot={}){
+  const feed=snapshot?.health?.biggjProofFeed||{};
+  return {embeds:[{
+    title:'BIGGJ // PROOF FEED',
+    description:String(renderBiggjProofFeed(feed)||'Noch keine Proof-Daten.').slice(0,3900),
+    fields:[],
+    footer:{text:MARKERS.proofFeed},
+    timestamp:new Date().toISOString()
+  }],components:[
+    {type:1,components:[
+      {type:2,style:2,label:'BTC',custom_id:'dc3:proof:BTCUSDT'},
+      {type:2,style:2,label:'ETH',custom_id:'dc3:proof:ETHUSDT'},
+      {type:2,style:2,label:'SOL',custom_id:'dc3:proof:SOLUSDT'},
+      {type:2,style:1,label:'ALLE',custom_id:'dc3:proof:ALL'}
+    ]}
+  ],allowedMentions:{parse:[]}};
+}
+
 function buildAnomalyWatchPayload(snapshot={}){
   const discovery=snapshot?.discovery||{};
   const h=snapshot?.health||{};
@@ -814,6 +864,8 @@ function berlinParts(){
 
 const V3_SYMBOLS=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','LINK','AVAX','DOT','LTC','TRX','PEPE','SHIB','BONK','WIF','FLOKI'];
 function symbolOption(){return {type:3,name:'symbol',description:'z. B. BTC, ETH, SOL',required:true};}
+function optionalSymbolOption(){return {type:3,name:'symbol',description:'Optional: BTC, ETH, SOL oder leer für alle',required:false};}
+function signalHorizonOption(){return {type:3,name:'horizon',description:'Forecast-Horizont',required:false,choices:['5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
 function intervalOption(){return {type:3,name:'interval',description:'Zeitrahmen',required:false,choices:['1m','5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
 function normalizeDiscordSymbol(value=''){const raw=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return raw?(raw.endsWith('USDT')?raw:raw+'USDT'):null;}
 function marketSelectRow(){return {type:1,components:[{type:3,custom_id:'dc3:market-select',placeholder:'Markt öffnen …',min_values:1,max_values:1,options:V3_SYMBOLS.map(x=>({label:x+'/USDT',value:x+'USDT',description:'TCX '+x+' Research'}))}]};}
@@ -836,6 +888,7 @@ function marketActionComponents(symbol){
   const s=normalizeDiscordSymbol(symbol)||'BTCUSDT';
   return [
     {type:1,components:[
+      {type:2,style:1,label:'Signal Lab',custom_id:'dc3:signallab:'+s+':1h'},
       {type:2,style:1,label:'Chart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
       {type:2,style:1,label:'Thesis',custom_id:'dc4:thesis:'+s},
       {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s}
@@ -905,6 +958,7 @@ function callbackDataForCommand(interaction){
   const n=String(interaction.commandName||'').toLowerCase();
   const s=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
   if(n==='radar')return 'terminal:radar';
+  if(n==='proof')return 'proof:'+(s||'ALL');
   if(!s)return null;
   if(n==='superchart')return 'superchart:'+s+':PRO:'+(interaction.options?.getString('interval')||'5m');
   if(n==='deep')return 'deep:'+s;
@@ -914,6 +968,7 @@ function callbackDataForCommand(interaction){
   if(n==='xray')return 'xray:'+s;
   if(n==='events')return 'events:'+s;
   if(n==='accuracy')return 'accuracy:'+s;
+  if(n==='signal')return 'signallab:'+s+':'+(interaction.options?.getString('horizon')||'1h');
   return null;
 }
 
@@ -1463,6 +1518,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function refreshForecastDesk(){
     return refreshStableManagedPanel('forecasts',MARKERS.forecasts,buildForecastDeskPayload(await safeMissionSnapshot()));
   }
+  async function refreshSignalLabDesk(){
+    return refreshStableManagedPanel('signal-lab',MARKERS.signalLab,buildSignalLabDeskPayload(await safeMissionSnapshot()));
+  }
+  async function refreshProofFeedDesk(){
+    return refreshStableManagedPanel('proof-feed',MARKERS.proofFeed,buildProofFeedDeskPayload(await safeMissionSnapshot()));
+  }
   async function refreshAnomalyDesk(){
     return refreshStableManagedPanel('anomalies',MARKERS.anomalies,buildAnomalyWatchPayload(await safeMissionSnapshot()));
   }
@@ -1478,7 +1539,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     ));
   }
   async function refreshAuxiliaryDesks(){
-    const out=await Promise.allSettled([refreshForecastDesk(),refreshAnomalyDesk(),refreshReplayDesk(),refreshErrorDesk()]);
+    const out=await Promise.allSettled([refreshSignalLabDesk(),refreshProofFeedDesk(),refreshForecastDesk(),refreshAnomalyDesk(),refreshReplayDesk(),refreshErrorDesk()]);
     return out.filter(x=>x.status==='fulfilled').length;
   }
   function managerRepairGroup(name){
@@ -1513,6 +1574,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='news-feed'){await refreshNewsFeed();return true;}
     if(name==='world-watch'){await refreshWorldWatch();return true;}
     if(name==='memecoins'){await refreshMemecoinLab();return true;}
+    if(name==='signal-lab'){await refreshSignalLabDesk();return true;}
+    if(name==='proof-feed'){await refreshProofFeedDesk();return true;}
     if(name==='forecasts'){await refreshForecastDesk();return true;}
     if(name==='anomalies'){await refreshAnomalyDesk();return true;}
     if(name==='trade-replay'){await refreshReplayDesk();return true;}
