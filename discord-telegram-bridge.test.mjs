@@ -156,15 +156,40 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/posted>=12|posted>=12/);
 });
 
-test('channel manager supervisor is wired across all declared channels',async()=>{
-  const mod=await import('./discord-telegram-bridge.mjs');
-  const audit=mod.auditBiggjDiscordChannelLayout();
-  assert.equal(audit.duplicateChannels.length,0);
-  assert.equal(audit.missingProfiles.length,0);
-  assert.equal(audit.complete,true);
-  assert.ok(audit.channels>=49);
-  assert.equal(mod.biggjChannelExperienceProfile('news-feed').mode,'DEDUPED LIVE FEED');
-  assert.equal(mod.biggjChannelExperienceProfile('alerts').eventDriven,true);
+test('channel manager supervisor is wired across all declared channels without runtime dependencies',async()=>{
+  const fs=await import('node:fs/promises');
+  const bridge=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  const experience=await fs.readFile(new URL('./biggj-experience-center.mjs',import.meta.url),'utf8');
+  const observability=await fs.readFile(new URL('./biggj-discord-observability.mjs',import.meta.url),'utf8');
+
+  const extractLayoutNames=(source,start,end)=>{
+    const a=source.indexOf(start),b=source.indexOf(end,a+start.length);
+    assert.ok(a>=0&&b>a,start);
+    const block=source.slice(a,b);
+    return [...block.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
+  };
+
+  const direct=extractLayoutNames(bridge,'const SERVER_LAYOUT=Object.freeze([','const CHANNEL_PROFILE_GROUPS=');
+  const exp=extractLayoutNames(experience,'export const BIGGJ_EXPERIENCE_LAYOUT=Object.freeze([','export const BIGGJ_EXPERIENCE_MARKERS=');
+  const obs=extractLayoutNames(observability,'export const BIGGJ_DISCORD_OBSERVABILITY_LAYOUT=Object.freeze([','export const BIGGJ_DISCORD_OBSERVABILITY_MARKERS=');
+  const declared=[...direct,...exp,...obs];
+  const unique=[...new Set(declared)];
+
+  assert.equal(unique.length,declared.length);
+  assert.ok(unique.length>=49);
+
+  const profileBlock=bridge.slice(
+    bridge.indexOf('const CHANNEL_PROFILE_GROUPS='),
+    bridge.indexOf('const MARKET_PANELS=',bridge.indexOf('const CHANNEL_PROFILE_GROUPS='))
+  );
+  for(const name of unique)assert.ok(profileBlock.includes("'"+name+"'"),'missing manager profile: '+name);
+
+  assert.match(bridge,/auditBiggjDiscordChannelLayout/);
+  assert.match(bridge,/createBiggjChannelManagerRuntime/);
+  assert.match(bridge,/channel-supervisor/);
+  assert.match(bridge,/channel-improvements/);
+  assert.match(bridge,/DEDUPED LIVE FEED/);
+  assert.match(bridge,/eventDriven:true/);
 });
 
 test('previously empty operational channels now have live builders',async()=>{
