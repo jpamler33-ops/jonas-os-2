@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   deriveUnconstrainedLabWalletCandidate,
+  buildLabWalletLearningModel,
   shadowDualWalletSummary,
   shadowWalletIdForPosition,
   LAB_WALLET_ID,
@@ -126,4 +127,36 @@ test('legacy research lanes map to LAB while STANDARD remains NORMAL',()=>{
   assert.equal(shadowWalletIdForPosition({entryMode:'COVERAGE_PROBE'}),LAB_WALLET_ID);
   assert.equal(shadowWalletIdForPosition({entryMode:'EXPLORATION'}),LAB_WALLET_ID);
   assert.equal(shadowWalletIdForPosition({entryMode:'LAB_UNCONSTRAINED'}),LAB_WALLET_ID);
+});
+
+test('LAB learning memory uses only prior LAB outcomes and remains shadow-only',()=>{
+  const labRows=[
+    ...Array.from({length:12},(_,i)=>({...position('lab-up-'+i,{mode:'LAB_UNCONSTRAINED',pnl:i%4===0?-2:4,entryQuote:500}),horizonId:'5m',side:'LONG'})),
+    ...Array.from({length:12},(_,i)=>({...position('lab-down-'+i,{mode:'LAB_UNCONSTRAINED',pnl:i%4===0?2:-5,entryQuote:500}),horizonId:'1h',side:'SHORT'})),
+    ...Array.from({length:20},(_,i)=>({...position('normal-'+i,{mode:'STANDARD',pnl:100,entryQuote:200}),horizonId:'1h',side:'SHORT'}))
+  ];
+  const model=buildLabWalletLearningModel({positions:labRows},{asOf:100});
+  assert.equal(model.samples,24);
+  assert.equal(model.lanes,2);
+  assert.equal(model.primaryMutationAllowed,false);
+  assert.equal(model.canExecuteLive,false);
+  assert.equal(model.byLane['BTCUSDT|5M|UP'].state,'PROMISING');
+  assert.equal(model.byLane['BTCUSDT|1H|DOWN'].state,'WEAK');
+});
+
+test('LAB candidate selection adapts to LAB-only history without changing forecast gates',()=>{
+  const rows=[
+    ...Array.from({length:20},(_,i)=>({...position('up-'+i,{mode:'LAB_UNCONSTRAINED',pnl:i%5===0?-1:4,entryQuote:500}),horizonId:'5m',side:'LONG'})),
+    ...Array.from({length:20},(_,i)=>({...position('down-'+i,{mode:'LAB_UNCONSTRAINED',pnl:i%5===0?1:-6,entryQuote:500}),horizonId:'1h',side:'SHORT'}))
+  ];
+  const model=buildLabWalletLearningModel({positions:rows},{asOf:100});
+  const d=deriveUnconstrainedLabWalletCandidate(issuance(),{now:1_010_000,learningModel:model});
+  assert.equal(d.eligible,true);
+  assert.equal(d.horizonId,'5m');
+  assert.equal(d.side,'BUY');
+  assert.equal(d.labLearningState,'PROMISING');
+  assert.ok(d.labLearningSamples>=20);
+  assert.equal(d.admissionGate,'ABSTAIN');
+  assert.equal(d.action,'ABSTAIN');
+  assert.equal(d.canExecuteLive,false);
 });
