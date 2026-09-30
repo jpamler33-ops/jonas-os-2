@@ -36,6 +36,26 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
     claimAssumptionResearch:{state:'NOT_EVALUATED',observations:0},
     researchCoverage:{averageCoverage:.75,healthy:3,blocked:1,blockedFeatures:2},
     discovery:{checkedCoins:12},
+    autonomousResearchFactory:{
+      mode:'DATA_COLLECTION_ONLY',
+      operatorDataOnly:true,
+      healthy:true,
+      revision:3,
+      automatic:2,
+      manual:0,
+      dataOnly:2,
+      unowned:0,
+      dataNeeds:['FORWARD_SHADOW_OBSERVATIONS'],
+      nextTasks:[{
+        type:'COLLECT_FORWARD_DATA',
+        subject:'skill:alpha',
+        reason:'MORE_FORWARD_POINT_IN_TIME_EVIDENCE_REQUIRED',
+        autoHandler:'AUTOLEARN_AND_COVERAGE_CURRICULUM',
+        automaticShadowEligible:true,
+        manualReviewRequired:false,
+        dataNeeds:['FORWARD_SHADOW_OBSERVATIONS']
+      }]
+    },
     asOf:1_800_000_000_000
   });
 
@@ -50,6 +70,8 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
   assert.equal(snapshot.researchReviews.open,0);
   assert.ok(Array.isArray(snapshot.researchReviews.tickets));
   assert.equal(snapshot.semantics.visibleReasoningIsStructuredStateNotHiddenChainOfThought,true);
+  assert.equal(snapshot.autonomousResearchFactory.mode,'DATA_COLLECTION_ONLY');
+  assert.equal(snapshot.autonomousResearchFactory.operatorDataOnly,true);
 
   const channels=BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.flatMap(section=>section.channels.map(x=>x.name));
   assert.deepEqual(channels,[
@@ -61,6 +83,35 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
   assert.equal(panels.length,11);
   assert.deepEqual(panels.map(x=>x.channel),channels);
   for(const panel of panels)assertDiscordPayload(panel.payload);
+});
+
+test('progress panel exposes whether BIGGJ has reached operator data-only mode',()=>{
+  const state=createBiggjLivingResearchRuntime({asOf:1_800_000_000_000});
+  const snapshot=buildBiggjDiscordObservabilitySnapshot({
+    livingResearchState:state,
+    autonomousResearchFactory:{
+      mode:'AUTONOMOUS_RESEARCH_ACTIVE',
+      operatorDataOnly:true,
+      automatic:3,
+      manual:0,
+      dataOnly:1,
+      unowned:0,
+      dataNeeds:['CHRONOLOGICAL_HOLDOUTS','STRESS_EVALUATION'],
+      nextTasks:[{
+        type:'WALK_FORWARD_VALIDATION',
+        subject:'skill:wf',
+        autoHandler:'FORECAST_CANDIDATE_LAB',
+        automaticShadowEligible:true
+      }]
+    },
+    asOf:1_800_000_000_000
+  });
+  const progress=buildBiggjDiscordObservabilityPayload('progress',snapshot);
+  assertDiscordPayload(progress);
+  const body=progress.embeds[0].fields.map(x=>x.value).join('\n');
+  assert.match(body,/Operator data-only YES/);
+  assert.match(body,/WALK_FORWARD_VALIDATION/);
+  assert.match(body,/FORECAST_CANDIDATE_LAB/);
 });
 
 test('every BIGGJ operator view remains within Discord embed/component limits',()=>{
