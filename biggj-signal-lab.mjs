@@ -1,7 +1,10 @@
 import { sha256 } from './institutional-kernel.mjs';
+import { verifyForecastJournalProofCommitment } from './forecast-runtime/forecast/journal.js';
 
-export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V1';
-export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V1';
+export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V2';
+export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V2';
+
+export const BIGGJ_SIGNAL_LAB_MODES=Object.freeze(['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO']);
 
 const arr=v=>Array.isArray(v)?v:[];
 const finite=(v,f=null)=>Number.isFinite(Number(v))?Number(v):f;
@@ -39,6 +42,61 @@ const directionLabel=v=>{
   if(x==='FLAT'||x==='SIDEWAYS'||x==='NEUTRAL')return '→ SIDEWAYS';
   return '—';
 };
+
+function normalizeMode(mode){
+  const x=String(mode||'FULL').toUpperCase();
+  return BIGGJ_SIGNAL_LAB_MODES.includes(x)?x:'FULL';
+}
+function macroEvidence(issuance){
+  return arr(issuance?.trace?.evidence).filter(row=>{
+    const hay=[row?.type,row?.domain,row?.source,row?.sourceId,row?.label].map(x=>String(x||'').toUpperCase()).join(' ');
+    return /MACRO|TREASURY|FED|ECB|CFTC|SEC|ETF_HOLDINGS/.test(hay);
+  });
+}
+function buildModeView(mode,{issuance,setup,risk,modeContext={}}={}){
+  const m=normalizeMode(mode);
+  if(m==='FULL') return freeze({mode:m,status:'AVAILABLE',label:'FULL BIGGJ',facts:['Forecast + setup + risk + calibrated outcome context'],reason:null});
+  if(m==='STRUCTURE'){
+    const trend=String(modeContext?.structure?.trend||'UNKNOWN');
+    const mtf=String(modeContext?.structure?.mtfBias||'UNKNOWN');
+    const events=finite(modeContext?.structure?.eventCount,0);
+    const available=trend!=='UNKNOWN'||mtf!=='UNKNOWN'||events>0||setup!=null;
+    return freeze({mode:m,status:available?'AVAILABLE':'INSUFFICIENT',label:'STRUCTURE',facts:available?[
+      'Local trend '+trend,
+      'MTF bias '+mtf,
+      'Structure events '+String(events),
+      'Setup '+String(setup?.status||'UNKNOWN')
+    ]:[],reason:available?null:'NO_STRUCTURE_CONTEXT'});
+  }
+  if(m==='FLOW'){
+    const flow=String(modeContext?.flow?.state||'UNKNOWN');
+    const imbalance=finite(modeContext?.flow?.imbalance,null);
+    const pressure=finite(modeContext?.flow?.pressureScore,null);
+    const available=flow!=='UNKNOWN'||imbalance!=null||pressure!=null;
+    return freeze({mode:m,status:available?'AVAILABLE':'INSUFFICIENT',label:'FLOW',facts:available?[
+      'Flow '+flow,
+      'Imbalance '+(imbalance==null?'—':imbalance.toFixed(3)),
+      'Pressure '+(pressure==null?'—':pressure.toFixed(1)+'/100')
+    ]:[],reason:available?null:'NO_FLOW_CONTEXT'});
+  }
+  if(m==='LIQUIDITY'){
+    const liquidity=String(modeContext?.liquidity?.state||'UNKNOWN');
+    const spread=finite(modeContext?.liquidity?.spreadBps,null);
+    const clusters=finite(modeContext?.liquidity?.liquidationClusters,null);
+    const available=liquidity!=='UNKNOWN'||spread!=null||clusters!=null||modeContext?.liquidity?.hasSnapshot===true;
+    return freeze({mode:m,status:available?'AVAILABLE':'INSUFFICIENT',label:'LIQUIDITY',facts:available?[
+      'Liquidity '+liquidity,
+      'Spread '+(spread==null?'—':spread.toFixed(3)+' bps'),
+      'Liquidation clusters '+(clusters==null?'—':String(clusters)),
+      'Risk '+String(risk?.status||'UNKNOWN')
+    ]:[],reason:available?null:'NO_LIQUIDITY_CONTEXT'});
+  }
+  const macro=macroEvidence(issuance);
+  const available=macro.length>0;
+  return freeze({mode:m,status:available?'AVAILABLE':'INSUFFICIENT',label:'MACRO',facts:macro.slice(0,4).map(x=>
+    String(x?.domain||x?.type||x?.source||x?.sourceId||'MACRO_EVIDENCE')
+  ),reason:available?null:'NO_MACRO_EVIDENCE_IN_FORECAST_TRACE'});
+}
 
 function horizonFor(issuance,horizonId){
   const hs=arr(issuance?.forecast?.horizons);
@@ -89,13 +147,17 @@ export function buildBiggjSignalLab({
   accuracy=null,
   horizonId='1h',
   mode='FULL',
+  modeContext={},
   asOf=Date.now()
 }={}){
   const s=String(symbol||issuance?.symbol||'UNKNOWN').toUpperCase();
   const horizon=horizonFor(issuance,horizonId);
   const top=topProbability(horizon);
   const allowProbability=probabilityAllowed(issuance,horizon,accuracy);
-  const state=signalState({issuance,horizon,setup,risk});
+  const normalizedMode=normalizeMode(mode);
+  const modeView=buildModeView(normalizedMode,{issuance,setup,risk,modeContext});
+  const baseState=signalState({issuance,horizon,setup,risk});
+  const state=modeView.status==='AVAILABLE'?baseState:'ABSTAIN';
   const supports=[
     ...arr(horizon?.reasons),
     ...arr(setup?.eventRows).map(x=>String(x?.type||x?.label||'STRUCTURE_EVENT'))
@@ -108,7 +170,8 @@ export function buildBiggjSignalLab({
     version:BIGGJ_SIGNAL_LAB_VERSION,
     generatedAt:finite(asOf,Date.now()),
     symbol:s,
-    mode:String(mode||'FULL').toUpperCase(),
+    mode:normalizedMode,
+    modeView,
     requestedHorizon:String(horizonId||'1h').toLowerCase(),
     selectedHorizon:horizon?String(horizon.horizonId||horizonId):null,
     state,
@@ -148,6 +211,8 @@ export function buildBiggjSignalLab({
       watchIsNotOrderAuthorization:true,
       probabilityOnlyWhenCalibrationGatePasses:true,
       diagnosticEvidenceScoreIsNotProbability:true,
+      modeIsEvidenceLensNotIndependentForecast:true,
+      insufficientModeContextForcesAbstain:true,
       noProfitGuarantee:true
     },
     safety:{
@@ -181,6 +246,7 @@ export function renderBiggjSignalLab(value={}){
     '',
     'DECISION STATE',
     'Status       '+String(value?.state||'ABSTAIN').replaceAll('_',' '),
+    'Focus        '+String(value?.modeView?.label||value?.mode||'FULL')+' · '+String(value?.modeView?.status||'UNKNOWN'),
     'Bias         '+directionLabel(value?.bias),
     'Forecast     '+String(value?.forecastGate||'ABSTAIN'),
     'Risk         '+String(d.riskStatus||'UNKNOWN'),
@@ -190,6 +256,12 @@ export function renderBiggjSignalLab(value={}){
     lines.push('Confidence   '+pct(p.calibrated,1)+' calibrated');
   }else{
     lines.push('Confidence   SUPPRESSED · '+String(p.suppressionReason||'CALIBRATION_NOT_READY').replaceAll('_',' '));
+  }
+  if(arr(value?.modeView?.facts).length){
+    lines.push('','FOCUS EVIDENCE');
+    for(const x of arr(value.modeView.facts))lines.push('• '+x);
+  }else if(value?.modeView?.status==='INSUFFICIENT'){
+    lines.push('','FOCUS EVIDENCE','• Nicht genügend explizite Daten für diesen Modus. Keine Spezialanalyse erfunden.');
   }
   lines.push(
     '',
@@ -213,28 +285,10 @@ export function renderBiggjSignalLab(value={}){
   return lines.join('\n').slice(0,4096);
 }
 
-function proofCommitment(row){
-  return sha256({
-    id:row?.id,
-    symbol:row?.symbol,
-    horizonId:row?.horizonId,
-    horizonMs:row?.horizonMs,
-    asOf:row?.asOf,
-    dueAt:row?.dueAt,
-    startPrice:row?.startPrice,
-    regimeId:row?.regimeId,
-    gate:row?.gate,
-    direction:row?.direction,
-    probabilities:row?.probabilities,
-    expectedReturn:row?.expectedReturn,
-    interval:row?.interval,
-    operationalConfidence:row?.operationalConfidence
-  });
-}
-
 function proofRow(row){
   const r=row?.resolution||{};
-  const beforeHash=proofCommitment(row);
+  const commitment=verifyForecastJournalProofCommitment(row);
+  const beforeHash=commitment.ok?commitment.stored:null;
   const outcomeCore={
     beforeHash,
     resolvedAt:r?.resolvedAt,
@@ -263,9 +317,14 @@ function proofRow(row){
     actualDirection:String(r?.actualDirection||'UNKNOWN').toUpperCase(),
     directionalHit:r?.topCorrect===true,
     intervalHit:r?.intervalMiss===false,
+    commitmentState:commitment.status,
+    commitmentVersion:commitment.version,
     beforeHash,
-    outcomeHash:sha256(outcomeCore),
-    semantics:'Internal deterministic commitment hash. Not an external timestamp, blockchain proof, or independent attestation.'
+    derivedForecastHash:commitment.expected,
+    outcomeHash:commitment.ok?sha256(outcomeCore):null,
+    semantics:commitment.ok
+      ?'Forecast fields were committed when the journal record was created; hash is internal, not an external timestamp or independent attestation.'
+      :'Legacy/unverified outcome row. It remains visible but is not presented as forecast-time cryptographic proof.'
   });
 }
 
@@ -290,21 +349,30 @@ export function buildBiggjProofFeed(entries=[],{
   const resolved=latest.map(proofRow);
   const hits=resolved.filter(x=>x.directionalHit).length;
   const misses=resolved.length-hits;
+  const committed=resolved.filter(x=>x.commitmentState==='VERIFIED').length;
+  const legacy=resolved.filter(x=>x.commitmentState==='LEGACY_UNCOMMITTED').length;
+  const invalid=resolved.filter(x=>!['VERIFIED','LEGACY_UNCOMMITTED'].includes(x.commitmentState)).length;
+  const verifiedHits=resolved.filter(x=>x.commitmentState==='VERIFIED'&&x.directionalHit).length;
+  const verifiedMisses=resolved.filter(x=>x.commitmentState==='VERIFIED'&&!x.directionalHit).length;
   const core={
     version:BIGGJ_PROOF_FEED_VERSION,
     generatedAt:finite(asOf,Date.now()),
     symbol:target,
     rows:resolved,
-    counts:{resolved:resolved.length,hits,misses},
+    counts:{resolved:resolved.length,hits,misses,committed,legacy,invalid,verifiedHits,verifiedMisses},
     policy:{
       includesWins:true,
       includesLosses:true,
       selection:'MOST_RECENT_RESOLVED_WITHIN_REQUESTED_SCOPE',
+      proofTrustScope:'ONLY_VERIFIED_FORECAST_TIME_COMMITMENTS',
+      legacyRowsRemainVisible:true,
       retrospectiveEditingAllowed:false,
       probabilityDisplaySuppressed:true
     },
     semantics:{
       beforeHashCommitsForecastFields:true,
+      commitmentCreatedAtForecastRecordTimeForV2Rows:true,
+      legacyRowsAreOutcomesNotProof:true,
       outcomeHashBindsResolutionToBeforeHash:true,
       hashesAreInternalNotIndependentAttestation:true,
       resolvedOutcomeDoesNotProveCausalityOrFutureProfitability:true
@@ -336,22 +404,25 @@ export function renderBiggjProofFeed(feed={}){
     '━━━━━━━━━━━━━━━━━━━━',
     'FORECAST BEFORE → OUTCOME AFTER',
     '',
-    'Resolved '+String(feed?.counts?.resolved||0)+' · Hits '+String(feed?.counts?.hits||0)+' · Misses '+String(feed?.counts?.misses||0),
+    'Resolved '+String(feed?.counts?.resolved||0)+' · Outcomes '+String(feed?.counts?.hits||0)+' HIT / '+String(feed?.counts?.misses||0)+' MISS',
+    'Forecast-time committed '+String(feed?.counts?.committed||0)+' · Legacy '+String(feed?.counts?.legacy||0)+' · Invalid '+String(feed?.counts?.invalid||0),
     ''
   ];
   if(!rows.length)lines.push('Noch keine aufgelösten Forecasts im gewählten Scope.');
   for(const row of rows.slice(0,10)){
     lines.push(
       (row.directionalHit?'✓ HIT':'✕ MISS')+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
+      'Proof   '+(row.commitmentState==='VERIFIED'?'🔒 FORECAST-TIME COMMITTED':row.commitmentState==='LEGACY_UNCOMMITTED'?'◐ LEGACY UNCOMMITTED':'⚠ '+String(row.commitmentState)),
       'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
       'After   '+directionLabel(row.actualDirection)+' · Return '+signedPct(row.actualReturn)+' · Range '+(row.intervalHit?'HIT':'MISS'),
       'As-of   '+iso(row.issuedAsOf)+' · Resolved '+iso(row.resolvedAt),
-      'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash).slice(0,12)+'…',
+      row.beforeHash&&row.outcomeHash?'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash).slice(0,12)+'…':'Hash    kein Forecast-Time-Commitment für diesen Legacy/invaliden Eintrag',
       ''
     );
   }
   lines.push(
     'Feed zeigt Gewinne UND Fehler; keine Cherry-Pick-Policy.',
+    'Nur 🔒-Zeilen besitzen ein beim Forecast-Record gespeichertes Commitment; Legacy-Zeilen bleiben sichtbar, gelten aber nicht als solcher Proof.',
     'Hashes sind interne deterministische Commitments, keine unabhängige externe Beglaubigung.',
     'Vergangene Treffer beweisen keine zukünftige Profitabilität.',
     'SHADOW_ONLY · REAL ORDERS BLOCKED'
@@ -359,19 +430,23 @@ export function renderBiggjProofFeed(feed={}){
   return lines.join('\n').slice(0,4096);
 }
 
-export function signalLabKeyboard(symbol,horizonId='1h'){
+export function signalLabKeyboard(symbol,horizonId='1h',mode='FULL'){
   const s=String(symbol||'BTCUSDT').toUpperCase();
   const active=String(horizonId||'1h').toLowerCase();
-  const b=(h)=>({text:(active===h?'● ':'')+h.toUpperCase(),callback_data:'signallab:'+s+':'+h});
+  const activeMode=normalizeMode(mode);
+  const b=(h)=>({text:(active===h?'● ':'')+h.toUpperCase(),callback_data:'signallab:'+s+':'+h+':'+activeMode});
+  const m=(key,label)=>({text:(activeMode===key?'● ':'')+label,callback_data:'signallab:'+s+':'+active+':'+key});
   return {inline_keyboard:[
     [b('5m'),b('15m'),b('1h'),b('4h')],
+    [m('FULL','FULL'),m('STRUCTURE','STRUCT'),m('FLOW','FLOW')],
+    [m('LIQUIDITY','LIQ'),m('MACRO','MACRO')],
     [
       {text:'🧠 SUPERCHART',callback_data:'superchart:'+s+':PRO:5m'},
       {text:'◇ EVIDENCE',callback_data:'evidence:'+s}
     ],
     [
       {text:'▣ PROOF FEED',callback_data:'proof:'+s},
-      {text:'↻ REFRESH',callback_data:'signallab:'+s+':'+active}
+      {text:'↻ REFRESH',callback_data:'signallab:'+s+':'+active+':'+activeMode}
     ],
     [{text:'⌂ HOME',callback_data:'home'}]
   ]};
@@ -387,7 +462,7 @@ export function proofFeedKeyboard(symbol=null){
     ],
     [
       {text:'ALLE',callback_data:'proof:ALL'},
-      ...(s?[{text:'SIGNAL',callback_data:'signallab:'+s+':1h'}]:[])
+      ...(s?[{text:'SIGNAL',callback_data:'signallab:'+s+':1h:FULL'}]:[])
     ],
     [{text:'⌂ HOME',callback_data:'home'}]
   ]};
