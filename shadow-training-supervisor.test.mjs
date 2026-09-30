@@ -126,6 +126,19 @@ test('EXPLORATION trades do not alter primary training risk samples',()=>{
   assert.equal(s.mission.type,'SAMPLE_BUILDING');
 });
 
+test('LAB wallet losses do not trigger NORMAL training holds',()=>{
+  const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
+  l.positions=Array.from({length:40},(_,i)=>({
+    ...closed(i,{pnl:-10}),
+    entryMode:'LAB_UNCONSTRAINED',
+    walletId:'LAB'
+  }));
+  const s=evaluateShadowTrainingSupervisor(l,academy(),{asOf:Date.UTC(2026,8,10)});
+  assert.equal(s.samples.all,0);
+  assert.equal(s.risk.hold,false);
+  assert.equal(s.mission.type,'SAMPLE_BUILDING');
+});
+
 test('ABSTAIN probes do not alter training risk samples',()=>{
   const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
   l.positions=Array.from({length:30},(_,i)=>({
