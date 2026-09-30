@@ -9425,7 +9425,7 @@ function missionControlData(){
   },
   memecoinRadar:{
     version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
-    sourceReady:Boolean(memecoinExperienceSnapshot?.rows?.length||memecoinExperienceSnapshot?.metas?.length),
+    sourceReady:Boolean(memecoinExperienceSnapshot?.rows?.length||memecoinExperienceSnapshot?.metas?.length)&&!memecoinExperienceLastError,
     capturedAt:memecoinExperienceSnapshot?.capturedAt||null,
     source:memecoinExperienceSnapshot?.source||'DEXSCREENER_PUBLIC_API',
     lastError:memecoinExperienceLastError,
