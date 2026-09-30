@@ -392,6 +392,7 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
     graphFingerprint:sidecar.graphFingerprint,
     forecastFingerprint:sidecar.forecastFingerprint,
     traceId:sidecar.traceId,
+    symbol:sidecar.symbol,
     forecastId:sidecar.forecastId,
     horizonId:horizon,
     decisionAsOf:sidecar.decisionAsOf,
