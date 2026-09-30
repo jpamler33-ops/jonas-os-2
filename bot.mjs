@@ -3881,10 +3881,10 @@ async function showCognitiveCore(chatId,messageId,symbol){
  ]}});
 }
 
-async function showSignalLab(chatId,messageId,symbol,horizonId='1h',mode='FULL'){
+async function currentSignalLab(symbol,horizonId='1h',mode='FULL'){
  const x=await terminalContext(symbol);
  const issuance=latestInstitutionalForecast(forecastRuntime,symbol);
- const lab=buildBiggjSignalLab({
+ return buildBiggjSignalLab({
   symbol,
   issuance,
   setup:x.setup,
@@ -3894,10 +3894,12 @@ async function showSignalLab(chatId,messageId,symbol,horizonId='1h',mode='FULL')
   mode,
   asOf:x.state?.availableAt||Date.now()
  });
+}
+async function showSignalLab(chatId,messageId,symbol,horizonId='1h',mode='FULL'){
+ const lab=await currentSignalLab(symbol,horizonId,mode);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjSignalLab(lab),reply_markup:signalLabKeyboard(symbol,horizonId,lab.mode)});
 }
-async function showProofFeed(chatId,messageId,symbol=null){
- const now=Date.now();
+function currentProofFeed(symbol=null,{limit=10,liveLimit=4,now=Date.now()}={}){
  const learningSummary=buildForecastLearningSummary(forecastRuntime,{
   minDisplaySamples:30,
   autoLearnEnabled,
@@ -3905,7 +3907,10 @@ async function showProofFeed(chatId,messageId,symbol=null){
   autoLearnForecastMs,
   now
  });
- const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit:10,liveLimit:4,asOf:now,learningSummary});
+ return buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit,liveLimit,asOf:now,learningSummary});
+}
+async function showProofFeed(chatId,messageId,symbol=null){
+ const feed=currentProofFeed(symbol);
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjProofFeed(feed),reply_markup:proofFeedKeyboard(symbol)});
 }
 async function showTerminalView(chatId,messageId,symbol,view){
@@ -7305,7 +7310,7 @@ async function handle(update) {
       if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
       stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
-      await showSignalLab(chatId,textMessageId,a.symbol,a.horizon||'1h'); await ack(q.id,'Signal Lab geladen'); return;
+      await showSignalLab(chatId,textMessageId,a.symbol,a.horizon||'1h',a.mode||'FULL'); await ack(q.id,'Signal Lab geladen'); return;
     }
     if (a.kind === 'PROOF_FEED') {
       if(a.symbol&&!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
@@ -9850,7 +9855,7 @@ function missionControlData(){
  return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
-const server = http.createServer((req,res) => {
+const server = http.createServer(async (req,res) => {
   if (req.url === '/app.webmanifest') {
     res.writeHead(200,{'content-type':'application/manifest+json; charset=utf-8','cache-control':'public, max-age=300'});
     res.end(biggjWebManifest());
@@ -9880,6 +9885,47 @@ const server = http.createServer((req,res) => {
       summary:biggjRulebookStaticSummary,
       runtime:currentBiggjRulebookAssessment()
     }));
+    return;
+  }
+  if (String(req.url||'').startsWith('/signal-lab.json')) {
+    try{
+      const u=new URL(String(req.url||''),'http://localhost');
+      const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase();
+      const horizon=String(u.searchParams.get('horizon')||'1h').toLowerCase();
+      const mode=String(u.searchParams.get('mode')||'FULL').toUpperCase();
+      if(!symbolOk(symbol)||!['5m','15m','1h','4h'].includes(horizon)||!['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'].includes(mode)){
+        res.writeHead(400,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+        res.end(JSON.stringify({ok:false,error:'INVALID_SIGNAL_LAB_REQUEST',execution:'SHADOW_ONLY',canExecuteLive:false}));
+        return;
+      }
+      const lab=await currentSignalLab(symbol,horizon,mode);
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify(lab));
+    }catch(err){
+      recordError(observability,{scope:'mobile_signal_lab',message:err instanceof Error?err.message:String(err)});
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      res.end(JSON.stringify({ok:false,error:'SIGNAL_LAB_UNAVAILABLE',execution:'SHADOW_ONLY',canExecuteLive:false}));
+    }
+    return;
+  }
+  if (String(req.url||'').startsWith('/proof-feed.json')) {
+    try{
+      const u=new URL(String(req.url||''),'http://localhost');
+      const raw=String(u.searchParams.get('symbol')||'ALL').toUpperCase();
+      const symbol=raw==='ALL'?null:raw;
+      if(symbol&&!symbolOk(symbol)){
+        res.writeHead(400,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+        res.end(JSON.stringify({ok:false,error:'INVALID_PROOF_FEED_REQUEST',execution:'SHADOW_ONLY',canExecuteLive:false}));
+        return;
+      }
+      const feed=currentProofFeed(symbol,{limit:20,liveLimit:8});
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify(feed));
+    }catch(err){
+      recordError(observability,{scope:'mobile_proof_feed',message:err instanceof Error?err.message:String(err)});
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      res.end(JSON.stringify({ok:false,error:'PROOF_FEED_UNAVAILABLE',execution:'SHADOW_ONLY',canExecuteLive:false}));
+    }
     return;
   }
   if (req.url === '/mission-control') {
