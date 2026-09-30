@@ -8,6 +8,7 @@ import { INSTITUTIONAL_FORECAST_RUNTIME_VERSION } from './institutional-forecast
 import { RESEARCH_DATA_PLANE_VERSION } from './research-data-plane.mjs';
 import { RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { MODEL_CANDIDATE_REGISTRY_VERSION } from './model-candidate-registry.mjs';
+import { BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION } from './biggj-living-research-runtime.mjs';
 
 export const PERSISTENCE_CONTRACTS_VERSION='TCX_PERSISTENCE_CONTRACTS_V1';
 
@@ -131,6 +132,16 @@ const CONTRACTS=Object.freeze([
     legacySchemas:[],
     criticality:'DEGRADE',
     corruptionPolicy:'BACKUP_AND_START_CLEAN_WITH_WARNING'
+  }),
+  Object.freeze({
+    id:'BIGGJ_LIVING_RESEARCH',
+    format:'JSON_ATOMIC_RENAME',
+    env:'TCX_BIGGJ_LIVING_RESEARCH_FILE',
+    defaultPath:'/data/tcx-biggj-living-research.json',
+    schema:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION,
+    legacySchemas:[],
+    criticality:'DEGRADE',
+    corruptionPolicy:'BACKUP_AND_REBUILD_RESEARCH_ONLY'
   })
 ]);
 
