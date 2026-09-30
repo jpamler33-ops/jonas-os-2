@@ -95,6 +95,9 @@ test('initial living research runtime is a governed research-only skill graph',(
   assert.equal(state.invariants.automaticExperimentLaunch,false);
   assert.equal(state.invariants.primaryMutationAllowed,false);
   assert.equal(state.discoveredSkillIds.length,0);
+  assert.deepEqual(state.observedForecastIds,[]);
+  assert.deepEqual(state.persistentCaseRegistry,[]);
+  assert.deepEqual(state.stabilityEventRegistry,[]);
   assert.ok(state.skillTree.nodes.length>=159);
 });
 
@@ -177,6 +180,72 @@ test('three independent persistent forecast cases create one deterministic resea
   assert.equal(duplicate.state.skillTree.nodes.length,out.state.skillTree.nodes.length);
 });
 
+test('persistent research cases survive removal from hot forecast tracker',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const first=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'HOT_TRACKER_CASES'
+  });
+  assert.equal(first.state.persistentCaseRegistry.length,3);
+  assert.equal(first.state.stabilityEventRegistry.length,3);
+  assert.equal(first.state.observedForecastIds.length,3);
+  const firstSignal=first.state.assumptionSignals.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE');
+  assert.equal(firstSignal.everPersistentForecasts,3);
+  assert.equal(firstSignal.status,'RESEARCH_REQUIRED');
+
+  const compacted=refreshBiggjLivingResearchRuntime(first.state,{
+    thesisMemories:[],
+    asOf:7000,
+    reason:'HOT_TRACKER_COMPACTED'
+  });
+  assert.equal(compacted.changed,true);
+  assert.equal(compacted.state.persistentCaseRegistry.length,3);
+  assert.equal(compacted.state.stabilityEventRegistry.length,3);
+  assert.equal(compacted.state.observedForecastIds.length,3);
+  const retained=compacted.state.assumptionSignals.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE');
+  assert.equal(retained.everPersistentForecasts,3);
+  assert.equal(retained.distinctPersistentForecasts,3);
+  assert.equal(retained.currentPersistentForecasts,0);
+  assert.equal(retained.status,'RESEARCH_REQUIRED');
+  assert.equal(compacted.discoveredSkillIds.length,0);
+  assert.equal(
+    compacted.state.skillTree.nodes.length,
+    first.state.skillTree.nodes.length,
+    'cold compaction must not create a duplicate research skill'
+  );
+});
+
+test('persistent case registry deduplicates repeat observations of the same forecast',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const one=thesisMemory({forecastId:'F1',observedAt:2000,persistentStaleCount:1});
+  const first=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[one],
+    asOf:3000
+  });
+  const repeated=thesisMemory({
+    forecastId:'F1',
+    observedAt:4000,
+    persistentStaleCount:2,
+    falsifiers:['WITNESS_NOT_SATISFIED','WITNESS_EXTERNAL_COUNT_LT_2']
+  });
+  const second=refreshBiggjLivingResearchRuntime(first.state,{
+    thesisMemories:[repeated],
+    asOf:5000
+  });
+  assert.equal(second.state.persistentCaseRegistry.length,1);
+  assert.equal(second.state.observedForecastIds.length,1);
+  assert.equal(second.state.persistentCaseRegistry[0].persistentStaleCount,2);
+  assert.ok(second.state.persistentCaseRegistry[0].falsifierCodes.includes('WITNESS_EXTERNAL_COUNT_LT_2'));
+  const signal=second.state.assumptionSignals.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE');
+  assert.equal(signal.everPersistentForecasts,1);
+  assert.equal(signal.distinctPersistentForecasts,1);
+});
+
 test('association evidence can raise research priority but remains explicitly non-causal',()=>{
   const initial=createBiggjLivingResearchRuntime({asOf:1000});
   const memories=[
@@ -256,6 +325,9 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.ok(summary.activeAgendaItems>=1);
   assert.ok(summary.researchRequired>=1);
   assert.ok(summary.discoveredResearchOnlySkills>=1);
+  assert.ok(summary.observedForecasts>=3);
+  assert.ok(summary.retainedPersistentCases>=3);
+  assert.ok(summary.retainedStabilityEvents>=3);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.automaticKill,false);
   assert.equal(summary.automaticExperimentLaunch,false);
