@@ -79,6 +79,7 @@ export function deriveBiggjExperienceNeeds(snapshot={}){
   if(traders?.sourceReady!==true)needs.push({priority:2,label:'Trader Intelligence Source',detail:'Für belastbare Profit-Trader-Rankings fehlt noch eine öffentliche, PIT-fähige Performance-/Wallet-Quelle.'});
   if(intel?.sourceReady!==true)needs.push({priority:2,label:'Live News Coverage',detail:intel?.lastError?'News-Discovery eingeschränkt: '+clip(intel.lastError,260):'Kein aktiver öffentlicher Live-News-Feed im Serving-State.'});
   else if(intel?.lastError)needs.push({priority:2,label:'News Source Degraded',detail:'Mindestens ein News-Abruf ist eingeschränkt: '+clip(intel.lastError,260)});
+  else if(intel?.fallbackUsed===true)needs.push({priority:2,label:'News Primary Source Resilience',detail:'Live-News laufen über Fallback ('+clip(intel?.source||'secondary provider',120)+'). Primärquelle weiter beobachten; Serving bleibt aktiv.'});
   else if(finite(intel?.eventCount)===0)needs.push({priority:2,label:'News Event Coverage',detail:'Live-News-Quelle ist erreichbar, liefert aktuell aber keine relevanten Events.'});
   const meme=h?.memecoinRadar||{};
   if(meme?.sourceReady!==true)needs.push({priority:2,label:'Memecoin Live Coverage',detail:meme?.lastError?'DEX-Radar eingeschränkt: '+clip(meme.lastError,260):'DexScreener Live-Radar liefert aktuell keine verwertbaren Rows.'});
@@ -109,7 +110,18 @@ export function buildBiggjNeedsPayload(snapshot={}){
       ].join('\n')),
       safeField('REGEL','Neue Quelle/Manager/Monitor nur dann hinzufügen, wenn sie eine konkrete Coverage-, Freshness-, Independence-, Latency- oder Governance-Lücke schließt.')
     ],
-    BIGGJ_EXPERIENCE_MARKERS.needs
+    BIGGJ_EXPERIENCE_MARKERS.needs,
+    [
+      {type:1,components:[
+        {type:2,style:1,label:'Research Queue',custom_id:'dc6:brain:research'},
+        {type:2,style:2,label:'Evidence',custom_id:'dc6:brain:evidence'},
+        {type:2,style:2,label:'Decisions',custom_id:'dc6:brain:decisions'}
+      ]},
+      {type:1,components:[
+        {type:2,style:2,label:'Brain Pulse',custom_id:'dc6:brain:pulse'},
+        {type:2,style:2,label:'Data Health',custom_id:'dc3:home:data'}
+      ]}
+    ]
   );
 }
 
@@ -136,7 +148,15 @@ export function buildBiggjLearnedPayload(snapshot={}){
       safeField('WHAT BIGGJ IS STILL TESTING',queue),
       safeField('MATURITY','Index '+pct(brain.maturityIndex)+' · Trusted '+finite(brain.trustedSkills)+' · Decaying '+finite(brain.decayingSkills))
     ],
-    BIGGJ_EXPERIENCE_MARKERS.learned
+    BIGGJ_EXPERIENCE_MARKERS.learned,
+    [
+      {type:1,components:[
+        {type:2,style:1,label:'Knowledge',custom_id:'dc6:brain:knowledge'},
+        {type:2,style:2,label:'Skill Tree',custom_id:'dc6:brain:skills'},
+        {type:2,style:2,label:'Changes',custom_id:'dc6:brain:changes'},
+        {type:2,style:2,label:'Timeline',custom_id:'dc6:brain:timeline'}
+      ]}
+    ]
   );
 }
 
@@ -168,7 +188,14 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
       safeField('NEXT SOURCE NEED',clip(t?.nextNeed||'PIT-fähige öffentliche Trader-/Wallet-Performancequelle mit stabiler Identität und Historie.',700)),
       safeField('PRIVACY','Nur öffentliche Markt-/On-Chain-Daten. Keine privaten Accounts, DMs oder nichtöffentlichen personenbezogenen Daten.')
     ],
-    BIGGJ_EXPERIENCE_MARKERS.traders
+    BIGGJ_EXPERIENCE_MARKERS.traders,
+    [
+      {type:1,components:[
+        {type:2,style:1,label:'Evidence',custom_id:'dc6:brain:evidence'},
+        {type:2,style:2,label:'Research Queue',custom_id:'dc6:brain:research'},
+        {type:2,style:2,label:'Data Health',custom_id:'dc3:home:data'}
+      ]}
+    ]
   );
 }
 
