@@ -359,3 +359,68 @@ test('CFTC weekly positioning enters its own governed research domain',()=>{
   assert.equal(cot.provenance.directionalExecutionAuthority,false);
   assert.ok(cot.features.some(x=>x.id==='research.cftc.leveragedMoneyNetShare'&&x.value===-.15));
 });
+
+
+test('Treasury SEC and exchange primary context enter isolated governed domains',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    officialPrimaryContextSnapshot:{
+      treasury:{
+        rows:[{
+          ok:true,source:'US_TREASURY_FISCAL_DATA_AUCTIONS',sourceEventId:'91282TEST:2026-09-29',
+          cusip:'91282TEST',securityType:'Note',securityTerm:'10-Year',
+          auctionDate:1_500_000,recordDate:1_500_000,availableAt:1_999_900,
+          bidToCoverRatio:2.5,clearingRatePct:4.1,totalAccepted:40e9,offeringAmount:40e9,
+          primaryDealerAccepted:10e9,directBidderAccepted:5e9,indirectBidderAccepted:25e9
+        }]
+      },
+      sec:{
+        rows:[{
+          ok:true,source:'SEC_EDGAR_SUBMISSIONS',sourceEventId:'0001-26-000001',
+          ticker:'MSTR',cik:'0001050446',companyName:'Strategy Inc.',form:'8-K',
+          eventTime:1_700_000,filingDate:1_600_000,availableAt:1_999_900,
+          url:'https://www.sec.gov/test',affectedAssets:['BTC','RISK'],
+          epistemic:'OFFICIAL_SEC_FILING_METADATA_NOT_CONTENT_INTERPRETATION_OR_FORECAST'
+        }]
+      },
+      exchange:{
+        ok:true,source:'COINBASE_KRAKEN_PUBLIC_CONTEXT',availableAt:1_999_900,capturedAt:1_999_900,
+        coinbase:{incidentSeverity:0,unresolvedIncidents:0,productCount:500,addedMarkets:1,removedMarkets:0},
+        kraken:{incidentSeverity:1/3,unresolvedIncidents:1,pairCount:300,addedMarkets:0,removedMarkets:0},
+        assetCoverage:{BTC:2,ETH:2,SOL:2},
+        endpoints:['https://status.coinbase.com/api/v2/summary.json'],
+        errors:[],
+        epistemic:'OFFICIAL_EXCHANGE_STATUS_AND_MARKET_UNIVERSE_NOT_PRICE_FORECAST'
+      }
+    }
+  });
+  assert.deepEqual(rows.map(x=>x.domain),['TREASURY_AUCTION','SEC_FILING','EXCHANGE_CONTEXT']);
+  const treasury=rows[0],sec=rows[1],exchange=rows[2];
+  assert.equal(treasury.source,'US_TREASURY_FISCAL_DATA_AUCTIONS');
+  assert.equal(treasury.eventTime,1_500_000);
+  assert.equal(treasury.provenance.directionalClaim,false);
+  assert.ok(treasury.features.some(x=>x.id==='research.treasury.indirectBidderAcceptedShare'&&x.value===.625));
+  assert.equal(sec.source,'SEC_EDGAR_SUBMISSIONS');
+  assert.equal(sec.provenance.contentInterpreted,false);
+  assert.ok(sec.features.some(x=>x.id==='research.sec.isCurrentReport'&&x.value===1));
+  assert.equal(exchange.source,'COINBASE_KRAKEN_PUBLIC_CONTEXT');
+  assert.equal(exchange.provenance.listingDeltaScope,'IN_PROCESS_OBSERVATION_WINDOW_ONLY');
+  assert.equal(exchange.provenance.restartBackfill,false);
+  assert.ok(exchange.features.some(x=>x.id==='research.exchange.krakenUnresolvedIncidentCount'&&x.value===1));
+});
+
+test('SEC filing is not fanned out to unrelated asset without broad CRYPTO tag',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'ETHUSDT',
+    ingestedAt:2_000_000,
+    officialPrimaryContextSnapshot:{
+      sec:{rows:[{
+        ok:true,source:'SEC_EDGAR_SUBMISSIONS',sourceEventId:'0001',
+        ticker:'MSTR',form:'8-K',eventTime:1_700_000,availableAt:1_999_900,
+        affectedAssets:['BTC','RISK']
+      }]}
+    }
+  });
+  assert.equal(rows.some(x=>x.domain==='SEC_FILING'),false);
+});
