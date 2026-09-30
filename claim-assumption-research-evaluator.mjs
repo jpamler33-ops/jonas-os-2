@@ -27,6 +27,12 @@ const mean=xs=>{
   const ys=(xs||[]).map(Number).filter(Number.isFinite);
   return ys.length?ys.reduce((a,b)=>a+b,0)/ys.length:null;
 };
+const median=xs=>{
+  const ys=(xs||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!ys.length) return null;
+  const m=Math.floor(ys.length/2);
+  return ys.length%2?ys[m]:(ys[m-1]+ys[m])/2;
+};
 const safeRate=(num,den)=>den>0?num/den:null;
 const unique=xs=>[...new Set((xs||[]).map(String))];
 
@@ -275,6 +281,78 @@ function thesisAssumptionBreakdown(rows){
   });
 }
 
+function preOutcomeRevisionSummary(rows){
+  const withState=rows.filter(x=>x?.preOutcomeThesisRevisionState!=null);
+  const warning=withState.filter(x=>x.preOutcomeThesisRevisionState?.warningAvailableBeforeMaturity===true);
+  const failures=withState.filter(primaryFailure);
+  const successes=withState.filter(primarySuccess);
+  const failureWarnings=failures.filter(x=>x.preOutcomeThesisRevisionState?.warningAvailableBeforeMaturity===true);
+  const successWarnings=successes.filter(x=>x.preOutcomeThesisRevisionState?.warningAvailableBeforeMaturity===true);
+  const invalidated=withState.filter(x=>x.preOutcomeThesisRevisionState?.forecastInvalidatedBeforeMaturity===true);
+  const leads=warning.map(x=>x.preOutcomeThesisRevisionState?.warningLeadMs).map(finiteOrNull).filter(x=>x!=null);
+  return {
+    observationsWithRevisionState:withState.length,
+    observationsWithoutRevisionState:rows.length-withState.length,
+    warningsBeforeMaturity:warning.length,
+    warningRate:wilson95(warning.length,withState.length),
+    primaryFailures:failures.length,
+    failuresWithPriorWarning:failureWarnings.length,
+    failureCaptureRate:wilson95(failureWarnings.length,failures.length),
+    primarySuccesses:successes.length,
+    successesWithPriorWarning:successWarnings.length,
+    falseWarningRate:wilson95(successWarnings.length,successes.length),
+    forecastInvalidatedBeforeMaturity:invalidated.length,
+    medianWarningLeadMs:median(leads),
+    meanWarningLeadMs:mean(leads),
+    interpretation:'PROSPECTIVE_PRE_OUTCOME_WARNING_ASSOCIATION_NOT_CAUSAL_OR_COUNTERFACTUAL_PROOF'
+  };
+}
+
+function preOutcomeStaleAssumptionBreakdown(rows){
+  const ids=unique(rows.flatMap(row=>
+    Array.isArray(row?.issuanceAuditState?.thesisAssumptionIds)
+      ?row.issuanceAuditState.thesisAssumptionIds
+      :[]
+  )).sort();
+
+  return ids.map(assumptionId=>{
+    const declared=rows.filter(row=>
+      Array.isArray(row?.issuanceAuditState?.thesisAssumptionIds)&&
+      row.issuanceAuditState.thesisAssumptionIds.includes(assumptionId)&&
+      row?.preOutcomeThesisRevisionState!=null
+    );
+    const stale=declared.filter(row=>
+      Array.isArray(row?.preOutcomeThesisRevisionState?.everStaleAssumptionIdsBeforeMaturity)&&
+      row.preOutcomeThesisRevisionState.everStaleAssumptionIdsBeforeMaturity.includes(assumptionId)
+    );
+    const notStale=declared.filter(row=>!stale.includes(row));
+    const staleFailures=stale.filter(primaryFailure).length;
+    const stableFailures=notStale.filter(primaryFailure).length;
+    const staleMisses=stale.filter(intervalFailure).length;
+    const stableMisses=notStale.filter(intervalFailure).length;
+    const staleFailureRate=safeRate(staleFailures,stale.length);
+    const stableFailureRate=safeRate(stableFailures,notStale.length);
+    const staleIntervalRate=safeRate(staleMisses,stale.length);
+    const stableIntervalRate=safeRate(stableMisses,notStale.length);
+    return {
+      assumptionId,
+      observations:declared.length,
+      staleBeforeMaturity:stale.length,
+      neverStaleBeforeMaturity:notStale.length,
+      directionFailureWhenStale:wilson95(staleFailures,stale.length),
+      directionFailureWhenNotStale:wilson95(stableFailures,notStale.length),
+      directionFailureRateDifference:
+        staleFailureRate==null||stableFailureRate==null?null:staleFailureRate-stableFailureRate,
+      intervalMissWhenStale:wilson95(staleMisses,stale.length),
+      intervalMissWhenNotStale:wilson95(stableMisses,notStale.length),
+      intervalMissRateDifference:
+        staleIntervalRate==null||stableIntervalRate==null?null:staleIntervalRate-stableIntervalRate,
+      associationReady:stale.length>=20&&notStale.length>=20,
+      interpretation:'PROSPECTIVE_STALENESS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF'
+    };
+  });
+}
+
 function horizonBreakdown(rows){
   const ids=[...new Set(rows.map(x=>String(x?.horizonId??'UNKNOWN')))].sort();
   return ids.map(horizonId=>{
@@ -468,13 +546,15 @@ export function evaluateClaimAssumptionResearch(dataset,{config={},evaluatedAt=n
     overhead:overheadSummary(accepted),
     byHorizon:horizonBreakdown(accepted),
     byThesisAssumption:thesisAssumptionBreakdown(accepted),
+    preOutcomeRevision:preOutcomeRevisionSummary(accepted),
+    byPreOutcomeStaleAssumption:preOutcomeStaleAssumptionBreakdown(accepted),
     conclusion,
     dimensions:{
       unsupportedOrInvalidAssumptionDefectDetection:'MEASURED_BY_ISSUANCE_GRAPH_ALERTS',
       assumptionLevelOutcomeAssociation:'MEASURED_PROSPECTIVELY_BY_FROZEN_SUPPORT_STATE',
       outcomeAssociation:'MEASURED_PROSPECTIVELY',
-      revisionPrecision:'NOT_YET_MEASURED_NO_GRAPH_REVISION_STREAM',
-      staleAssumptionDetection:'NOT_YET_MEASURED_NO_GRAPH_REVISION_STREAM',
+      revisionPrecision:'MEASURED_AS_PRE_OUTCOME_WARNING_CAPTURE_AND_FALSE_WARNING_RATE',
+      staleAssumptionDetection:'MEASURED_PROSPECTIVELY_BY_SUPPORT_TRANSITION_MEMORY',
       reproducibility:'SUPPORTED_BY_PERSISTED_FINGERPRINTED_ARTIFACTS',
       runtimeCpuCost:'NOT_MEASURED'
     },
@@ -486,6 +566,8 @@ export function evaluateClaimAssumptionResearch(dataset,{config={},evaluatedAt=n
       confidenceIntervals:'WILSON_95_PERCENT',
       causalInterpretation:false,
       outcomeDoesNotValidateIndividualAssumptions:true,
+      preOutcomeWarningsUseOnlyEventsKnownByHorizonMaturity:true,
+      warningLeadTimeIsDescriptiveNotCounterfactualCausation:true,
       noRandomizedTrafficSplitRequired:true
     },
     governance:{
@@ -532,6 +614,7 @@ export function claimAssumptionResearchEvaluationSummary(value){
     readiness:structuredClone(value?.readiness??null),
     conclusion:structuredClone(value?.conclusion??null),
     primary:structuredClone(value?.primary??null),
+    preOutcomeRevision:structuredClone(value?.preOutcomeRevision??null),
     overhead:structuredClone(value?.overhead??null),
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',

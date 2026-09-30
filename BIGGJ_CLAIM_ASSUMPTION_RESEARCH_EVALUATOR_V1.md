@@ -158,17 +158,34 @@ An assumption-level row becomes association-ready only after at least 20 support
 
 This remains prospective association, not proof that the assumption was true, false, or causal.
 
+## Pre-outcome thesis revision measurement
+
+For forecasts with Thesis Revision & Stale-Assumption Memory, the matured observation also contains only revision events whose knowledge timestamp was available by horizon maturity.
+
+The evaluator now measures:
+
+- how often a thesis warning existed before maturity,
+- what fraction of direction failures had a prior warning,
+- false-warning rate among direction-correct outcomes,
+- mean and median warning lead time,
+- whether ordinary forecast invalidation happened before maturity,
+- per-THESIS_* direction-error rates when the assumption became stale versus when it did not,
+- per-THESIS_* interval-miss rates when stale versus not stale.
+
+A stale-assumption comparison becomes association-ready only after at least 20 stale and 20 non-stale observations for that assumption.
+
+These measurements are prospective diagnostics. Warning lead time is descriptive and does not prove that acting on the warning would have improved an outcome.
+
 ## Not yet measured
 
 V1 does not yet claim evidence for:
 
-- graph revision precision,
-- stale-assumption detection,
 - assumption-level truth/falsity,
 - causal mechanism correctness,
+- whether every support transition represents durable information rather than short-lived evidence flicker,
 - runtime CPU cost.
 
-Those require additional prospective streams.
+Those require additional prospective validation.
 
 ## Invariants
 

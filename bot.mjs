@@ -166,6 +166,7 @@ import {
   seedInstitutionalForecastRuntimeFromEpisodes,
   issueInstitutionalForecast,
   observeInstitutionalForecastRuntime,
+  observeInstitutionalForecastThesisRevisions,
   recordCoverageProbeCalibration,
   observeInstitutionalForecastOutcomePoint,
   latestInstitutionalForecast,
@@ -6079,6 +6080,62 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   const claimAssumptionDeclarationSummary=forecastThesisDeclarationSummary(claimAssumptionDeclarations);
   markForecastMemory('thesis-declarations');
 
+  let thesisRevisionObservation={
+    version:'TCX_INSTITUTIONAL_FORECAST_THESIS_REVISION_OBSERVATION_V1',
+    symbol,
+    observedAt:issuanceGeneratedAt,
+    examined:0,
+    initialized:0,
+    changed:0,
+    results:[],
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  };
+  try{
+    thesisRevisionObservation=observeInstitutionalForecastThesisRevisions(forecastRuntime,{
+      currentDeclarations:claimAssumptionDeclarations,
+      observedAt:issuanceGeneratedAt,
+      currentInputFingerprint:input.inputFingerprint,
+      forecastRevisions:liveObservation.revisions
+    });
+    if(thesisRevisionObservation.changed>0||thesisRevisionObservation.initialized>0){
+      await persistForecastRuntime('forecast-thesis-revision');
+    }
+    if(thesisRevisionObservation.changed>0){
+      console.log('[TCX_THESIS_REVISION]',JSON.stringify({
+        symbol,
+        examined:thesisRevisionObservation.examined,
+        initialized:thesisRevisionObservation.initialized,
+        changed:thesisRevisionObservation.changed,
+        events:thesisRevisionObservation.results
+          .filter(x=>x.changed)
+          .slice(0,8)
+          .map(x=>({
+            forecastId:x.forecastId,
+            assessment:x.forecastAssessmentStatus,
+            supportLost:x.supportLostSinceIssueIds,
+            unsupported:x.currentUnsupportedAssumptionIds,
+            eventId:x.event?.eventId??null
+          })),
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+    }
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'forecast.thesis_revision',message:msg});
+    console.error('[TCX_THESIS_REVISION_FAILED]',JSON.stringify({
+      symbol,
+      error:msg,
+      primaryMutation:false,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+  }
+  markForecastMemory('thesis-revisions');
+
   const traceContext={
     data:{
       fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
@@ -6337,6 +6394,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       thesisAssumptions:claimAssumptionDeclarationSummary.assumptions,
       thesisUnsupportedMaterialAssumptions:claimAssumptionDeclarationSummary.unsupportedMaterialAssumptions.length,
       thesisMechanismCausalStatus:claimAssumptionDeclarationSummary.mechanismCausalStatus,
+      thesisRevisionExamined:Number(thesisRevisionObservation?.examined||0),
+      thesisRevisionInitialized:Number(thesisRevisionObservation?.initialized||0),
+      thesisRevisionChanged:Number(thesisRevisionObservation?.changed||0),
+      thesisRevisionSupportLosses:(thesisRevisionObservation?.results||[])
+        .reduce((n,x)=>n+(x?.supportLostSinceIssueIds?.length||0),0),
       autoShadowTradePlaced:autoShadowTrade?.placed===true,
       autoShadowTradeEligible:autoShadowTrade?.eligible===true,
       autoShadowTradeReason:autoShadowTrade?.reason||null,

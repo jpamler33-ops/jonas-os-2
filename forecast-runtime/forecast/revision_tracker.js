@@ -26,7 +26,7 @@ export class ForecastRevisionTracker {
         if (this.records.has(id))
             return id;
         const expiresAt = input.asOf + Math.max(0, ...report.forecast.forecasts.map(f => f.horizonMs));
-        this.records.set(id, { id, symbol: input.symbol, issuedAt: input.asOf, expiresAt, issuePrice: input.price, issueRegimeId: input.regimeId, report: structuredClone(report.forecast), transitionAtIssue: structuredClone(report.regimeTransition), issueState: structuredClone(input), revisions: [], status: 'ACTIVE' });
+        this.records.set(id, { id, symbol: input.symbol, issuedAt: input.asOf, expiresAt, issuePrice: input.price, issueRegimeId: input.regimeId, report: structuredClone(report.forecast), transitionAtIssue: structuredClone(report.regimeTransition), issueState: structuredClone(input), revisions: [], thesisMemory: null, status: 'ACTIVE' });
         this.trim();
         return id;
     }
@@ -48,6 +48,33 @@ export class ForecastRevisionTracker {
             r.status = 'INVALIDATED';
         changed.push(structuredClone(r));
     } return changed; }
+    bindThesis(id, memory) {
+        const r = this.records.get(id);
+        if (!r)
+            throw new Error('unknown forecast id: ' + id);
+        if (r.thesisMemory) {
+            if (r.thesisMemory.fingerprint !== memory?.fingerprint)
+                throw new Error('forecast thesis memory binding mismatch');
+            return structuredClone(r);
+        }
+        r.thesisMemory = structuredClone(memory);
+        return structuredClone(r);
+    }
+    updateThesisMemory(id, memory) {
+        const r = this.records.get(id);
+        if (!r)
+            throw new Error('unknown forecast id: ' + id);
+        if (!r.thesisMemory)
+            throw new Error('forecast thesis memory not bound');
+        if (
+            r.thesisMemory.issueGraphFingerprint &&
+            memory?.issueGraphFingerprint &&
+            r.thesisMemory.issueGraphFingerprint !== memory.issueGraphFingerprint
+        )
+            throw new Error('forecast thesis issue graph mismatch');
+        r.thesisMemory = structuredClone(memory);
+        return structuredClone(r);
+    }
     get(id) { const x = this.records.get(id); return x ? structuredClone(x) : undefined; }
     all() { return [...this.records.values()].map(x => structuredClone(x)); }
     snapshot() { return { version: 1, records: this.all() }; }

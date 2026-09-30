@@ -24,6 +24,13 @@ import {
 } from './forecast-claim-assumption-sidecar.mjs';
 import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
 import { evaluateClaimAssumptionResearch } from './claim-assumption-research-evaluator.mjs';
+import {
+  createInitialForecastThesisRevisionMemory,
+  createForecastThesisRevisionArtifact,
+  applyForecastThesisRevision,
+  forecastThesisPreOutcomeRevisionState,
+  verifyForecastThesisRevisionMemory
+} from './forecast-thesis-revision-memory.mjs';
 import { sha256 } from './institutional-kernel.mjs';
 
 export const INSTITUTIONAL_FORECAST_RUNTIME_VERSION='TCX_INSTITUTIONAL_FORECAST_RUNTIME_V1';
@@ -542,6 +549,7 @@ function createRuntimeState(filePath,config,opts={}){
     trackerArchiveHash:null,
     trackerArchiveRecordCount:0,
     trackerArchiveRevisionCount:0,
+    trackerArchiveThesisRevisionEventCount:0,
     lastTrackerArchiveBytes:null,
     lastTrackerArchiveLogicalBytes:null,
     maxEngineStoreBytes:engineStoreByteLimit(opts.maxEngineStoreBytes),
@@ -731,20 +739,30 @@ export async function openInstitutionalForecastRuntime(filePath,{
       const trackerRecords=intelligenceSnapshot?.tracker?.records;
       if(!Array.isArray(trackerRecords)) throw new Error('forecast tracker archive missing tracker records');
       let restoredRevisionCount=0;
+      let restoredThesisRevisionEventCount=0;
       for(const record of trackerRecords){
         const archived=archiveById.get(record.id);
         if(!archived) throw new Error('forecast tracker archive record missing: '+record.id);
         record.issueState=clone(archived.issueState);
         record.revisions=clone(Array.isArray(archived.revisions)?archived.revisions:[]);
+        record.thesisMemory=clone(archived.thesisMemory??record.thesisMemory??null);
         restoredRevisionCount+=record.revisions.length;
+        restoredThesisRevisionEventCount+=Number(record?.thesisMemory?.eventCount||0);
       }
       if(Number.isFinite(Number(meta.revisionCount))&&restoredRevisionCount!==Number(meta.revisionCount)){
         throw new Error('forecast tracker archive revision count mismatch');
+      }
+      if(
+        Number.isFinite(Number(meta.thesisRevisionEventCount))&&
+        restoredThesisRevisionEventCount!==Number(meta.thesisRevisionEventCount)
+      ){
+        throw new Error('forecast tracker archive thesis revision count mismatch');
       }
       runtime.trackerArchiveSlot=meta.slot;
       runtime.trackerArchiveHash=meta.sha256;
       runtime.trackerArchiveRecordCount=archive.records.length;
       runtime.trackerArchiveRevisionCount=restoredRevisionCount;
+      runtime.trackerArchiveThesisRevisionEventCount=restoredThesisRevisionEventCount;
       runtime.lastTrackerArchiveBytes=archiveStat.size;
       runtime.lastTrackerArchiveLogicalBytes=logical.length;
     }
@@ -859,12 +877,16 @@ function snapshotComponentProfile(payload){
     issueState:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.issueState??null),0),
     transitionAtIssue:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.transitionAtIssue??null),0),
     revisionsBytes:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.revisions??[]),0),
+    thesisMemories:trackerRecords.filter(r=>r?.thesisMemory).length,
+    thesisRevisionEvents:trackerRecords.reduce((s,r)=>s+Number(r?.thesisMemory?.eventCount||0),0),
+    thesisMemoryBytes:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.thesisMemory??null),0),
     metadata:trackerRecords.reduce((s,r)=>{
       const x={...r};
       delete x.report;
       delete x.issueState;
       delete x.transitionAtIssue;
       delete x.revisions;
+      delete x.thesisMemory;
       return s+jsonBytes(x);
     },0)
   };
@@ -925,7 +947,7 @@ function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={
       records:snapshot.tracker.records.map(record=>({
         ...record,
         report:trackerReportForPersistence(record.report),
-        ...(externalizeTrackerArchive?{issueState:null,revisions:[]}:null)
+        ...(externalizeTrackerArchive?{issueState:null,revisions:[],thesisMemory:null}:null)
       }))
     }
   };
@@ -935,7 +957,8 @@ function trackerArchiveRowForPersistence(record){
   return {
     id:record?.id,
     issueState:record?.issueState,
-    revisions:Array.isArray(record?.revisions)?record.revisions:[]
+    revisions:Array.isArray(record?.revisions)?record.revisions:[],
+    thesisMemory:record?.thesisMemory??null
   };
 }
 
@@ -949,7 +972,7 @@ function intelligencePersistenceView(service,{externalizeTrackerArchive=false}={
       records:trackerRows.map(record=>({
         ...record,
         report:trackerReportForPersistence(record?.report),
-        ...(externalizeTrackerArchive?{issueState:null,revisions:[]}:null)
+        ...(externalizeTrackerArchive?{issueState:null,revisions:[],thesisMemory:null}:null)
       }))
     },
     // The save path is synchronous until serialization begins; shallow references
@@ -1138,12 +1161,14 @@ export async function saveInstitutionalForecastRuntime(runtime){
         }
       }
       const revisionCount=trackerRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
+      const thesisRevisionEventCount=trackerRows.reduce((n,row)=>n+Number(row?.thesisMemory?.eventCount||0),0);
       trackerArchiveMeta={
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         slot,
         sha256:archiveHash,
         recordCount:trackerRows.length,
         revisionCount,
+        thesisRevisionEventCount,
         storageBytes:archiveBytes,
         logicalBytes:archiveLogicalBytes
       };
@@ -1257,6 +1282,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       runtime.trackerArchiveHash=trackerArchiveMeta.sha256;
       runtime.trackerArchiveRecordCount=trackerArchiveMeta.recordCount;
       runtime.trackerArchiveRevisionCount=trackerArchiveMeta.revisionCount;
+      runtime.trackerArchiveThesisRevisionEventCount=trackerArchiveMeta.thesisRevisionEventCount;
       runtime.lastTrackerArchiveBytes=trackerArchiveMeta.storageBytes;
       runtime.lastTrackerArchiveLogicalBytes=trackerArchiveMeta.logicalBytes;
     }
@@ -1407,9 +1433,27 @@ export function issueInstitutionalForecast(runtime,{
     runtime.issuances=trimIssuances(runtime.issuances,runtime.maxIssuances);
   }
 
+  const effectiveIssuance=prior??issuance;
+  if(effectiveIssuance?.claimAssumptionSidecar){
+    const tracked=runtime.intelligence.get(raw.forecastId);
+    if(!tracked?.thesisMemory){
+      const memory=createInitialForecastThesisRevisionMemory({
+        forecastId:raw.forecastId,
+        issuance:effectiveIssuance
+      });
+      runtime.intelligence.bindThesis(raw.forecastId,memory);
+    }else{
+      const mv=verifyForecastThesisRevisionMemory(tracked.thesisMemory);
+      if(!mv.ok) throw new Error('tracked thesis revision memory invalid: '+mv.reasons.join(','));
+      if(tracked.thesisMemory.issueGraphFingerprint!==effectiveIssuance.claimAssumptionSidecar.graphFingerprint){
+        throw new Error('tracked thesis revision memory graph mismatch');
+      }
+    }
+  }
+
   return deepFreeze({
     forecastId:raw.forecastId,
-    issuance:prior??issuance,
+    issuance:effectiveIssuance,
     duplicate:Boolean(prior),
     claimAssumptionSidecarStatus:prior
       ?(prior.claimAssumptionSidecar?'MATCHED_EXISTING':'LEGACY_MISSING')
@@ -1490,6 +1534,16 @@ function evaluationsFromResolved(runtime,resolved){
     });
     let claimAssumptionObservation=null;
     if(issuance.claimAssumptionSidecar){
+      const tracked=runtime.intelligence.get(forecastId);
+      let thesisRevisionState=null;
+      if(tracked?.thesisMemory){
+        const mv=verifyForecastThesisRevisionMemory(tracked.thesisMemory);
+        if(!mv.ok) throw new Error('tracked thesis revision memory invalid: '+mv.reasons.join(','));
+        thesisRevisionState=forecastThesisPreOutcomeRevisionState(
+          tracked.thesisMemory,
+          {maturedAt:row.dueAt}
+        );
+      }
       claimAssumptionObservation=createForecastClaimAssumptionShadowObservation(
         issuance.claimAssumptionSidecar,
         {
@@ -1500,7 +1554,8 @@ function evaluationsFromResolved(runtime,resolved){
           evaluationMetrics:evaluation.metrics,
           outcome:evaluation.outcome,
           baselineAuditState:researchTraceBaselineAuditState(issuance.trace),
-          overhead:claimAssumptionObservationOverhead(issuance)
+          overhead:claimAssumptionObservationOverhead(issuance),
+          thesisRevisionState
         }
       );
       const observationVerification=verifyForecastClaimAssumptionShadowObservation(claimAssumptionObservation);
@@ -1536,6 +1591,88 @@ export function observeInstitutionalForecastOutcomePoint(runtime,{
   return deepFreeze({
     resolved:clone(resolved),
     evaluations:evaluationsFromResolved(runtime,resolved)
+  });
+}
+
+export function observeInstitutionalForecastThesisRevisions(runtime,{
+  currentDeclarations,
+  observedAt,
+  currentInputFingerprint=null,
+  forecastRevisions=[]
+}={}){
+  if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
+  const at=finite(observedAt,'observedAt');
+  const symbol=String(currentDeclarations?.symbol??'').toUpperCase();
+  if(!symbol) throw new Error('current thesis declaration symbol required');
+
+  const results=[];
+  let examined=0;
+  let changed=0;
+  let initialized=0;
+  for(const revisionRecord of Array.isArray(forecastRevisions)?forecastRevisions:[]){
+    if(String(revisionRecord?.symbol??'').toUpperCase()!==symbol) continue;
+    const forecastId=String(revisionRecord?.id??'');
+    if(!forecastId) continue;
+    const issuance=runtime.issuances.find(x=>
+      String(x?.forecast?.forecastId??'')===forecastId||
+      (
+        String(x?.symbol??'').toUpperCase()===symbol&&
+        Number(x?.asOf)===Number(revisionRecord?.issuedAt)
+      )
+    );
+    if(!issuance?.claimAssumptionSidecar) continue;
+    examined++;
+
+    let tracked=runtime.intelligence.get(forecastId);
+    if(!tracked?.thesisMemory){
+      const initial=createInitialForecastThesisRevisionMemory({forecastId,issuance});
+      runtime.intelligence.bindThesis(forecastId,initial);
+      initialized++;
+      tracked=runtime.intelligence.get(forecastId);
+    }
+    const mv=verifyForecastThesisRevisionMemory(tracked?.thesisMemory);
+    if(!mv.ok) throw new Error('tracked thesis revision memory invalid: '+mv.reasons.join(','));
+
+    const assessment=
+      revisionRecord?.revisions?.at?.(-1)?.assessment??
+      tracked?.revisions?.at?.(-1)?.assessment??
+      null;
+    const artifact=createForecastThesisRevisionArtifact({
+      issuance,
+      currentDeclarations,
+      observedAt:at,
+      currentInputFingerprint,
+      forecastRevisionAssessment:assessment
+    });
+    const applied=applyForecastThesisRevision(tracked.thesisMemory,artifact);
+    if(applied.changed){
+      runtime.intelligence.updateThesisMemory(forecastId,applied.memory,applied.event);
+      changed++;
+    }
+    results.push({
+      forecastId,
+      issuanceId:issuance.issuanceId,
+      changed:applied.changed,
+      event:applied.event?clone(applied.event):null,
+      artifactFingerprint:artifact.fingerprint,
+      currentUnsupportedAssumptionIds:clone(artifact.diagnostics.currentUnsupportedAssumptionIds),
+      supportLostSinceIssueIds:clone(artifact.diagnostics.supportLostSinceIssueIds),
+      forecastAssessmentStatus:artifact.forecastAssessment.status
+    });
+  }
+
+  return deepFreeze({
+    version:'TCX_INSTITUTIONAL_FORECAST_THESIS_REVISION_OBSERVATION_V1',
+    symbol,
+    observedAt:at,
+    examined,
+    initialized,
+    changed,
+    results,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
   });
 }
 
@@ -1662,6 +1799,7 @@ export function institutionalForecastRuntimeSummary(runtime){
       slot:runtime?.trackerArchiveSlot??null,
       recordCount:runtime?.trackerArchiveRecordCount??0,
       revisionCount:runtime?.trackerArchiveRevisionCount??0,
+      thesisRevisionEventCount:runtime?.trackerArchiveThesisRevisionEventCount??0,
       storageBytes:runtime?.lastTrackerArchiveBytes??null,
       logicalBytes:runtime?.lastTrackerArchiveLogicalBytes??null,
       maxLogicalBytes:runtime?.maxTrackerArchiveBytes??null,
@@ -1688,6 +1826,11 @@ export function institutionalForecastRuntimeSummary(runtime){
     claimAssumptionSidecars:(runtime?.issuances??[]).filter(x=>x?.claimAssumptionSidecar).length,
     resolvedClaimAssumptionEligible:(runtime?.journal?.all?.()??[]).filter(x=>x?.status==='RESOLVED').length,
     trackedForecasts:runtime?.intelligence?.all?.().length??0,
+    trackedThesisMemories:(runtime?.intelligence?.all?.()??[]).filter(x=>x?.thesisMemory).length,
+    thesisRevisionEvents:(runtime?.intelligence?.all?.()??[]).reduce((n,x)=>n+Number(x?.thesisMemory?.eventCount||0),0),
+    staleThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
+      (x?.thesisMemory?.assumptions||[]).some(a=>a?.issueSupported===true&&a?.currentSupported===false)
+    ).length,
     probabilityCalibration,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
