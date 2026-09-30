@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V9';
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V10';
 
 const contracts=[
   {id:'BINANCE_USDM_DERIVATIVES',domain:'DERIVATIVES',source:'BINANCE_USDM_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
@@ -38,6 +38,9 @@ const contracts=[
   {id:'BLS_CPI_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'BLS_CPI',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:5184000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'BLS_JOLTS_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'BLS_JOLTS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:5184000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'CFTC_TFF_CRYPTO_POSITIONING',domain:'CFTC_POSITIONING',source:'CFTC_TFF_FUTURES_ONLY',minCompleteness:.5,maxPublicationLagMs:864000000,maxIngestLagMs:300000,maxSilenceMs:864000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'US_TREASURY_AUCTIONS',domain:'TREASURY_AUCTION',source:'US_TREASURY_FISCAL_DATA_AUCTIONS',minCompleteness:.5,maxPublicationLagMs:604800000,maxIngestLagMs:300000,maxSilenceMs:1814400000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'SEC_EDGAR_SUBMISSIONS',domain:'SEC_FILING',source:'SEC_EDGAR_SUBMISSIONS',minCompleteness:1,maxPublicationLagMs:1814400000,maxIngestLagMs:300000,maxSilenceMs:7776000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'COINBASE_KRAKEN_CONTEXT',domain:'EXCHANGE_CONTEXT',source:'COINBASE_KRAKEN_PUBLIC_CONTEXT',minCompleteness:.4,maxPublicationLagMs:600000,maxIngestLagMs:300000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'POLYMARKET_CONFIGURED',domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:1800000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},
   {id:'PUBLIC_WALLET_COHORT',domain:'WALLET_COHORT',source:'PUBLIC_WALLET_COHORT_RPC',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null}

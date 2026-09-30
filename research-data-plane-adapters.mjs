@@ -40,8 +40,14 @@ import {
   cftcCotSnapshotToExtraFeatures,
   CFTC_COT_PUBLIC_PROVIDER_VERSION
 } from './expansion-runtime/cftc-cot-public-provider.mjs';
+import {
+  exchangeContextToExtraFeatures,
+  secFilingToExtraFeatures,
+  treasuryAuctionToExtraFeatures,
+  OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION
+} from './expansion-runtime/official-primary-research-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V7';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V8';
 
 function finite(v){
   if(v==null||v==='') return null;
@@ -738,6 +744,161 @@ function cftcCotInput(symbol,snapshot,ingestedAt){
   });
 }
 
+
+function officialPrimaryInputs(symbol,context,ingestedAt){
+  if(!context) return [];
+  const rows=[];
+
+  for(const snapshot of Array.isArray(context?.treasury?.rows)?context.treasury.rows:[]){
+    const features=treasuryAuctionToExtraFeatures(snapshot);
+    if(!features.length) continue;
+    const availableAt=finite(snapshot?.availableAt);
+    const eventTime=eventTimeOrAvailable(snapshot?.auctionDate??snapshot?.recordDate,availableAt);
+    if(availableAt==null||eventTime==null) continue;
+    rows.push(createResearchFeatureSnapshot({
+      streamKey:symbol,
+      domain:'TREASURY_AUCTION',
+      source:'US_TREASURY_FISCAL_DATA_AUCTIONS',
+      sourceVersion:OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION,
+      sourceEventId:makeSourceEventId({
+        symbol,
+        source:'US_TREASURY_FISCAL_DATA_AUCTIONS',
+        sourceEventId:snapshot?.sourceEventId||null,
+        recordDate:snapshot?.recordDate||null,
+        features:features.map(x=>[x.id,x.value])
+      }),
+      eventTime,
+      availableAt,
+      ingestedAt,
+      ttlMs:14*24*60*60_000,
+      finality:'OBSERVED',
+      quality:{
+        completeness:features.length/7,
+        sourceCount:1,
+        expectedSourceCount:1,
+        status:'OFFICIAL_TREASURY_AUCTION_RESULT'
+      },
+      features,
+      provenance:{
+        adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+        providerVersion:OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION,
+        upstreamSource:String(snapshot?.source||'US_TREASURY_FISCAL_DATA_AUCTIONS'),
+        sourceEventId:String(snapshot?.sourceEventId||''),
+        cusip:String(snapshot?.cusip||''),
+        securityType:String(snapshot?.securityType||''),
+        securityTerm:String(snapshot?.securityTerm||''),
+        auctionDate:Number(snapshot?.auctionDate||0)||null,
+        endpoint:String(snapshot?.endpoint||''),
+        epistemic:String(snapshot?.epistemic||'OFFICIAL_TREASURY_AUCTION_RESULT_NOT_FORECAST_OR_DIRECTIONAL_SIGNAL'),
+        directionalClaim:false,
+        causalClaim:false,
+        researchOnly:true,
+        canExecute:false
+      }
+    }));
+  }
+
+  const base=String(symbol||'').toUpperCase().replace(/USDT$/,'');
+  for(const snapshot of Array.isArray(context?.sec?.rows)?context.sec.rows:[]){
+    const assets=new Set((snapshot?.affectedAssets||[]).map(x=>String(x).toUpperCase()));
+    if(!(assets.has(base)||assets.has('CRYPTO'))) continue;
+    const features=secFilingToExtraFeatures(snapshot);
+    if(!features.length) continue;
+    const availableAt=finite(snapshot?.availableAt);
+    const eventTime=eventTimeOrAvailable(snapshot?.eventTime??snapshot?.filingDate,availableAt);
+    if(availableAt==null||eventTime==null) continue;
+    rows.push(createResearchFeatureSnapshot({
+      streamKey:symbol,
+      domain:'SEC_FILING',
+      source:'SEC_EDGAR_SUBMISSIONS',
+      sourceVersion:OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION,
+      sourceEventId:makeSourceEventId({
+        symbol,
+        source:'SEC_EDGAR_SUBMISSIONS',
+        sourceEventId:snapshot?.sourceEventId||null
+      }),
+      eventTime,
+      availableAt,
+      ingestedAt,
+      ttlMs:21*24*60*60_000,
+      finality:'OBSERVED',
+      quality:{
+        completeness:1,
+        sourceCount:1,
+        expectedSourceCount:1,
+        status:'OFFICIAL_SEC_FILING_METADATA'
+      },
+      features,
+      provenance:{
+        adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+        providerVersion:OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION,
+        upstreamSource:'SEC_EDGAR_SUBMISSIONS',
+        accessionNumber:String(snapshot?.sourceEventId||''),
+        ticker:String(snapshot?.ticker||''),
+        cik:String(snapshot?.cik||''),
+        companyName:String(snapshot?.companyName||''),
+        form:String(snapshot?.form||''),
+        url:String(snapshot?.url||''),
+        affectedAssets:[...(snapshot?.affectedAssets||[])].map(String),
+        epistemic:String(snapshot?.epistemic||'OFFICIAL_SEC_FILING_METADATA_NOT_CONTENT_INTERPRETATION_OR_FORECAST'),
+        contentInterpreted:false,
+        directionalClaim:false,
+        causalClaim:false,
+        researchOnly:true,
+        canExecute:false
+      }
+    }));
+  }
+
+  if(context?.exchange?.ok){
+    const snapshot=context.exchange;
+    const features=exchangeContextToExtraFeatures(snapshot);
+    const availableAt=finite(snapshot?.availableAt??snapshot?.capturedAt);
+    if(features.length&&availableAt!=null){
+      rows.push(createResearchFeatureSnapshot({
+        streamKey:symbol,
+        domain:'EXCHANGE_CONTEXT',
+        source:'COINBASE_KRAKEN_PUBLIC_CONTEXT',
+        sourceVersion:OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION,
+        sourceEventId:makeSourceEventId({
+          symbol,
+          source:'COINBASE_KRAKEN_PUBLIC_CONTEXT',
+          availableAt,
+          features:features.map(x=>[x.id,x.value])
+        }),
+        eventTime:availableAt,
+        availableAt,
+        ingestedAt,
+        ttlMs:15*60_000,
+        finality:'OBSERVED',
+        quality:{
+          completeness:Math.min(1,features.length/13),
+          sourceCount:Math.max(0,Math.min(2,Number(snapshot?.venueSourceCount||0))),
+          expectedSourceCount:2,
+          status:'OFFICIAL_EXCHANGE_STATUS_AND_MARKET_UNIVERSE'
+        },
+        features,
+        provenance:{
+          adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+          providerVersion:OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION,
+          upstreamSource:'COINBASE_KRAKEN_PUBLIC_CONTEXT',
+          endpoints:Array.isArray(snapshot?.endpoints)?snapshot.endpoints.map(String):[],
+          errors:Array.isArray(snapshot?.errors)?snapshot.errors.slice(0,8):[],
+          epistemic:String(snapshot?.epistemic||'OFFICIAL_EXCHANGE_STATUS_AND_MARKET_UNIVERSE_NOT_PRICE_FORECAST'),
+          listingDeltaScope:'IN_PROCESS_OBSERVATION_WINDOW_ONLY',
+          restartBackfill:false,
+          directionalClaim:false,
+          causalClaim:false,
+          researchOnly:true,
+          canExecute:false
+        }
+      }));
+    }
+  }
+
+  return rows.filter(Boolean);
+}
+
 function walletInput(symbol,snapshot,ingestedAt){
   const features=walletCohortSnapshotToExtraFeatures(snapshot);
   if(!features.length) return null;
@@ -789,7 +950,8 @@ export function buildResearchDataPlaneSnapshots({
   publicContextSnapshot=null,
   dexContextSnapshot=null,
   dexPromotionSnapshot=null,
-  cftcCotSnapshot=null
+  cftcCotSnapshot=null,
+  officialPrimaryContextSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -805,6 +967,7 @@ export function buildResearchDataPlaneSnapshots({
     ...publicContextInputs(s,publicContextSnapshot,t),
     dexContextInput(s,dexContextSnapshot,t),
     dexPromotionInput(s,dexPromotionSnapshot,t),
-    cftcCotInput(s,cftcCotSnapshot,t)
+    cftcCotInput(s,cftcCotSnapshot,t),
+    ...officialPrimaryInputs(s,officialPrimaryContextSnapshot,t)
   ].filter(Boolean);
 }
