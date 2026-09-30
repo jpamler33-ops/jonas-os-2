@@ -1225,10 +1225,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return posted;
   }
   async function refreshNewsFeed(){
-    return managed('news-feed',()=>syncNewsChannel('news-feed',{world:false}),{detail:'Deutscher Live-News-Feed',rethrow:false});
+    try{return await syncNewsChannel('news-feed',{world:false});}
+    catch(err){channelManagers.failure('news-feed',err);fail('news-feed',err);return 0;}
   }
   async function refreshWorldWatch(){
-    return managed('world-watch',()=>syncNewsChannel('world-watch',{world:true}),{detail:'Deutsche Weltlage',rethrow:false});
+    try{return await syncNewsChannel('world-watch',{world:true});}
+    catch(err){channelManagers.failure('world-watch',err);fail('world-watch',err);return 0;}
   }
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
@@ -1317,10 +1319,53 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto:Boolean(msg.attachments?.size),components});
   }
   async function refreshMarketPanels(){
-    let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
+    let count=0;
+    for(const panel of MARKET_PANELS){
+      const c=channelCache.get(panel.channel);if(!c)continue;
+      const out=await managed(panel.channel,()=>refreshCorePanel(c,'refresh:'+panel.symbol),{detail:panel.symbol+' Marktpanel',rethrow:false});
+      if(out)count++;
+    }
     state.marketPanels=count; state.lastMarketRefreshAt=Date.now(); return count;
   }
-  async function refreshGlobalIntel(){const c=channelCache.get('global-intel');if(c)try{await refreshCorePanel(c,'home:news');}catch(err){fail('global-intel',err);}}
+  async function refreshGlobalIntel(){
+    const c=channelCache.get('global-intel');if(!c)return null;
+    return managed('global-intel',()=>refreshCorePanel(c,'home:news'),{detail:'Legacy Global Intel aktualisiert',rethrow:false});
+  }
+
+  async function refreshStableManagedPanel(name,marker,payload){
+    const channel=channelCache.get(name);
+    if(!channel){channelManagers.failure(name,'CHANNEL_NOT_FOUND');return null;}
+    const digest=observabilityDigest(payload);
+    if(corePanelDigests.get(name)===digest){
+      channelManagers.success(name,'Panel unverändert und aktuell');
+      return findMarked(channel,marker);
+    }
+    const msg=await managed(name,()=>upsertMarked(channel,marker,payload),{detail:'Managed Panel aktualisiert',rethrow:false});
+    if(msg)corePanelDigests.set(name,digest);
+    return msg;
+  }
+
+  async function refreshForecastDesk(){
+    return refreshStableManagedPanel('forecasts',MARKERS.forecasts,buildForecastDeskPayload(await safeMissionSnapshot()));
+  }
+  async function refreshAnomalyDesk(){
+    return refreshStableManagedPanel('anomalies',MARKERS.anomalies,buildAnomalyWatchPayload(await safeMissionSnapshot()));
+  }
+  async function refreshReplayDesk(){
+    return refreshStableManagedPanel('trade-replay',MARKERS.replay,buildReplayDeskPayload(await safeMissionSnapshot()));
+  }
+  async function refreshErrorDesk(){
+    return refreshStableManagedPanel('errors',MARKERS.errors,buildErrorDeskPayload(
+      await safeMissionSnapshot(),
+      recentErrors,
+      germanTranslator.health(),
+      managerSnapshot()
+    ));
+  }
+  async function refreshAuxiliaryDesks(){
+    const out=await Promise.allSettled([refreshForecastDesk(),refreshAnomalyDesk(),refreshReplayDesk(),refreshErrorDesk()]);
+    return out.filter(x=>x.status==='fulfilled').length;
+  }
   async function dispatchReadCommand(channelName,text){
     const c=channelCache.get(channelName); if(!c)return false; const chatId=fakeChatId(guildId,c.id,'panel');
     await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
@@ -1343,8 +1388,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const previous=lastHealthDigest;lastHealthDigest=digest;
     const c=channelCache.get('alerts');if(!c)return;
     const now=JSON.parse(digest),before=JSON.parse(previous);
-    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>k+': '+(before[k]?'OK':'CHECK')+' → '+(now[k]?'OK':'CHECK'));
-    await c.send({embeds:[{title:'TCX // STATUS CHANGE',description:(changes.join('\n')||'System state changed').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}});
+    const labels={ready:'Runtime',fabric:'Marktdaten',oms:'Shadow OMS',forecast:'Forecast',telegram:'Telegram'};
+    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>(labels[k]||k)+': '+(before[k]?'OK':'PRÜFEN')+' → '+(now[k]?'OK':'PRÜFEN'));
+    await managed('alerts',()=>c.send({embeds:[{title:'TCX // STATUSÄNDERUNG',description:(changes.join('\n')||'Systemzustand hat sich geändert.').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}}),{detail:'Statusänderung gepostet',rethrow:false});
     state.lastAlertAt=Date.now();
   }
   function cachedMessage(channel,messageId){
