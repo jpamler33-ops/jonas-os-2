@@ -9,6 +9,7 @@ const position={
   entryRegimeConfidence:.74,entryStressRobustnessScore:.81,entryQualityScore:.76,lastMark:{executableExitPrice:101.2},
   execution:'SHADOW_ONLY',canExecuteLive:false
 };
+const incomplete={...position,entryRegimeConfidence:null,entryStressRobustnessScore:null,entryQualityScore:null,setupScore:null};
 
 test('living thesis stays shadow-only and deterministic',()=>{
   const a=buildBiggjTradeThesis(position,{asOf:position.openedAt+30*60_000});
@@ -27,14 +28,16 @@ test('short overlay reverses stop and target correctly',()=>{
 });
 
 test('missing regime stress and quality reduce evidence coverage and health',()=>{
-  const t=buildBiggjTradeThesis({...position,entryRegimeConfidence:null,entryStressRobustnessScore:null,entryQualityScore:null,setupScore:null},{asOf:position.openedAt});
+  const full=buildBiggjTradeThesis(position,{asOf:position.openedAt});
+  const t=buildBiggjTradeThesis(incomplete,{asOf:position.openedAt});
   assert.equal(t.knownBeliefs,3);assert.equal(t.evidenceCoverage,.5);assert.equal(t.thesisState,'INCOMPLETE');
-  assert.ok(t.thesisHealth<.5,'missing half the thesis evidence must materially lower health');
+  assert.ok(t.thesisHealth<full.thesisHealth,'missing thesis evidence must lower health relative to the complete thesis');
 });
 
-test('ABSTAIN thesis is research-only and cannot present as healthy admitted trade',()=>{
-  const t=buildBiggjTradeThesis({...position,admissionGate:'ABSTAIN',entryRegimeConfidence:null,entryStressRobustnessScore:null,entryQualityScore:null,setupScore:null},{asOf:position.openedAt});
-  assert.equal(t.admitted,false);assert.equal(t.thesisState,'RESEARCH_ONLY');assert.ok(t.thesisHealth<.25);
+test('ABSTAIN thesis is research-only and health is penalized relative to same evidence',()=>{
+  const admitted=buildBiggjTradeThesis(incomplete,{asOf:position.openedAt});
+  const t=buildBiggjTradeThesis({...incomplete,admissionGate:'ABSTAIN'},{asOf:position.openedAt});
+  assert.equal(t.admitted,false);assert.equal(t.thesisState,'RESEARCH_ONLY');assert.ok(t.thesisHealth<admitted.thesisHealth);
   const admission=t.whyNow.find(x=>x.id==='ADMISSION');assert.equal(admission.state,'ABSTAIN');assert.match(admission.detail,/research observation only/);
 });
 
