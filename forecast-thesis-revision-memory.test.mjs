@@ -10,7 +10,10 @@ import {
   applyForecastThesisRevision,
   verifyForecastThesisRevisionMemory,
   verifyForecastThesisRevisionArtifact,
-  forecastThesisPreOutcomeRevisionState
+  forecastThesisPreOutcomeRevisionState,
+  upgradeForecastThesisRevisionMemory,
+  LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION,
+  FORECAST_THESIS_REVISION_MEMORY_VERSION
 } from './forecast-thesis-revision-memory.mjs';
 
 function context(asOf=1000,generatedAt=1010){
@@ -127,6 +130,37 @@ test('initial memory freezes issue support without rewriting the sidecar',()=>{
   assert.equal(m.firstPersistentStaleAt,null);
   assert.equal(m.canInfluencePrimary,false);
   assert.equal(m.canExecuteLive,false);
+});
+
+test('legacy V1 revision memory upgrades without inventing historical stability',()=>{
+  const i=issuance();
+  const fresh=createInitialForecastThesisRevisionMemory({forecastId:'BTCUSDT:1000',issuance:i});
+  const legacyCore={
+    ...structuredClone(fresh),
+    version:LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION
+  };
+  delete legacyCore.fingerprint;
+  delete legacyCore.firstPersistentStaleAt;
+  delete legacyCore.stabilityEventCount;
+  for(const row of legacyCore.assumptions) delete row.stability;
+  legacyCore.semantics={
+    immutableIssueState:true,
+    revisionEventsAreProspective:true,
+    supportLossDoesNotProveForecastFailure:true,
+    invalidationAssessmentIsNotCausalProof:true,
+    noOutcomeInformationUsed:true
+  };
+  const legacy={...legacyCore,fingerprint:sha256(legacyCore)};
+  assert.equal(verifyForecastThesisRevisionMemory(legacy).ok,true);
+
+  const upgraded=upgradeForecastThesisRevisionMemory(legacy);
+  assert.equal(upgraded.version,FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.equal(upgraded.migration.fromVersion,LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.equal(upgraded.migration.historicalStabilityBackfilled,false);
+  assert.equal(upgraded.firstPersistentStaleAt,null);
+  assert.ok(upgraded.assumptions.every(x=>x.stability.state==='LEGACY_UNKNOWN'));
+  assert.ok(upgraded.assumptions.every(x=>x.stability.migration==='LEGACY_V1_NO_HISTORICAL_STABILITY_BACKFILL'));
+  assert.equal(verifyForecastThesisRevisionMemory(upgraded).ok,true);
 });
 
 test('later support loss records exact assumption transition and forecast watch state',()=>{
