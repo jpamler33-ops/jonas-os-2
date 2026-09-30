@@ -802,8 +802,10 @@ export function verifyBiggjLivingResearchRuntime(value){
     if(!Array.isArray(value?.observedForecastIds)) reasons.push('OBSERVED_FORECAST_IDS_INVALID');
     if(!Array.isArray(value?.persistentCaseRegistry)) reasons.push('PERSISTENT_CASE_REGISTRY_INVALID');
     if(!Array.isArray(value?.stabilityEventRegistry)) reasons.push('STABILITY_EVENT_REGISTRY_INVALID');
-    const rqv=verifyBiggjResearchReviewQueue(value?.researchReviewQueue);
-    if(!rqv.ok) reasons.push('RESEARCH_REVIEW_QUEUE_INVALID:'+rqv.reasons.join('|'));
+    if(value?.researchReviewQueue!=null){
+      const rqv=verifyBiggjResearchReviewQueue(value.researchReviewQueue);
+      if(!rqv.ok) reasons.push('RESEARCH_REVIEW_QUEUE_INVALID:'+rqv.reasons.join('|'));
+    }
     if(value?.researchReviewDecisions!=null&&!Array.isArray(value.researchReviewDecisions)){
       reasons.push('RESEARCH_REVIEW_DECISIONS_INVALID');
     }
@@ -1032,8 +1034,51 @@ export async function openBiggjLivingResearchRuntime(filePath,{asOf=Date.now()}=
       ...coreOf(state),
       updatedAt:finite(asOf,Date.now()),
       skillTree:tree,
+      researchReviewQueue:buildBiggjResearchReviewQueue({
+        tree,
+        protocols:state.researchProtocols||[],
+        asOf
+      }),
+      researchReviewDecisions:Array.isArray(state.researchReviewDecisions)
+        ?state.researchReviewDecisions
+        :[],
       canonicalResearchQueue:buildBiggjResearchQueue(tree,{limit:20}).queue,
       lastRefreshReason:'CAPABILITY_MAP_RECONCILIATION'
+    };
+    state=finalized(core);
+    reconciled=true;
+  }
+
+  if(state.researchReviewQueue==null||!Array.isArray(state.researchReviewDecisions)){
+    const migratedAt=finite(asOf,Date.now());
+    const migrationCore={
+      migrationId:'research-review-queue:'+sha256({
+        priorFingerprint:state.fingerprint,
+        migratedAt
+      }).slice(0,24),
+      kind:'RESEARCH_REVIEW_QUEUE_BACKFILL',
+      at:migratedAt,
+      evidenceRewritten:false,
+      skillStatusRewritten:false,
+      protocolRewritten:false,
+      productionMutationPerformed:false
+    };
+    const core={
+      ...coreOf(state),
+      updatedAt:Math.max(Number(state.updatedAt||0),migratedAt),
+      researchReviewQueue:buildBiggjResearchReviewQueue({
+        tree:state.skillTree,
+        protocols:state.researchProtocols||[],
+        asOf:migratedAt
+      }),
+      researchReviewDecisions:Array.isArray(state.researchReviewDecisions)
+        ?state.researchReviewDecisions
+        :[],
+      migrations:[
+        ...(state.migrations||[]),
+        migrationCore
+      ].slice(-128),
+      lastRefreshReason:'RESEARCH_REVIEW_QUEUE_BACKFILL'
     };
     state=finalized(core);
     reconciled=true;
