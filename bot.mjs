@@ -72,6 +72,10 @@ import {
   SHADOW_TRAINING_SUPERVISOR_VERSION
 } from './shadow-training-supervisor.mjs';
 import {
+  buildBiggjTradingAcademy, renderBiggjTradingAcademy,
+  BIGGJ_TRADING_ACADEMY_VERSION
+} from './biggj-trading-academy.mjs';
+import {
   loadStrategyLeagueLedger, saveStrategyLeagueLedger,
   reconcileStrategyLeagueEntries, replaceStrategyLeaguePosition,
   markStrategyLeaguePosition, closeStrategyLeaguePosition,
@@ -4766,59 +4770,20 @@ function shadowOrderDetail(order) {
 }
 
 async function showShadowCapitalAcademy(chatId,messageId=null){
-  const a=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
-  const active=a.stages.find(x=>x.id===a.activeStage)||a.stages[0];
-  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
-  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
-  const lines=[
-    '🏆 TCX CAPITAL ACADEMY','',
-    'AKTUELLER STATUS',
-    'Erreichte Stufe: '+(a.achievedStage==='UNRANKED'?'noch keine':a.achievedStage.replaceAll('_',' ')),
-    'Aktuelle Challenge: '+a.activeStageLabel,
-    'Fortschritt: '+pct(a.stageProgress),
-    'Abgeschlossene Trades: '+a.metrics.closedTrades,
-    'Gesamt-PnL: '+money(a.metrics.netPnlQuote),
-    'Profit Factor: '+(a.metrics.profitFactor==null?'—':fmt(a.metrics.profitFactor,2)),
-    'Max. Drawdown: '+pct(a.metrics.maxDrawdownPct),'',
-    'CHALLENGE-KRITERIEN'
-  ];
-  for(const x of active.criteria){
-    const value=x.id.includes('drawdown')||x.id.includes('positive_')||x.id.includes('single_trade')
-      ?pct(x.value)
-      :x.id.includes('profit_factor')||x.id==='meme_pf'
-        ?fmt(x.value,2)
-        :x.id.includes('expectancy')||x.id.includes('net_pnl')
-          ?money(x.value)
-          :fmt(x.value,0);
-    lines.push((x.pass?'✅ ':'⬜ ')+x.label+' · aktuell '+value);
-  }
-  lines.push(
-    '',
-    'RISIKO-LIZENZ DIESER STUFE',
-    'Max. offene Trades: '+a.riskPolicy.maxOpenTotal,
-    'Max. je Coin: '+a.riskPolicy.maxOpenPerSymbol,
-    'Max. Memecoins offen: '+a.riskPolicy.maxOpenMemecoin,
-    'Max. Gesamt-Exposure: '+pct(a.riskPolicy.maxExposurePct),
-    'Tagesverlust-Limit: '+pct(a.riskPolicy.dailyLossLimitPct),
-    'Positions-Skalierung: '+fmt(a.riskPolicy.notionalMultiplier,2)+'×',
-    'Memecoin-Skalierung: '+fmt(a.riskPolicy.memeMultiplier,2)+'×','',
-    'LIVE-GUARD',
-    'Core Entries: '+(a.guard.coreAllowed?'🟢 freigegeben':'⛔ pausiert'),
-    'Meme Entries: '+(a.guard.memeAllowed?'🟢 freigegeben':'⛔ pausiert'),
-    'Heutiger PnL: '+money(a.guard.dailyRealizedPnlQuote),
-    'Verlustserie: '+a.guard.lossStreak,
-    ...(a.guard.blockers.length?['Blocker: '+a.guard.blockers.join(', ')]:[]),
-    ...(a.guard.memeBlockers.length&&!a.guard.memeAllowed?['Meme-Blocker: '+a.guard.memeBlockers.join(', ')]:[]),
-    '',
-    'Die Academy erhöht simulierte Risikobudgets nur nach bestandenen Challenges.',
-    'CAPITAL_READY_SIM ist kein Nachweis für echte zukünftige Gewinne.',
-    'Mode: SHADOW_ONLY · echte Orders bleiben gesperrt.'
-  );
-  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
-    [{text:'🔄 Prüfen',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
-    [{text:'🏆 Academy',callback_data:'home:academy'},{text:'💼 Portfolio',callback_data:'home:portfolio'}],
-    [{text:'🏠 Start',callback_data:'home'}]
-  ]}};
+  const now=Date.now();
+  const legacy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:now,timeZone:shadowStatsTimeZone});
+  const supervisor=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,legacy,{asOf:now});
+  const academy=buildBiggjTradingAcademy(shadowPortfolioLedger,{academy:legacy,supervisor,asOf:now});
+  const payload={
+    chat_id:chatId,
+    text:renderBiggjTradingAcademy(academy),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎯 ACTIVE QUEST',callback_data:'home:academy'},{text:'🧠 COACH',callback_data:'home:coach'}],
+      [{text:'🏁 STRATEGY LEAGUE',callback_data:'home:league'},{text:'📈 STATS',callback_data:'home:stats_day'}],
+      [{text:'💼 PORTFOLIO',callback_data:'home:portfolio'},{text:'↻ REFRESH',callback_data:'home:academy'}],
+      [{text:'🏠 COMMAND CENTER',callback_data:'home'}]
+    ]}
+  };
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
   return tg('sendMessage',payload);
 }
