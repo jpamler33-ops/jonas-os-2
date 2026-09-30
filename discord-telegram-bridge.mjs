@@ -14,6 +14,7 @@ import {
 } from './biggj-experience-center.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V7';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -114,6 +115,63 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'}
   ]}
 ]);
+
+const CHANNEL_PROFILE_GROUPS=Object.freeze({
+  HOME:new Set(['start-here']),
+  LIVE_60:new Set([
+    'tcx-terminal','performance','system-status','data-health',
+    'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
+    'forecasts','anomalies','trade-replay','errors'
+  ]),
+  LIVE_90:new Set(['market-overview']),
+  LIVE_120:new Set([
+    'brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
+    'review-queue','learning-timeline','progress','evidence-ledger','decision-trace',
+    'btc','eth','sol','memecoins','global-intel'
+  ]),
+  ACADEMY_120:new Set([
+    'academy-start','academy-roadmap','academy-lessons','academy-chart-training',
+    'academy-challenges','academy-glossary','academy-progress','academy-questions'
+  ]),
+  FEED_120:new Set(['news-feed','world-watch']),
+  TRADE_STREAM:new Set(['live-trades','theses']),
+  EVENT_FEED:new Set(['closed-trades','alerts'])
+});
+
+export function biggjChannelExperienceProfile(name){
+  const key=String(name||'');
+  if(CHANNEL_PROFILE_GROUPS.HOME.has(key))return {mode:'HOME',cadence:'STARTUP + ON DEMAND'};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_60.has(key))return {mode:'LIVE PANEL',cadence:'~60s'};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_90.has(key))return {mode:'LIVE PANEL',cadence:'~90s'};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_120.has(key))return {mode:'LIVE PANEL',cadence:'~120s'};
+  if(CHANNEL_PROFILE_GROUPS.ACADEMY_120.has(key))return {mode:'LEARNING PANEL',cadence:'~120s · kept at bottom'};
+  if(CHANNEL_PROFILE_GROUPS.FEED_120.has(key))return {mode:'DEDUPED LIVE FEED',cadence:'~120s'};
+  if(CHANNEL_PROFILE_GROUPS.TRADE_STREAM.has(key))return {mode:'TRADE STREAM',cadence:'~20–120s'};
+  if(CHANNEL_PROFILE_GROUPS.EVENT_FEED.has(key))return {mode:'EVENT FEED',cadence:'on change'};
+  return null;
+}
+
+function decoratedChannelTopic(spec={}){
+  const base=String(spec?.topic||'').trim();
+  const profile=biggjChannelExperienceProfile(spec?.name);
+  if(!profile)return base;
+  return (base+' · '+profile.mode+' · '+profile.cadence).slice(0,1024);
+}
+
+export function auditBiggjDiscordChannelLayout(){
+  const names=SERVER_LAYOUT.flatMap(section=>section.channels.map(x=>x.name));
+  const duplicates=names.filter((name,index)=>names.indexOf(name)!==index);
+  const missingProfiles=names.filter(name=>!biggjChannelExperienceProfile(name));
+  return Object.freeze({
+    version:BIGGJ_DISCORD_CHANNEL_UX_VERSION,
+    channels:names.length,
+    uniqueChannels:new Set(names).size,
+    duplicateChannels:[...new Set(duplicates)],
+    missingProfiles,
+    complete:duplicates.length===0&&missingProfiles.length===0
+  });
+}
+
 const MARKET_PANELS=Object.freeze([
   {channel:'btc',symbol:'BTCUSDT'},
   {channel:'eth',symbol:'ETHUSDT'},
@@ -134,7 +192,12 @@ const MARKERS=Object.freeze({
   academyChallenges:'BIGGJ_ACADEMY_CHALLENGES_V1',
   academyGlossary:'BIGGJ_ACADEMY_GLOSSARY_V1',
   academyProgress:'BIGGJ_ACADEMY_PROGRESS_V1',
-  academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1'
+  academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1',
+  forecasts:'BIGGJ_CHANNEL_FORECAST_DESK_V7',
+  intelHub:'BIGGJ_CHANNEL_INTEL_HUB_V7',
+  anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
+  replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
+  errors:'BIGGJ_CHANNEL_ERROR_DESK_V7'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -635,6 +698,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const thesisCards=new Map();
   const observabilityPanelDigests=new Map();
   const experiencePanelDigests=new Map();
+  const corePanelDigests=new Map();
+  const recentErrors=[];
   const closedPosted=new Set();
   const timers=new Set();
   const visualRefreshQueue=createSerialDedupeQueue({maxSize:64});
@@ -651,10 +716,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
+    recentErrors.unshift({at:Date.now(),scope:String(scope),message});
+    if(recentErrors.length>20)recentErrors.length=20;
+    state.recentErrors=recentErrors.length;
     try{
       const detail={
         scope:String(scope),
@@ -748,11 +816,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       let category=g.channels.cache.find(c=>c.type===ChannelType.GuildCategory&&c.name===section.category);
       if(!category){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');category=await g.channels.create({name:section.category,type:ChannelType.GuildCategory,reason:'TCX Discord V2 setup'});created.push(section.category);}
       for(const spec of section.channels){
+        const desiredTopic=decoratedChannelTopic(spec);
         let channel=g.channels.cache.find(c=>c.type===ChannelType.GuildText&&c.name===spec.name);
-        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:spec.topic,reason:'BIGGJ Discord V6 setup'});created.push('#'+spec.name);}
+        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:desiredTopic,reason:'BIGGJ Discord V7 channel UX setup'});created.push('#'+spec.name);}
         else if(canManage){
-          if(channel.parentId!==category.id)await channel.setParent(category.id,{lockPermissions:false,reason:'BIGGJ Discord V6 layout reconciliation'});
-          if(String(channel.topic||'')!==String(spec.topic||''))await channel.setTopic(spec.topic||null,'BIGGJ Discord V6 topic reconciliation');
+          if(channel.parentId!==category.id)await channel.setParent(category.id,{lockPermissions:false,reason:'BIGGJ Discord V7 layout reconciliation'});
+          if(String(channel.topic||'')!==String(desiredTopic||''))await channel.setTopic(desiredTopic||null,'BIGGJ Discord V7 topic reconciliation');
         }
         channelCache.set(spec.name,channel);
       }
@@ -808,7 +877,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function refreshOverview(){const c=channelCache.get('market-overview');return c?upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())):null;}
   async function refreshDataHealth(){const c=channelCache.get('data-health');return c?upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())):null;}
   function observabilityDigest(payload){
-    return JSON.stringify({embeds:payload?.embeds||[],components:payload?.components||[]});
+    const embeds=(payload?.embeds||[]).map(embed=>{
+      const copy={...embed};
+      delete copy.timestamp;
+      return copy;
+    });
+    return JSON.stringify({embeds,components:payload?.components||[]});
   }
   async function refreshBiggjObservabilityPanels(){
     const snapshot=await safeMissionSnapshot();
