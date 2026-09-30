@@ -67,17 +67,24 @@ export function newsResearchSnapshotKey(snapshot){
 export function filterPreviouslyObservedNewsSnapshots(plane,snapshots=[]){
   const sourcePayload=plane?.sourcePayload;
   const rows=(Array.isArray(snapshots)?snapshots:[]).filter(Boolean);
-  if(!sourcePayload||typeof sourcePayload.has!=='function'){
-    return Object.freeze({candidates:Object.freeze(rows),previouslyObserved:0});
-  }
   const candidates=[];
+  const seenBatch=new Set();
   let previouslyObserved=0;
+  let batchDuplicates=0;
   for(const snapshot of rows){
     const key=newsResearchSnapshotKey(snapshot);
-    if(key&&sourcePayload.has(key)) previouslyObserved++;
-    else candidates.push(snapshot);
+    if(key&&sourcePayload&&typeof sourcePayload.has==='function'&&sourcePayload.has(key)){
+      previouslyObserved++;
+      continue;
+    }
+    if(key&&seenBatch.has(key)){
+      batchDuplicates++;
+      continue;
+    }
+    if(key) seenBatch.add(key);
+    candidates.push(snapshot);
   }
-  return Object.freeze({candidates:Object.freeze(candidates),previouslyObserved});
+  return Object.freeze({candidates:Object.freeze(candidates),previouslyObserved,batchDuplicates});
 }
 
 export function newsEventToResearchSnapshot(event,{
