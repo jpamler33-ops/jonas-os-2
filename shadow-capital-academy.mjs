@@ -277,10 +277,10 @@ export function evaluateShadowCapitalAcademy(ledger,{asOf=Date.now(),timeZone='E
   return freeze({...core,fingerprint:sha256(core)});
 }
 
-export function academyTradeBudget(academy,{assetClass='CORE',baseNotionalQuote=100,equityQuote=null}={}){
+export function academyTradeBudget(academy,{assetClass='CORE',baseNotionalQuote=200,equityQuote=null}={}){
   const policy=academy?.riskPolicy||STAGES[0].risk;
   const equity=Math.max(1,finite(equityQuote,10000));
-  const base=Math.max(1,finite(baseNotionalQuote,100));
+  const base=Math.max(1,finite(baseNotionalQuote,200));
   const cls=String(assetClass||'CORE').toUpperCase();
   const classMult=cls==='MEME'?Number(policy.memeMultiplier||.4):1;
   const stageSized=base*Number(policy.notionalMultiplier||.5)*classMult;
