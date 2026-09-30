@@ -856,6 +856,8 @@ function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=
   }
 }
 
+await refreshBiggjLivingResearch('startup',null);
+
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
 let shadowCompetitionLastHistorySize = Number(shadowCompetitionState?.evaluatedHistoryRows||0);
@@ -6227,6 +6229,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       await persistForecastRuntime('forecast-thesis-revision');
     }
     if(thesisRevisionObservation.changed>0){
+      await refreshBiggjLivingResearch('thesis-revision');
       console.log('[TCX_THESIS_REVISION]',JSON.stringify({
         symbol,
         examined:thesisRevisionObservation.examined,
@@ -8632,6 +8635,7 @@ async function forecastOutcomeWatcher() {
         }));
         if(postAdmission.allowed){
           maybeEvaluateClaimAssumptionResearch('resolved-outcomes');
+          await refreshBiggjLivingResearch('resolved-outcomes',claimAssumptionResearchLastReport);
           await syncFeatureResearch('resolved-outcomes');
         }else{
           console.warn('resolved-outcome feature research deferred for memory headroom',JSON.stringify({
