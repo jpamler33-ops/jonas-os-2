@@ -94,6 +94,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'biggj-living-research-runtime.mjs',
   'biggj-epistemic-kernel.mjs',
   'biggj-epistemic-runtime.mjs',
+  'biggj-market-science-director.mjs',
   'biggj-research-validation-harness.mjs',
   'biggj-research-protocol-compiler.mjs',
   'biggj-research-review-queue.mjs',
