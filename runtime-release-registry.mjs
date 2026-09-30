@@ -166,6 +166,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'model-promotion-review-service.mjs',
   'expansion-runtime/dexscreener-public-provider.mjs',
   'expansion-runtime/public-market-context-provider.mjs',
+  'expansion-runtime/cftc-cot-public-provider.mjs',
   'expansion-runtime/external-research-provider.mjs',
 
   'forecast-runtime/utils/math.js',
