@@ -43,6 +43,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'venue-quality-memory.mjs',
   'execution-research-lab.mjs',
   'telegram-product-ui.mjs',
+  'telegram-chat-lifecycle.mjs',
   'alert-engine.mjs',
   'evidence-history.mjs',
   'state-validity.mjs',
