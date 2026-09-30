@@ -8,7 +8,9 @@ import {
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
   forecastHistoryProgressAt,
-  forecastHistoryHasAdvanced
+  forecastHistoryHasAdvanced,
+  shadowWorkerHeadroomRetryPolicy,
+  SHADOW_WORKER_HEADROOM_RETRY_POLICY_VERSION
 } from './forecast-shadow-evaluation-client.mjs';
 
 test('fixed-size history windows detect newly resolved rows by point-in-time progress',()=>{
@@ -70,6 +72,80 @@ test('adaptive shadow worker admission requires real serving headroom',()=>{
   assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2');
 });
 
+
+test('shadow worker adaptive pressure gets bounded retry without changing admission thresholds',()=>{
+  const adaptive=evaluateShadowWorkerAdmission({
+    mode:'AUTO',
+    heapUsedMb:274,
+    rssMb:488,
+    externalMb:5,
+    autoHeapMb:260,
+    autoRssMb:620,
+    autoExternalMb:64,
+    hardHeapMb:300,
+    hardRssMb:900,
+    hardExternalMb:160
+  });
+  assert.equal(adaptive.allowed,false);
+  assert.equal(adaptive.reason,'ADAPTIVE_MEMORY_PRESSURE');
+
+  const first=shadowWorkerHeadroomRetryPolicy(adaptive,{
+    attempt:0,
+    elapsedMs:0,
+    maxAttempts:8,
+    maxWaitMs:20_000,
+    pollMs:2_500
+  });
+  assert.equal(first.retry,true);
+  assert.equal(first.delayMs,2500);
+  assert.equal(first.terminalReason,'WAIT_FOR_NATURAL_HEADROOM');
+  assert.equal(first.thresholdsUnchanged,true);
+
+  const exhausted=shadowWorkerHeadroomRetryPolicy(adaptive,{
+    attempt:8,
+    elapsedMs:20_000,
+    maxAttempts:8,
+    maxWaitMs:20_000,
+    pollMs:2_500
+  });
+  assert.equal(exhausted.retry,false);
+  assert.equal(exhausted.terminalReason,'ADAPTIVE_WINDOW_EXHAUSTED');
+  assert.equal(SHADOW_WORKER_HEADROOM_RETRY_POLICY_VERSION,'TCX_SHADOW_WORKER_HEADROOM_RETRY_POLICY_V1');
+});
+
+test('hard memory pressure and disabled worker never enter headroom retry loop',()=>{
+  const hard=evaluateShadowWorkerAdmission({
+    mode:'AUTO',
+    heapUsedMb:305,
+    rssMb:500,
+    externalMb:5
+  });
+  const hardPolicy=shadowWorkerHeadroomRetryPolicy(hard,{attempt:0,elapsedMs:0,maxWaitMs:20_000});
+  assert.equal(hard.reason,'HARD_MEMORY_PRESSURE');
+  assert.equal(hardPolicy.retry,false);
+  assert.equal(hardPolicy.terminalReason,'HARD_MEMORY_PRESSURE');
+
+  const disabled=evaluateShadowWorkerAdmission({mode:'OFF',heapUsedMb:200,rssMb:400,externalMb:5});
+  const disabledPolicy=shadowWorkerHeadroomRetryPolicy(disabled,{attempt:0,elapsedMs:0,maxWaitMs:20_000});
+  assert.equal(disabledPolicy.retry,false);
+  assert.equal(disabledPolicy.terminalReason,'DISABLED');
+});
+
+test('recovered headroom ends retry immediately',()=>{
+  const healthy=evaluateShadowWorkerAdmission({
+    mode:'AUTO',
+    heapUsedMb:257,
+    rssMb:512,
+    externalMb:7,
+    autoHeapMb:260,
+    autoRssMb:620,
+    autoExternalMb:64
+  });
+  const policy=shadowWorkerHeadroomRetryPolicy(healthy,{attempt:3,elapsedMs:7500,maxWaitMs:20_000});
+  assert.equal(healthy.allowed,true);
+  assert.equal(policy.retry,false);
+  assert.equal(policy.terminalReason,'HEADROOM_AVAILABLE');
+});
 
 test('autolearn admission blocks external-memory pressure even when heap and rss look safe',()=>{
   const r=evaluateAutoLearnMemoryAdmission({
