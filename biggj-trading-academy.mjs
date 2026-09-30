@@ -20,6 +20,14 @@ function primaryClosed(ledger){
 function rate(rows,predicate){
   return rows.length?rows.filter(predicate).length/rows.length:0;
 }
+function trailingLossStreak(rows){
+  let n=0;
+  for(let i=rows.length-1;i>=0;i--){
+    if(Number(rows[i]?.realizedNetPnlQuote||0)<0)n++;
+    else break;
+  }
+  return n;
+}
 function entropyScore(values){
   const xs=values.map(x=>String(x||'UNKNOWN')).filter(Boolean);
   if(xs.length<2)return 0;
@@ -201,7 +209,7 @@ function missionFor(skills,rows){
       checks:[
         {label:'15 aktuelle PRIMARY-Fälle',value:Math.min(15,recent.length),target:15},
         {label:'≥ 95% bei 1×',value:rate(recent,cleanLeverage),target:.95},
-        {label:'Verlustserie ≤ 3',value:Math.max(0,3-(recent.slice().reverse().findIndex(p=>Number(p.realizedNetPnlQuote||0)>=0))),target:3}
+        {label:'Verlustserie ≤ 3',value:trailingLossStreak(recent)<=3?1:clamp(3/trailingLossStreak(recent)),target:1}
       ]
     },
     EXECUTION:{
