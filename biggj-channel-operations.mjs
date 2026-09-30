@@ -118,6 +118,29 @@ export function createBiggjChannelManagerRuntime({sections=[],profileFor=()=>nul
     const problems=rows
       .filter(x=>!['HEALTHY','IDLE_OK'].includes(x.status))
       .sort((a,b)=>a.priority-b.priority||String(a.name).localeCompare(String(b.name)));
+    const supervisorStatus=problems.some(x=>x.priority===1)?'ACTION_REQUIRED':problems.length?'DEGRADED':'HEALTHY';
+    const profiled=rows.filter(x=>x.profile?.mode&&x.profile.mode!=='UNKNOWN').length;
+    const managerCoverage=rows.length?profiled/rows.length:0;
+    const supervisor=Object.freeze({
+      status:supervisorStatus,
+      managed:rows.length,
+      coverage:managerCoverage,
+      nextActions:Object.freeze(problems.slice(0,8).map(x=>Object.freeze({
+        channel:x.name,
+        decision:x.decision,
+        priority:x.priority,
+        reason:x.reason,
+        suggestion:x.suggestion
+      })))
+    });
+    const metaSupervisor=Object.freeze({
+      status:managerCoverage<1?'BLIND_SPOT':supervisorStatus==='ACTION_REQUIRED'?'SUPERVISOR_ESCALATION':supervisorStatus==='DEGRADED'?'WATCH_SUPERVISOR':'HEALTHY',
+      supervisorObserved:true,
+      managerCoverage,
+      unprofiledManagers:rows.length-profiled,
+      problemRate:rows.length?problems.length/rows.length:0,
+      rule:'Der Supervisor darf Probleme melden und UI/Refresh/Layout reparieren, aber keine Trading-Policy oder Live-Execution autorisieren.'
+    });
     return Object.freeze({
       version:BIGGJ_CHANNEL_OPERATIONS_VERSION,
       generatedAt:t,
@@ -127,18 +150,8 @@ export function createBiggjChannelManagerRuntime({sections=[],profileFor=()=>nul
       counts:Object.freeze(counts),
       rows:Object.freeze(rows),
       topProblems:Object.freeze(problems.slice(0,12)),
-      supervisor:Object.freeze({
-        status:problems.some(x=>x.priority===1)?'ACTION_REQUIRED':problems.length?'DEGRADED':'HEALTHY',
-        managed:rows.length,
-        coverage:rows.length?1:0,
-        nextActions:Object.freeze(problems.slice(0,8).map(x=>Object.freeze({
-          channel:x.name,
-          decision:x.decision,
-          priority:x.priority,
-          reason:x.reason,
-          suggestion:x.suggestion
-        })))
-      })
+      supervisor,
+      metaSupervisor
     });
   }
 
