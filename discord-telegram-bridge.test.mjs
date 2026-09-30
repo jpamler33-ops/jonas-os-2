@@ -125,6 +125,8 @@ test('BIGGJ Discord V6 operator and experience layers are wired into the bridge'
   assert.match(source,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
   assert.match(source,/\.\.\.BIGGJ_EXPERIENCE_LAYOUT/);
   assert.match(source,/name:'executive'/);
+  assert.match(source,/name:'signal'/);
+  assert.match(source,/name:'proof'/);
   assert.match(source,/name:'brain'/);
   assert.match(source,/name:'timeline'/);
   assert.match(source,/name:'needs'/);
@@ -197,6 +199,8 @@ test('previously empty operational channels now have live builders',async()=>{
   const fs=await import('node:fs/promises');
   const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
   for(const required of [
+    'buildSignalLabDeskPayload',
+    'buildProofFeedDeskPayload',
     'buildForecastDeskPayload',
     'buildAnomalyWatchPayload',
     'buildReplayDeskPayload',
