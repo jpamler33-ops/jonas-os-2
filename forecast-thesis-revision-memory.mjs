@@ -93,21 +93,31 @@ export function createInitialForecastThesisRevisionMemory({
   const id=text(forecastId??issuance?.forecast?.forecastId);
   if(!id) throw new Error('forecastId required');
   const issueEvidence=graphEvidenceMap(sidecar);
-  const assumptions=thesisAssumptionNodes(sidecar).map(node=>({
-    assumptionId:String(node.assumptionId),
-    issueSupportState:String(node.supportState||'UNKNOWN'),
-    currentSupportState:String(node.supportState||'UNKNOWN'),
-    issueSupported:supportedState(String(node.supportState||'UNKNOWN')),
-    currentSupported:supportedState(String(node.supportState||'UNKNOWN')),
-    issueEvidenceIds:uniq(node.evidenceIds),
-    currentEvidenceIds:uniq(node.evidenceIds),
-    issueEvidenceFingerprint:assumptionEvidenceDigest(node.evidenceIds,issueEvidence),
-    currentEvidenceFingerprint:assumptionEvidenceDigest(node.evidenceIds,issueEvidence),
-    firstSupportLostAt:null,
-    firstSupportRestoredAt:null,
-    lastSupportChangedAt:null,
-    supportTransitionCount:0
-  }));
+  const assumptions=thesisAssumptionNodes(sidecar).map(node=>{
+    const issueSupportState=String(node.supportState||'UNKNOWN');
+    const issueSupported=supportedState(issueSupportState);
+    const issueEvidenceIds=uniq(node.evidenceIds);
+    return {
+      assumptionId:String(node.assumptionId),
+      issueSupportState,
+      currentSupportState:issueSupportState,
+      issueSupported,
+      currentSupported:issueSupported,
+      issueEvidenceIds,
+      currentEvidenceIds:issueEvidenceIds,
+      issueEvidenceFingerprint:assumptionEvidenceDigest(node.evidenceIds,issueEvidence),
+      currentEvidenceFingerprint:assumptionEvidenceDigest(node.evidenceIds,issueEvidence),
+      firstSupportLostAt:null,
+      firstSupportRestoredAt:null,
+      lastSupportChangedAt:null,
+      supportTransitionCount:0,
+      stability:createInitialAssumptionStability({
+        assumptionId:String(node.assumptionId),
+        issueSupported,
+        issueEvidenceIds
+      })
+    };
+  });
   const core={
     version:FORECAST_THESIS_REVISION_MEMORY_VERSION,
     forecastId:id,
@@ -131,6 +141,8 @@ export function createInitialForecastThesisRevisionMemory({
       immutableIssueState:true,
       revisionEventsAreProspective:true,
       supportLossDoesNotProveForecastFailure:true,
+      persistentStaleRequiresHysteresis:true,
+      transientFlickerIsNotStructuralStaleness:true,
       invalidationAssessmentIsNotCausalProof:true,
       noOutcomeInformationUsed:true
     },
