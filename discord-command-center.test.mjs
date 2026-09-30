@@ -3,22 +3,23 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source=readFileSync(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+const observabilitySource=readFileSync(new URL('./biggj-discord-observability.mjs',import.meta.url),'utf8');
 
-test('BIGGJ Discord V4 is release-bound and interactive',()=>{
-  assert.ok(source.includes('BIGGJ_DISCORD_COMMAND_CENTER_V4'));
+test('BIGGJ Discord V5 is release-bound and interactive',()=>{
+  assert.ok(source.includes('BIGGJ_DISCORD_COMMAND_CENTER_V5'));
   assert.ok(source.includes('dc3:market-select'));
   assert.ok(source.includes('dc4:thesis:'));
   assert.ok(source.includes('commandCenterComponents'));
   assert.ok(source.includes('marketActionComponents'));
 });
 
-test('BIGGJ V4 keeps execution safety explicit',()=>{
+test('BIGGJ V5 keeps execution safety explicit',()=>{
   assert.ok(source.includes('SHADOW_ONLY'));
   assert.ok(source.includes('REAL ORDERS BLOCKED'));
   assert.ok(source.includes('keine echten Orders'));
 });
 
-test('BIGGJ V4 contains visual thesis and lifecycle surfaces',()=>{
+test('BIGGJ V5 contains visual thesis and lifecycle surfaces',()=>{
   for(const required of [
     'buildDiscordPerformancePayload',
     'buildDiscordMarketOverviewPayload',
@@ -33,6 +34,34 @@ test('BIGGJ V4 contains visual thesis and lifecycle surfaces',()=>{
     'recentClosed',
     'isStringSelectMenu'
   ]) assert.ok(source.includes(required),required);
+});
+
+
+test('BIGGJ V5 exposes governed operator observability navigation',()=>{
+  for(const required of [
+    'BIGGJ_DISCORD_OBSERVABILITY_LAYOUT',
+    'buildBiggjDiscordObservabilityPanelMap',
+    'buildBiggjDiscordObservabilityPayload',
+    'refreshBiggjObservabilityPanels',
+    "name:'brain'",
+    "name:'research'",
+    "name:'skills'",
+    "name:'progress'",
+    "name:'decisions'",
+    'dc6:brain:'
+  ]) assert.ok(source.includes(required),required);
+  for(const required of [
+    'brain-pulse',
+    'knowledge',
+    'research-queue',
+    'hypotheses',
+    'changes',
+    'experiments',
+    'skill-tree',
+    'progress',
+    'evidence-ledger',
+    'decision-trace'
+  ]) assert.ok(observabilitySource.includes(required),required);
 });
 
 
