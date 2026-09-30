@@ -95,3 +95,12 @@ test('context converts to bounded research features',()=>{
   assert.ok(byId.get('research.marketContext.totalMarketCapLog')>0);
   assert.ok(byId.get('research.defi.totalTvlLog')>0);
 });
+
+
+test('null public context metrics remain missing instead of synthetic zeros',()=>{
+  const rows=publicMarketContextToExtraFeatures({
+    global:{bitcoinDominancePct:null,totalMarketCapUsd:null,totalVolume24hUsd:null,activeCryptocurrencies:null,activeMarkets:null},
+    defi:{totalTvlUsd:null,chainCount:null,ethereumTvlUsd:null,solanaTvlUsd:null,bitcoinTvlUsd:null,top10TvlShare:null}
+  });
+  assert.deepEqual(rows,[]);
+});
