@@ -25,6 +25,7 @@ import {
   BIGGJ_RESEARCH_PROTOCOL_VERSION
 } from './biggj-research-protocol-compiler.mjs';
 import { biggjResearchValidationSummary } from './biggj-research-validation-harness.mjs';
+import { biggjResearchExperimentPlannerSummary } from './biggj-research-experiment-planner.mjs';
 
 export const BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION='TCX_BIGGJ_LIVING_RESEARCH_RUNTIME_V1';
 export const BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION='TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2';
@@ -1102,6 +1103,14 @@ export function biggjLivingResearchRuntimeSummary(value){
       :null,
     validationHarness:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjResearchValidationSummary(value.skillTree,{limit:5})
+      :null,
+    experimentPlanner:verifyBiggjSkillTree(value?.skillTree).ok
+      ?biggjResearchExperimentPlannerSummary({
+          tree:value.skillTree,
+          protocols:value?.researchProtocols||[],
+          limit:5,
+          plannedAt:value?.updatedAt??value?.skillTree?.asOf
+        })
       :null,
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
