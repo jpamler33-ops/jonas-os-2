@@ -217,9 +217,10 @@ function tasksFromExperimentGovernor(governor={}){
 }
 
 function tasksFromRegistry(summary={}){
-  const candidates=arr(summary.candidates);
-  for(const row of candidates.filter(x=>normalizedStatus(x.status)==='REGISTERED').slice(0,8)){
-    return [task({
+  return arr(summary.candidates)
+    .filter(x=>normalizedStatus(x.status)==='REGISTERED')
+    .slice(0,8)
+    .map(row=>task({
       type:'EVALUATE_REGISTERED_CANDIDATES',
       subject:String(row.candidateId||'UNKNOWN_CANDIDATE'),
       reason:'REGISTERED_CANDIDATE_HAS_NO_EVALUATION',
@@ -228,9 +229,7 @@ function tasksFromRegistry(summary={}){
       uncertainty:.65,
       source:'MODEL_CANDIDATE_REGISTRY',
       dataNeeds:['WALK_FORWARD_EVIDENCE']
-    })];
-  }
-  return [];
+    }));
 }
 
 function tasksFromLearnedChallenger(summary={}){
@@ -271,8 +270,8 @@ function tasksFromFeatureResearch(summary={}){
 
 function tasksFromStrategyLeague(summary={}){
   const strategies=arr(summary?.strategies||summary?.rows);
-  const open=strategies.reduce((n,x)=>n+finite(x?.openPositions??x?.open),0);
-  const closed=strategies.reduce((n,x)=>n+finite(x?.closedTrades??x?.closed),0);
+  const open=strategies.reduce((n,x)=>n+finite(x?.openPositions??x?.open??x?.account?.openPositions),0);
+  const closed=strategies.reduce((n,x)=>n+finite(x?.closedTrades??x?.closed??x?.account?.closedTrades),0);
   if(!strategies.length&&open===0&&closed===0)return [];
   return [task({
     type:'CONTINUE_STRATEGY_LEAGUE',
