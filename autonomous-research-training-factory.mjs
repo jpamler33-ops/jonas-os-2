@@ -45,7 +45,8 @@ const AUTO_HANDLERS=Object.freeze({
   GENERATE_NEXT_CHALLENGER_GENERATION:'FORECAST_SHADOW_COMPETITION',
   EVALUATE_REGISTERED_CANDIDATES:'MODEL_CANDIDATE_REGISTRY',
   COLLECT_CHALLENGER_FORWARD_EVIDENCE:'LEARNED_CHALLENGER_ENGINE',
-  CONTINUE_STRATEGY_LEAGUE:'SHADOW_STRATEGY_LEAGUE'
+  CONTINUE_STRATEGY_LEAGUE:'SHADOW_STRATEGY_LEAGUE',
+  PREPARE_MODEL_PROMOTION_REVIEW:'MODEL_PROMOTION_REVIEW_SERVICE'
 });
 
 function finite(v,f=0){
@@ -182,24 +183,46 @@ function tasksFromLivingResearch(state){
   return tasks;
 }
 
-function tasksFromExperimentGovernor(governor={}){
+function tasksFromExperimentGovernor(governor={},modelPromotionReviewSummary=null){
   const tasks=[];
   const status=normalizedStatus(governor.status);
   const counts=governor.counts||{};
+  const decisionByCandidate=new Map(
+    arr(modelPromotionReviewSummary?.decisions).map(x=>[String(x?.candidateId||''),x])
+  );
   const reviewRows=[
     ...arr(governor.promotionReviewRequired),
     ...arr(governor.legacyPromotionCandidates)
   ];
   for(const row of reviewRows.slice(0,12)){
+    const candidateId=String(row?.candidateId||row?.blueprintId||'UNKNOWN_CANDIDATE');
+    const review=decisionByCandidate.get(candidateId)||null;
+    const decision=String(review?.decision||'UNAVAILABLE');
+    if(decision==='PROMOTE_CANDIDATE'){
+      tasks.push(task({
+        type:'MODEL_PROMOTION_REVIEW',
+        subject:candidateId,
+        reason:'MODEL_PASSED_FULL_GOVERNANCE_REVIEW_REQUIRES_EXPLICIT_PROMOTION_APPROVAL',
+        priority:1,
+        informationValue:.98,
+        uncertainty:.1,
+        source:'MODEL_PROMOTION_REVIEW_SERVICE',
+        metadata:{...row,decision,nextAction:review?.nextAction??null,missingProofs:arr(review?.missingProofs)}
+      }));
+      continue;
+    }
+    if(decision==='REJECT_CANDIDATE'||decision==='HOLD_CANDIDATE'){
+      continue;
+    }
     tasks.push(task({
-      type:'MODEL_PROMOTION_REVIEW',
-      subject:String(row?.candidateId||row?.blueprintId||'UNKNOWN_CANDIDATE'),
-      reason:'CANDIDATE_PASSED_SHADOW_STATISTICAL_REVIEW',
-      priority:1,
-      informationValue:.95,
-      uncertainty:.25,
+      type:'PREPARE_MODEL_PROMOTION_REVIEW',
+      subject:candidateId,
+      reason:'STATISTICAL_REVIEW_READY_BUT_FULL_GOVERNANCE_REVIEW_NOT_YET_RESOLVED',
+      priority:.92,
+      informationValue:.92,
+      uncertainty:.35,
       source:'FORECAST_EXPERIMENT_GOVERNOR',
-      metadata:row
+      metadata:{...row,reviewDecision:decision}
     }));
   }
   const measuring=finite(counts.MEASURING)+finite(counts.SHADOW_TESTING)+finite(counts.INTEGRITY_HOLD);
@@ -344,6 +367,15 @@ function sourceFingerprint(input){
     governorGenerationId:input?.experimentGovernorSummary?.generationId??null,
     governorStatus:input?.experimentGovernorSummary?.status??null,
     governorLastEvaluatedAt:input?.experimentGovernorSummary?.lastEvaluatedAt??null,
+    modelPromotionReviewGenerationId:input?.modelPromotionReviewSummary?.generationId??null,
+    modelPromotionReviewAt:finite(input?.modelPromotionReviewSummary?.at,null),
+    modelPromotionReviewDecisions:arr(input?.modelPromotionReviewSummary?.decisions).map(x=>({
+      candidateId:x?.candidateId??null,
+      ok:x?.ok===true,
+      decision:x?.decision??null,
+      nextAction:x?.nextAction??null,
+      missingProofs:arr(x?.missingProofs)
+    })),
     modelRegistrySeq:finite(input?.modelCandidateRegistrySummary?.seq),
     learnedChallengerCounts:input?.learnedChallengerSummary?.counts??null,
     featureResearchStatus:input?.featureResearchSummary?.status??null,
@@ -427,6 +459,7 @@ export function verifyAutonomousResearchTrainingFactory(state){
 export function refreshAutonomousResearchTrainingFactory(state,{
   livingResearchState=null,
   experimentGovernorSummary=null,
+  modelPromotionReviewSummary=null,
   modelCandidateRegistrySummary=null,
   learnedChallengerSummary=null,
   featureResearchSummary=null,
@@ -447,6 +480,7 @@ export function refreshAutonomousResearchTrainingFactory(state,{
   const input={
     livingResearchState,
     experimentGovernorSummary,
+    modelPromotionReviewSummary,
     modelCandidateRegistrySummary,
     learnedChallengerSummary,
     featureResearchSummary,
@@ -463,7 +497,7 @@ export function refreshAutonomousResearchTrainingFactory(state,{
 
   const rawTasks=dedupeTasks([
     ...tasksFromLivingResearch(livingResearchState),
-    ...tasksFromExperimentGovernor(experimentGovernorSummary||{}),
+    ...tasksFromExperimentGovernor(experimentGovernorSummary||{},modelPromotionReviewSummary),
     ...tasksFromRegistry(modelCandidateRegistrySummary||{}),
     ...tasksFromLearnedChallenger(learnedChallengerSummary||{}),
     ...tasksFromFeatureResearch(featureResearchSummary||{}),
@@ -540,6 +574,10 @@ export function refreshAutonomousResearchTrainingFactory(state,{
       reviewTickets:arr(livingResearchState?.researchReviewQueue?.tickets).length,
       governorStatus:String(experimentGovernorSummary?.status||'UNINITIALIZED'),
       governorGeneration:finite(experimentGovernorSummary?.generationNumber),
+      modelPromotionReviewAt:finite(modelPromotionReviewSummary?.at,null),
+      modelPromotionReady:finite(modelPromotionReviewSummary?.promotionReady),
+      modelPromotionHolds:finite(modelPromotionReviewSummary?.holds),
+      modelPromotionRejected:finite(modelPromotionReviewSummary?.rejected),
       modelRegistrySeq:finite(modelCandidateRegistrySummary?.seq),
       researchDataPlaneSeq:finite(researchDataPlaneSummary?.seq),
       researchCoverageAverage:finite(researchCoverageSummary?.averageCoverage,null),
