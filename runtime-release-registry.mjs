@@ -60,6 +60,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-experience-center.mjs',
   'biggj-mobile-webapp.mjs',
   'biggj-public-news-provider.mjs',
+  'biggj-channel-operations.mjs',
+  'biggj-german-translation.mjs',
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
   'biggj-autonomous-operator.mjs',
