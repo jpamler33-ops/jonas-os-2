@@ -10,6 +10,12 @@ import {
   renderBiggjProofFeed,
   signalLabKeyboard
 } from './biggj-signal-lab.mjs';
+import {
+  ForecastLearningJournal,
+  FORECAST_JOURNAL_PROOF_COMMITMENT_VERSION,
+  forecastJournalProofCommitment,
+  verifyForecastJournalProofCommitment
+} from './forecast-runtime/forecast/journal.js';
 
 function issuance({probabilityDisplayAllowed=true,calibration='CALIBRATED'}={}){
   return {
@@ -42,6 +48,32 @@ function accuracy(status='CALIBRATED'){
     ready:true,
     gate:{status,passed:status==='CALIBRATED'},
     evaluation:{resolvedCount:140}
+  };
+}
+
+function committedRow(row){
+  const out=structuredClone(row);
+  out.proofCommitmentVersion=FORECAST_JOURNAL_PROOF_COMMITMENT_VERSION;
+  out.proofCommitment=forecastJournalProofCommitment(out);
+  out.proofIntegrity='VERIFIED_AT_RECORD';
+  return out;
+}
+function journalEngineStub(){
+  const sink={add(){}};
+  return {drift:sink,calibration:sink,reliability:sink,intervalCalibration:sink,modelPerformance:sink};
+}
+function journalInput(){
+  return {symbol:'BTCUSDT',asOf:1_000,regimeId:'RANGE',features:{x:1},dataQuality:1};
+}
+function journalReport(){
+  return {
+    symbol:'BTCUSDT',asOf:1_000,price:100,
+    forecasts:[{
+      horizonId:'1h',horizonMs:3_600_000,flatThreshold:0,gate:'PASS',direction:'UP',
+      probabilities:{up:.7,down:.2,flat:.1},expectedReturn:.01,
+      interval:{q10:-.01,q90:.03},rawInterval:{q10:-.01,q90:.03,median:.01},
+      operationalConfidence:.7,models:[]
+    }]
   };
 }
 
@@ -95,18 +127,18 @@ test('high risk or missing forecast fails closed to ABSTAIN',()=>{
 
 test('proof feed includes hits and misses and binds outcome to forecast commitment',()=>{
   const rows=[
-    {
-      id:'a',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,asOf:1000,dueAt:3601000,startPrice:100,
-      regimeId:'RANGE',gate:'PASS',direction:'UP',probabilities:{up:.7,down:.2,flat:.1},
+    committedRow({
+      id:'a',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,flatThreshold:0,asOf:1000,dueAt:3601000,startPrice:100,
+      regimeId:'RANGE',dataQuality:1,gate:'PASS',direction:'UP',probabilities:{up:.7,down:.2,flat:.1},
       expectedReturn:.01,interval:{q10:-.01,q90:.03},operationalConfidence:.7,status:'RESOLVED',
       resolution:{resolvedAt:3601000,resolvedPrice:102,actualReturn:.02,actualDirection:'UP',topCorrect:true,intervalMiss:false}
-    },
-    {
-      id:'b',symbol:'ETHUSDT',horizonId:'1h',horizonMs:3600000,asOf:2000,dueAt:3602000,startPrice:100,
-      regimeId:'RANGE',gate:'PASS',direction:'DOWN',probabilities:{up:.1,down:.8,flat:.1},
+    }),
+    committedRow({
+      id:'b',symbol:'ETHUSDT',horizonId:'1h',horizonMs:3600000,flatThreshold:0,asOf:2000,dueAt:3602000,startPrice:100,
+      regimeId:'RANGE',dataQuality:1,gate:'PASS',direction:'DOWN',probabilities:{up:.1,down:.8,flat:.1},
       expectedReturn:-.01,interval:{q10:-.03,q90:.01},operationalConfidence:.8,status:'RESOLVED',
       resolution:{resolvedAt:3602000,resolvedPrice:102,actualReturn:.02,actualDirection:'UP',topCorrect:false,intervalMiss:true}
-    }
+    })
   ];
   const feed=buildBiggjProofFeed(rows,{asOf:4_000_000});
   assert.equal(feed.counts.resolved,2);
@@ -171,17 +203,17 @@ test('mode lenses filter structured evidence without recomputing the canonical f
 
 test('proof lifecycle exposes live before-hash and marks learned only after aggregate learning inclusion',()=>{
   const entries=[
-    {
-      id:'live-1',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,asOf:1_000,dueAt:3_601_000,startPrice:100,
-      regimeId:'RANGE',gate:'PASS',direction:'UP',probabilities:{up:.6,down:.2,flat:.2},
+    committedRow({
+      id:'live-1',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,flatThreshold:0,asOf:1_000,dueAt:3_601_000,startPrice:100,
+      regimeId:'RANGE',dataQuality:1,gate:'PASS',direction:'UP',probabilities:{up:.6,down:.2,flat:.2},
       expectedReturn:.01,interval:{q10:-.01,q90:.03},operationalConfidence:.6,status:'PENDING'
-    },
-    {
-      id:'resolved-1',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,asOf:2_000,dueAt:3_602_000,startPrice:100,
-      regimeId:'RANGE',gate:'PASS',direction:'DOWN',probabilities:{up:.2,down:.7,flat:.1},
+    }),
+    committedRow({
+      id:'resolved-1',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,flatThreshold:0,asOf:2_000,dueAt:3_602_000,startPrice:100,
+      regimeId:'RANGE',dataQuality:1,gate:'PASS',direction:'DOWN',probabilities:{up:.2,down:.7,flat:.1},
       expectedReturn:-.01,interval:{q10:-.03,q90:.01},operationalConfidence:.7,status:'RESOLVED',
       resolution:{resolvedAt:3_602_100,resolvedPrice:98,actualReturn:-.02,actualDirection:'DOWN',topCorrect:true,intervalMiss:false,brier:.12,logLoss:.3}
-    }
+    })
   ];
   const feed=buildBiggjProofFeed(entries,{
     asOf:3_000_000,
@@ -205,4 +237,55 @@ test('proof lifecycle exposes live before-hash and marks learned only after aggr
   assert.equal(later.learning.meaning.includes('does not mean skill promotion'),true);
   assert.equal(verifyBiggjProofFeed(later).ok,true);
   assert.match(renderBiggjProofFeed(later),/GENERATED → LIVE → MATURED → REVIEWED → LEARNED/);
+});
+
+
+test('journal stores proof commitment before outcome and preserves it through resolution',()=>{
+  const journal=new ForecastLearningJournal(journalEngineStub());
+  journal.record(journalInput(),journalReport());
+  const pending=journal.entries[0];
+  assert.equal(pending.status,'PENDING');
+  assert.equal(verifyForecastJournalProofCommitment(pending).status,'VERIFIED');
+  const before=pending.proofCommitment;
+
+  journal.observe({symbol:'BTCUSDT',timestamp:3_601_000,price:102,quality:1});
+  const resolved=journal.all()[0];
+  assert.equal(resolved.status,'RESOLVED');
+  assert.equal(resolved.proofCommitment,before);
+  assert.equal(verifyForecastJournalProofCommitment(resolved).status,'VERIFIED');
+
+  const feed=buildBiggjProofFeed(journal.all(),{asOf:4_000_000});
+  assert.equal(feed.counts.committed,1);
+  assert.equal(feed.counts.verifiedHits,1);
+  assert.equal(feed.rows[0].beforeHash,before);
+  assert.equal(feed.rows[0].outcomeHash.length,64);
+});
+
+test('forecast-field mutation after record fails closed before outcome learning',()=>{
+  const journal=new ForecastLearningJournal(journalEngineStub());
+  journal.record(journalInput(),journalReport());
+  journal.entries[0].direction='DOWN';
+  journal.observe({symbol:'BTCUSDT',timestamp:3_601_000,price:102,quality:1});
+  assert.equal(journal.entries[0].status,'PROOF_INVALID');
+  assert.equal(journal.entries[0].proofIntegrity,'MISMATCH');
+  assert.equal(journal.entries[0].resolution,undefined);
+  assert.equal(journal.lightweightStats().proofInvalid,1);
+});
+
+test('legacy outcomes remain visible without being misrepresented as forecast-time proof',()=>{
+  const legacy={
+    id:'legacy',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,flatThreshold:0,
+    asOf:1000,dueAt:3601000,startPrice:100,regimeId:'RANGE',dataQuality:1,
+    gate:'PASS',direction:'UP',probabilities:{up:.7,down:.2,flat:.1},
+    expectedReturn:.01,interval:{q10:-.01,q90:.03},operationalConfidence:.7,status:'RESOLVED',
+    resolution:{resolvedAt:3601000,resolvedPrice:102,actualReturn:.02,actualDirection:'UP',topCorrect:true,intervalMiss:false}
+  };
+  const feed=buildBiggjProofFeed([legacy],{asOf:4_000_000});
+  assert.equal(feed.counts.legacy,1);
+  assert.equal(feed.counts.committed,0);
+  assert.equal(feed.rows[0].commitmentState,'LEGACY_UNCOMMITTED');
+  assert.equal(feed.rows[0].beforeHash,null);
+  assert.equal(feed.rows[0].outcomeHash,null);
+  assert.equal(verifyBiggjProofFeed(feed).ok,true);
+  assert.match(renderBiggjProofFeed(feed),/LEGACY UNCOMMITTED/);
 });
