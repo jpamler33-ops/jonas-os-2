@@ -61,7 +61,7 @@ function payload(title,description,fields,marker,components=[]){
   };
 }
 
-function providerNeedLines(snapshot={}){
+export function deriveBiggjExperienceNeeds(snapshot={}){
   const h=snapshot?.health||{};
   const needs=[];
   const coverage=h?.researchCoverage||{};
@@ -85,7 +85,7 @@ export function buildBiggjNeedsPayload(snapshot={}){
   const h=snapshot?.health||{};
   const operator=h?.autonomousOperator||{};
   const factory=h?.autonomousResearchFactory||{};
-  const needs=providerNeedLines(snapshot);
+  const needs=deriveBiggjExperienceNeeds(snapshot);
   const top=needs.slice(0,8).map((x,i)=>[
     (x.priority===1?'🔴':x.priority===2?'🟡':'⚪')+' **'+(i+1)+'. '+x.label+'**',
     x.detail
