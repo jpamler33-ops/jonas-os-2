@@ -31,8 +31,16 @@ import {
   publicMarketContextToExtraFeatures,
   PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION
 } from './expansion-runtime/public-market-context-provider.mjs';
+import {
+  dexScreenerLearningContextToExtraFeatures,
+  DEXSCREENER_PUBLIC_PROVIDER_VERSION
+} from './expansion-runtime/dexscreener-public-provider.mjs';
+import {
+  defiLlamaSnapshotToExtraFeatures,
+  DEFILLAMA_PUBLIC_PROVIDER_VERSION
+} from './expansion-runtime/defillama-public-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V4';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V5';
 
 function finite(v){
   const n=Number(v);
@@ -516,6 +524,88 @@ function publicContextInputs(symbol,context,ingestedAt){
   return rows.filter(Boolean);
 }
 
+function dexActivityInput(symbol,snapshot,ingestedAt){
+  if(!snapshot||snapshot.ok!==true) return null;
+  const features=dexScreenerLearningContextToExtraFeatures(snapshot);
+  if(!features.length) return null;
+  const availableAt=finite(snapshot?.capturedAt);
+  if(availableAt==null) return null;
+  return createResearchFeatureSnapshot({
+    streamKey:symbol,
+    domain:'DEX_ACTIVITY',
+    source:'DEXSCREENER_PUBLIC_API',
+    sourceVersion:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+    sourceEventId:makeSourceEventId({
+      symbol,
+      source:'DEXSCREENER_PUBLIC_API',
+      availableAt,
+      features:features.map(x=>[x.id,x.value])
+    }),
+    eventTime:availableAt,
+    availableAt,
+    ingestedAt,
+    ttlMs:15*60_000,
+    finality:'OBSERVED',
+    quality:{
+      completeness:features.length/7,
+      sourceCount:(snapshot?.radar?1:0)+(snapshot?.metas?1:0),
+      expectedSourceCount:2,
+      status:'PUBLIC_DEX_ACTIVITY_CONTEXT'
+    },
+    features,
+    provenance:{
+      adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+      providerVersion:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+      upstreamSource:String(snapshot?.source||'DEXSCREENER_PUBLIC_API'),
+      promotionBias:true,
+      epistemic:String(snapshot?.epistemic||'PROMOTION_BIASED_DEX_ACTIVITY_CONTEXT_NOT_FORECAST_PROBABILITY'),
+      researchOnly:true
+    }
+  });
+}
+
+function defiLiquidityInput(symbol,snapshot,ingestedAt){
+  if(!snapshot||snapshot.ok!==true) return null;
+  const features=defiLlamaSnapshotToExtraFeatures(snapshot);
+  if(!features.length) return null;
+  const availableAt=finite(snapshot?.availableAt);
+  if(availableAt==null) return null;
+  return createResearchFeatureSnapshot({
+    streamKey:symbol,
+    domain:'DEFI_LIQUIDITY',
+    source:'DEFILLAMA_PUBLIC_API',
+    sourceVersion:DEFILLAMA_PUBLIC_PROVIDER_VERSION,
+    sourceEventId:makeSourceEventId({
+      symbol,
+      source:'DEFILLAMA_PUBLIC_API',
+      availableAt,
+      chainName:snapshot?.chainName||null,
+      features:features.map(x=>[x.id,x.value])
+    }),
+    eventTime:availableAt,
+    availableAt,
+    ingestedAt,
+    ttlMs:30*60_000,
+    finality:'OBSERVED',
+    quality:{
+      completeness:features.length/6,
+      sourceCount:Math.max(1,2-Number(snapshot?.errors?.length||0)),
+      expectedSourceCount:2,
+      status:'PUBLIC_DEFI_LIQUIDITY_CONTEXT'
+    },
+    features,
+    provenance:{
+      adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+      providerVersion:DEFILLAMA_PUBLIC_PROVIDER_VERSION,
+      upstreamSource:String(snapshot?.source||'DEFILLAMA_PUBLIC_API'),
+      chainName:String(snapshot?.chainName||''),
+      sourceUrls:Array.isArray(snapshot?.sourceUrls)?snapshot.sourceUrls:[],
+      epistemic:String(snapshot?.epistemic||'PUBLIC_DEFI_AND_STABLECOIN_LIQUIDITY_CONTEXT_NOT_FORECAST_PROBABILITY'),
+      researchOnly:true
+    }
+  });
+}
+
 function walletInput(symbol,snapshot,ingestedAt){
   const features=walletCohortSnapshotToExtraFeatures(snapshot);
   if(!features.length) return null;
@@ -564,7 +654,9 @@ export function buildResearchDataPlaneSnapshots({
   entityFlowSnapshot=null,
   walletSnapshot=null,
   externalSnapshot=null,
-  publicContextSnapshot=null
+  publicContextSnapshot=null,
+  dexActivitySnapshot=null,
+  defiLiquiditySnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -577,6 +669,8 @@ export function buildResearchDataPlaneSnapshots({
     entityFlowInput(s,entityFlowSnapshot,t),
     walletInput(s,walletSnapshot,t),
     ...externalInputs(s,externalSnapshot,t),
-    ...publicContextInputs(s,publicContextSnapshot,t)
+    ...publicContextInputs(s,publicContextSnapshot,t),
+    dexActivityInput(s,dexActivitySnapshot,t),
+    defiLiquidityInput(s,defiLiquiditySnapshot,t)
   ].filter(Boolean);
 }
