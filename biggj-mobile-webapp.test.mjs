@@ -96,7 +96,8 @@ test('V2 renders BIGGJ command-center hierarchy and live states',()=>{
     },
     portfolio:{netPnlQuote:12.5,openPositions:1,closedTrades:3,positions:[]}
   });
-  assert.match(html,/BIGGJ \/\/ TCX/);
+  assert.match(html,/BIGGJ <span/);
+  assert.match(html,/>\/\/<\/span> TCX/);
   assert.match(html,/System posture/);
   assert.match(html,/WARTET AUF DATEN/);
   assert.match(html,/Living Research/);
