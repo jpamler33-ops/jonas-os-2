@@ -687,18 +687,19 @@ function livingResearchEvidenceSummary(tree){
     .filter(x=>x?.kind==='DISCOVERED_SKILL'&&x?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1')
     .map(node=>{
       const progress=evaluateBiggjSkillProgress(tree,node.skillId);
+      const evidence=progress.evidenceSummary||{};
       return {
         skillId:node.skillId,
         title:node.title,
         status:node.status,
-        evidenceTotal:Number(node?.evidenceSummary?.total||0),
-        forwardShadow:Number(node?.evidenceSummary?.forwardShadow||0),
-        independentEpisodes:Number(node?.evidenceSummary?.independentEpisodes||0),
-        validationEvidenceTotal:Number(node?.evidenceSummary?.validationTotal||0),
-        validationForwardShadow:Number(node?.evidenceSummary?.validationForwardShadow||0),
-        validationIndependentEpisodes:Number(node?.evidenceSummary?.validationIndependentEpisodes||0),
-        auditReady:Number(node?.evidenceSummary?.auditReady||0),
-        sciencePassed:Number(node?.evidenceSummary?.sciencePassed||0),
+        evidenceTotal:Number(evidence.total||0),
+        forwardShadow:Number(evidence.forwardShadow||0),
+        independentEpisodes:Number(evidence.independentEpisodes||0),
+        validationEvidenceTotal:Number(evidence.validationTotal||0),
+        validationForwardShadow:Number(evidence.validationForwardShadow||0),
+        validationIndependentEpisodes:Number(evidence.validationIndependentEpisodes||0),
+        auditReady:Number(evidence.auditReady||0),
+        sciencePassed:Number(evidence.sciencePassed||0),
         recommendedStatus:progress.recommendedStatus,
         reasons:[...(progress.reasons||[])]
       };
