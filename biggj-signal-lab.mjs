@@ -337,8 +337,10 @@ function proofLifecycleRow(row,{cutoff,learningSummary}={}){
   const resolvedAt=finite(r?.resolvedAt);
   const generated=issuedAsOf!=null&&issuedAsOf<=cutoff;
   const resolved=row?.status==='RESOLVED'&&r&&resolvedAt!=null&&resolvedAt<=cutoff;
-  const live=row?.status==='PENDING'&&generated&&(dueAt==null||cutoff<dueAt);
-  const awaitingOutcome=row?.status==='PENDING'&&generated&&dueAt!=null&&cutoff>=dueAt;
+  // Reconstruct lifecycle strictly as-of the requested cutoff. A row that is
+  // RESOLVED today was still LIVE before its historical resolution timestamp.
+  const live=generated&&!resolved&&(dueAt==null||cutoff<dueAt);
+  const awaitingOutcome=generated&&!resolved&&dueAt!=null&&cutoff>=dueAt;
   const matured=resolved;
   const reviewed=Boolean(
     matured&&
