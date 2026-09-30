@@ -1,4 +1,4 @@
-export const BIGGJ_CHANNEL_OPERATIONS_VERSION='BIGGJ_CHANNEL_OPERATIONS_V1';
+export const BIGGJ_CHANNEL_OPERATIONS_VERSION='BIGGJ_CHANNEL_OPERATIONS_V2';
 
 const finite=(v,f=null)=>Number.isFinite(Number(v))?Number(v):f;
 const arr=v=>Array.isArray(v)?v:[];
@@ -133,13 +133,70 @@ export function createBiggjChannelManagerRuntime({sections=[],profileFor=()=>nul
         suggestion:x.suggestion
       })))
     });
+    const domainMap=new Map();
+    for(const row of rows){
+      const key=String(row.category||'UNKNOWN');
+      const bucket=domainMap.get(key)||[];
+      bucket.push(row);
+      domainMap.set(key,bucket);
+    }
+    const domainSupervisors=[...domainMap.entries()].map(([category,domainRows])=>{
+      const domainProblems=domainRows.filter(x=>!['HEALTHY','IDLE_OK'].includes(x.status));
+      const status=domainProblems.some(x=>x.priority===1)
+        ?'ACTION_REQUIRED'
+        :domainProblems.length?'DEGRADED':'HEALTHY';
+      const covered=domainRows.filter(x=>x.profile?.mode&&x.profile.mode!=='UNKNOWN').length;
+      return Object.freeze({
+        category,
+        status,
+        managers:domainRows.length,
+        healthy:domainRows.length-domainProblems.length,
+        problems:domainProblems.length,
+        coverage:domainRows.length?covered/domainRows.length:0,
+        nextActions:Object.freeze(domainProblems.slice(0,4).map(x=>Object.freeze({
+          channel:x.name,
+          decision:x.decision,
+          priority:x.priority,
+          reason:x.reason,
+          suggestion:x.suggestion
+        })))
+      });
+    }).sort((a,b)=>
+      ({ACTION_REQUIRED:0,DEGRADED:1,HEALTHY:2}[a.status]??3)-({ACTION_REQUIRED:0,DEGRADED:1,HEALTHY:2}[b.status]??3)||
+      a.category.localeCompare(b.category)
+    );
+    const domainProblems=domainSupervisors.filter(x=>x.status!=='HEALTHY');
+    const operationsDirector=Object.freeze({
+      status:domainProblems.some(x=>x.status==='ACTION_REQUIRED')
+        ?'ACTION_REQUIRED'
+        :domainProblems.length?'DEGRADED':'HEALTHY',
+      domains:domainSupervisors.length,
+      healthyDomains:domainSupervisors.length-domainProblems.length,
+      problemDomains:domainProblems.length,
+      supervisorStatus,
+      nextDomains:Object.freeze(domainProblems.slice(0,6).map(x=>Object.freeze({
+        category:x.category,
+        status:x.status,
+        problems:x.problems,
+        nextActions:x.nextActions
+      })))
+    });
     const metaSupervisor=Object.freeze({
-      status:managerCoverage<1?'BLIND_SPOT':supervisorStatus==='ACTION_REQUIRED'?'SUPERVISOR_ESCALATION':supervisorStatus==='DEGRADED'?'WATCH_SUPERVISOR':'HEALTHY',
+      status:managerCoverage<1
+        ?'BLIND_SPOT'
+        :operationsDirector.status==='ACTION_REQUIRED'
+          ?'DIRECTOR_ESCALATION'
+          :operationsDirector.status==='DEGRADED'
+            ?'WATCH_DIRECTOR'
+            :'HEALTHY',
       supervisorObserved:true,
+      directorObserved:true,
+      domainSupervisorsObserved:domainSupervisors.length,
       managerCoverage,
       unprofiledManagers:rows.length-profiled,
       problemRate:rows.length?problems.length/rows.length:0,
-      rule:'Der Supervisor darf Probleme melden und UI/Refresh/Layout reparieren, aber keine Trading-Policy oder Live-Execution autorisieren.'
+      domainProblemRate:domainSupervisors.length?domainProblems.length/domainSupervisors.length:0,
+      rule:'Manager → Domain-Supervisor → Operations-Director → Meta-Supervisor. Auto-Reparatur bleibt auf UI/Refresh/Layout begrenzt; keine Trading-Policy oder Live-Execution.'
     });
     return Object.freeze({
       version:BIGGJ_CHANNEL_OPERATIONS_VERSION,
@@ -151,6 +208,8 @@ export function createBiggjChannelManagerRuntime({sections=[],profileFor=()=>nul
       rows:Object.freeze(rows),
       topProblems:Object.freeze(problems.slice(0,12)),
       supervisor,
+      domainSupervisors:Object.freeze(domainSupervisors),
+      operationsDirector,
       metaSupervisor
     });
   }
