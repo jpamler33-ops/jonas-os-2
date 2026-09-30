@@ -64,7 +64,9 @@ function observation(i,{
   baseline=false,
   topCorrect=true,
   intervalMiss=false,
-  custom=true
+  custom=true,
+  revisionWarning=false,
+  staleAssumptionIds=[]
 }={}){
   const sidecar=challenger?alertSidecar:(custom?cleanSidecar:genericSidecar);
   return createForecastClaimAssumptionShadowObservation(sidecar,{
@@ -98,6 +100,18 @@ function observation(i,{
       graphBytes:1000,
       traceBytes:800,
       sidecarBytes:1600
+    },
+    thesisRevisionState:{
+      eventsBeforeMaturity:revisionWarning?1:0,
+      staleAssumptionIdsAtMaturity:revisionWarning?[...staleAssumptionIds]:[],
+      everStaleAssumptionIdsBeforeMaturity:revisionWarning?[...staleAssumptionIds]:[],
+      firstStaleAt:revisionWarning?300000+i*10:null,
+      firstWatchAt:null,
+      firstForecastInvalidatedAt:null,
+      firstWarningAt:revisionWarning?300000+i*10:null,
+      warningAvailableBeforeMaturity:revisionWarning,
+      warningLeadMs:revisionWarning?1000:null,
+      forecastInvalidatedBeforeMaturity:false
     }
   });
 }
@@ -205,6 +219,49 @@ test('evaluator attributes prospective outcome association to frozen thesis assu
   assert.equal(a.associationReady,true);
   assert.equal(a.interpretation,'PROSPECTIVE_ASSOCIATION_ONLY_NOT_ASSUMPTION_TRUTH_OR_CAUSATION');
   assert.equal(r.methodology.outcomeDoesNotValidateIndividualAssumptions,true);
+});
+
+test('pre-outcome thesis revision warnings measure failure capture, false-warning burden and stale-assumption association',()=>{
+  const rows=[];
+  let i=0;
+  for(let n=0;n<30;n++){
+    rows.push(observation(i++,{
+      challenger:n<10,
+      baseline:false,
+      topCorrect:false,
+      revisionWarning:n<24,
+      staleAssumptionIds:n<24?['THESIS_TEST_SUPPORT']:[]
+    }));
+  }
+  for(let n=0;n<50;n++){
+    rows.push(observation(i++,{
+      challenger:n<5,
+      baseline:false,
+      topCorrect:true,
+      revisionWarning:n<8,
+      staleAssumptionIds:n<8?['THESIS_TEST_SUPPORT']:[]
+    }));
+  }
+  const r=evaluateClaimAssumptionResearch(dataset(rows),{config:lowThresholds});
+  assert.equal(r.preOutcomeRevision.observationsWithRevisionState,80);
+  assert.equal(r.preOutcomeRevision.warningsBeforeMaturity,32);
+  assert.equal(r.preOutcomeRevision.failuresWithPriorWarning,24);
+  assert.equal(r.preOutcomeRevision.failureCaptureRate.count,24);
+  assert.equal(r.preOutcomeRevision.primaryFailures,30);
+  assert.equal(r.preOutcomeRevision.successesWithPriorWarning,8);
+  assert.equal(r.preOutcomeRevision.falseWarningRate.count,8);
+  assert.equal(r.preOutcomeRevision.medianWarningLeadMs,1000);
+
+  const a=r.byPreOutcomeStaleAssumption.find(x=>x.assumptionId==='THESIS_TEST_SUPPORT');
+  assert.ok(a);
+  assert.equal(a.staleBeforeMaturity,32);
+  assert.equal(a.neverStaleBeforeMaturity,48);
+  assert.ok(a.directionFailureRateDifference>0);
+  assert.equal(a.associationReady,true);
+  assert.equal(a.interpretation,'PROSPECTIVE_STALENESS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF');
+  assert.equal(r.methodology.preOutcomeWarningsUseOnlyEventsKnownByHorizonMaturity,true);
+  assert.equal(r.canInfluencePrimary,false);
+  assert.equal(r.canExecuteLive,false);
 });
 
 test('same frozen dataset produces same evaluation fingerprint',()=>{
