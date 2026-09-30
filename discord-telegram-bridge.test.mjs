@@ -142,3 +142,15 @@ test('BIGGJ Discord V6 operator and experience layers are wired into the bridge'
   assert.match(source,/upsertMarkedAtBottom/);
   assert.match(source,/dc6:brain:/);
 });
+
+
+test('deduplicated news event stream uses stable markers and separates world families',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/BIGGJ_NEWS_EVENT:/);
+  assert.match(source,/messages\.fetch\(\{limit:100\}\)/);
+  assert.match(source,/GEOPOLITICS/);
+  assert.match(source,/COMMODITIES/);
+  assert.match(source,/DISCOVERY_ONLY/);
+  assert.match(source,/posted>=12|posted>=12/);
+});
