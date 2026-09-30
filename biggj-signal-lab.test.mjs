@@ -1,0 +1,128 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  buildBiggjSignalLab,
+  verifyBiggjSignalLab,
+  renderBiggjSignalLab,
+  buildBiggjProofFeed,
+  verifyBiggjProofFeed,
+  renderBiggjProofFeed,
+  signalLabKeyboard
+} from './biggj-signal-lab.mjs';
+
+function issuance({probabilityDisplayAllowed=true,calibration='CALIBRATED'}={}){
+  return {
+    symbol:'BTCUSDT',
+    asOf:1_000,
+    generatedAt:1_100,
+    issuanceId:'iss-1',
+    traceId:'trace-1',
+    gate:'PASS',
+    probabilityDisplayAllowed,
+    executionMode:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false,
+    forecast:{
+      horizons:[{
+        horizonId:'1h',horizonMs:3_600_000,gate:'PASS',direction:'UP',
+        expectedReturn:.012,
+        probabilities:{up:.68,down:.20,flat:.12},
+        interval:{q10:-.006,q90:.026},
+        calibration:{status:calibration},
+        reasons:['MTF alignment'],
+        warnings:[]
+      }]
+    }
+  };
+}
+
+function accuracy(status='CALIBRATED'){
+  return {
+    ready:true,
+    gate:{status,passed:status==='CALIBRATED'},
+    evaluation:{resolvedCount:140}
+  };
+}
+
+test('signal lab only exposes probability after all calibration display gates pass',()=>{
+  const x=buildBiggjSignalLab({
+    symbol:'BTCUSDT',
+    issuance:issuance(),
+    setup:{status:'READY',direction:'UP',evidence:.82,eventRows:[]},
+    risk:{status:'NORMAL',reasons:[]},
+    accuracy:accuracy(),
+    horizonId:'1h',
+    asOf:2_000
+  });
+  assert.equal(x.state,'WATCH_STRONG');
+  assert.equal(x.probability.displayAllowed,true);
+  assert.equal(x.probability.calibrated,.68);
+  assert.equal(x.safety.action,'ABSTAIN');
+  assert.equal(verifyBiggjSignalLab(x).ok,true);
+  assert.match(renderBiggjSignalLab(x),/68\.0% calibrated/);
+});
+
+test('signal lab suppresses raw probabilities if calibration gate is not ready',()=>{
+  const x=buildBiggjSignalLab({
+    symbol:'BTCUSDT',
+    issuance:issuance({probabilityDisplayAllowed:false}),
+    setup:{status:'READY',direction:'UP',evidence:.82,eventRows:[]},
+    risk:{status:'NORMAL',reasons:[]},
+    accuracy:accuracy(),
+    horizonId:'1h',
+    asOf:2_000
+  });
+  assert.equal(x.probability.displayAllowed,false);
+  assert.equal(x.probability.calibrated,null);
+  assert.equal(verifyBiggjSignalLab(x).ok,true);
+  assert.doesNotMatch(renderBiggjSignalLab(x),/68\.0% calibrated/);
+});
+
+test('high risk or missing forecast fails closed to ABSTAIN',()=>{
+  const risky=buildBiggjSignalLab({
+    symbol:'BTCUSDT',
+    issuance:issuance(),
+    setup:{status:'READY',direction:'UP',evidence:.8,eventRows:[]},
+    risk:{status:'HIGH',reasons:['test risk']},
+    accuracy:accuracy(),
+    asOf:2_000
+  });
+  assert.equal(risky.state,'ABSTAIN');
+  const missing=buildBiggjSignalLab({symbol:'ETHUSDT',asOf:2_000});
+  assert.equal(missing.state,'ABSTAIN');
+});
+
+test('proof feed includes hits and misses and binds outcome to forecast commitment',()=>{
+  const rows=[
+    {
+      id:'a',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,asOf:1000,dueAt:3601000,startPrice:100,
+      regimeId:'RANGE',gate:'PASS',direction:'UP',probabilities:{up:.7,down:.2,flat:.1},
+      expectedReturn:.01,interval:{q10:-.01,q90:.03},operationalConfidence:.7,status:'RESOLVED',
+      resolution:{resolvedAt:3601000,resolvedPrice:102,actualReturn:.02,actualDirection:'UP',topCorrect:true,intervalMiss:false}
+    },
+    {
+      id:'b',symbol:'ETHUSDT',horizonId:'1h',horizonMs:3600000,asOf:2000,dueAt:3602000,startPrice:100,
+      regimeId:'RANGE',gate:'PASS',direction:'DOWN',probabilities:{up:.1,down:.8,flat:.1},
+      expectedReturn:-.01,interval:{q10:-.03,q90:.01},operationalConfidence:.8,status:'RESOLVED',
+      resolution:{resolvedAt:3602000,resolvedPrice:102,actualReturn:.02,actualDirection:'UP',topCorrect:false,intervalMiss:true}
+    }
+  ];
+  const feed=buildBiggjProofFeed(rows,{asOf:4_000_000});
+  assert.equal(feed.counts.resolved,2);
+  assert.equal(feed.counts.hits,1);
+  assert.equal(feed.counts.misses,1);
+  assert.equal(feed.policy.includesLosses,true);
+  assert.equal(feed.rows[0].beforeHash.length,64);
+  assert.equal(feed.rows[0].outcomeHash.length,64);
+  assert.equal(verifyBiggjProofFeed(feed).ok,true);
+  const text=renderBiggjProofFeed(feed);
+  assert.match(text,/HIT/);
+  assert.match(text,/MISS/);
+  assert.match(text,/keine Cherry-Pick-Policy/);
+});
+
+test('signal lab keyboard stays inside callback size limits',()=>{
+  const kb=signalLabKeyboard('BTCUSDT','1h');
+  for(const row of kb.inline_keyboard)for(const b of row)if(b.callback_data)assert.ok(Buffer.byteLength(b.callback_data,'utf8')<=64);
+});

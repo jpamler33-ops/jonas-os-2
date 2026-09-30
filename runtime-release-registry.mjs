@@ -58,6 +58,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'discord-serial-dedupe-queue.mjs',
   'biggj-discord-observability.mjs',
   'biggj-outcome-supervisor.mjs',
+  'biggj-signal-lab.mjs',
   'biggj-experience-center.mjs',
   'biggj-mobile-webapp.mjs',
   'biggj-public-news-provider.mjs',

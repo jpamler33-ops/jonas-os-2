@@ -208,6 +208,7 @@ import {
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
+import { buildBiggjSignalLab, renderBiggjSignalLab, signalLabKeyboard, buildBiggjProofFeed, renderBiggjProofFeed, proofFeedKeyboard, BIGGJ_SIGNAL_LAB_VERSION, BIGGJ_PROOF_FEED_VERSION } from './biggj-signal-lab.mjs';
 import { runScientificCore, SCIENTIFIC_CORE_VERSION } from './scientific-core.mjs';
 import {
   archiveForecastColdBatch,
@@ -3880,9 +3881,29 @@ async function showCognitiveCore(chatId,messageId,symbol){
  ]}});
 }
 
-async function showTerminalView(chatId,messageId,symbol,view){
+async function showSignalLab(chatId,messageId,symbol,horizonId='1h'){
  const x=await terminalContext(symbol);
- const text=view==='RISK'?renderSuperRisk(x.risk):view==='SIGNAL'?renderSuperSignal(x.signal):renderSuperSetup(x.setup);
+ const issuance=latestInstitutionalForecast(forecastRuntime,symbol);
+ const lab=buildBiggjSignalLab({
+  symbol,
+  issuance,
+  setup:x.setup,
+  risk:x.risk,
+  accuracy:x.accuracy,
+  horizonId,
+  mode:'FULL',
+  asOf:x.state?.availableAt||Date.now()
+ });
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjSignalLab(lab),reply_markup:signalLabKeyboard(symbol,horizonId)});
+}
+async function showProofFeed(chatId,messageId,symbol=null){
+ const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit:10,asOf:Date.now()});
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjProofFeed(feed),reply_markup:proofFeedKeyboard(symbol)});
+}
+async function showTerminalView(chatId,messageId,symbol,view){
+ if(view==='SIGNAL')return showSignalLab(chatId,messageId,symbol,'1h');
+ const x=await terminalContext(symbol);
+ const text=view==='RISK'?renderSuperRisk(x.risk):renderSuperSetup(x.setup);
  return deliverTelegramTextCard(tg,chatId,messageId,{text,reply_markup:terminalKeyboard(symbol)});
 }
 
@@ -7272,6 +7293,18 @@ async function handle(update) {
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
       await showTerminalView(chatId,textMessageId,a.symbol,a.view); await ack(q.id,'Terminal '+a.view); return;
     }
+    if (a.kind === 'SIGNAL_LAB') {
+      if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showSignalLab(chatId,textMessageId,a.symbol,a.horizon||'1h'); await ack(q.id,'Signal Lab geladen'); return;
+    }
+    if (a.kind === 'PROOF_FEED') {
+      if(a.symbol&&!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
+      stopLiveAnalysisAuto(chatId);
+      const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
+      await showProofFeed(chatId,textMessageId,a.symbol||null); await ack(q.id,'Proof Feed geladen'); return;
+    }
     if (a.kind === 'HOME') {
       stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
@@ -9634,6 +9667,8 @@ function missionControlData(){
   marketDataFabric:{healthy:marketFabric.healthy,events:marketFabric.events.length},
   shadowOms:{healthy:shadowOmsHealthy,total:shadowOrders.length,active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,filled:shadowOrders.filter(o=>o.status==='FILLED').length},
   institutionalForecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+  biggjProofFeed:buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{limit:8,asOf:now}),
+  biggjSignalLab:{version:BIGGJ_SIGNAL_LAB_VERSION,proofVersion:BIGGJ_PROOF_FEED_VERSION,execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false},
   claimAssumptionResearch:claimAssumptionResearchLastSummary||{
     state:'NOT_EVALUATED',
     observations:0,
