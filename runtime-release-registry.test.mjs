@@ -118,6 +118,7 @@ test('institutional staged release set hashes forecast, science, admission and t
     'biggj-skill-tree.mjs',
     'biggj-living-research-runtime.mjs',
     'biggj-research-protocol-compiler.mjs',
+    'biggj-research-review-queue.mjs',
     'biggj-research-episode-resolver.mjs',
     'tcx-research-os-contract.mjs',
     'institutional-forecast-issuance.mjs',
