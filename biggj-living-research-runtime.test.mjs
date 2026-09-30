@@ -107,6 +107,8 @@ test('initial living research runtime is a governed research-only skill graph',(
   assert.deepEqual(state.persistentCaseRegistry,[]);
   assert.deepEqual(state.stabilityEventRegistry,[]);
   assert.deepEqual(state.researchProtocols,[]);
+  assert.equal(state.researchReviewQueue.ticketCount,0);
+  assert.deepEqual(state.researchReviewDecisions,[]);
   assert.equal(state.invariants.researchProtocolsArePreregistered,true);
   assert.equal(state.invariants.retrospectiveConfirmatoryRelabelingForbidden,true);
   assert.ok(state.skillTree.nodes.length>=159);
@@ -583,6 +585,44 @@ test('runtime persistence round-trip preserves fingerprint and research state',a
   assert.equal(raw.fingerprint,out.state.fingerprint);
 });
 
+test('legacy persisted living research state backfills review queue without corruption reset',async()=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'biggj-living-research-review-migration-'));
+  const file=path.join(dir,'runtime.json');
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const populated=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'LEGACY_REVIEW_MIGRATION_FIXTURE'
+  }).state;
+
+  const legacy=structuredClone(populated);
+  delete legacy.researchReviewQueue;
+  delete legacy.researchReviewDecisions;
+  const {fingerprint,...legacyCore}=legacy;
+  legacy.fingerprint=sha256(legacyCore);
+  await writeFile(file,JSON.stringify(legacy,null,2)+'\n','utf8');
+
+  const reopened=await openBiggjLivingResearchRuntime(file,{asOf:6000});
+  assert.equal(reopened.recoveredFromCorrupt,false);
+  assert.equal(reopened.created,false);
+  assert.equal(reopened.reconciled,true);
+  assert.ok(reopened.state.researchReviewQueue);
+  assert.deepEqual(reopened.state.researchReviewDecisions,[]);
+  assert.equal(reopened.state.skillTree.nodes.length,populated.skillTree.nodes.length);
+  assert.equal(reopened.state.discoveredSkillIds.length,populated.discoveredSkillIds.length);
+  assert.equal(reopened.state.researchProtocols.length,populated.researchProtocols.length);
+  assert.equal(reopened.state.migrations.at(-1).kind,'RESEARCH_REVIEW_QUEUE_BACKFILL');
+  assert.equal(reopened.state.migrations.at(-1).evidenceRewritten,false);
+  assert.equal(reopened.state.migrations.at(-1).skillStatusRewritten,false);
+  assert.equal(reopened.state.migrations.at(-1).protocolRewritten,false);
+  assert.equal(reopened.state.migrations.at(-1).productionMutationPerformed,false);
+  assert.equal(verifyBiggjLivingResearchRuntime(reopened.state).ok,true);
+});
+
 test('corrupt runtime is quarantined and safely restarted research-only',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'biggj-living-research-corrupt-'));
   const file=path.join(dir,'runtime.json');
@@ -628,6 +668,9 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.equal(summary.researchProtocols.stateCounts.AWAITING_PROSPECTIVE_EVIDENCE,1);
   assert.equal(summary.researchProtocols.protocols[0].automaticExperimentLaunch,false);
   assert.equal(summary.researchProtocols.protocols[0].automaticSkillStatusTransition,false);
+  assert.equal(summary.researchReviews.open,0);
+  assert.equal(summary.researchReviews.blocked,0);
+  assert.equal(summary.researchReviews.automaticApply,false);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.automaticKill,false);
   assert.equal(summary.automaticExperimentLaunch,false);
