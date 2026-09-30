@@ -92,6 +92,8 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'biggj-skill-dependency-graph.mjs',
   'biggj-skill-tree.mjs',
   'biggj-living-research-runtime.mjs',
+  'biggj-epistemic-kernel.mjs',
+  'biggj-epistemic-runtime.mjs',
   'biggj-research-validation-harness.mjs',
   'biggj-research-protocol-compiler.mjs',
   'biggj-research-review-queue.mjs',

@@ -205,6 +205,13 @@ import {
   biggjLivingResearchRuntimeSummary,
   BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
 } from './biggj-living-research-runtime.mjs';
+import {
+  openBiggjEpistemicRuntime,
+  saveBiggjEpistemicRuntime,
+  syncLivingResearchIntoEpistemicKernel,
+  biggjEpistemicRuntimeSummary,
+  BIGGJ_EPISTEMIC_RUNTIME_VERSION
+} from './biggj-epistemic-runtime.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -791,6 +798,112 @@ if(biggjLivingResearchOpened.created||biggjLivingResearchOpened.reconciled){
   }
 }
 
+const biggjEpistemicFile=process.env.TCX_BIGGJ_EPISTEMIC_FILE||'/data/tcx-biggj-epistemic-ledger.json';
+const biggjEpistemicOpened=await openBiggjEpistemicRuntime(biggjEpistemicFile,{asOf:Date.now()});
+let biggjEpistemicState=biggjEpistemicOpened.state;
+let biggjEpistemicHealthy=biggjEpistemicOpened.healthy===true;
+const biggjEpistemicRecoveredFromCorrupt=biggjEpistemicOpened.recoveredFromCorrupt===true;
+if(biggjEpistemicOpened.created){
+  try{
+    const admission=await storageWriteAdmission('biggj-epistemic-init');
+    if(admission.allowed){
+      await saveBiggjEpistemicRuntime(biggjEpistemicFile,biggjEpistemicState);
+    }else{
+      biggjEpistemicHealthy=false;
+      console.warn('[BIGGJ_EPISTEMIC_INIT_DEFERRED]',JSON.stringify({
+        reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+    }
+  }catch(err){
+    biggjEpistemicHealthy=false;
+    console.error('[BIGGJ_EPISTEMIC_INIT_FAILED]',JSON.stringify({
+      error:err instanceof Error?err.message:String(err),
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+  }
+}
+
+let biggjEpistemicSyncQueue=Promise.resolve();
+async function syncBiggjEpistemic(reason='runtime-sync'){
+  const run=async()=>{
+    const started=Date.now();
+    try{
+      const synced=syncLivingResearchIntoEpistemicKernel(
+        biggjEpistemicState,
+        biggjLivingResearchState,
+        {asOf:Date.now()}
+      );
+      if(synced.changed){
+        const admission=await storageWriteAdmission('biggj-epistemic');
+        if(!admission.allowed){
+          biggjEpistemicHealthy=false;
+          console.warn('[BIGGJ_EPISTEMIC_PERSIST_DEFERRED]',JSON.stringify({
+            reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+            refreshReason:reason,
+            createdTheoryIds:synced.createdTheoryIds,
+            appendedEvidenceIds:synced.appendedEvidenceIds,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
+          return biggjEpistemicRuntimeSummary(biggjEpistemicState,{asOf:Date.now()});
+        }
+        await saveBiggjEpistemicRuntime(biggjEpistemicFile,synced.ledger);
+        biggjEpistemicState=synced.ledger;
+      }
+      biggjEpistemicHealthy=true;
+      const summary=biggjEpistemicRuntimeSummary(biggjEpistemicState,{asOf:Date.now()});
+      recordOperation(observability,{
+        name:'biggj_epistemic_sync',
+        ok:true,
+        latencyMs:Date.now()-started,
+        error:null
+      });
+      if(synced.createdTheoryIds.length||synced.appendedEvidenceIds.length){
+        console.log('[BIGGJ_EPISTEMIC_SYNC]',JSON.stringify({
+          version:BIGGJ_EPISTEMIC_RUNTIME_VERSION,
+          reason,
+          createdTheoryIds:synced.createdTheoryIds,
+          appendedEvidenceCount:synced.appendedEvidenceIds.length,
+          theoryCount:summary.theoryCount,
+          robustTheoryCount:summary.robustTheoryCount,
+          brokenTheoryCount:summary.brokenTheoryCount,
+          tradingBridgeEligibleCount:summary.tradingBridgeEligibleCount,
+          automaticPrimaryPromotionAllowed:false,
+          primaryMutationAllowed:false,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+      return summary;
+    }catch(err){
+      biggjEpistemicHealthy=false;
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'biggj_epistemic',message:msg});
+      recordOperation(observability,{
+        name:'biggj_epistemic_sync',
+        ok:false,
+        latencyMs:Date.now()-started,
+        error:msg
+      });
+      console.error('[BIGGJ_EPISTEMIC_SYNC_ERROR]',JSON.stringify({
+        reason,
+        error:msg,
+        primaryMutationAllowed:false,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+      return null;
+    }
+  };
+  const queued=biggjEpistemicSyncQueue.then(run,run);
+  biggjEpistemicSyncQueue=queued.then(()=>undefined,()=>undefined);
+  return queued;
+}
+await syncBiggjEpistemic('startup');
+
 const forecastColdArchiveDir=process.env.TCX_FORECAST_COLD_ARCHIVE_DIR||forecastRuntimeFile+'.cold';
 let forecastColdArchiveState=await forecastColdArchiveSummary(forecastColdArchiveDir);
 
@@ -872,6 +985,7 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
         await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
         biggjLivingResearchState=refreshed.state;
         biggjLivingResearchHealthy=true;
+        await syncBiggjEpistemic('living-research:'+reason);
         const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
         if(newAgendaItems.length>0||newlyResearchRequired.length>0||refreshed.discoveredSkillIds.length>0){
           console.log('[TCX_BIGGJ_RESEARCH_AGENDA]',JSON.stringify({
@@ -7139,6 +7253,8 @@ function biggjAiContextSnapshot(extraContext=null){
       autonomousOperator:snapshot?.health?.autonomousOperator||null,
       governanceTriage:snapshot?.health?.governanceTriage||null,
       researchCoverage:snapshot?.health?.researchCoverage||null,
+      livingResearch:snapshot?.health?.biggjLivingResearch||null,
+      epistemicKernel:snapshot?.health?.biggjEpistemicKernel||null,
       marketRadar:snapshot?.health?.marketRadar||null,
       biggjRulebook:snapshot?.health?.biggjRulebook||null,
       biggjSignalLab:snapshot?.health?.biggjSignalLab||null,
@@ -9799,6 +9915,13 @@ function missionControlData(){
     recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
     file:biggjLivingResearchFile
   },
+  biggjEpistemicKernel:{
+    ...biggjEpistemicRuntimeSummary(biggjEpistemicState,{asOf:now}),
+    version:BIGGJ_EPISTEMIC_RUNTIME_VERSION,
+    healthy:biggjEpistemicHealthy,
+    recoveredFromCorrupt:biggjEpistemicRecoveredFromCorrupt,
+    file:biggjEpistemicFile
+  },
   autonomousResearchFactory:{
     ...autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
     version:AUTONOMOUS_RESEARCH_TRAINING_FACTORY_VERSION,
@@ -10359,6 +10482,10 @@ async function gracefulShutdown(signal) {
   await biggjLivingResearchRefreshQueue.catch(()=>{});
   await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState).catch(err=>{
     console.error('[TCX_BIGGJ_LIVING_RESEARCH_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
+  });
+  await biggjEpistemicSyncQueue.catch(()=>{});
+  await saveBiggjEpistemicRuntime(biggjEpistemicFile,biggjEpistemicState).catch(err=>{
+    console.error('[BIGGJ_EPISTEMIC_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
   });
   await researchDataPlaneAppendQueue.catch(()=>{});
   await saveResearchDataGovernance(researchGovernanceFile,researchDataGovernance).catch(()=>{});
