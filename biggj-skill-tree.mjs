@@ -625,7 +625,7 @@ export function applyBiggjSkillStatusTransition(tree,{
 
 function researchPriority(node){
   const e=node.evidenceSummary||blankEvidence();
-  const evidenceDeficit=1-clamp(e.independentEpisodes/30);
+  const evidenceDeficit=1-clamp(Number(e.validationIndependentEpisodes||0)/30);
   const statusNeed={
     UNKNOWN:1,DISCOVERING:.92,LEARNING:.78,TESTING:.62,VALIDATED:.35,TRUSTED:.12,DECAYING:.95,RETIRED:0
   }[node.status]??.6;
@@ -658,6 +658,8 @@ export function buildBiggjResearchQueue(tree,{limit=25}={}){
         question:node.question||defaultQuestion(node),
         uncertainty:node.uncertainty,
         independentEpisodes:node.evidenceSummary?.independentEpisodes||0,
+        validationIndependentEpisodes:node.evidenceSummary?.validationIndependentEpisodes||0,
+        validationEvidenceTotal:node.evidenceSummary?.validationTotal||0,
         nextGate:evaluateBiggjSkillProgress(tree,node.skillId).recommendedStatus,
         dependencyLeverage:leverage.score,
         directUnlocks:leverage.directUnlocks,
