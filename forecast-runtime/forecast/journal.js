@@ -1,5 +1,48 @@
+import crypto from 'node:crypto';
 import { clamp } from '../utils/math.js';
 import { evaluateForecastJournal } from './evaluation.js';
+
+export const FORECAST_JOURNAL_PROOF_COMMITMENT_VERSION='FORECAST_JOURNAL_COMMITMENT_V1';
+
+function proofPayload(e) {
+    return {
+        version: FORECAST_JOURNAL_PROOF_COMMITMENT_VERSION,
+        id: e?.id ?? null,
+        symbol: e?.symbol ?? null,
+        horizonId: e?.horizonId ?? null,
+        horizonMs: e?.horizonMs ?? null,
+        flatThreshold: e?.flatThreshold ?? null,
+        asOf: e?.asOf ?? null,
+        dueAt: e?.dueAt ?? null,
+        startPrice: e?.startPrice ?? null,
+        regimeId: e?.regimeId ?? null,
+        dataQuality: e?.dataQuality ?? null,
+        gate: e?.gate ?? null,
+        direction: e?.direction ?? null,
+        probabilities: {
+            up: e?.probabilities?.up ?? null,
+            down: e?.probabilities?.down ?? null,
+            flat: e?.probabilities?.flat ?? null
+        },
+        expectedReturn: e?.expectedReturn ?? null,
+        interval: {
+            q10: e?.interval?.q10 ?? null,
+            q90: e?.interval?.q90 ?? null
+        },
+        operationalConfidence: e?.operationalConfidence ?? null
+    };
+}
+export function forecastJournalProofCommitment(entry) {
+    return crypto.createHash('sha256').update(JSON.stringify(proofPayload(entry))).digest('hex');
+}
+export function verifyForecastJournalProofCommitment(entry) {
+    const stored=String(entry?.proofCommitment||'');
+    const expected=forecastJournalProofCommitment(entry);
+    if(!stored) return {ok:false,status:'LEGACY_UNCOMMITTED',stored:null,expected,version:null};
+    const version=String(entry?.proofCommitmentVersion||'UNKNOWN');
+    if(version!==FORECAST_JOURNAL_PROOF_COMMITMENT_VERSION) return {ok:false,status:'UNSUPPORTED_COMMITMENT_VERSION',stored,expected,version};
+    return {ok:stored===expected,status:stored===expected?'VERIFIED':'MISMATCH',stored,expected,version};
+}
 function normalize(p) { const u = Math.max(0, p.up), d = Math.max(0, p.down), f = Math.max(0, p.flat), s = u + d + f; return s <= 1e-12 ? { up: 1 / 3, down: 1 / 3, flat: 1 / 3 } : { up: u / s, down: d / s, flat: f / s }; }
 function direction(ret, flat) { return ret > flat ? 'UP' : ret < -flat ? 'DOWN' : 'FLAT'; }
 function topDirection(p) { return p.up >= p.down && p.up >= p.flat ? 'UP' : p.down >= p.up && p.down >= p.flat ? 'DOWN' : 'FLAT'; }
@@ -31,6 +74,9 @@ export class ForecastLearningJournal {
             if (this.keys.has(id))
                 continue;
             const e = { id, symbol: report.symbol, horizonId: f.horizonId, horizonMs: f.horizonMs, flatThreshold: f.flatThreshold, asOf: report.asOf, dueAt: report.asOf + f.horizonMs, startPrice: report.price, regimeId: input.regimeId, features: structuredClone(input.features), dataQuality: input.dataQuality, gate: f.gate, direction: f.direction, probabilities: structuredClone(f.probabilities), expectedReturn: f.expectedReturn, interval: { q10: f.interval.q10, q90: f.interval.q90 }, rawInterval: { q10: f.rawInterval.q10, q90: f.rawInterval.q90, median: f.rawInterval.median }, operationalConfidence: f.operationalConfidence, models: structuredClone(f.models), runningMaxAdverseReturn: 0, runningMaxFavorableReturn: 0, status: 'PENDING' };
+            e.proofCommitmentVersion=FORECAST_JOURNAL_PROOF_COMMITMENT_VERSION;
+            e.proofCommitment=forecastJournalProofCommitment(e);
+            e.proofIntegrity='VERIFIED_AT_RECORD';
             this.entries.push(e);
             this.keys.add(id);
         }
@@ -54,6 +100,12 @@ export class ForecastLearningJournal {
                 e.status = 'EXPIRED';
                 continue;
             }
+            const proof=verifyForecastJournalProofCommitment(e);
+            if(proof.status==='MISMATCH'||proof.status==='UNSUPPORTED_COMMITMENT_VERSION'){
+                e.proofIntegrity=proof.status;
+                e.status='PROOF_INVALID';
+                continue;
+            }
             const actualDirection = direction(ret, e.flatThreshold), s = score(e.probabilities, actualDirection), intervalMiss = ret < e.interval.q10 || ret > e.interval.q90;
             const resolution = { resolvedAt: point.timestamp, resolvedPrice: point.price, actualReturn: ret, actualDirection, maxAdverseReturn: e.runningMaxAdverseReturn, maxFavorableReturn: e.runningMaxFavorableReturn, brier: s.brier, logLoss: s.logLoss, absoluteReturnError: Math.abs(ret - e.expectedReturn), intervalMiss, topCorrect: s.topCorrect };
             e.resolution = resolution;
@@ -66,6 +118,11 @@ export class ForecastLearningJournal {
     feedResolved(e, quality = 1) {
         if (e.status !== 'RESOLVED' || !e.resolution)
             return;
+        const proof=verifyForecastJournalProofCommitment(e);
+        if(proof.status==='MISMATCH'||proof.status==='UNSUPPORTED_COMMITMENT_VERSION'){
+            e.proofIntegrity=proof.status;
+            return;
+        }
         const r = e.resolution, q = clamp(quality * e.dataQuality, 0, 1);
         // Drift is monitoring, not model fitting: keep observing every resolved shadow forecast so a drift ABSTAIN can later recover.
         this.engine.drift.add({ id: e.id, symbol: e.symbol, horizonMs: e.horizonMs, resolvedAt: r.resolvedAt, regimeId: e.regimeId, features: structuredClone(e.features), brier: r.brier, logLoss: r.logLoss, intervalMiss: r.intervalMiss, topProbability: Math.max(e.probabilities.up, e.probabilities.down, e.probabilities.flat), topCorrect: r.topCorrect, quality: q });
@@ -88,6 +145,16 @@ export class ForecastLearningJournal {
             else if (e.status === 'EXPIRED') expired++;
         }
         return { total: this.entries.length, pending, resolved, expired };
+    }
+    proofIntegrityStats() {
+        let verified=0, legacy=0, invalid=0;
+        for(const e of this.entries){
+            const proof=verifyForecastJournalProofCommitment(e);
+            if(proof.status==='VERIFIED')verified++;
+            else if(proof.status==='LEGACY_UNCOMMITTED')legacy++;
+            else invalid++;
+        }
+        return { total:this.entries.length, verified, legacy, invalid };
     }
     probabilityCalibrationRows() {
         return this.entries
@@ -122,6 +189,11 @@ export class ForecastLearningJournal {
             if (this.keys.has(e.id))
                 continue;
             const copy = structuredClone(e);
+            const proof=verifyForecastJournalProofCommitment(copy);
+            if(proof.status==='MISMATCH'||proof.status==='UNSUPPORTED_COMMITMENT_VERSION'){
+                copy.proofIntegrity=proof.status;
+                copy.status='PROOF_INVALID';
+            }
             this.entries.push(copy);
             this.keys.add(copy.id);
         }

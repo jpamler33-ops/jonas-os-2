@@ -1,4 +1,5 @@
 import { sha256 } from './institutional-kernel.mjs';
+import { verifyForecastJournalProofCommitment } from './forecast-runtime/forecast/journal.js';
 
 export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V2';
 export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V2';
@@ -298,25 +299,6 @@ export function renderBiggjSignalLab(value={}){
   return lines.join('\n').slice(0,4096);
 }
 
-function proofCommitment(row){
-  return sha256({
-    id:row?.id,
-    symbol:row?.symbol,
-    horizonId:row?.horizonId,
-    horizonMs:row?.horizonMs,
-    asOf:row?.asOf,
-    dueAt:row?.dueAt,
-    startPrice:row?.startPrice,
-    regimeId:row?.regimeId,
-    gate:row?.gate,
-    direction:row?.direction,
-    probabilities:row?.probabilities,
-    expectedReturn:row?.expectedReturn,
-    interval:row?.interval,
-    operationalConfidence:row?.operationalConfidence
-  });
-}
-
 function learningIncludesResolvedRow(row,learningSummary,cutoff){
   const resolvedAt=finite(row?.resolution?.resolvedAt);
   return Boolean(
@@ -331,7 +313,8 @@ function learningIncludesResolvedRow(row,learningSummary,cutoff){
 
 function proofLifecycleRow(row,{cutoff,learningSummary}={}){
   const r=row?.resolution||null;
-  const beforeHash=proofCommitment(row);
+  const commitment=verifyForecastJournalProofCommitment(row);
+  const beforeHash=commitment.ok?commitment.stored:null;
   const issuedAsOf=finite(row?.asOf);
   const dueAt=finite(row?.dueAt);
   const resolvedAt=finite(r?.resolvedAt);
@@ -356,7 +339,7 @@ function proofLifecycleRow(row,{cutoff,learningSummary}={}){
     awaitingOutcome?'AWAITING_OUTCOME':
     live?'LIVE':
     generated?'GENERATED':'NOT_YET_VISIBLE';
-  const outcomeCore=resolved?{
+  const outcomeCore=resolved&&commitment.ok?{
     beforeHash,
     resolvedAt:r?.resolvedAt,
     resolvedPrice:r?.resolvedPrice,
@@ -386,10 +369,15 @@ function proofLifecycleRow(row,{cutoff,learningSummary}={}){
     intervalHit:resolved?r?.intervalMiss===false:null,
     currentStage,
     milestones:freeze({generated,live,matured,reviewed,learned}),
+    commitmentState:commitment.status,
+    commitmentVersion:commitment.version,
     beforeHash,
+    derivedForecastHash:commitment.expected,
     outcomeHash:outcomeCore?sha256(outcomeCore):null,
     learningMeaning:learned?'Included in the current aggregate learning summary; not a promoted skill or production-policy mutation.':null,
-    semantics:'Internal deterministic commitment hash. Not an external timestamp, blockchain proof, or independent attestation.'
+    semantics:commitment.ok
+      ?'Forecast fields were committed when the journal record was created; hash is internal, not an external timestamp, blockchain proof, or independent attestation.'
+      :'Legacy or invalid journal row remains visible but is not presented as forecast-time cryptographic proof.'
   });
 }
 
@@ -423,6 +411,11 @@ export function buildBiggjProofFeed(entries=[],{
     .slice(0,liveTake);
   const hits=resolved.filter(x=>x.directionalHit===true).length;
   const misses=resolved.filter(x=>x.directionalHit===false).length;
+  const committed=lifecycle.filter(x=>x.commitmentState==='VERIFIED').length;
+  const legacy=lifecycle.filter(x=>x.commitmentState==='LEGACY_UNCOMMITTED').length;
+  const invalid=lifecycle.filter(x=>!['VERIFIED','LEGACY_UNCOMMITTED'].includes(x.commitmentState)).length;
+  const verifiedHits=resolved.filter(x=>x.commitmentState==='VERIFIED'&&x.directionalHit===true).length;
+  const verifiedMisses=resolved.filter(x=>x.commitmentState==='VERIFIED'&&x.directionalHit===false).length;
   const counts={
     scoped:lifecycle.length,
     generated:lifecycle.filter(x=>x.milestones.generated).length,
@@ -431,6 +424,11 @@ export function buildBiggjProofFeed(entries=[],{
     resolved:resolved.length,
     hits,
     misses,
+    committed,
+    legacy,
+    invalid,
+    verifiedHits,
+    verifiedMisses,
     reviewed:lifecycle.filter(x=>x.milestones.reviewed).length,
     learned:lifecycle.filter(x=>x.milestones.learned).length
   };
@@ -453,12 +451,16 @@ export function buildBiggjProofFeed(entries=[],{
       includesLosses:true,
       includesOpenCommitments:true,
       selection:'MOST_RECENT_LIVE_AND_RESOLVED_WITHIN_REQUESTED_SCOPE',
+      proofTrustScope:'ONLY_VERIFIED_FORECAST_TIME_COMMITMENTS',
+      legacyRowsRemainVisible:true,
       retrospectiveEditingAllowed:false,
       probabilityDisplaySuppressed:true
     },
     semantics:{
       beforeHashCommitsForecastFields:true,
-      liveCommitmentExistsBeforeOutcome:true,
+      commitmentCreatedAtForecastRecordTimeForCommittedRows:true,
+      legacyRowsAreOutcomesNotProof:true,
+      liveCommitmentExistsBeforeOutcomeForCommittedRows:true,
       outcomeHashBindsResolutionToBeforeHash:true,
       hashesAreInternalNotIndependentAttestation:true,
       resolvedOutcomeDoesNotProveCausalityOrFutureProfitability:true,
@@ -481,6 +483,13 @@ export function verifyBiggjProofFeed(value){
   if(value?.policy?.includesWins!==true||value?.policy?.includesLosses!==true)reasons.push('SELECTION_BIAS_POLICY_INVALID');
   if(value?.policy?.includesOpenCommitments!==true)reasons.push('OPEN_COMMITMENT_POLICY_INVALID');
   if(value?.policy?.probabilityDisplaySuppressed!==true)reasons.push('PROBABILITY_POLICY_INVALID');
+  for(const row of [...arr(value?.liveRows),...arr(value?.rows)]){
+    const state=String(row?.commitmentState||'UNKNOWN');
+    if(state==='VERIFIED'&&!row?.beforeHash)reasons.push('VERIFIED_COMMITMENT_HASH_MISSING');
+    if(state!=='VERIFIED'&&row?.beforeHash!=null)reasons.push('UNVERIFIED_ROW_HAS_TRUSTED_BEFORE_HASH');
+    if(state!=='VERIFIED'&&row?.outcomeHash!=null)reasons.push('UNVERIFIED_ROW_HAS_OUTCOME_PROOF_HASH');
+    if(state==='VERIFIED'&&['MATURED','REVIEWED','LEARNED'].includes(String(row?.currentStage))&&!row?.outcomeHash)reasons.push('VERIFIED_RESOLVED_OUTCOME_HASH_MISSING');
+  }
   for(const row of arr(value?.liveRows)){
     if(row?.outcomeHash!=null)reasons.push('LIVE_OUTCOME_HASH_LEAK');
     if(!['GENERATED','LIVE','AWAITING_OUTCOME'].includes(String(row?.currentStage)))reasons.push('LIVE_STAGE_INVALID');
@@ -499,7 +508,8 @@ export function renderBiggjProofFeed(feed={}){
     'FORECAST BEFORE → OUTCOME AFTER → LEARNING',
     '',
     'Live '+String(feed?.counts?.live||0)+' · Awaiting '+String(feed?.counts?.awaitingOutcome||0)+' · Resolved '+String(feed?.counts?.resolved||0)+' · Learned '+String(feed?.counts?.learned||0),
-    'Hits '+String(feed?.counts?.hits||0)+' · Misses '+String(feed?.counts?.misses||0),
+    'Outcomes '+String(feed?.counts?.hits||0)+' HIT / '+String(feed?.counts?.misses||0)+' MISS',
+    'Proof '+String(feed?.counts?.committed||0)+' committed · '+String(feed?.counts?.legacy||0)+' legacy · '+String(feed?.counts?.invalid||0)+' invalid',
     ''
   ];
   if(live.length){
@@ -507,9 +517,10 @@ export function renderBiggjProofFeed(feed={}){
     for(const row of live.slice(0,4)){
       lines.push(
         '◐ '+row.currentStage.replaceAll('_',' ')+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
+        'Proof   '+(row.commitmentState==='VERIFIED'?'🔒 FORECAST-TIME COMMITTED':row.commitmentState==='LEGACY_UNCOMMITTED'?'◐ LEGACY UNCOMMITTED':'⚠ '+String(row.commitmentState)),
         'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
         'As-of   '+iso(row.issuedAsOf)+' · Due '+iso(row.dueAt),
-        'Hash    '+String(row.beforeHash).slice(0,16)+'…',
+        row.beforeHash?'Hash    '+String(row.beforeHash).slice(0,16)+'…':'Hash    kein Forecast-Time-Commitment',
         ''
       );
     }
@@ -521,10 +532,11 @@ export function renderBiggjProofFeed(feed={}){
   for(const row of rows.slice(0,8)){
     lines.push(
       (row.directionalHit?'✓ HIT':'✕ MISS')+' · '+row.currentStage+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
+      'Proof   '+(row.commitmentState==='VERIFIED'?'🔒 FORECAST-TIME COMMITTED':row.commitmentState==='LEGACY_UNCOMMITTED'?'◐ LEGACY UNCOMMITTED':'⚠ '+String(row.commitmentState)),
       'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
       'After   '+directionLabel(row.actualDirection)+' · Return '+signedPct(row.actualReturn)+' · Range '+(row.intervalHit?'HIT':'MISS'),
       'As-of   '+iso(row.issuedAsOf)+' · Resolved '+iso(row.resolvedAt),
-      'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash||'').slice(0,12)+'…',
+      row.beforeHash&&row.outcomeHash?'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash).slice(0,12)+'…':'Hash    Outcome sichtbar, aber kein verifizierter Forecast-Time-Proof',
       ''
     );
   }
@@ -532,6 +544,7 @@ export function renderBiggjProofFeed(feed={}){
     'Lifecycle: GENERATED → LIVE → MATURED → REVIEWED → LEARNED.',
     'LEARNED = im aktuellen Learning-Aggregat enthalten; keine Skill-Promotion und keine PRIMARY-Änderung.',
     'Feed zeigt Gewinne UND Fehler; keine Cherry-Pick-Policy.',
+    'Nur 🔒-Zeilen besitzen ein beim Forecast-Record gespeichertes Commitment; Legacy-Zeilen bleiben sichtbar, zählen aber nicht als Forecast-Time-Proof.',
     'Hashes sind interne deterministische Commitments, keine unabhängige externe Beglaubigung.',
     'Vergangene Treffer beweisen keine zukünftige Profitabilität.',
     'SHADOW_ONLY · REAL ORDERS BLOCKED'
