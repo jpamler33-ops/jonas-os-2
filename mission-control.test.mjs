@@ -18,11 +18,12 @@ test('embedded state cannot inject a script tag',()=>{
   assert.match(html,/"x":"\\u003cscript>"/);
 });
 
-test('mobile command center exposes autonomy learning trades intel and system tabs',()=>{
+test('mobile command center exposes overview markets research trades and system tabs',()=>{
   const s=missionControlSnapshot({
     health:{
       autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false,automationCoverage:1},
       autonomousResearchFactory:{mode:'DATA_COLLECTION_ONLY'},
+      biggjLivingResearch:{researchRequired:2,activeAgendaItems:3,topResearchBottlenecks:[],researchProtocols:{total:1},researchReviews:{open:0}},
       researchCoverage:{averageCoverage:.75,blocked:0},
       biggjObservability:{
         maturityIndex:.6,
@@ -31,16 +32,17 @@ test('mobile command center exposes autonomy learning trades intel and system ta
         researchQueue:[{skillId:'s2',title:'Liquidity',nextGate:'FORWARD_SHADOW',priority:.7,uncertainty:.4}],
         learningTimeline:{events:[]}
       },
-      experienceNeeds:[{priority:2,label:'More live data',detail:'coverage gap'}],
+      experienceNeeds:[{priority:2,label:'Mehr Live Data',detail:'coverage gap'}],
       globalIntel:{eventCount:0,recent:[]},
       traderWatch:{sourceReady:false,nextNeed:'PIT public performance source'}
     },
     portfolio:{equityQuote:1000,openPositions:0,closedTrades:0,netPnlQuote:0,positions:[],recentClosed:[]}
   });
   const html=renderMissionControlHtml(s);
-  for(const x of ['data-tab="home"','data-tab="learn"','data-tab="trades"','data-tab="intel"','data-tab="system"','What BIGGJ needs','Trader watch']){
+  for(const x of ['data-tab="overview"','data-tab="markets"','data-tab="research"','data-tab="trades"','data-tab="system"','Was BIGGJ braucht','Trader Intelligence']){
     assert.match(html,new RegExp(x));
   }
   assert.match(html,/app\.webmanifest/);
   assert.match(html,/serviceWorker/);
+  assert.match(html,/SHADOW_ONLY/);
 });

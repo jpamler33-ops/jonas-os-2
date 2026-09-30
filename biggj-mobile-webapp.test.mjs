@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   BIGGJ_MOBILE_WEBAPP_VERSION,
@@ -11,7 +12,7 @@ import {
 
 test('BIGGJ mobile app is installable as a standalone PWA',()=>{
   const manifest=JSON.parse(biggjWebManifest());
-  assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_MOBILE_COMMAND_CENTER_V1');
+  assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_MOBILE_COMMAND_CENTER_V2');
   assert.equal(manifest.start_url,'/mission-control');
   assert.equal(manifest.scope,'/');
   assert.equal(manifest.display,'standalone');
@@ -24,7 +25,7 @@ test('mobile app renders five primary tabs and iPhone install metadata',()=>{
     health:{autonomousOperator:{mode:'HANDS_OFF'}},
     portfolio:{}
   });
-  for(const tab of ['home','learn','trades','intel','system']){
+  for(const tab of ['overview','markets','research','trades','system']){
     assert.match(html,new RegExp('data-tab="'+tab+'"'));
   }
   assert.match(html,/apple-mobile-web-app-capable/);
@@ -74,10 +75,39 @@ test('mobile intel separates world, general news, memecoins and trader source tr
     },
     portfolio:{}
   });
-  assert.match(html,/World situation/);
-  assert.match(html,/General relevant news/);
-  assert.match(html,/Memecoin radar/);
-  assert.match(html,/Trader watch/);
-  assert.match(html,/not independently verified/);
-  assert.match(html,/Market radar/);
+  assert.match(html,/Live Intelligence/);
+  assert.match(html,/Memecoin Radar/);
+  assert.match(html,/Trader Intelligence/);
+  assert.match(html,/nicht unabhängig bestätigt/);
+  assert.match(html,/Market Radar/);
+});
+
+
+test('V2 renders BIGGJ command-center hierarchy and live states',()=>{
+  const html=renderBiggjMobileApp({
+    generatedAt:1_800_000_000_000,
+    health:{
+      autonomousOperator:{mode:'WAITING_FOR_DATA',operatorNeeded:false,automationCoverage:1},
+      autonomousResearchFactory:{mode:'RESEARCH_STALLED'},
+      biggjLivingResearch:{researchRequired:4,activeAgendaItems:5,researchProtocols:{total:4},researchReviews:{open:0},discoveredResearchOnlySkills:4,topResearchBottlenecks:[{assumptionId:'A1',status:'RESEARCH_REQUIRED',informationValue:.8,primaryCapabilityId:'EVIDENCE_INDEPENDENCE',distinctPersistentForecasts:3}]},
+      researchCoverage:{averageCoverage:.9,blocked:0},
+      marketRadar:{rows:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND_UP',witnessAgreement:.88,support:12,score:.82}]},
+      experienceNeeds:[{priority:3,label:'Research wartet auf Daten',detail:'Kein Eingriff nötig.'}]
+    },
+    portfolio:{netPnlQuote:12.5,openPositions:1,closedTrades:3,positions:[]}
+  });
+  assert.match(html,/BIGGJ <span/);
+  assert.match(html,/>\/\/<\/span> TCX/);
+  assert.match(html,/System posture/);
+  assert.match(html,/WARTET AUF DATEN/);
+  assert.match(html,/Living Research/);
+  assert.match(html,/Market Radar/);
+  assert.match(html,/Execution Boundary/);
+  assert.match(html,/Live Diagnose/);
+});
+
+test('canonical mission-control renderer delegates to the V2 mobile app',async()=>{
+  const source=await readFile(new URL('./mission-control.mjs',import.meta.url),'utf8');
+  assert.match(source,/import \{ renderBiggjMobileApp \} from '\.\/biggj-mobile-webapp\.mjs'/);
+  assert.match(source,/return renderBiggjMobileApp\(snapshot\)/);
 });
