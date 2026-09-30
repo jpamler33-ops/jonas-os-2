@@ -281,6 +281,27 @@ test('exploration entry is reconciled and preserves learning metadata',()=>{
 });
 
 
+test('exploration is research-only and excluded from every primary performance view',()=>{
+  const e=entry({
+    id:'sh_explore_visibility',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'EXPLORATION_ENTRY',
+      entryMode:'EXPLORATION',
+      entryLearningValue:.8
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  let p=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0}).position;
+  p=closeShadowPosition(p,{reason:'MANUAL_RESEARCH_EXIT',at:61_000});
+  l=replaceShadowPortfolioPosition(l,p);
+  const research=shadowResearchActivitySummary(l,{asOf:70_000});
+  assert.equal(research.closedTrades,1);
+  assert.equal(research.byMode.EXPLORATION.closed,1);
+  assert.equal(shadowPortfolioSummary(l,{asOf:70_000}).closedTrades,0);
+  assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
+});
+
 test('learned challenger is tracked but excluded from primary portfolio metrics',()=>{
   const e=entry({
     id:'sh_challenger_1',
