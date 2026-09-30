@@ -146,13 +146,13 @@ test('BIGGJ V6.1 exposes one-tap user commands',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'BIGGJ_DISCORD_CHANNEL_UX_V7'
+    'BIGGJ_DISCORD_CHANNEL_UX_V8'
   ]) assert.ok(source.includes(required),required);
 });
 
-test('BIGGJ V7 channel managers cover every Discord surface and supervise themselves',()=>{
+test('BIGGJ V8 channel managers cover every Discord surface and supervise themselves',()=>{
   for(const required of [
-    'BIGGJ_DISCORD_CHANNEL_UX_V7',
+    'BIGGJ_DISCORD_CHANNEL_UX_V8',
     'BIGGJ • OPERATIONS',
     'channel-supervisor',
     'channel-improvements',

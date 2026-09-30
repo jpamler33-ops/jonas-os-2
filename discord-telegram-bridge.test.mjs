@@ -124,6 +124,7 @@ test('BIGGJ Discord V6 operator and experience layers are wired into the bridge'
   assert.match(source,/BIGGJ_DISCORD_COMMAND_CENTER_V6/);
   assert.match(source,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
   assert.match(source,/\.\.\.BIGGJ_EXPERIENCE_LAYOUT/);
+  assert.match(source,/name:'executive'/);
   assert.match(source,/name:'brain'/);
   assert.match(source,/name:'timeline'/);
   assert.match(source,/name:'needs'/);
@@ -236,6 +237,8 @@ test('channel operations expose manager domain director and meta supervision lay
   assert.match(source,/Domain-Supervisoren/);
   assert.match(source,/Operations-Director/);
   assert.match(source,/Meta-Supervisor/);
+  assert.match(source,/Outcome-Supervisor/);
+  assert.match(source,/biggjObservability\?\.outcomeSupervisor/);
   assert.match(source,/finalState\.operationsDirector/);
 });
 

@@ -16,7 +16,7 @@ import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } fr
 import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V7';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V8';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -44,6 +44,7 @@ const COMMANDS=[
   {name:'memory',description:'Episode Memory für einen Markt',options:[symbolOption()]},
   {name:'evidence',description:'Evidence-Diagnostik für einen Markt',options:[symbolOption()]},
   {name:'validity',description:'Research-Validity für einen Markt',options:[symbolOption()]},
+  {name:'executive',description:'BIGGJ Executive State öffnen'},
   {name:'brain',description:'BIGGJ Brain Pulse öffnen'},
   {name:'knowledge',description:'BIGGJ Wissens- und Capability-Map öffnen'},
   {name:'research',description:'BIGGJ Research Queue öffnen'},
@@ -135,7 +136,7 @@ const CHANNEL_PROFILE_GROUPS=Object.freeze({
   ]),
   LIVE_90:new Set(['market-overview']),
   LIVE_120:new Set([
-    'brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
+    'executive-state','brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
     'review-queue','learning-timeline','progress','evidence-ledger','decision-trace',
     'btc','eth','sol','memecoins','global-intel'
   ]),
@@ -704,7 +705,7 @@ function buildRulebookPayload(snapshot={}){
   }],allowedMentions:{parse:[]}};
 }
 
-function buildChannelSupervisorPayload(managerState={},translationHealth=null,rulebookRuntime=null){
+function buildChannelSupervisorPayload(managerState={},translationHealth=null,rulebookRuntime=null,outcomeSupervisor=null){
   const counts=managerState?.counts||{};
   const problems=(managerState?.topProblems||[]).slice(0,10).map(x=>
     '• **#'+String(x.name)+'** · '+String(x.status)+' → '+String(x.decision)+'\n  '+String(x.reason)
@@ -722,6 +723,7 @@ function buildChannelSupervisorPayload(managerState={},translationHealth=null,ru
       {name:'Operations-Director',value:String(director?.status||'—')+' · '+String(director?.healthyDomains||0)+'/'+String(director?.domains||0)+' Domains gesund',inline:true},
       {name:'Meta-Supervisor',value:String(managerState?.metaSupervisor?.status||'—')+' · Coverage '+Math.round(Number(managerState?.metaSupervisor?.managerCoverage||0)*100)+'% · Blindspots '+String(managerState?.metaSupervisor?.unprofiledManagers||0),inline:true},
       {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
+      {name:'Outcome-Supervisor',value:outcomeSupervisor?String(outcomeSupervisor.status||'UNKNOWN')+' · Research '+String(outcomeSupervisor?.outcomeHealth?.researchEvidence||0)+' → Validation '+String(outcomeSupervisor?.outcomeHealth?.validationEvidence||0)+' → Forward '+String(outcomeSupervisor?.outcomeHealth?.forwardShadow||0)+' · stalled '+String(outcomeSupervisor?.outcomeHealth?.stalledResearchTasks||0):'—',inline:false},
       {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
       {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
       {name:'Rulebook',value:rulebookRuntime?String(rulebookRuntime.state||'UNKNOWN')+' · Verstöße '+String(rulebookRuntime?.counts?.failed||0)+' · HARD '+String(rulebookRuntime?.counts?.hard||0):'—',inline:true},
@@ -1544,7 +1546,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const translation=germanTranslator.health();
     const mission=await safeMissionSnapshot();
     const rulebookRuntime=mission?.health?.biggjRulebook?.runtime||null;
-    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation,rulebookRuntime));
+    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation,rulebookRuntime,mission?.health?.biggjObservability?.outcomeSupervisor||null));
     await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation,rulebookRuntime));
     await refreshStableManagedPanel('rulebook',MARKERS.rulebook,buildRulebookPayload(mission));
     const finalState=managerSnapshot();
@@ -2013,7 +2015,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='supervisor'){
       await interaction.deferReply();
       const mission=await safeMissionSnapshot();
-      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health(),mission?.health?.biggjRulebook?.runtime||null));
+      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health(),mission?.health?.biggjRulebook?.runtime||null,mission?.health?.biggjObservability?.outcomeSupervisor||null));
       return;
     }
     if(name==='improvements'){
@@ -2027,7 +2029,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       await interaction.editReply(buildRulebookPayload(await safeMissionSnapshot()));
       return;
     }
-    const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
+    const operatorViews={executive:'executive',brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
     const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
     if(experienceViews[name]){await experienceCommand(interaction,experienceViews[name]);return;}
