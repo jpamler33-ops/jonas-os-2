@@ -1,6 +1,7 @@
 export const PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION='TCX_PUBLIC_MARKET_CONTEXT_V2';
 
 function finite(v){
+  if(v==null||v==='') return null;
   const n=Number(v);
   return Number.isFinite(n)?n:null;
 }
