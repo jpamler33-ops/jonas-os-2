@@ -956,12 +956,16 @@ function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={
 function trackerArchiveRowForPersistence(record){
   // Sidecar persistence must snapshot mutable tracker state. Returning live
   // nested references allows revisions/thesis memory to change between the
-  // fingerprint pass and the asynchronous gzip pass.
+  // fingerprint pass and the asynchronous gzip pass. Read each live field once
+  // and clone it so even accessor-backed state has one point-in-time value.
+  const issueState=record?.issueState;
+  const revisions=record?.revisions;
+  const thesisMemory=record?.thesisMemory;
   return {
     id:record?.id,
-    issueState:record?.issueState==null?null:clone(record.issueState),
-    revisions:clone(Array.isArray(record?.revisions)?record.revisions:[]),
-    thesisMemory:record?.thesisMemory==null?null:clone(record.thesisMemory)
+    issueState:issueState==null?null:clone(issueState),
+    revisions:clone(Array.isArray(revisions)?revisions:[]),
+    thesisMemory:thesisMemory==null?null:clone(thesisMemory)
   };
 }
 
