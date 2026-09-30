@@ -13,6 +13,7 @@ import {
   verifyBiggjSkillTree
 } from './biggj-skill-tree.mjs';
 import { canonicalSkillLeverage } from './biggj-skill-dependency-graph.mjs';
+import { biggjResearchValidationSummary } from './biggj-research-validation-harness.mjs';
 import {
   resolveBiggjResearchEpisodes,
   researchEpisodeAssignment,
@@ -989,6 +990,9 @@ export function biggjLivingResearchRuntimeSummary(value){
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
     researchEvidence:verifyBiggjSkillTree(value?.skillTree).ok
       ?livingResearchEvidenceSummary(value.skillTree)
+      :null,
+    validationHarness:verifyBiggjSkillTree(value?.skillTree).ok
+      ?biggjResearchValidationSummary(value.skillTree,{limit:5})
       :null,
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
