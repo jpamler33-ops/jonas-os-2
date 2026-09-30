@@ -76,6 +76,22 @@ export class ForecastRevisionTracker {
         return structuredClone(r);
     }
     get(id) { const x = this.records.get(id); return x ? structuredClone(x) : undefined; }
+    stateIndex() {
+        return [...this.records.values()].map(r => ({
+            id: r.id,
+            status: r.status,
+            revisionCount: r.revisions.length,
+            symbol: r.symbol,
+            issuedAt: r.issuedAt,
+            expiresAt: r.expiresAt,
+            hasThesisMemory: Boolean(r.thesisMemory)
+        }));
+    }
+    thesisMemories() {
+        return [...this.records.values()]
+            .filter(r => r.thesisMemory)
+            .map(r => structuredClone(r.thesisMemory));
+    }
     all() { return [...this.records.values()].map(x => structuredClone(x)); }
     snapshot() { return { version: 1, records: this.all() }; }
     restore(s) { if (s.version !== 1)
