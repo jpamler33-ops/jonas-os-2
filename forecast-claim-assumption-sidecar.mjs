@@ -366,7 +366,11 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
   horizonId,
   maturedAt,
   observedAt,
-  evaluationId
+  evaluationId,
+  evaluationMetrics=null,
+  outcome=null,
+  baselineAuditState=null,
+  overhead=null
 }={}){
   const sv=verifyForecastClaimAssumptionSidecar(sidecar);
   if(!sv.ok) throw new Error('forecast claim-assumption sidecar invalid');
@@ -388,6 +392,7 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
     graphFingerprint:sidecar.graphFingerprint,
     forecastFingerprint:sidecar.forecastFingerprint,
     traceId:sidecar.traceId,
+    symbol:sidecar.symbol,
     forecastId:sidecar.forecastId,
     horizonId:horizon,
     decisionAsOf:sidecar.decisionAsOf,
@@ -398,17 +403,62 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
     issuanceAuditState:{
       graphGate:sidecar.graph?.diagnostics?.researchGate??'UNKNOWN',
       defectCount:Number(sidecar.graph?.diagnostics?.defectCount||0),
+      affectedRequiredClaimCount:Number(sidecar.graph?.diagnostics?.affectedRequiredClaimCount||0),
       sharedAssumptionCount:Array.isArray(sidecar.graph?.diagnostics?.sharedAssumptions)
         ?sidecar.graph.diagnostics.sharedAssumptions.length
         :0,
+      explicitUnsupportedAssumptionCount:Array.isArray(sidecar.graph?.diagnostics?.explicitUnsupportedAssumptionIds)
+        ?sidecar.graph.diagnostics.explicitUnsupportedAssumptionIds.length
+        :0,
       horizonClaimIds
+    },
+    declarationCoverage:{
+      customClaims:Number(sidecar?.declarationStats?.customClaims||0),
+      customAssumptions:Number(sidecar?.declarationStats?.customAssumptions||0),
+      customEvidence:Number(sidecar?.declarationStats?.customEvidence||0),
+      customDependencies:Number(sidecar?.declarationStats?.customDependencies||0),
+      customDeclarationCount:
+        Number(sidecar?.declarationStats?.customClaims||0)+
+        Number(sidecar?.declarationStats?.customAssumptions||0)+
+        Number(sidecar?.declarationStats?.customEvidence||0)+
+        Number(sidecar?.declarationStats?.customDependencies||0),
+      hiddenAssumptionsMayRemain:sidecar?.semantics?.hiddenAssumptionsMayRemain===true
+    },
+    evaluationMetrics:{
+      brier:Number.isFinite(Number(evaluationMetrics?.brier))?Number(evaluationMetrics.brier):null,
+      logLoss:Number.isFinite(Number(evaluationMetrics?.logLoss))?Number(evaluationMetrics.logLoss):null,
+      absoluteReturnError:Number.isFinite(Number(evaluationMetrics?.absoluteReturnError))?Number(evaluationMetrics.absoluteReturnError):null,
+      intervalMiss:typeof evaluationMetrics?.intervalMiss==='boolean'?evaluationMetrics.intervalMiss:null,
+      topCorrect:typeof evaluationMetrics?.topCorrect==='boolean'?evaluationMetrics.topCorrect:null
+    },
+    outcome:{
+      actualReturn:Number.isFinite(Number(outcome?.actualReturn))?Number(outcome.actualReturn):null,
+      actualDirection:outcome?.actualDirection==null?null:String(outcome.actualDirection)
+    },
+    baselineAuditState:{
+      alert:baselineAuditState?.alert===true,
+      reasons:Array.isArray(baselineAuditState?.reasons)?[...new Set(baselineAuditState.reasons.map(String))].sort():[],
+      safetyState:String(baselineAuditState?.safetyState??'UNKNOWN'),
+      validityState:String(baselineAuditState?.validityState??'UNKNOWN'),
+      contradictionCount:Math.max(0,Math.floor(Number(baselineAuditState?.contradictionCount)||0)),
+      forecastGate:String(baselineAuditState?.forecastGate??'UNKNOWN'),
+      scienceGate:String(baselineAuditState?.scienceGate??'UNKNOWN')
+    },
+    overhead:{
+      graphNodes:Math.max(0,Math.floor(Number(overhead?.graphNodes)||0)),
+      graphEdges:Math.max(0,Math.floor(Number(overhead?.graphEdges)||0)),
+      graphBytes:Math.max(0,Math.floor(Number(overhead?.graphBytes)||0)),
+      traceBytes:Math.max(0,Math.floor(Number(overhead?.traceBytes)||0)),
+      sidecarBytes:Math.max(0,Math.floor(Number(overhead?.sidecarBytes)||0))
     },
     semantics:{
       forwardShadowMeasurementOnly:true,
       linksIssuanceStateToLaterOutcome:true,
       doesNotInferAssumptionTruthFromOutcome:true,
       doesNotRewriteIssuanceGraph:true,
-      doesNotChangeForecastEvaluation:true
+      doesNotChangeForecastEvaluation:true,
+      pairedResearchComparisonOnly:true,
+      outcomeAssociationIsNotCausation:true
     },
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
