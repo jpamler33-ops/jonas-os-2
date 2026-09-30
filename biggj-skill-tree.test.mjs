@@ -14,6 +14,7 @@ import {
   proposeBiggjChildSkill,
   recordBiggjSkillEvidence,
   evaluateBiggjSkillProgress,
+  advanceBiggjResearchLifecycleStep,
   applyBiggjSkillStatusTransition,
   buildBiggjResearchQueue,
   biggjCapabilityGapReport,
@@ -136,6 +137,85 @@ test('BIGGJ can discover a new child skill only as a falsifiable research propos
   assert.equal(child.promotionStage,'RESEARCH_ONLY');
   assert.equal(child.productionMutationAllowed,false);
   assert.equal(next.proposals.at(-1).productionMutationPerformed,false);
+});
+
+test('discovered research skills auto-advance only through DISCOVERING -> LEARNING -> TESTING',()=>{
+  let tree=createBiggjSkillTree({asOf:1_000_000});
+  const parent=tree.nodes.find(x=>x.capabilityId==='SELF_QUESTIONING');
+  tree=proposeBiggjChildSkill(tree,{
+    parentSkillId:parent.skillId,
+    title:'AUTO_RESEARCH_STAGE_TEST',
+    question:'Can this research signal be reproduced prospectively?',
+    hypothesis:'Repeated independent prospective evidence supports the signal.',
+    falsifier:'Independent prospective episodes fail to reproduce it.',
+    dependencies:[],
+    asOf:1_001_000
+  });
+  const skill=tree.nodes.find(x=>x.title==='AUTO_RESEARCH_STAGE_TEST');
+
+  const addEvidence=(index)=>{
+    tree=recordBiggjSkillEvidence(tree,{
+      skillId:skill.skillId,
+      epistemicClass:'INFERRED',
+      asOf:1_010_000+index,
+      availableAt:1_010_000+index,
+      sourceId:'AUTO_RESEARCH_STAGE_TEST',
+      independentEpisodeId:'episode-'+Math.floor(index/2),
+      statement:'Prospective research evidence '+index,
+      outcome:'POSITIVE',
+      forwardShadow:true,
+      pointInTime:true,
+      auditReady:true,
+      scientificGuardsPassed:true,
+      chronologicalStable:true,
+      costStressPassed:true,
+      concentrationPassed:true,
+      winnerRemovalPassed:true
+    });
+  };
+
+  for(let i=0;i<3;i++) addEvidence(i);
+  const first=advanceBiggjResearchLifecycleStep(tree,{skillId:skill.skillId,asOf:1_020_000});
+  assert.equal(first.changed,true);
+  assert.equal(first.currentStatus,'DISCOVERING');
+  assert.equal(first.recommendedStatus,'LEARNING');
+  assert.equal(first.tree.nodes.find(x=>x.skillId===skill.skillId).status,'LEARNING');
+  assert.equal(first.transition.scope,'RESEARCH_ONLY');
+  assert.equal(first.transition.productionMutationPerformed,false);
+  tree=first.tree;
+
+  for(let i=3;i<10;i++) addEvidence(i);
+  const second=advanceBiggjResearchLifecycleStep(tree,{skillId:skill.skillId,asOf:1_030_000});
+  assert.equal(second.changed,true);
+  assert.equal(second.currentStatus,'LEARNING');
+  assert.equal(second.recommendedStatus,'TESTING');
+  assert.equal(second.tree.nodes.find(x=>x.skillId===skill.skillId).status,'TESTING');
+  assert.equal(second.tree.nodes.find(x=>x.skillId===skill.skillId).promotionStage,'CHALLENGER');
+  assert.equal(second.tree.canExecuteLive,false);
+  tree=second.tree;
+
+  for(let i=10;i<40;i++) addEvidence(i);
+  const hold=advanceBiggjResearchLifecycleStep(tree,{skillId:skill.skillId,asOf:1_050_000});
+  assert.equal(hold.changed,false);
+  assert.equal(hold.currentStatus,'TESTING');
+  assert.equal(hold.recommendedStatus,'VALIDATED');
+  assert.equal(hold.reviewRequired,true);
+  assert.equal(hold.reason,'EXPLICIT_REVIEW_REQUIRED_BEYOND_RESEARCH_LIFECYCLE');
+  assert.equal(tree.nodes.find(x=>x.skillId===skill.skillId).status,'TESTING');
+  assert.equal(hold.productionMutationPerformed,false);
+});
+
+test('research lifecycle automation never advances seeded capabilities',()=>{
+  const tree=createBiggjSkillTree({asOf:1_000_000});
+  const seeded=tree.nodes.find(x=>x.capabilityId==='SELF_QUESTIONING');
+  const out=advanceBiggjResearchLifecycleStep(tree,{
+    skillId:seeded.skillId,
+    asOf:1_010_000
+  });
+  assert.equal(out.changed,false);
+  assert.equal(out.reason,'AUTO_RESEARCH_LIFECYCLE_ONLY_FOR_DISCOVERED_SKILLS');
+  assert.equal(out.productionMutationPerformed,false);
+  assert.equal(out.canExecuteLive,false);
 });
 
 test('new discovered skills require an explicit falsifier',()=>{
