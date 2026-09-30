@@ -9932,8 +9932,10 @@ function missionControlData(){
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
- const openPositions=allShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
- const recentClosed=allShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
+ const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION']);
+ const primaryShadowPositions=allShadowPositions.filter(p=>!researchShadowModes.has(String(p?.entryMode||'STANDARD').toUpperCase()));
+ const openPositions=primaryShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
+ const recentClosed=primaryShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
  const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now,runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:portfolio.openPositions,openDiscoveryPositions:countOpenDiscoveryPositions(allShadowPositions)}});
  health.biggjObservability=buildBiggjDiscordObservabilitySnapshot({
   livingResearchState:biggjLivingResearchState,
