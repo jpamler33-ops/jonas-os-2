@@ -128,3 +128,15 @@ test('runtime wiring uses adaptive cadence and bounded budgets',async()=>{
   assert.match(leverage,/batchReuse:\.10/);
   assert.match(leverage,/basePriority:\.15/);
 });
+
+
+test('runtime separates lightweight outcome resolution from heavy AutoLearn memory gate',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(bot,/forecastOutcomeMemoryBackoffUntil/);
+  assert.match(bot,/issueHeapMb:forecastPersistenceHeapHeadroomMb/);
+  assert.match(bot,/forecastOutcomeMemoryBackoffUntil=Date\.now\(\)\+30_000/);
+  assert.match(bot,/adaptiveShadowAutoHeapMb/);
+  assert.match(bot,/adaptiveShadowAutoRssMb/);
+  assert.match(bot,/effectiveShadowCompetitionHistoryRows/);
+});
