@@ -7253,6 +7253,8 @@ function biggjAiContextSnapshot(extraContext=null){
       autonomousOperator:snapshot?.health?.autonomousOperator||null,
       governanceTriage:snapshot?.health?.governanceTriage||null,
       researchCoverage:snapshot?.health?.researchCoverage||null,
+      livingResearch:snapshot?.health?.biggjLivingResearch||null,
+      epistemicKernel:snapshot?.health?.biggjEpistemicKernel||null,
       marketRadar:snapshot?.health?.marketRadar||null,
       biggjRulebook:snapshot?.health?.biggjRulebook||null,
       biggjSignalLab:snapshot?.health?.biggjSignalLab||null,
