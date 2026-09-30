@@ -153,14 +153,24 @@ test('legacy V1 revision memory upgrades without inventing historical stability'
   const legacy={...legacyCore,fingerprint:sha256(legacyCore)};
   assert.equal(verifyForecastThesisRevisionMemory(legacy).ok,true);
 
-  const upgraded=upgradeForecastThesisRevisionMemory(legacy);
+  const upgraded=upgradeForecastThesisRevisionMemory(legacy,{migratedAt:200_000});
   assert.equal(upgraded.version,FORECAST_THESIS_REVISION_MEMORY_VERSION);
   assert.equal(upgraded.migration.fromVersion,LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.equal(upgraded.migration.migratedAt,200_000);
   assert.equal(upgraded.migration.historicalStabilityBackfilled,false);
   assert.equal(upgraded.firstPersistentStaleAt,null);
   assert.ok(upgraded.assumptions.every(x=>x.stability.state==='LEGACY_UNKNOWN'));
   assert.ok(upgraded.assumptions.every(x=>x.stability.migration==='LEGACY_V1_NO_HISTORICAL_STABILITY_BACKFILL'));
   assert.equal(verifyForecastThesisRevisionMemory(upgraded).ok,true);
+
+  const legacyMatured=forecastThesisPreOutcomeRevisionState(legacy,{maturedAt:150_000});
+  const migratedHistorical=forecastThesisPreOutcomeRevisionState(upgraded,{maturedAt:150_000});
+  assert.deepEqual(migratedHistorical,legacyMatured);
+  assert.equal('stabilityVersion' in migratedHistorical,false);
+
+  const postMigration=forecastThesisPreOutcomeRevisionState(upgraded,{maturedAt:250_000});
+  assert.equal(postMigration.version,FORECAST_THESIS_REVISION_MEMORY_VERSION);
+  assert.ok(postMigration.stabilityVersion);
 });
 
 test('later support loss records exact assumption transition and forecast watch state',()=>{
