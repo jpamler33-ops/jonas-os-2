@@ -74,7 +74,18 @@ export function deriveBiggjExperienceNeeds(snapshot={}){
 
   if(Number(coverage?.blocked||0)>0)needs.push({priority:1,label:'Research coverage reparieren',detail:(coverage.blocked||0)+' Märkte/Slots blockiert · '+(coverage.blockedFeatures||0)+' Features betroffen'});
   if(String(factory?.mode)==='DATA_QUALITY_BLOCKED')needs.push({priority:1,label:'Datenqualität',detail:'Research Factory ist durch Data Governance/Coverage blockiert.'});
-  if(String(factory?.mode)==='RESEARCH_STALLED')needs.push({priority:1,label:'Research Deadlock',detail:'Research macht trotz neuer Source-States keinen messbaren Fortschritt.'});
+  if(String(factory?.mode)==='RESEARCH_STALLED'){
+    if(operator?.waitingForData===true){
+      const waitingOn=arr(factory?.dataNeeds).slice(0,4).map(x=>clip(x,44)).join(', ');
+      needs.push({
+        priority:3,
+        label:'Research wartet auf Daten',
+        detail:'Kein Eingriff nötig · BIGGJ wartet auf neue Point-in-Time-Evidence'+(waitingOn?' · '+waitingOn:'')+'.'
+      });
+    }else{
+      needs.push({priority:1,label:'Research Deadlock',detail:'Research macht trotz verfügbarer Inputs keinen messbaren Fortschritt · Research-Stack prüfen.'});
+    }
+  }
   if(operator?.operatorNeeded===true)needs.push({priority:1,label:'Operator-Eskalation',detail:operator.humanJobRemaining||'Explizite Freigabe/Entscheidung nötig.'});
   if(traders?.sourceReady!==true)needs.push({priority:2,label:'Trader Intelligence Source',detail:'Für belastbare Profit-Trader-Rankings fehlt noch eine öffentliche, PIT-fähige Performance-/Wallet-Quelle.'});
   if(intel?.sourceReady!==true)needs.push({priority:2,label:'Live News Coverage',detail:intel?.lastError?'News-Discovery eingeschränkt: '+clip(intel.lastError,260):'Kein aktiver öffentlicher Live-News-Feed im Serving-State.'});
@@ -97,15 +108,18 @@ export function buildBiggjNeedsPayload(snapshot={}){
     (x.priority===1?'🔴':x.priority===2?'🟡':'⚪')+' **'+(i+1)+'. '+x.label+'**',
     x.detail
   ].join('\n')).join('\n\n');
+  const humanNeeded=operator.operatorNeeded===true;
   return payload(
     'BIGGJ // WHAT I NEED',
-    '**Die priorisierte Einkauf-/Integrationsliste für BIGGJs nächsten Effizienzsprung.**\nNur echte Runtime-Lücken werden gezeigt; keine Wunschliste ohne Beleg.',
+    '**Nur Dinge, die BIGGJ wirklich fehlen oder die du wirklich tun musst.**\nPassive Wartezeiten werden nicht mehr als Fehler oder Kaufbedarf ausgegeben.',
     [
       safeField('JETZT AM WICHTIGSTEN',top),
       safeField('AUTONOMY',[
-        'Operator '+clip(operator.mode||'UNKNOWN',40)+' · human needed '+(operator.operatorNeeded?'YES':'NO'),
-        'Factory '+clip(factory.mode||'UNKNOWN',40)+' · data-only '+(factory.operatorDataOnly?'YES':'NO'),
-        'Automation coverage '+pct(operator.automationCoverage)
+        'Operator: '+clip(operator.mode||'UNKNOWN',40),
+        'Mensch nötig: '+(humanNeeded?'JA · '+clip(operator.humanJobRemaining||'Freigabe/Entscheidung nötig',90):'NEIN · aktuell nichts zu tun'),
+        'Research Factory: '+clip(factory.mode||'UNKNOWN',40),
+        'Nur Datensammlung: '+(factory.operatorDataOnly?'JA':'NEIN'),
+        'Automatisiert: '+pct(operator.automationCoverage)
       ].join('\n')),
       safeField('REGEL','Neue Quelle/Manager/Monitor nur dann hinzufügen, wenn sie eine konkrete Coverage-, Freshness-, Independence-, Latency- oder Governance-Lücke schließt.')
     ],
