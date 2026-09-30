@@ -2,6 +2,7 @@ import http from 'node:http';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
 import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
+import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
@@ -526,6 +527,12 @@ const marketDataProvider=createMarketDataProvider({
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
+const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.TCX_GLOBAL_NEWS_REFRESH_MS||120_000)));
+const biggjPublicNewsProvider=createBiggjPublicNewsProvider({
+  fetchImpl:globalThis.fetch,
+  timeoutMs:Math.max(4000,researchProviderTimeoutMs),
+  cacheTtlMs:Math.min(globalNewsRefreshMs,120_000)
+});
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
 const externalResearchProvider=createExternalResearchProvider({
   fetchImpl:globalThis.fetch,
@@ -3784,7 +3791,93 @@ async function showTerminalView(chatId,messageId,symbol,view){
 }
 
 const globalIntelEvents=[];
+let globalIntelLastRefreshAt=null;
+let globalIntelLastError=null;
+let globalIntelLastSource=null;
+let memecoinExperienceSnapshot=null;
+let memecoinExperienceLastError=null;
+
 function globalIntelSnapshot(){return globalIntelEvents.slice(-250);}
+
+function replaceGlobalIntelEvents(rows=[]){
+  const byId=new Map();
+  for(const row of [...globalIntelEvents,...(Array.isArray(rows)?rows:[])]){
+    const key=String(row?.id||row?.url||row?.title||'').trim();
+    if(!key)continue;
+    const prior=byId.get(key);
+    if(!prior||Number(row?.availableAt||row?.timestamp||0)>=Number(prior?.availableAt||prior?.timestamp||0))byId.set(key,row);
+  }
+  const next=[...byId.values()]
+    .sort((a,b)=>Number(a?.availableAt||a?.timestamp||0)-Number(b?.availableAt||b?.timestamp||0))
+    .slice(-250);
+  globalIntelEvents.splice(0,globalIntelEvents.length,...next);
+  return next.length;
+}
+
+async function refreshPublicExperienceIntel(reason='periodic'){
+  const started=Date.now();
+  const force=reason==='startup'||reason==='manual';
+  const [newsResult,memeResult,trendResult]=await Promise.allSettled([
+    biggjPublicNewsProvider.fetchFeed({force}),
+    dexScreenerProvider.fetchMemecoinRadar({limit:8,force}),
+    dexScreenerProvider.fetchTrendingMetas({limit:8,force})
+  ]);
+  if(newsResult.status==='fulfilled'){
+    const feed=newsResult.value;
+    replaceGlobalIntelEvents(feed.events);
+    globalIntelLastRefreshAt=Date.now();
+    globalIntelLastError=feed.errors?.length?feed.errors.map(x=>x.queryClass+':'+x.error).join(' | '):null;
+    globalIntelLastSource=feed.source||'GDELT DOC 2.1';
+  }else{
+    globalIntelLastError=newsResult.reason instanceof Error?newsResult.reason.message:String(newsResult.reason);
+  }
+  if(memeResult.status==='fulfilled'||trendResult.status==='fulfilled'){
+    memecoinExperienceSnapshot={
+      version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+      capturedAt:Date.now(),
+      source:'DEXSCREENER_PUBLIC_API',
+      rows:memeResult.status==='fulfilled'?(memeResult.value?.rows||[]):[],
+      errors:memeResult.status==='fulfilled'?(memeResult.value?.errors||[]):[{error:memeResult.reason instanceof Error?memeResult.reason.message:String(memeResult.reason)}],
+      metas:trendResult.status==='fulfilled'?(trendResult.value?.rows||[]):[],
+      epistemic:'LIVE_DEX_ACTIVITY_NOT_PRICE_PROBABILITY'
+    };
+    memecoinExperienceLastError=null;
+  }else{
+    memecoinExperienceLastError=[
+      memeResult.reason instanceof Error?memeResult.reason.message:String(memeResult.reason),
+      trendResult.reason instanceof Error?trendResult.reason.message:String(trendResult.reason)
+    ].join(' | ');
+  }
+  const ok=newsResult.status==='fulfilled'||memeResult.status==='fulfilled'||trendResult.status==='fulfilled';
+  recordOperation(observability,{
+    name:'biggj_public_experience_intel',
+    ok,
+    latencyMs:Date.now()-started,
+    error:ok?null:[globalIntelLastError,memecoinExperienceLastError].filter(Boolean).join(' | ')
+  });
+  if(!ok)recordError(observability,{scope:'biggj_public_experience_intel',message:[globalIntelLastError,memecoinExperienceLastError].filter(Boolean).join(' | ')});
+  console.log('[BIGGJ_PUBLIC_INTEL]',JSON.stringify({
+    reason,
+    newsEvents:globalIntelEvents.length,
+    newsSource:globalIntelLastSource,
+    newsError:globalIntelLastError,
+    memecoins:memecoinExperienceSnapshot?.rows?.length||0,
+    metas:memecoinExperienceSnapshot?.metas?.length||0,
+    memecoinError:memecoinExperienceLastError,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  }));
+  return {news:newsResult.status==='fulfilled',memecoins:memeResult.status==='fulfilled',trends:trendResult.status==='fulfilled'};
+}
+
+async function publicExperienceIntelWatcher(){
+  while(running){
+    await sleep(globalNewsRefreshMs);
+    if(!running)break;
+    await refreshPublicExperienceIntel('periodic');
+  }
+}
+
 async function showGlobalIntel(chatId,messageId,filter='TOP'){
   return deliverTelegramTextCard(tg,chatId,messageId,{text:renderGlobalIntelFeed(globalIntelSnapshot(),{filter}),reply_markup:globalIntelKeyboard(filter)});
 }
@@ -9281,7 +9374,28 @@ function missionControlData(){
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
   researchCoverage,
+  marketRadar:{
+    capturedAt:now,
+    rows:requestedSymbols.map(symbol=>{
+      const r=radarCache.get(symbol);
+      if(!r)return null;
+      return {
+        symbol,
+        capturedAt:Number(r.capturedAt||0)||null,
+        status:r.status||'UNKNOWN',
+        regime:r.regime||'UNKNOWN',
+        witnessAgreement:Number.isFinite(Number(r.witnessAgreement))?Number(r.witnessAgreement):null,
+        support:Number(r.support||0),
+        score:Number.isFinite(Number(r.score))?Number(r.score):null
+      };
+    }).filter(Boolean).sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,18)
+  },
   globalIntel:{
+    version:BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION,
+    sourceReady:globalIntelEvents.length>0&&globalIntelLastRefreshAt!=null,
+    source:globalIntelLastSource,
+    lastRefreshAt:globalIntelLastRefreshAt,
+    lastError:globalIntelLastError,
     eventCount:globalIntelEvents.length,
     recent:[...globalIntelSnapshot()]
       .sort((a,b)=>Number(b?.availableAt||b?.timestamp||0)-Number(a?.availableAt||a?.timestamp||0))
@@ -9291,6 +9405,10 @@ function missionControlData(){
         family:x?.family||x?.eventFamily||'OTHER',
         status:x?.status||'WATCH',
         verified:x?.verified===true,
+        independentConfirmation:Number(x?.independentConfirmation||0),
+        source:x?.source||x?.domain||'PUBLIC_NEWS',
+        url:x?.url||null,
+        epistemic:x?.epistemic||'PUBLIC_EVENT',
         availableAt:Number(x?.availableAt||x?.timestamp||0)||null,
         affectedAssets:Array.isArray(x?.affectedAssets||x?.assets)?(x.affectedAssets||x.assets).slice(0,8):[],
         marketStatus:x?.cryptoImpactStatus||x?.marketStatus||'AWAITING_MARKET_DATA'
@@ -9299,9 +9417,40 @@ function missionControlData(){
   traderWatch:{
     sourceReady:false,
     nextNeed:'Öffentliche, Point-in-Time erfassbare Trader-/Wallet-Performancequelle mit stabiler Identität, realisierter PnL-Historie und mehreren unabhängigen Trades.',
-    entityRegistry:entityRegistrySummary(entityRegistry),
+    entityRegistry:entityRegistryServingSummary,
     entityFlow:entityFlowMemorySummary(entityFlowMemory),
+    configuredPublicWalletCohorts:walletCohortResearchProvider.configuredCohorts,
     privacy:'PUBLIC_DATA_ONLY'
+  },
+  memecoinRadar:{
+    version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+    sourceReady:Boolean(memecoinExperienceSnapshot?.rows?.length||memecoinExperienceSnapshot?.metas?.length),
+    capturedAt:memecoinExperienceSnapshot?.capturedAt||null,
+    source:memecoinExperienceSnapshot?.source||'DEXSCREENER_PUBLIC_API',
+    lastError:memecoinExperienceLastError,
+    rows:(memecoinExperienceSnapshot?.rows||[]).slice(0,8).map(x=>({
+      chainId:x?.chainId||null,
+      tokenAddress:x?.tokenAddress||null,
+      source:x?.source||'DEXSCREENER_PUBLIC_API',
+      pair:x?.pair?{
+        symbol:x.pair?.baseToken?.symbol||null,
+        name:x.pair?.baseToken?.name||null,
+        url:x.pair?.url||x?.boost?.url||null,
+        priceUsd:x.pair?.priceUsd??null,
+        liquidityUsd:x.pair?.liquidityUsd??null,
+        volumeH1:x.pair?.volumeH1??null,
+        volumeH24:x.pair?.volumeH24??null,
+        priceChangeH1:x.pair?.priceChangeH1??null,
+        priceChangeH24:x.pair?.priceChangeH24??null,
+        buysH1:x.pair?.buysH1??0,
+        sellsH1:x.pair?.sellsH1??0,
+        marketCap:x.pair?.marketCap??null,
+        pairCreatedAt:x.pair?.pairCreatedAt??null,
+        activeBoosts:x.pair?.activeBoosts??0
+      }:null
+    })),
+    metas:(memecoinExperienceSnapshot?.metas||[]).slice(0,8),
+    epistemic:'LIVE_DEX_ACTIVITY_NOT_PRICE_PROBABILITY'
   },
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
@@ -9631,6 +9780,7 @@ process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 liquidationResearchStream.start();
 await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
+await refreshPublicExperienceIntel('startup');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
 const me = await tg('getMe',{});
@@ -9753,4 +9903,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher()]);
