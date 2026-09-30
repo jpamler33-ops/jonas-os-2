@@ -20,8 +20,8 @@ const txt=(v,fallback='UNKNOWN')=>{
   return s||fallback;
 };
 const safe=(v)=>txt(v).toUpperCase().replace(/[^A-Z0-9:_-]+/g,'_').slice(0,120);
+const short=(v,max=20)=>txt(v).replace(/\s+/g,' ').slice(0,max);
 const uniq=xs=>[...new Set((xs||[]).map(String).filter(Boolean))].sort();
-const present=v=>v!=null&&v!=='';
 
 function evidenceRow({evidenceId,classification,statement,provenanceIds,availableAt}){
   return {
@@ -274,7 +274,7 @@ export function buildForecastThesisDeclarations({
   const claims=[
     {
       claimId:'THESIS_WORLD_STATE_CLAIM',
-      statement:'Derived state: regime '+regime+', bias '+bias+', structure '+structure+', flow '+flow+', liquidity '+liquidity+'.',
+      statement:'Derived state: regime '+short(regime)+', bias '+short(bias)+', structure '+short(structure)+', flow '+short(flow)+', liquidity '+short(liquidity)+'.',
       epistemicClass:'INFERRED',
       required:true,
       assumptionIds:['THESIS_WORLD_STATE_REPRESENTATIVE','THESIS_DEPENDENCY_COVERAGE_ADEQUATE'],
@@ -283,7 +283,7 @@ export function buildForecastThesisDeclarations({
     },
     {
       claimId:'THESIS_MECHANISM_CLAIM',
-      statement:'Modelled mechanism candidate '+mechanismCandidate+' has score '+mechanismScore.toFixed(3)+'; causal status remains '+causalStatus+'.',
+      statement:'Modelled mechanism '+short(mechanismCandidate,32)+' score '+mechanismScore.toFixed(3)+'; causal status remains '+short(causalStatus,28)+'.',
       epistemicClass:'MODELLED',
       required:true,
       assumptionIds:[
