@@ -468,8 +468,7 @@ function sourceFingerprint(input){
     strategyLeagueFingerprint:input?.strategyLeagueSummary?.fingerprint??null,
     researchDataPlaneSeq:finite(input?.researchDataPlaneSummary?.seq),
     researchGovernanceFingerprint:input?.researchDataGovernanceSummary?.fingerprint??null,
-    marketScienceDirectorFingerprint:input?.marketScienceDirectorSummary?.fingerprint??sha256({
-      asOf:finite(input?.marketScienceDirectorSummary?.asOf,null),
+    marketScienceDirectorFingerprint:input?.marketScienceDirectorSummary?.researchFingerprint??sha256({
       frontier:input?.marketScienceDirectorSummary?.knowledgeFrontier??null,
       nextQuestionId:input?.marketScienceDirectorSummary?.nextResearchQuestion?.questionId??null,
       topAgenda:arr(input?.marketScienceDirectorSummary?.topAgenda).map(x=>({
