@@ -67,6 +67,7 @@ const COMMANDS=[
   {name:'decisions',description:'BIGGJ Decision Trace öffnen'},
   {name:'supervisor',description:'Channel-Manager Supervisor öffnen'},
   {name:'improvements',description:'Channel-Verbesserungsliste öffnen'},
+  {name:'rulebook',description:'BIGGJ internes Rulebook und aktuelle Verstöße öffnen'},
   {name:'setup',description:'TCX Discord Command Center automatisch einrichten'},
   {name:'terminal',description:'TCX Live-Terminal anzeigen'},
   {name:'system',description:'TCX Systemstatus anzeigen'},
@@ -115,7 +116,8 @@ const SERVER_LAYOUT=Object.freeze([
   ]},
   {category:'BIGGJ • OPERATIONS',channels:[
     {name:'channel-supervisor',topic:'Meta-Überwachung aller Channel-Manager: Zustand, Freshness, Fehler, Entscheidungen und Auto-Reparaturen.'},
-    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'}
+    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'},
+    {name:'rulebook',topic:'Kanonisches BIGGJ Rulebook: Soll, Nicht-Soll, HARD-Regeln, Runtime-Verstöße und Coverage.'}
   ]},
   {category:'TCX • SYSTEM',channels:[
     {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
@@ -129,7 +131,7 @@ const CHANNEL_PROFILE_GROUPS=Object.freeze({
   LIVE_60:new Set([
     'tcx-terminal','performance','system-status','data-health',
     'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
-    'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements'
+    'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements','rulebook'
   ]),
   LIVE_90:new Set(['market-overview']),
   LIVE_120:new Set([
@@ -205,7 +207,8 @@ const MARKERS=Object.freeze({
   intelHub:'BIGGJ_CHANNEL_INTEL_HUB_V7',
   anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
   replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
-  errors:'BIGGJ_CHANNEL_ERROR_DESK_V7'
+  errors:'BIGGJ_CHANNEL_ERROR_DESK_V7',
+  rulebook:'BIGGJ_RULEBOOK_PANEL_V1'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -671,6 +674,32 @@ function buildErrorDeskPayload(snapshot={},recentErrors=[],translationHealth=nul
     {type:2,style:2,label:'Brain Pulse',custom_id:'dc6:brain:pulse'},
     {type:2,style:2,label:'Entscheidungen',custom_id:'dc6:brain:decisions'}
   ]}],allowedMentions:{parse:[]}};
+}
+
+function buildRulebookPayload(snapshot={}){
+  const rb=snapshot?.health?.biggjRulebook||{};
+  const runtime=rb?.runtime||{};
+  const verification=rb?.verification||{};
+  const violations=Array.isArray(runtime?.violations)?runtime.violations:[];
+  const top=violations.slice(0,10).map(v=>
+    '• **'+String(v.ruleId||'UNKNOWN')+' · '+String(v.severity||'—')+'**\n  '+String(v.title||v.reason||'Regelverletzung')+' → '+String(v.response||'PRÜFEN')
+  ).join('\n')||'Keine aktuell erkannten Rulebook-Verstöße.';
+  const missing=Array.isArray(runtime?.coverage?.coreFactsMissing)?runtime.coverage.coreFactsMissing:[];
+  return {embeds:[{
+    title:'BIGGJ // INTERNES RULEBOOK',
+    description:'**Feste Soll- und Nicht-Soll-Regeln für alle BIGGJ/TCX-Subsysteme.**\nHARD-Regeln blockieren; HIGH-Regeln degradieren oder erzwingen Repair. Nicht geprüft bedeutet niemals automatisch bestanden.',
+    fields:[
+      {name:'Rulebook',value:String(rb?.version||'—')+' · '+String(rb?.rules||0)+' Regeln · '+String(rb?.domains||0)+' Domänen · '+String(rb?.hardRules||0)+' HARD',inline:false},
+      {name:'Definition gültig',value:verification?.ok===true?'● OK':'● FEHLER',inline:true},
+      {name:'Runtime',value:String(runtime?.state||'UNKNOWN')+' · Aktion '+String(runtime?.action||'—'),inline:true},
+      {name:'Machine Coverage',value:String(runtime?.counts?.checked||0)+' Core-Fakten geprüft · '+String(runtime?.counts?.missingCoreFacts||0)+' unbewiesen',inline:false},
+      {name:'Aktuelle Verstöße',value:top.slice(0,1024),inline:false},
+      {name:'Unbewiesene Core-Fakten',value:(missing.slice(0,8).map(x=>'• '+String(x.ruleId)+' / '+String(x.key)).join('\n')||'Keine').slice(0,1024),inline:false},
+      {name:'Fixe Grenze',value:'SHADOW_ONLY · canExecute:false · canExecuteLive:false · ABSTAIN ist vollwertig · Point-in-Time Pflicht.',inline:false}
+    ],
+    footer:{text:MARKERS.rulebook},
+    timestamp:new Date().toISOString()
+  }],allowedMentions:{parse:[]}};
 }
 
 function buildChannelSupervisorPayload(managerState={},translationHealth=null){
@@ -1383,6 +1412,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return msg;
   }
 
+  async function refreshRulebookPanel(){
+    return refreshStableManagedPanel('rulebook',MARKERS.rulebook,buildRulebookPayload(await safeMissionSnapshot()));
+  }
   async function refreshForecastDesk(){
     return refreshStableManagedPanel('forecasts',MARKERS.forecasts,buildForecastDeskPayload(await safeMissionSnapshot()));
   }
@@ -1440,12 +1472,14 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='anomalies'){await refreshAnomalyDesk();return true;}
     if(name==='trade-replay'){await refreshReplayDesk();return true;}
     if(name==='errors'){await refreshErrorDesk();return true;}
+    if(name==='rulebook'){await refreshRulebookPanel();return true;}
     return false;
   }
 
   async function refreshChannelSupervisor({autoRepair=true}={}){
     channelManagers.success('channel-supervisor','Supervisor-Zyklus gestartet');
     channelManagers.success('channel-improvements','Verbesserungsanalyse gestartet');
+    channelManagers.success('rulebook','Rulebook-Zustand wird geprüft');
     let before=managerSnapshot();
     const repaired=[];
     if(autoRepair){
@@ -1467,6 +1501,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const translation=germanTranslator.health();
     await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation));
     await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation));
+    await refreshRulebookPanel();
     const finalState=managerSnapshot();
     try{logger.info?.('[BIGGJ_CHANNEL_SUPERVISOR] '+JSON.stringify({
       status:finalState.supervisor.status,
@@ -1826,6 +1861,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshWorldWatch,120000);
     addTimer(refreshMemecoinLab,120000);
     addTimer(refreshAuxiliaryDesks,60000);
+    addTimer(refreshRulebookPanel,60000);
     addTimer(()=>refreshChannelSupervisor({autoRepair:true}),60000);
     addSerialTimer(syncTradeCards,tradeSyncIntervalMs);
     addSerialTimer(drainVisualRefreshQueue,250);
@@ -1840,7 +1876,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       await Promise.allSettled([
         refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),
         refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
-        refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),syncTradeCards(),syncHealthAlerts()
+        refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),refreshRulebookPanel(),syncTradeCards(),syncHealthAlerts()
       ]);
       await refreshAuxiliaryDesks();
       await refreshChannelSupervisor({autoRepair:true});
@@ -1931,6 +1967,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='improvements'){
       await interaction.deferReply();
       await interaction.editReply(buildChannelImprovementsPayload(managerSnapshot(),germanTranslator.health()));
+      return;
+    }
+    if(name==='rulebook'){
+      await interaction.deferReply();
+      await interaction.editReply(buildRulebookPayload(await safeMissionSnapshot()));
       return;
     }
     const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
