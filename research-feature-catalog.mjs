@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V3';
+export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V4';
 
 const defs=[];
 
@@ -144,6 +144,19 @@ define('research.news.affectedAssetCount','NEWS_EVENT',{unit:'COUNT',min:0,max:1
 define('research.news.primarySource','NEWS_EVENT',{unit:'BINARY',min:0,max:1,description:'Direct primary-source publication flag'});
 define('research.news.sourceOriginVerified','NEWS_EVENT',{unit:'BINARY',min:0,max:1,description:'Verified direct source origin; not verification of substantive claims'});
 define('research.news.sourceClassCode','NEWS_EVENT',{unit:'CATEGORY_CODE',min:0,max:2,description:'Source class code: unknown 0, discovery aggregator 1, official primary 2'});
+
+define('research.cftc.openInterestLog','CFTC_POSITIONING',{unit:'LOG_CONTRACTS',min:0,description:'log1p open interest for the fixed CFTC crypto futures contract'});
+define('research.cftc.openInterestChangeShare','CFTC_POSITIONING',{unit:'RATE',min:-20,max:20,description:'Weekly CFTC open-interest change divided by current open interest'});
+define('research.cftc.dealerNetShare','CFTC_POSITIONING',{unit:'SIGNED_SHARE',min:-1,max:1,description:'Dealer long minus short positions divided by open interest'});
+define('research.cftc.assetManagerNetShare','CFTC_POSITIONING',{unit:'SIGNED_SHARE',min:-1,max:1,description:'Asset-manager long minus short positions divided by open interest'});
+define('research.cftc.leveragedMoneyNetShare','CFTC_POSITIONING',{unit:'SIGNED_SHARE',min:-1,max:1,description:'Leveraged-money long minus short positions divided by open interest'});
+define('research.cftc.nonreportableNetShare','CFTC_POSITIONING',{unit:'SIGNED_SHARE',min:-1,max:1,description:'Nonreportable long minus short positions divided by open interest'});
+define('research.cftc.assetManagerLongShare','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Asset-manager long positions as share of open interest'});
+define('research.cftc.assetManagerShortShare','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Asset-manager short positions as share of open interest'});
+define('research.cftc.leveragedMoneyLongShare','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Leveraged-money long positions as share of open interest'});
+define('research.cftc.leveragedMoneyShortShare','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Leveraged-money short positions as share of open interest'});
+define('research.cftc.top4LongConcentration','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Gross long share held by the four largest traders'});
+define('research.cftc.top4ShortConcentration','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Gross short share held by the four largest traders'});
 
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
