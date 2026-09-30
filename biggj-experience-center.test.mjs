@@ -69,7 +69,7 @@ function snapshot(){
 
 test('experience layout exposes requested operator and intelligence surfaces',()=>{
   const channels=BIGGJ_EXPERIENCE_LAYOUT.flatMap(x=>x.channels.map(c=>c.name));
-  for(const name of ['biggj-needs','learned-playbook','learning-timeline','news-feed','world-watch','trader-watch','trade-cockpit']){
+  for(const name of ['biggj-needs','learned-playbook','mobile-app','news-feed','world-watch','trader-watch','trade-cockpit']){
     assert.ok(channels.includes(name),name);
   }
 });
