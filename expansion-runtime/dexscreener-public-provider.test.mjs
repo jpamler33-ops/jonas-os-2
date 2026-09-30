@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDexScreenerPublicProvider } from './dexscreener-public-provider.mjs';
+import { createDexScreenerPublicProvider, dexScreenerLearningContextToExtraFeatures } from './dexscreener-public-provider.mjs';
 
 function response(body,status=200){
   return {ok:status>=200&&status<300,status,json:async()=>body};
@@ -35,4 +35,41 @@ test('trending metas are normalized without inventing missing values',async()=>{
   assert.equal(out.rows[0].name,'AI Agents');
   assert.equal(out.rows[0].marketCapChange.h1,2.5);
   assert.equal(out.rows[0].marketCapChange.h6,null);
+});
+
+
+test('learning context converts promotion-biased DEX activity into bounded research features',()=>{
+  const rows=dexScreenerLearningContextToExtraFeatures({
+    radar:{rows:[
+      {pair:{liquidityUsd:1000,volumeH1:500,buysH1:8,sellsH1:2}},
+      {pair:{liquidityUsd:4000,volumeH1:1500,buysH1:4,sellsH1:6}}
+    ]},
+    metas:{rows:[
+      {liquidity:10000,volume:20000,tokenCount:5},
+      {liquidity:5000,volume:10000,tokenCount:3}
+    ]}
+  });
+  const byId=new Map(rows.map(x=>[x.id,x.value]));
+  assert.equal(byId.get('research.dex.boostedPairCount'),2);
+  assert.equal(byId.get('research.dex.boostedBuySellImbalanceH1'),.2);
+  assert.ok(byId.get('research.dex.boostedLiquidityLog')>0);
+  assert.ok(byId.get('research.dex.trendingMetaVolumeLog')>0);
+  assert.equal(byId.get('research.dex.trendingMetaTokenCountLog'),Math.log1p(8));
+});
+
+test('learning context survives one failed DEX sub-source without inventing the missing side',async()=>{
+  const fetchImpl=async url=>{
+    if(url.endsWith('/token-boosts/top/v1')) return response([],503);
+    if(url.endsWith('/metas/trending/v1')) return response([{name:'AI',liquidity:50,volume:100,tokenCount:2}]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createDexScreenerPublicProvider({fetchImpl,baseUrl:'https://example.test'});
+  const out=await p.fetchLearningContext({metaLimit:1});
+  assert.equal(out.ok,true);
+  assert.equal(out.radar,null);
+  assert.equal(out.metas.rows.length,1);
+  assert.equal(out.errors.length,1);
+  const features=dexScreenerLearningContextToExtraFeatures(out);
+  assert.equal(features.some(x=>x.id==='research.dex.boostedPairCount'),false);
+  assert.ok(features.some(x=>x.id==='research.dex.trendingMetaTokenCountLog'));
 });
