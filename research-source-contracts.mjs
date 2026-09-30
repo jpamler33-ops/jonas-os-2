@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V7';
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V8';
 
 const contracts=[
   {id:'BINANCE_USDM_DERIVATIVES',domain:'DERIVATIVES',source:'BINANCE_USDM_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
@@ -28,6 +28,15 @@ const contracts=[
   {id:'DEXSCREENER_TRENDING_METAS',domain:'DEX_CONTEXT',source:'DEXSCREENER_TRENDING_METAS',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:600000,maxSilenceMs:3600000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'DEFILLAMA_STABLECOIN_CHAINS',domain:'STABLECOIN_CONTEXT',source:'DEFILLAMA_STABLECOIN_CHAINS',minCompleteness:.5,maxPublicationLagMs:1800000,maxIngestLagMs:600000,maxSilenceMs:7200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'DEXSCREENER_PROMOTION_RADAR',domain:'DEX_PROMOTION_CONTEXT',source:'DEXSCREENER_PROMOTION_RADAR',minCompleteness:.44,maxPublicationLagMs:600000,maxIngestLagMs:600000,maxSilenceMs:3600000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'GDELT_PUBLIC_NEWS',domain:'NEWS_EVENT',source:'GDELT_DOC_API',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:43200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'GOOGLE_PUBLIC_NEWS',domain:'NEWS_EVENT',source:'GOOGLE_NEWS_RSS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:43200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'FED_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'FED_PRESS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'SEC_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'SEC_PRESS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'ECB_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'ECB_PRESS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'CFTC_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'CFTC_PRESS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'BLS_EMPSIT_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'BLS_EMPSIT',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:5184000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'BLS_CPI_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'BLS_CPI',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:5184000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
+  {id:'BLS_JOLTS_OFFICIAL_NEWS',domain:'NEWS_EVENT',source:'BLS_JOLTS',minCompleteness:1,maxPublicationLagMs:108000000,maxIngestLagMs:300000,maxSilenceMs:5184000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'POLYMARKET_CONFIGURED',domain:'PREDICTION_MARKET',source:'POLYMARKET_GAMMA_CONFIGURED',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'VERIFIED_ENTITY_FLOW',domain:'ENTITY_FLOW',source:'VERIFIED_ENTITY_FINALIZED_FLOW',minCompleteness:1,maxPublicationLagMs:1800000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:'FINALIZED'},
   {id:'PUBLIC_WALLET_COHORT',domain:'WALLET_COHORT',source:'PUBLIC_WALLET_COHORT_RPC',minCompleteness:1,maxPublicationLagMs:900000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null}
