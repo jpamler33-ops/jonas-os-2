@@ -1,8 +1,15 @@
 import { sha256 } from './institutional-kernel.mjs';
 import { verifyForecastClaimAssumptionSidecar } from './forecast-claim-assumption-sidecar.mjs';
 import { FORECAST_THESIS_DECLARATIONS_VERSION } from './forecast-thesis-declarations.mjs';
+import {
+  createInitialAssumptionStability,
+  observeAssumptionStability,
+  verifyAssumptionStability,
+  FORECAST_ASSUMPTION_STABILITY_VERSION
+} from './forecast-assumption-stability.mjs';
 
-export const FORECAST_THESIS_REVISION_MEMORY_VERSION='TCX_FORECAST_THESIS_REVISION_MEMORY_V1';
+export const LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION='TCX_FORECAST_THESIS_REVISION_MEMORY_V1';
+export const FORECAST_THESIS_REVISION_MEMORY_VERSION='TCX_FORECAST_THESIS_REVISION_MEMORY_V2';
 export const FORECAST_THESIS_REVISION_ARTIFACT_VERSION='TCX_FORECAST_THESIS_REVISION_ARTIFACT_V1';
 
 const deepFreeze=value=>{
