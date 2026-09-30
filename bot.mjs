@@ -6060,6 +6060,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let entityFlowResearchSnapshot=null;
   let walletResearchSnapshot=null;
   let externalResearchSnapshot=null;
+  let publicContextResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     const researchAsOf=Date.now();
     try{
@@ -6080,6 +6081,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       {
         id:'external',
         run:()=>externalResearchProvider.fetchBundle(symbol)
+      },
+      {
+        id:'public_context',
+        run:()=>publicMarketContextProvider.fetchContext()
       }
     ];
     if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
@@ -6105,6 +6110,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     derivativesResearchSnapshot=fanout.results.derivatives?.value||null;
     onchainResearchSnapshot=fanout.results.onchain?.value||null;
     externalResearchSnapshot=fanout.results.external?.value||null;
+    publicContextResearchSnapshot=fanout.results.public_context?.value||null;
     entityFlowResearchSnapshot=fanout.results.entity_flow?.value||null;
     walletResearchSnapshot=fanout.results.wallet?.value||null;
 
@@ -6113,12 +6119,13 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       let ok=row.status==='FULFILLED';
       if(id==='derivatives') ok=ok&&value?.ok===true;
       else if(id==='external') ok=ok&&Boolean(value?.coinMetrics?.ok||value?.deribitOptions?.ok||value?.macro?.ok||value?.predictionMarket?.ok);
+      else if(id==='public_context') ok=ok&&Boolean(value?.sentiment||value?.global);
       else if(['onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
       const error=row.status==='REJECTED'
         ?row.error
         :(ok?null:(value?.reason||((value?.errors||[]).map(x=>x.error||x.reason||String(x)).join(' | ')||'PROVIDER_NO_USABLE_DATA')));
       recordOperation(observability,{
-        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':'research_provider_'+id,
+        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':'research_provider_'+id,
         ok,
         latencyMs:row.durationMs,
         error
@@ -6173,7 +6180,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         onchainSnapshot:onchainResearchSnapshot,
         entityFlowSnapshot:entityFlowResearchSnapshot,
         walletSnapshot:walletResearchSnapshot,
-        externalSnapshot:externalResearchSnapshot
+        externalSnapshot:externalResearchSnapshot,
+        publicContextSnapshot:publicContextResearchSnapshot
       });
       researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
       markForecastMemory('rdp-append');
