@@ -9118,6 +9118,12 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
+  biggjLivingResearch:{
+    ...biggjLivingResearchRuntimeSummary(biggjLivingResearchState),
+    healthy:biggjLivingResearchHealthy,
+    recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
+    file:biggjLivingResearchFile
+  },
   auditLedger:{
     healthy:auditLedger.healthy,
     fileBytes:Number(auditLedger.fileBytes||0),
