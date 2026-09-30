@@ -402,3 +402,55 @@ test('previously unresolved recovery stays unresolved while its incident remains
   assert.equal(biggjAutonomousOperatorSummary(out.state).unresolvedRecoveries,1);
   assert.equal(out.state.recoveryHistory.some(x=>x.result==='PLANNED'),true);
 });
+
+
+test('passive data-quality quarantine is waiting for data, not a human escalation',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'DATA_QUALITY_BLOCKED',
+      operatorDataOnly:false,
+      automatic:12,
+      manual:0,
+      dataOnly:12,
+      unowned:0,
+      dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+      nextTasks:[task({taskId:'pit-quality',subject:'seed:PIT_EVENT_CLOCK'})]
+    }),
+    operations:{forecast_shadow_competition:{lastAt:now-10_000,lastError:null}},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.mode,'WAITING_FOR_DATA');
+  assert.equal(summary.waitingForData,true);
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.humanJobRemaining,'EXCEPTIONS_ONLY');
+  assert.equal(summary.activeIncidents,0);
+  assert.equal(out.actions.length,0);
+});
+
+test('non-passive repeated data-quality block still escalates',()=>{
+  let state=createBiggjAutonomousOperator({asOf:now-10_000});
+  for(let i=0;i<3;i++){
+    const out=refreshBiggjAutonomousOperator(state,{
+      factorySummary:factory({
+        mode:'DATA_QUALITY_BLOCKED',
+        operatorDataOnly:false,
+        dataNeeds:['AUDITABLE_POINT_IN_TIME_EVIDENCE'],
+        nextTasks:[task({taskId:'integrity',subject:'RESEARCH_DATA'})]
+      }),
+      operations:{forecast_shadow_competition:{lastAt:now+i*1000,lastError:null}},
+      ownerPolicies:policies(),
+      uptimeMs:600_000,
+      asOf:now+i*1000
+    });
+    state=out.state;
+  }
+  const summary=biggjAutonomousOperatorSummary(state);
+  assert.equal(summary.waitingForData,false);
+  assert.equal(summary.operatorNeeded,true);
+  assert.equal(summary.mode,'ESCALATION_REQUIRED');
+  assert.match(summary.humanJobRemaining,/DATA_QUALITY_BLOCKED/);
+});
