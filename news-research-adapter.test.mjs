@@ -110,3 +110,16 @@ test('previously persisted source event is skipped before payload-conflict prefl
   assert.equal(filtered.previouslyObserved,1);
   assert.deepEqual(filtered.candidates,[]);
 });
+
+
+test('same feed batch deduplicates repeated source event before RDP preflight',()=>{
+  const first=newsEventToResearchSnapshot(official,{symbol:'BTCUSDT',ingestedAt:OBSERVED});
+  const variant=Object.freeze({
+    ...first,
+    provenance:Object.freeze({...first.provenance,queryClass:'SECOND_QUERY'})
+  });
+  const filtered=filterPreviouslyObservedNewsSnapshots({sourcePayload:new Map()},[first,variant]);
+  assert.equal(filtered.candidates.length,1);
+  assert.equal(filtered.batchDuplicates,1);
+  assert.equal(filtered.previouslyObserved,0);
+});
