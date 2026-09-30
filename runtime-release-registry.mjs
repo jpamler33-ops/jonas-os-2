@@ -29,6 +29,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-trading-policy.mjs',
   'shadow-portfolio-ledger.mjs',
   'shadow-capital-academy.mjs',
+  'biggj-trading-academy.mjs',
   'shadow-training-supervisor.mjs',
   'strategy-evidence-engine.mjs',
   'shadow-trade-quality-learner.mjs',
