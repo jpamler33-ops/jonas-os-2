@@ -12,6 +12,7 @@ import {
   saveBiggjLivingResearchRuntime,
   verifyBiggjLivingResearchRuntime,
   biggjLivingResearchRuntimeSummary,
+  applyBiggjLivingResearchReviewDecision,
   biggjAssumptionResearchTemplates,
   BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION
 } from './biggj-living-research-runtime.mjs';
@@ -107,6 +108,8 @@ test('initial living research runtime is a governed research-only skill graph',(
   assert.deepEqual(state.persistentCaseRegistry,[]);
   assert.deepEqual(state.stabilityEventRegistry,[]);
   assert.deepEqual(state.researchProtocols,[]);
+  assert.equal(state.researchReviewQueue.ticketCount,0);
+  assert.deepEqual(state.researchReviewDecisions,[]);
   assert.equal(state.invariants.researchProtocolsArePreregistered,true);
   assert.equal(state.invariants.retrospectiveConfirmatoryRelabelingForbidden,true);
   assert.ok(state.skillTree.nodes.length>=159);
@@ -322,10 +325,58 @@ test('common-cause clustering prevents correlated cases from inflating independe
   const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
   assert.equal(row.recommendedStatus,'LEARNING');
   assert.equal(row.status,'DISCOVERING','research runtime must not auto-apply the recommendation');
+  assert.equal(summary.researchReviews.open,1);
+  assert.equal(summary.researchReviews.automaticApply,false);
+  assert.equal(separated.state.researchReviewQueue.tickets[0].proposedStatus,'LEARNING');
   assert.ok(summary.conservativeEpisodePartitions>=2);
   assert.equal(summary.researchEvidence.independentEpisodes,2);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.primaryMutationAllowed,false);
+});
+
+test('explicit living research review approval advances one skill stage and rebuilds the queue',()=>{
+  const DAY=24*60*60*1000;
+  const createdAt=30*DAY;
+  const initial=createBiggjLivingResearchRuntime({asOf:createdAt-10_000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:createdAt-3*60*60*1000}),
+      thesisMemory({forecastId:'F2',observedAt:createdAt-2*60*60*1000}),
+      thesisMemory({forecastId:'F3',observedAt:createdAt-1*60*60*1000})
+    ],
+    asOf:createdAt,
+    reason:'DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+  const forward=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F4',observedAt:createdAt+6*60*60*1000,symbol:'BTCUSDT'}),
+      thesisMemory({forecastId:'F5',observedAt:createdAt+7*60*60*1000,symbol:'ETHUSDT'}),
+      thesisMemory({forecastId:'F6',observedAt:createdAt+80*60*60*1000,symbol:'SOLUSDT'})
+    ],
+    asOf:createdAt+4*DAY,
+    reason:'REVIEW_READY'
+  });
+  assert.equal(forward.state.skillTree.nodes.find(x=>x.skillId===skillId).status,'DISCOVERING');
+  assert.equal(forward.state.researchReviewQueue.ticketCount,1);
+  const ticket=forward.state.researchReviewQueue.tickets[0];
+  assert.equal(ticket.skillId,skillId);
+  assert.equal(ticket.proposedStatus,'LEARNING');
+
+  const approved=applyBiggjLivingResearchReviewDecision(forward.state,{
+    ticketId:ticket.ticketId,
+    approved:true,
+    asOf:createdAt+4*DAY+1000,
+    reviewer:'TEST_OPERATOR'
+  });
+  assert.equal(approved.changed,true);
+  assert.equal(approved.state.skillTree.nodes.find(x=>x.skillId===skillId).status,'LEARNING');
+  assert.equal(approved.decision.decision,'APPROVED');
+  assert.equal(approved.state.researchReviewDecisions.length,1);
+  assert.equal(approved.state.researchReviewQueue.ticketCount,0);
+  assert.equal(approved.productionMutationPerformed,false);
+  assert.equal(approved.canInfluencePrimary,false);
+  assert.equal(approved.canExecuteLive,false);
 });
 
 test('association milestones bind modelled non-causal evidence without becoming independent validation',()=>{
