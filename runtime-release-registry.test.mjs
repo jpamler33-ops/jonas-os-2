@@ -102,6 +102,7 @@ test('institutional staged release set hashes forecast, science, admission and t
   const files=institutionalRuntimeFiles();
   for(const required of [
     'operational-readiness.mjs',
+    'shadow-dual-wallet.mjs',
     'persistence-contracts.mjs',
     'forecast-contract.mjs',
     'scientific-validity.mjs',
