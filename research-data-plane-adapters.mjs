@@ -36,8 +36,12 @@ import {
   dexScreenerPromotionRadarToExtraFeatures,
   DEXSCREENER_PUBLIC_PROVIDER_VERSION
 } from './expansion-runtime/dexscreener-public-provider.mjs';
+import {
+  cftcCotSnapshotToExtraFeatures,
+  CFTC_COT_PUBLIC_PROVIDER_VERSION
+} from './expansion-runtime/cftc-cot-public-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V6';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V7';
 
 function finite(v){
   if(v==null||v==='') return null;
@@ -682,6 +686,58 @@ function dexPromotionInput(symbol,snapshot,ingestedAt){
   });
 }
 
+function cftcCotInput(symbol,snapshot,ingestedAt){
+  const features=cftcCotSnapshotToExtraFeatures(snapshot);
+  if(!features.length) return null;
+  const availableAt=finite(snapshot?.availableAt)??finite(snapshot?.capturedAt)??ingestedAt;
+  const eventTime=eventTimeOrAvailable(snapshot?.reportDate,availableAt);
+  if(availableAt==null||eventTime==null) return null;
+  return createResearchFeatureSnapshot({
+    streamKey:symbol,
+    domain:'CFTC_POSITIONING',
+    source:'CFTC_TFF_FUTURES_ONLY',
+    sourceVersion:CFTC_COT_PUBLIC_PROVIDER_VERSION,
+    sourceEventId:makeSourceEventId({
+      symbol,
+      source:'CFTC_TFF_FUTURES_ONLY',
+      sourceEventId:snapshot?.sourceEventId||null,
+      eventTime,
+      availableAt,
+      features:features.map(x=>[x.id,x.value])
+    }),
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:8*24*60*60_000,
+    finality:'OBSERVED',
+    quality:{
+      completeness:features.length/12,
+      sourceCount:1,
+      expectedSourceCount:1,
+      status:'OFFICIAL_WEEKLY_CFTC_POSITIONING'
+    },
+    features,
+    provenance:{
+      adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+      providerVersion:CFTC_COT_PUBLIC_PROVIDER_VERSION,
+      upstreamSource:String(snapshot?.source||'CFTC_TFF_FUTURES_ONLY'),
+      sourceEventId:String(snapshot?.sourceEventId||''),
+      contractCode:String(snapshot?.contractCode||''),
+      contractMarketName:String(snapshot?.contractMarketName||''),
+      marketAndExchange:String(snapshot?.marketAndExchange||''),
+      reportDate:Number(snapshot?.reportDate||0)||null,
+      reportWeek:String(snapshot?.reportWeek||''),
+      timestampSemantics:String(snapshot?.timestampSemantics||'REPORT_DATE_EVENT_TIME_CAPTURE_TIME_AVAILABILITY'),
+      epistemic:String(snapshot?.epistemic||'OFFICIAL_WEEKLY_POSITIONING_REPORT_NOT_LIVE_FLOW_OR_FORECAST'),
+      weeklyReport:true,
+      liveFlow:false,
+      directionalExecutionAuthority:false,
+      researchOnly:true,
+      canExecute:false
+    }
+  });
+}
+
 function walletInput(symbol,snapshot,ingestedAt){
   const features=walletCohortSnapshotToExtraFeatures(snapshot);
   if(!features.length) return null;
@@ -732,7 +788,8 @@ export function buildResearchDataPlaneSnapshots({
   externalSnapshot=null,
   publicContextSnapshot=null,
   dexContextSnapshot=null,
-  dexPromotionSnapshot=null
+  dexPromotionSnapshot=null,
+  cftcCotSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -747,6 +804,7 @@ export function buildResearchDataPlaneSnapshots({
     ...externalInputs(s,externalSnapshot,t),
     ...publicContextInputs(s,publicContextSnapshot,t),
     dexContextInput(s,dexContextSnapshot,t),
-    dexPromotionInput(s,dexPromotionSnapshot,t)
+    dexPromotionInput(s,dexPromotionSnapshot,t),
+    cftcCotInput(s,cftcCotSnapshot,t)
   ].filter(Boolean);
 }
