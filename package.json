@@ -50,9 +50,9 @@
     "test:research-leverage": "node --test biggj-research-leverage-engine.test.mjs autonomous-research-training-factory.test.mjs",
     "test:autonomous-operator": "node --test biggj-autonomous-operator.test.mjs",
     "test:governance-triage": "node --test biggj-governance-triage.test.mjs autonomous-research-training-factory.test.mjs",
-    "test:experience": "node --test biggj-experience-center.test.mjs biggj-mobile-webapp.test.mjs biggj-public-news-provider.test.mjs mission-control.test.mjs discord-command-center.test.mjs discord-telegram-bridge.test.mjs biggj-discord-observability.test.mjs biggj-channel-operations.test.mjs biggj-german-translation.test.mjs biggj-rulebook.test.mjs",
+    "test:experience": "node --test biggj-experience-center.test.mjs biggj-mobile-webapp.test.mjs biggj-public-news-provider.test.mjs mission-control.test.mjs discord-command-center.test.mjs discord-telegram-bridge.test.mjs biggj-discord-observability.test.mjs biggj-channel-operations.test.mjs biggj-german-translation.test.mjs biggj-rulebook.test.mjs biggj-rulebook-enforcement.test.mjs",
     "test:channel-ops": "node --test biggj-channel-operations.test.mjs biggj-german-translation.test.mjs discord-telegram-bridge.test.mjs discord-command-center.test.mjs biggj-experience-center.test.mjs",
-    "test:rulebook": "node --test biggj-rulebook.test.mjs"
+    "test:rulebook": "node --test biggj-rulebook.test.mjs biggj-rulebook-enforcement.test.mjs"
   },
   "engines": {
     "node": ">=22"
