@@ -646,7 +646,16 @@ export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
         if(firstPersistentStaleAt==null) firstPersistentStaleAt=Number(event.observedAt);
       }else if(t.type==='RECOVERY_STARTED'){
         transient.delete(id);
-        persistent.add(id);
+        if(t.recoveryOriginState!=='ISSUE_UNSUPPORTED') persistent.add(id);
+      }else if(t.type==='PERSISTENT_STALE_RECOVERED'){
+        transient.delete(id);
+        persistent.delete(id);
+      }else if(t.type==='ISSUE_UNSUPPORTED_SUPPORT_ESTABLISHED'){
+        transient.delete(id);
+        persistent.delete(id);
+      }else if(t.type==='ISSUE_SUPPORT_ESTABLISHMENT_FAILED'){
+        transient.delete(id);
+        persistent.delete(id);
       }else if(t.type==='PERSISTENT_STALE_RECOVERED'){
         transient.delete(id);
         persistent.delete(id);
