@@ -1,5 +1,6 @@
 import { manageShadowPosition, attributeClosedShadowTrade } from './trade-lifecycle-v2.mjs';
 import { evaluateBiggjPositionLifecycle, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
+import { LAB_UNCONSTRAINED_ENTRY_MODE, LAB_UNCONSTRAINED_ENTRY_ROLE, isLabWalletEntryMode, shadowWalletIdForPosition } from './shadow-dual-wallet.mjs';
 import path from 'node:path';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { sha256 } from './institutional-kernel.mjs';
@@ -122,7 +123,14 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     tradingPolicyVersion:String(order.strategyMeta?.tradingPolicyVersion||''),
     assetClass:String(order.strategyMeta?.assetClass||'CORE').toUpperCase(),
     entryMode:String(order.strategyMeta?.entryMode||'STANDARD').toUpperCase(),
-    exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
+    walletId:String(order.strategyMeta?.walletId||shadowWalletIdForPosition({entryMode:order.strategyMeta?.entryMode})).toUpperCase(),
+    labWalletVersion:String(order.strategyMeta?.labWalletVersion||''),
+    labDecisionKey:String(order.strategyMeta?.labDecisionKey||''),
+    labCapitalFacility:String(order.strategyMeta?.labCapitalFacility||''),
+    labCalibrationStatus:String(order.strategyMeta?.labCalibrationStatus||''),
+    labCounterfactualOnly:order.strategyMeta?.labCounterfactualOnly===true,
+    labPrimaryIsolation:order.strategyMeta?.labPrimaryIsolation===true,
+    exploration:['EXPLORATION','ABSTAIN_PROBE','COVERAGE_PROBE',LAB_UNCONSTRAINED_ENTRY_MODE].includes(String(order.strategyMeta?.entryMode||'').toUpperCase()),
     probeOnly:String(order.strategyMeta?.entryMode||'').toUpperCase()==='ABSTAIN_PROBE',
     probeAdmissionReasons:Array.isArray(order.strategyMeta?.probeAdmissionReasons)
       ?order.strategyMeta.probeAdmissionReasons.map(String).slice(0,12)
@@ -278,7 +286,7 @@ export function markShadowPosition(position,book,{at=Date.now(),feeBps=10,lifecy
   const ret=finite(exit.marginRoePct,finite(exit.returnPct,0));
   const legacyLifecycle=manageShadowPosition(position,{marginRoePct:ret,at:markAt});
   const entryMode=String(position.entryMode||'STANDARD').toUpperCase();
-  const primaryMode=!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(entryMode)&&position.horizonOnlyExit!==true;
+  const primaryMode=!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE].includes(entryMode)&&position.horizonOnlyExit!==true;
   const biggjPrimaryLane=primaryMode&&String(position.tradingPolicyVersion||'')===BIGGJ_TRADING_POLICY_VERSION;
   let lifecycle=legacyLifecycle;
 
@@ -388,7 +396,7 @@ export function reconcileShadowPortfolioEntries(ledger,orders,{now=Date.now()}={
   const current=validLedger?ledger:createEmptyShadowPortfolioLedger();
   const positions=Array.isArray(current.positions)?current.positions:[];
   const known=new Set(positions.map(p=>String(p.entryOrderId)));
-  const acceptedRoles=['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY'];
+  const acceptedRoles=['ENTRY','EXPLORATION_ENTRY','ABSTAIN_PROBE_ENTRY','COVERAGE_PROBE_ENTRY','LEARNED_CHALLENGER_ENTRY',LAB_UNCONSTRAINED_ENTRY_ROLE];
   const additions=[];
 
   for(const order of Array.isArray(orders)?orders:[]){
@@ -464,7 +472,7 @@ export function shadowResearchProbeSummary(ledger,{asOf=Date.now()}={}){
 }
 
 export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
-  const excludedModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION']);
+  const excludedModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE]);
   const rows=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
     .filter(p=>excludedModes.has(String(p.entryMode||'STANDARD').toUpperCase()));
   const open=rows.filter(p=>p.status==='OPEN');
@@ -529,7 +537,7 @@ export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
 
 export function shadowPortfolioSummary(ledger,{asOf=Date.now()}={}){
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const open=positions.filter(p=>p.status==='OPEN');
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
@@ -671,7 +679,7 @@ function tradeStats(rows){
 export function shadowPortfolioPeriodStats(ledger,{period='DAY',asOf=Date.now(),timeZone='UTC'}={}){
   const window=periodWindow(period,asOf,timeZone);
   const positions=(ledger?.positions||[]).map(sanitizePosition).filter(Boolean)
-    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+    .filter(p=>!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE].includes(String(p.entryMode||'STANDARD').toUpperCase()));
   const entered=positions.filter(p=>Number(p.openedAt)>=window.startAt&&Number(p.openedAt)<=window.endAt);
   const closed=positions.filter(p=>p.status==='CLOSED'&&Number(p.closedAt)>=window.startAt&&Number(p.closedAt)<=window.endAt);
   const base=tradeStats(closed);
