@@ -11,6 +11,7 @@ import {
   getBiggjRule,
   searchBiggjRules,
   evaluateBiggjRulebook,
+  evaluateBiggjRuntimeRulebook,
   assertBiggjRulebookAdmission,
   biggjRulebookInstructionPacket
 } from './biggj-rulebook.mjs';
@@ -190,4 +191,38 @@ test('summary is versioned, fingerprinted and domain-complete',()=>{
   assert.equal(summary.defaultFailureMode,'FAIL_CLOSED_FOR_HARD_RULES');
   assert.equal(typeof summary.fingerprint,'string');
   assert.ok(summary.fingerprint.length>=32);
+});
+
+
+test('runtime assessment exposes unproven coverage and blocks verification laundering',()=>{
+  const healthy=evaluateBiggjRuntimeRulebook({
+    health:{
+      institutionalKernel:{execution:'SHADOW_ONLY',canExecute:false},
+      autonomousOperator:{
+        canExecuteLive:false,
+        automaticPrimaryMutation:false,
+        automaticPromotion:false,
+        automaticSkillTransition:false
+      }
+    },
+    newsEvents:[]
+  });
+  assert.equal(healthy.state,'PASS');
+  assert.ok(healthy.counts.missingCoreFacts>0);
+  assert.match(healthy.note,/Missing core facts remain explicitly unproven/);
+
+  const bad=evaluateBiggjRuntimeRulebook({
+    health:{
+      institutionalKernel:{execution:'SHADOW_ONLY',canExecute:false},
+      autonomousOperator:{
+        canExecuteLive:false,
+        automaticPrimaryMutation:false,
+        automaticPromotion:false,
+        automaticSkillTransition:false
+      }
+    },
+    newsEvents:[{verified:true,independentConfirmation:0}]
+  });
+  assert.equal(bad.state,'BLOCKED');
+  assert.ok(bad.violations.some(v=>v.ruleId==='NEWS-003'));
 });
