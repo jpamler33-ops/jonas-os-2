@@ -414,6 +414,10 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
         .filter(x=>x?.type==='ASSUMPTION'&&x?.supportState==='REQUIRED_SUPPORT_MISSING')
         .map(x=>String(x.assumptionId))
         .sort(),
+      thesisAssumptionIds:(sidecar.graph?.nodes||[])
+        .filter(x=>x?.type==='ASSUMPTION'&&String(x.assumptionId||'').startsWith('THESIS_'))
+        .map(x=>String(x.assumptionId))
+        .sort(),
       thesisUnsupportedAssumptionIds:(sidecar.graph?.nodes||[])
         .filter(x=>
           x?.type==='ASSUMPTION'&&
