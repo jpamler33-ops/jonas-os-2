@@ -276,3 +276,19 @@ test('runtime readiness contradiction is blocked',()=>{
   assert.equal(out.state,'BLOCKED');
   assert.ok(out.violations.some(v=>v.ruleId==='OPS-001'));
 });
+
+test('rulebook V2 permits isolated LAB counterfactual research without weakening NORMAL',()=>{
+  assert.equal(BIGGJ_RULEBOOK_VERSION,'BIGGJ_INTERNAL_RULEBOOK_V2');
+  const lab=getBiggjRule('RISK-008');
+  assert.equal(lab.severity,'HARD');
+  assert.match(lab.must,/ohne Kapital-, Drawdown- oder Academy-Limit/);
+  assert.match(lab.must,/PIT/);
+  assert.match(lab.mustNot,/PRIMARY/);
+  assert.match(lab.mustNot,/echte Orders/);
+  const primary=getBiggjRule('RISK-001');
+  assert.match(primary.must,/NORMAL/);
+  assert.match(primary.must,/Data-Safety-Blocks/);
+  const forced=getBiggjRule('TRADING-004');
+  assert.match(forced.must,/LAB-Counterfactuals/);
+  assert.match(forced.mustNot,/NORMAL\/PRIMARY/);
+});

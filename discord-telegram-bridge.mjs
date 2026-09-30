@@ -105,9 +105,9 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'theses',topic:'BIGGJ Living Theses, Ghost Paths und Trade DNA für aktive Shadow-Trades.'}
   ]},
   {category:'TCX • SHADOW',channels:[
-    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades mit kompakter Thesis, Risiko, PnL und Live-Chart-Thread. Keine echten Orders.'},
+    {name:'live-trades',topic:'Nur offene NORMAL/PRIMARY Shadow-Trades mit Thesis, Risiko, PnL und Live-Chart-Thread. LAB bleibt getrennt. Keine echten Orders.'},
     {name:'closed-trades',topic:'Nur abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
-    {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
+    {name:'performance',topic:'Getrennte NORMAL- und LAB-Wallet-Performance im Shadow-Modus inklusive LAB-Recovery-Debt.'},
     {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen mit Point-in-Time Kontext.'}
   ]},
   {category:'BIGGJ • TRADING ACADEMY',channels:[
@@ -508,13 +508,13 @@ function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANN
 ].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
 
 export function buildDiscordTerminalPayload(snapshot={}){
-  const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
-    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'Primary Open',value:String(p?.openPositions??0),inline:true},{name:'Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},{name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},{name:'Return',value:percent(p?.returnPct),inline:true},
-    {name:'Research Open',value:String(research?.openPositions??0),inline:true},{name:'Research Closed',value:String(research?.closedTrades??0),inline:true},{name:'Research PnL',value:money(research?.netPnlQuote),inline:true},
-    {name:'Forecast Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},{name:'Episodes',value:String(h?.episodeMemory?.total??'—'),inline:true},{name:'Evidence',value:String(h?.evidenceHistory?.total??'—'),inline:true},
-    {name:'Execution',value:'SHADOW_ONLY',inline:true},{name:'Live Orders',value:'BLOCKED',inline:true}
+  const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{},wallets=p?.wallets||{},normal=wallets?.normal||{},lab=wallets?.lab||{};
+  return {embeds:[{title:'TCX // COMMAND CENTER',description:'**DUAL SHADOW WALLETS · SHADOW_ONLY · REAL ORDERS BLOCKED**',fields:[
+    {name:'Runtime',value:yesNo(r?.ready),inline:true},{name:'NORMAL Open',value:String(normal?.openPositions??p?.openPositions??0),inline:true},{name:'NORMAL Equity',value:money(p?.equityQuote),inline:true},
+    {name:'NORMAL Closed',value:String(normal?.closedTrades??p?.closedTrades??0),inline:true},{name:'NORMAL PnL',value:money(normal?.netPnlQuote??p?.netPnlQuote),inline:true},{name:'NORMAL Return',value:percent(p?.returnPct),inline:true},
+    {name:'LAB Open',value:String(lab?.openPositions??research?.openPositions??0),inline:true},{name:'LAB Closed',value:String(lab?.closedTrades??research?.closedTrades??0),inline:true},{name:'LAB PnL',value:money(lab?.netPnlQuote??research?.netPnlQuote),inline:true},
+    {name:'LAB Recovery Debt',value:money(lab?.currentRecoveryDebtQuote),inline:true},{name:'LAB Facility',value:'∞ VIRTUAL',inline:true},{name:'LAB Status',value:String(lab?.objectiveStatus||'BUILDING_SAMPLE').replaceAll('_',' '),inline:true},
+    {name:'Forecast Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},{name:'Execution',value:'SHADOW_ONLY',inline:true},{name:'Live Orders',value:'BLOCKED',inline:true}
   ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordSystemPayload(snapshot={}){
@@ -529,20 +529,23 @@ export function buildDiscordSystemPayload(snapshot={}){
 }
 
 export function buildDiscordPerformancePayload(snapshot={}){
-  const p=snapshot?.portfolio||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance getrennt von Research/Probes · keine echten Orders**',fields:[
-    {name:'Primary Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},
-    {name:'Primary Return',value:percent(p?.returnPct),inline:true},
-    {name:'Primary Open',value:String(p?.openPositions??0),inline:true},
-    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},
-    {name:'Primary Winrate',value:percent(p?.winRate),inline:true},
-    {name:'Research Open',value:String(research?.openPositions??0),inline:true},
-    {name:'Research Closed',value:String(research?.closedTrades??0),inline:true},
-    {name:'Research PnL',value:money(research?.netPnlQuote),inline:true},
-    {name:'Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
-    {name:'Expectancy',value:money(p?.expectancyQuote),inline:true},
-    {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
+  const p=snapshot?.portfolio||{},research=p?.researchActivity||{},wallets=p?.wallets||{},normal=wallets?.normal||{},lab=wallets?.lab||{};
+  return {embeds:[{title:'TCX // DUAL WALLET PERFORMANCE',description:'**NORMAL = governed portfolio · LAB = unlimited virtual capital facility · strikt getrennt · keine echten Orders**',fields:[
+    {name:'NORMAL Equity',value:money(p?.equityQuote),inline:true},
+    {name:'NORMAL PnL',value:money(normal?.netPnlQuote??p?.netPnlQuote),inline:true},
+    {name:'NORMAL Return',value:percent(p?.returnPct),inline:true},
+    {name:'NORMAL Open',value:String(normal?.openPositions??p?.openPositions??0),inline:true},
+    {name:'NORMAL Closed',value:String(normal?.closedTrades??p?.closedTrades??0),inline:true},
+    {name:'NORMAL Winrate',value:percent(normal?.winRate??p?.winRate),inline:true},
+    {name:'LAB PnL',value:money(lab?.netPnlQuote??research?.netPnlQuote),inline:true},
+    {name:'LAB Recovery Debt',value:money(lab?.currentRecoveryDebtQuote),inline:true},
+    {name:'LAB Surplus',value:money(lab?.retainedSurplusQuote),inline:true},
+    {name:'LAB Open / Closed',value:String(lab?.openPositions??research?.openPositions??0)+' / '+String(lab?.closedTrades??research?.closedTrades??0),inline:true},
+    {name:'LAB Profit Factor',value:Number.isFinite(Number(lab?.profitFactor))?Number(lab.profitFactor).toFixed(2):'—',inline:true},
+    {name:'LAB Recovery',value:Number.isFinite(Number(lab?.recoveryCoverage))?percent(lab.recoveryCoverage):'—',inline:true},
+    {name:'NORMAL Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
+    {name:'NORMAL Expectancy',value:money(p?.expectancyQuote),inline:true},
+    {name:'NORMAL Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
   ],footer:{text:MARKERS.performance},timestamp:new Date().toISOString()}],components:[
     {type:1,components:[
       {type:2,style:2,label:'Tag',custom_id:'dc3:home:stats_day'},
@@ -554,8 +557,8 @@ export function buildDiscordPerformancePayload(snapshot={}){
   ],allowedMentions:{parse:[]}};
 }
 export function buildDiscordMarketOverviewPayload(snapshot={}){
-  const p=snapshot?.portfolio||{},h=snapshot?.health||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Primary offen: **'+String(p?.openPositions??0)+'**','Research offen: **'+String(research?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+  const p=snapshot?.portfolio||{},h=snapshot?.health||{},research=p?.researchActivity||{},wallets=p?.wallets||{},lab=wallets?.lab||{};
+  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core · zwei Shadow-Wallets**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','NORMAL offen: **'+String(p?.openPositions??0)+'**','LAB offen: **'+String(lab?.openPositions??research?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordDataHealthPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{},coverage=h?.researchCoverage||{};
@@ -817,6 +820,7 @@ function tradeContextLabel(position={}){
 }
 function tradeLaneLabel(position={}){
   const mode=String(position?.entryMode||'STANDARD').trim().toUpperCase();
+  if(mode==='LAB_UNCONSTRAINED') return 'LAB';
   return ['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(mode)?'RESEARCH':'PRIMARY';
 }
 function virtualTradeSize(position={}){

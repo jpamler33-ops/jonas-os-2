@@ -302,6 +302,40 @@ test('exploration is research-only and excluded from every primary performance v
   assert.equal(shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000}).trades,0);
 });
 
+test('LAB wallet entry is persisted, horizon-only and excluded from primary performance',()=>{
+  const e=entry({
+    id:'sh_lab_wallet_1',
+    fillQuote:500,
+    strategyMeta:{
+      ...entry().strategyMeta,
+      role:'LAB_UNCONSTRAINED_ENTRY',
+      entryMode:'LAB_UNCONSTRAINED',
+      walletId:'LAB',
+      labWalletVersion:'TCX_SHADOW_DUAL_WALLET_V1',
+      labDecisionKey:'lab_test',
+      labCapitalFacility:'UNLIMITED_VIRTUAL',
+      labCalibrationStatus:'WATCH',
+      labCounterfactualOnly:true,
+      labPrimaryIsolation:true,
+      horizonOnlyExit:true,
+      horizonMs:60_000,
+      horizonId:'1m'
+    }
+  });
+  let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
+  assert.equal(l.positions.length,1);
+  assert.equal(l.positions[0].entryMode,'LAB_UNCONSTRAINED');
+  assert.equal(l.positions[0].walletId,'LAB');
+  assert.equal(l.positions[0].labDecisionKey,'lab_test');
+  assert.equal(l.positions[0].horizonOnlyExit,true);
+  assert.equal(shadowPortfolioSummary(l,{asOf:30_000}).openPositions,0);
+  assert.equal(shadowResearchActivitySummary(l,{asOf:30_000}).byMode.LAB_UNCONSTRAINED.open,1);
+  const early=markShadowPosition(l.positions[0],book({bid:110}),{at:30_000,feeBps:0});
+  assert.equal(early.trigger,null);
+  const due=markShadowPosition(early.position,book({bid:110}),{at:61_000,feeBps:0});
+  assert.equal(due.trigger,'HORIZON_EXIT');
+});
+
 test('learned challenger is tracked but excluded from primary portfolio metrics',()=>{
   const e=entry({
     id:'sh_challenger_1',

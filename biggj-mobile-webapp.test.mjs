@@ -145,3 +145,24 @@ test('service worker bypasses cache for live signal and proof JSON',()=>{
   assert.match(sw,/proof-feed\.json/);
   assert.match(sw,/cache:'no-store'/);
 });
+
+test('mobile trades view renders NORMAL and LAB as separate shadow wallets',()=>{
+  const html=renderBiggjMobileApp({
+    generatedAt:1_800_000_000_000,
+    health:{autonomousOperator:{mode:'HANDS_OFF'}},
+    portfolio:{
+      equityQuote:10000,netPnlQuote:25,openPositions:1,closedTrades:4,positions:[],recentClosed:[],
+      wallets:{
+        normal:{netPnlQuote:25,openPositions:1,closedTrades:4},
+        lab:{netPnlQuote:-30,currentRecoveryDebtQuote:30,openPositions:2,closedTrades:9,active:[],capitalLimitQuote:null}
+      }
+    }
+  });
+  assert.match(html,/Dual Shadow Wallets/);
+  assert.match(html,/NORMAL PnL/);
+  assert.match(html,/LAB PnL/);
+  assert.match(html,/LAB Debt/);
+  assert.match(html,/Kapitalfazilität ∞ virtuell/);
+  assert.match(html,/PIT, Data Safety/);
+  assert.match(html,/canExecuteLive:false/);
+});

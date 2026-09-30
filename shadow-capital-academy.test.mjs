@@ -122,6 +122,20 @@ test('EXPLORATION trades cannot advance academy progression',()=>{
   assert.equal(a.activeStage,'BOOTCAMP');
 });
 
+test('LAB wallet results cannot advance or punish NORMAL academy progression',()=>{
+  const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
+  l.positions=Array.from({length:30},(_,i)=>({
+    ...pos(i,{pnl:i%2?-20:40}),
+    entryMode:'LAB_UNCONSTRAINED',
+    walletId:'LAB'
+  }));
+  const a=evaluateShadowCapitalAcademy(l,{asOf:Date.UTC(2026,8,10),timeZone:'Europe/Berlin'});
+  assert.equal(a.metrics.closedTrades,0);
+  assert.equal(a.achievedLevel,-1);
+  assert.equal(a.activeStage,'BOOTCAMP');
+  assert.equal(a.guard.coreAllowed,true);
+});
+
 test('ABSTAIN probes cannot advance academy progression',()=>{
   const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
   l.positions=Array.from({length:25},(_,i)=>({

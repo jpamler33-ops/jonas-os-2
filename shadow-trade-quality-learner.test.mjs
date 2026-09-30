@@ -100,3 +100,16 @@ test('raw coverage probes teach with reduced effective sample weight',()=>{
   assert.ok(s.confidence<.25);
   assert.equal(model.explorationSamples,8);
 });
+
+test('unconstrained LAB outcomes cannot contaminate the NORMAL quality learner',()=>{
+  const standard=Array.from({length:10},(_,i)=>closed(i,{pnl:2}));
+  const lab=Array.from({length:20},(_,i)=>({
+    ...closed(1000+i,{pnl:100}),
+    entryMode:'LAB_UNCONSTRAINED',
+    walletId:'LAB',
+    exploration:true
+  }));
+  const model=buildShadowTradeQualityModel({positions:[...standard,...lab]});
+  assert.equal(model.samples,10);
+  assert.equal(model.explorationSamples,0);
+});

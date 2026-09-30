@@ -152,3 +152,10 @@ test("data command opens data status dashboard",async()=>{
   await h["/data"]({chatId:7,args:[]});
   assert.deepEqual(calls[0],["data",7,null]);
 });
+
+test("wallets command opens the same dual-wallet surface as portfolio",async()=>{
+  const {d,calls}=deps();
+  const h=createReadCommandHandlers(d);
+  await h["/wallets"]({chatId:1,args:[]});
+  assert.equal(calls.filter(x=>x[0]==="portfolio").length,1);
+});
