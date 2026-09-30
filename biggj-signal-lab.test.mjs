@@ -187,10 +187,12 @@ test('proof lifecycle exposes live before-hash and marks learned only after aggr
     asOf:3_000_000,
     learningSummary:{generatedAt:4_000_000,resolvedOutcomes:1,phase:'LEARNING'}
   });
-  assert.equal(feed.liveRows.length,1);
-  assert.equal(feed.liveRows[0].currentStage,'LIVE');
-  assert.equal(feed.liveRows[0].outcomeHash,null);
-  assert.equal(feed.liveRows[0].beforeHash.length,64);
+  assert.equal(feed.liveRows.length,2);
+  assert.ok(feed.liveRows.every(x=>x.currentStage==='LIVE'));
+  assert.ok(feed.liveRows.every(x=>x.outcomeHash===null));
+  assert.ok(feed.liveRows.every(x=>x.beforeHash.length===64));
+  assert.equal(feed.learning.generatedAt,null);
+  assert.equal(feed.learning.futureSummarySuppressed,true);
 
   const later=buildBiggjProofFeed(entries,{
     asOf:4_000_000,
