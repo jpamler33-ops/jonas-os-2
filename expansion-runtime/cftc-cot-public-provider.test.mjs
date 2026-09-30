@@ -103,3 +103,10 @@ test('unsupported symbols fail closed without network request',async()=>{
   assert.equal(out.reason,'CFTC_CONTRACT_UNMAPPED');
   assert.equal(calls,0);
 });
+
+
+test('future-dated CFTC report fails closed',async()=>{
+  const future={...row,report_date_as_yyyy_mm_dd:'2026-10-01T00:00:00.000'};
+  const p=createCftcCotPublicProvider({fetchImpl:async()=>response([future]),now:()=>NOW});
+  await assert.rejects(()=>p.fetchSnapshot('BTCUSDT'),/CFTC_COT_ROW_MISSING/);
+});
