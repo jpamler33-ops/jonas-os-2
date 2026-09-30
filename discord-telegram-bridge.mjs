@@ -753,6 +753,15 @@ function buildChannelImprovementsPayload(managerState={},translationHealth=null,
   }],allowedMentions:{parse:[]}};
 }
 
+function tradeContextLabel(position={}){
+  const setup=String(position?.setupType||'').trim().toUpperCase();
+  if(setup&&setup!=='UNKNOWN') return setup;
+  const mode=String(position?.entryMode||'').trim().toUpperCase();
+  if(mode&&mode!=='UNKNOWN'&&mode!=='STANDARD') return mode;
+  const strategy=String(position?.strategyId||'').trim().toUpperCase();
+  if(strategy&&strategy!=='UNKNOWN') return strategy;
+  return mode==='STANDARD'?'PRIMARY_UNCLASSIFIED':'UNCLASSIFIED';
+}
 function closedTradePayload(position={}){
   const pnl=Number(position?.realizedNetPnlQuote),ret=Number(position?.realizedReturnPct);
   const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT');
@@ -765,7 +774,7 @@ function closedTradePayload(position={}){
       {name:'RESULT',value:(Number.isFinite(pnl)?money(pnl):'—')+' · '+(Number.isFinite(ret)?percent(ret):'—'),inline:false},
       {name:'ENTRY → EXIT',value:String(position?.entryPrice??'—')+' → '+String(position?.exitPrice??position?.lastMark?.price??'—'),inline:false},
       {name:'WHY CLOSED',value:String(position?.closeReason||position?.exitReason||'UNKNOWN'),inline:true},
-      {name:'SETUP',value:String(position?.setupType||position?.strategyId||'UNKNOWN'),inline:true},
+      {name:'SETUP / LANE',value:tradeContextLabel(position),inline:true},
       {name:'LEARNING',value:'Replay the Point-in-Time thesis before judging the result. Good process and profitable outcome are separate.',inline:false}
     ],
     footer:{text:'CLOSED:'+String(position?.positionId||'UNKNOWN')},
@@ -781,7 +790,7 @@ function shadowTradePayload(position={}){
   const thesis=position?.thesisHealth??position?.metadata?.thesisHealth;
   return {embeds:[{
     title:'BIGGJ // LIVE TRADE · '+symbol,
-    description:'**'+side+' · OPEN · SHADOW_ONLY**\n'+String(position?.setupType||position?.strategyId||'UNKNOWN')+' · '+String(position?.entryMode||'STANDARD'),
+    description:'**'+side+' · OPEN · SHADOW_ONLY**\n'+tradeContextLabel(position)+(tradeContextLabel(position)===String(position?.entryMode||'STANDARD').toUpperCase()?'':' · '+String(position?.entryMode||'STANDARD')),
     fields:[
       {name:'LIVE PnL',value:(Number.isFinite(pnl)?money(pnl):'—')+' · '+(Number.isFinite(ret)?percent(ret):'—'),inline:false},
       {name:'ENTRY',value:String(position?.entryPrice??'—'),inline:true},
