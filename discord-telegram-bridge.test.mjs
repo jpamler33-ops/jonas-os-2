@@ -153,7 +153,7 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/COMMODITIES/);
   assert.match(source,/DISCOVERY_ONLY/);
   assert.match(source,/noch nicht unabhängig verifiziert/);
-  assert.match(source,/posted>=12|posted>=12/);
+  assert.match(source,/slice\(-12\)/);
 });
 
 test('channel manager supervisor is wired across all declared channels without runtime dependencies',async()=>{
@@ -204,4 +204,15 @@ test('previously empty operational channels now have live builders',async()=>{
     'channel-supervisor',
     'channel-improvements'
   ]) assert.ok(source.includes(required),required);
+});
+
+
+test('German news translation is bounded and concurrent so Discord startup cannot scan the full backlog serially',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/TCX_DISCORD_NEWS_TRANSLATION_CONCURRENCY\|\|4/);
+  assert.match(source,/TCX_DISCORD_NEWS_TRANSLATION_ATTEMPT_LIMIT\|\|18/);
+  assert.match(source,/mapWithConcurrency\(candidates,newsTranslationConcurrency/);
+  assert.match(source,/slice\(0,newsTranslationAttemptLimit\)/);
+  assert.match(source,/posted===0&&candidates\.length>0&&translationFailures>0&&strictGermanNews/);
 });

@@ -877,6 +877,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     timeoutMs:Math.max(2000,Math.min(12000,Number(process.env.TCX_GERMAN_TRANSLATION_TIMEOUT_MS||4500)))
   });
   const strictGermanNews=String(process.env.TCX_DISCORD_STRICT_GERMAN_NEWS||'1')!=='0';
+  const newsTranslationConcurrency=Math.max(1,Math.min(6,Math.floor(Number(process.env.TCX_DISCORD_NEWS_TRANSLATION_CONCURRENCY||4)||4)));
+  const newsTranslationAttemptLimit=Math.max(12,Math.min(36,Math.floor(Number(process.env.TCX_DISCORD_NEWS_TRANSLATION_ATTEMPT_LIMIT||18)||18)));
   const contexts=new Map();
   const channelCache=new Map();
   const tradeCards=new Map();
@@ -901,7 +903,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,newsTranslationConcurrency,newsTranslationAttemptLimit,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -1207,31 +1209,57 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         }
       }
     }
-    let posted=0,translationFailures=0,translated=0;
-    for(const event of rows){
-      const key=newsEventKey(event);
-      if(seen.has(key))continue;
+    const candidates=rows
+      .filter(event=>!seen.has(newsEventKey(event)))
+      .sort((a,b)=>Number(b?.availableAt||b?.timestamp||0)-Number(a?.availableAt||a?.timestamp||0))
+      .slice(0,newsTranslationAttemptLimit);
+
+    const translatedRows=await mapWithConcurrency(candidates,newsTranslationConcurrency,async event=>{
       const rawTitle=String(event?.title||event?.headline||'Ereignis');
       const translation=await germanTranslator.translate(rawTitle);
-      if(!translation.ok){
-        translationFailures++;
-        if(strictGermanNews)continue;
-      }
-      const germanTitle=translation.ok?translation.text:rawTitle;
-      if(translation.ok&&translation.sourceLanguage!=='de')translated++;
+      if(!translation.ok&&strictGermanNews)return {event,translation,skip:true};
+      return {event,translation,skip:false,germanTitle:translation.ok?translation.text:rawTitle};
+    });
+
+    let posted=0,translationFailures=0,translated=0;
+    const ready=translatedRows
+      .filter(row=>{
+        if(row?.translation?.ok!==true)translationFailures++;
+        if(row?.translation?.ok===true&&row.translation.sourceLanguage!=='de')translated++;
+        return row&&!row.skip;
+      })
+      .sort((a,b)=>Number(a.event?.availableAt||a.event?.timestamp||0)-Number(b.event?.availableAt||b.event?.timestamp||0))
+      .slice(-12);
+
+    for(const row of ready){
+      const event=row.event;
+      const key=newsEventKey(event);
       await c.send(newsEventPayload(event,{
         world,
-        translatedTitle:germanTitle,
-        translationSourceLanguage:translation.ok?translation.sourceLanguage:'unknown'
+        translatedTitle:row.germanTitle,
+        translationSourceLanguage:row.translation?.ok?row.translation.sourceLanguage:'unknown'
       }));
       seen.add(key);
       posted++;
-      if(posted>=12)break;
     }
-    const detail='News '+posted+' gepostet · übersetzt '+translated+' · Übersetzungsfehler '+translationFailures;
-    if(translationFailures>0&&strictGermanNews)channelManagers.failure(channelName,'GERMAN_TRANSLATION_FAILED_'+translationFailures,detail);
-    else channelManagers.success(channelName,detail);
-    try{logger.info?.('[BIGGJ_GERMAN_NEWS] '+JSON.stringify({channel:channelName,posted,translated,translationFailures,strictGermanNews,translation:germanTranslator.health()}));}catch{}
+
+    const detail='News '+posted+' gepostet · Kandidaten '+candidates.length+' · übersetzt '+translated+' · Übersetzungsfehler '+translationFailures;
+    if(posted===0&&candidates.length>0&&translationFailures>0&&strictGermanNews){
+      channelManagers.failure(channelName,'GERMAN_TRANSLATION_BLOCKED_FEED',detail);
+    }else{
+      channelManagers.success(channelName,detail);
+    }
+    try{logger.info?.('[BIGGJ_GERMAN_NEWS] '+JSON.stringify({
+      channel:channelName,
+      posted,
+      candidates:candidates.length,
+      translated,
+      translationFailures,
+      strictGermanNews,
+      translationConcurrency:newsTranslationConcurrency,
+      attemptLimit:newsTranslationAttemptLimit,
+      translation:germanTranslator.health()
+    }));}catch{}
     return posted;
   }
   async function refreshNewsFeed(){
