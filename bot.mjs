@@ -544,8 +544,8 @@ const marketDataProvider=createMarketDataProvider({
 });
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
-const cftcCotResearchProvider=createCftcCotPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
+const cftcCotResearchProvider=createCftcCotPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
 const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.TCX_GLOBAL_NEWS_REFRESH_MS||120_000)));
 const globalNewsTimeoutMs=Math.max(8000,Math.min(30_000,Number(process.env.TCX_GLOBAL_NEWS_TIMEOUT_MS||18_000)));
 const globalNewsSecondaryTimeoutMs=Math.max(4000,Math.min(20_000,Number(process.env.TCX_GLOBAL_NEWS_SECONDARY_TIMEOUT_MS||8000)));
