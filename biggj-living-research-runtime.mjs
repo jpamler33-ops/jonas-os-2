@@ -415,6 +415,24 @@ function compactSource(memories,report){
   };
 }
 
+function assertLivingResearchPointInTime(memories,claimAssumptionReport,asOf){
+  const t=Number(asOf);
+  const reportAt=finite(claimAssumptionReport?.evaluatedAt);
+  if(reportAt!=null&&reportAt>t) throw new Error('future claim-assumption research report blocked');
+  for(const memory of memories||[]){
+    const memoryPersistentAt=finite(memory?.firstPersistentStaleAt);
+    if(memoryPersistentAt!=null&&memoryPersistentAt>t) throw new Error('future thesis persistence state blocked');
+    for(const row of memory?.assumptions||[]){
+      const persistentAt=finite(row?.stability?.firstPersistentStaleAt);
+      if(persistentAt!=null&&persistentAt>t) throw new Error('future assumption persistence state blocked');
+    }
+    for(const event of memory?.stabilityEvents||[]){
+      const eventAt=finite(event?.observedAt);
+      if(eventAt!=null&&eventAt>t) throw new Error('future thesis stability event blocked');
+    }
+  }
+}
+
 function currentTreeMapFingerprint(){
   return createBiggjSkillTree({asOf:0}).capabilityMapFingerprint;
 }
@@ -724,6 +742,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
   if(t==null) throw new Error('asOf must be finite');
 
   const memories=normalizeMemories(thesisMemories);
+  assertLivingResearchPointInTime(memories,claimAssumptionReport,t);
   const sourceFingerprint=sha256(compactSource(memories,claimAssumptionReport));
   if(sourceFingerprint===state.sourceFingerprint){
     return deepFreeze({
