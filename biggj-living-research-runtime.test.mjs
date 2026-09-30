@@ -116,6 +116,9 @@ test('transient flicker becomes a watch item but cannot autonomously create a sk
   const signal=out.state.assumptionSignals.find(x=>x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE');
   assert.equal(signal.status,'WATCH_FLICKER');
   assert.equal(signal.everPersistentForecasts,0);
+  assert.equal(signal.distinctPersistentForecasts,0);
+  assert.equal(signal.currentPersistentForecasts,0);
+  assert.equal(signal.currentTransientForecasts,1);
   assert.equal(out.discoveredSkillIds.length,0);
   assert.equal(out.state.discoveredSkillIds.length,0);
 });
