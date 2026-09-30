@@ -446,14 +446,35 @@ export function buildBiggjMarketScienceDirector(ledger,{
 
 export function biggjMarketScienceDirectorSummary(director){
   if(director?.version!==BIGGJ_MARKET_SCIENCE_DIRECTOR_VERSION) throw new Error('SCIENCE_DIRECTOR_INVALID');
+  const topAgenda=director.agenda.slice(0,5);
+  const topDataRequests=director.dataRequests.slice(0,5);
+  const researchFingerprint=sha256({
+    knowledgeFrontier:director.knowledgeFrontier,
+    topAgenda:topAgenda.map(x=>({
+      questionId:x.questionId,
+      kind:x.kind,
+      theoryId:x.theoryId,
+      derivedStatus:x.derivedStatus,
+      nextExperimentType:x.nextExperimentType,
+      priority:x.priority
+    })),
+    topDataRequests:topDataRequests.map(x=>({
+      requestId:x.requestId,
+      variable:x.variable,
+      surpriseCount:x.surpriseCount,
+      priority:x.priority
+    })),
+    competitionIds:director.theoryCompetitions.map(x=>x.competitionId)
+  });
   return deepFreeze({
     version:director.version,
     kernelVersion:director.kernelVersion,
     asOf:director.asOf,
+    researchFingerprint,
     knowledgeFrontier:director.knowledgeFrontier,
     nextResearchQuestion:director.nextResearchQuestion,
-    topAgenda:director.agenda.slice(0,5),
-    topDataRequests:director.dataRequests.slice(0,5),
+    topAgenda,
+    topDataRequests,
     theoryCompetitionCount:director.theoryCompetitions.length,
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
