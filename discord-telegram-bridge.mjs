@@ -1012,6 +1012,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const thesisCards=new Map();
   const observabilityPanelDigests=new Map();
   const experiencePanelDigests=new Map();
+  const marketSciencePanelDigests=new Map();
   const corePanelDigests=new Map();
   const recentErrors=[];
   const closedPosted=new Set();
@@ -1030,7 +1031,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,newsTranslationConcurrency,newsTranslationAttemptLimit,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,newsTranslationConcurrency,newsTranslationAttemptLimit,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,v7:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,marketSciencePanels:0,lastMarketScienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -1253,6 +1254,22 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     state.lastObservabilityRefreshAt=Date.now();
     return count;
   }
+  async function refreshMarketSciencePanels(){
+    const snapshot=await safeMissionSnapshot();
+    let count=0;
+    for(const row of buildBiggjDiscordMarketSciencePanelMap(snapshot)){
+      const channel=channelCache.get(row.channel);
+      if(!channel)continue;
+      const digest=observabilityDigest(row.payload);
+      if(marketSciencePanelDigests.get(row.channel)===digest){channelManagers.success(row.channel,'Market-Science Panel unverändert und aktuell');count++;continue;}
+      await managed(row.channel,()=>upsertMarked(channel,row.marker,row.payload),{detail:'Market-Science Panel aktualisiert'});
+      marketSciencePanelDigests.set(row.channel,digest);
+      count++;
+    }
+    state.marketSciencePanels=count;
+    state.lastMarketScienceRefreshAt=Date.now();
+    return count;
+  }
   function publicMobileUrl(){
     const explicit=String(process.env.TCX_PUBLIC_DASHBOARD_URL||'').trim();
     if(explicit)return explicit;
@@ -1432,6 +1449,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(!row){await interaction.editReply('BIGGJ Experience Panel ist gerade nicht verfügbar.');return;}
     await interaction.editReply(row.payload);
   }
+  async function marketScienceCommand(interaction,view){
+    const component=typeof interaction.isButton==='function'&&interaction.isButton();
+    if(component)await interaction.deferUpdate();else await interaction.deferReply();
+    const snapshot=await safeMissionSnapshot();
+    await interaction.editReply(buildBiggjDiscordMarketSciencePayload(view,snapshot));
+  }
   async function operatorCommand(interaction,view){
     const component=typeof interaction.isButton==='function'&&interaction.isButton();
     if(component)await interaction.deferUpdate();else await interaction.deferReply();
@@ -1564,6 +1587,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return out.filter(x=>x.status==='fulfilled').length;
   }
   function managerRepairGroup(name){
+    if(BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'MARKET_SCIENCE';
     if(BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'OBSERVABILITY';
     if(BIGGJ_EXPERIENCE_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'EXPERIENCE';
     if(name.startsWith('academy-'))return 'ACADEMY';
@@ -1580,6 +1604,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       return true;
     }
     const group=managerRepairGroup(name);
+    if(group==='MARKET_SCIENCE'){if(name==='start-here')await ensureStart();else await refreshMarketSciencePanels();return true;}
     if(group==='OBSERVABILITY'){await refreshBiggjObservabilityPanels();return true;}
     if(group==='EXPERIENCE'){await refreshExperiencePanels();return true;}
     if(group==='ACADEMY'){await ensureAcademy();return true;}
@@ -1989,6 +2014,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshPerformance,60000);
     addTimer(refreshOverview,90000);
     addTimer(refreshDataHealth,60000);
+    addTimer(refreshMarketSciencePanels,60000);
     addTimer(refreshBiggjObservabilityPanels,120000);
     addTimer(refreshExperiencePanels,60000);
     addTimer(ensureAcademy,120000);
@@ -2012,7 +2038,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       await ensureAcademy();
       await Promise.allSettled([
         refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),
-        refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
+        refreshMarketSciencePanels(),refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
         refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),refreshRulebookPanel(),syncTradeCards(),syncHealthAlerts()
       ]);
       await refreshAuxiliaryDesks();
@@ -2033,7 +2059,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
     const managers=managerSnapshot();
-    await interaction.editReply('BIGGJ Discord V10 eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    await interaction.editReply('BIGGJ Discord V11 Science Control Room eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.marketSciencePanels+state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
   }
   async function thesisCommand(interaction){
     const symbol=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
