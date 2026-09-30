@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V4';
+export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V5';
 
 const defs=[];
 
@@ -157,6 +157,35 @@ define('research.cftc.leveragedMoneyLongShare','CFTC_POSITIONING',{unit:'SHARE',
 define('research.cftc.leveragedMoneyShortShare','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Leveraged-money short positions as share of open interest'});
 define('research.cftc.top4LongConcentration','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Gross long share held by the four largest traders'});
 define('research.cftc.top4ShortConcentration','CFTC_POSITIONING',{unit:'SHARE',min:0,max:1,description:'Gross short share held by the four largest traders'});
+
+define('research.treasury.bidToCover','TREASURY_AUCTION',{unit:'RATIO',min:0,max:20,description:'Official U.S. Treasury auction bid-to-cover ratio'});
+define('research.treasury.clearingRatePct','TREASURY_AUCTION',{unit:'PERCENT',min:-20,max:100,description:'Official auction high yield/investment/discount rate'});
+define('research.treasury.totalAcceptedLogUsd','TREASURY_AUCTION',{unit:'LOG_USD',min:0,description:'log1p total accepted Treasury auction amount'});
+define('research.treasury.primaryDealerAcceptedShare','TREASURY_AUCTION',{unit:'SHARE',min:0,max:1,description:'Primary-dealer accepted amount divided by total accepted'});
+define('research.treasury.directBidderAcceptedShare','TREASURY_AUCTION',{unit:'SHARE',min:0,max:1,description:'Direct-bidder accepted amount divided by total accepted'});
+define('research.treasury.indirectBidderAcceptedShare','TREASURY_AUCTION',{unit:'SHARE',min:0,max:1,description:'Indirect-bidder accepted amount divided by total accepted'});
+define('research.treasury.offeringAcceptedRatio','TREASURY_AUCTION',{unit:'RATIO',min:0,max:5,description:'Total accepted amount divided by announced offering amount'});
+
+define('research.sec.filingPresent','SEC_FILING',{unit:'BINARY',min:1,max:1,description:'Relevant official SEC filing observed'});
+define('research.sec.formClassCode','SEC_FILING',{unit:'CATEGORY_CODE',min:0,max:4,description:'Form class only; no semantic interpretation of filing content'});
+define('research.sec.isCurrentReport','SEC_FILING',{unit:'BINARY',min:0,max:1,description:'8-K/6-K current-report class flag'});
+define('research.sec.isPeriodicReport','SEC_FILING',{unit:'BINARY',min:0,max:1,description:'10-Q/10-K/20-F periodic-report class flag'});
+define('research.sec.isOfferingFiling','SEC_FILING',{unit:'BINARY',min:0,max:1,description:'S-1/S-3/424B offering-related filing class flag'});
+define('research.sec.isOwnershipFiling','SEC_FILING',{unit:'BINARY',min:0,max:1,description:'Schedule 13D/13G ownership filing class flag'});
+
+define('research.exchange.coinbaseIncidentSeverity','EXCHANGE_CONTEXT',{unit:'SEVERITY',min:0,max:1,description:'Coinbase official status-page incident severity'});
+define('research.exchange.krakenIncidentSeverity','EXCHANGE_CONTEXT',{unit:'SEVERITY',min:0,max:1,description:'Kraken official status-page incident severity'});
+define('research.exchange.coinbaseUnresolvedIncidentCount','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:1000,description:'Unresolved Coinbase status incidents'});
+define('research.exchange.krakenUnresolvedIncidentCount','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:1000,description:'Unresolved Kraken status incidents'});
+define('research.exchange.coinbaseProductCountLog','EXCHANGE_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p current Coinbase Exchange public product count'});
+define('research.exchange.krakenPairCountLog','EXCHANGE_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p current Kraken public pair count'});
+define('research.exchange.coinbaseAddedMarkets','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:10000,description:'Markets added since previous in-process Coinbase universe observation'});
+define('research.exchange.coinbaseRemovedMarkets','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:10000,description:'Markets removed since previous in-process Coinbase universe observation'});
+define('research.exchange.krakenAddedMarkets','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:10000,description:'Markets added since previous in-process Kraken universe observation'});
+define('research.exchange.krakenRemovedMarkets','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:10000,description:'Markets removed since previous in-process Kraken universe observation'});
+define('research.exchange.btcVenueCoverage','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:2,description:'Count of Coinbase/Kraken public universes containing BTC spot markets'});
+define('research.exchange.ethVenueCoverage','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:2,description:'Count of Coinbase/Kraken public universes containing ETH spot markets'});
+define('research.exchange.solVenueCoverage','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:2,description:'Count of Coinbase/Kraken public universes containing SOL spot markets'});
 
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
