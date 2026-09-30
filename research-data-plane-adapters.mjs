@@ -46,8 +46,12 @@ import {
   treasuryAuctionToExtraFeatures,
   OFFICIAL_PRIMARY_RESEARCH_PROVIDER_VERSION
 } from './expansion-runtime/official-primary-research-provider.mjs';
+import {
+  issuerEtfHoldingsToExtraFeatures,
+  ISSUER_ETF_HOLDINGS_PROVIDER_VERSION
+} from './expansion-runtime/issuer-etf-holdings-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V8';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V9';
 
 function finite(v){
   if(v==null||v==='') return null;
@@ -899,6 +903,64 @@ function officialPrimaryInputs(symbol,context,ingestedAt){
   return rows.filter(Boolean);
 }
 
+
+function issuerEtfInputs(symbol,context,ingestedAt){
+  if(!context?.ok) return [];
+  const base=String(symbol||'').toUpperCase().replace(/USDT$/,'');
+  const rows=[];
+  for(const snapshot of Array.isArray(context?.rows)?context.rows:[]){
+    if(String(snapshot?.assetTicker||'').toUpperCase()!==base) continue;
+    const features=issuerEtfHoldingsToExtraFeatures(snapshot);
+    if(!features.length) continue;
+    const availableAt=finite(snapshot?.availableAt??snapshot?.capturedAt);
+    const eventTime=eventTimeOrAvailable(snapshot?.asOfDate,availableAt);
+    if(availableAt==null||eventTime==null) continue;
+    rows.push(createResearchFeatureSnapshot({
+      streamKey:symbol,
+      domain:'ETF_HOLDINGS',
+      source:'ISHARES_DIGITAL_ASSET_HOLDINGS',
+      sourceVersion:ISSUER_ETF_HOLDINGS_PROVIDER_VERSION,
+      sourceEventId:makeSourceEventId({
+        symbol,
+        source:'ISHARES_DIGITAL_ASSET_HOLDINGS',
+        sourceEventId:snapshot?.sourceEventId||null,
+        features:features.map(x=>[x.id,x.value])
+      }),
+      eventTime,
+      availableAt,
+      ingestedAt,
+      ttlMs:10*24*60*60_000,
+      finality:'OBSERVED',
+      quality:{
+        completeness:features.length/7,
+        sourceCount:1,
+        expectedSourceCount:1,
+        status:'ISSUER_PUBLISHED_DIGITAL_ASSET_HOLDINGS'
+      },
+      features,
+      provenance:{
+        adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+        providerVersion:ISSUER_ETF_HOLDINGS_PROVIDER_VERSION,
+        upstreamSource:'ISHARES_DIGITAL_ASSET_HOLDINGS',
+        fundTicker:String(snapshot?.fundTicker||''),
+        fundName:String(snapshot?.fundName||''),
+        assetTicker:String(snapshot?.assetTicker||''),
+        sourceEventId:String(snapshot?.sourceEventId||''),
+        asOfDate:Number(snapshot?.asOfDate||0)||null,
+        endpoint:String(snapshot?.endpoint||''),
+        deltaSemantics:String(snapshot?.deltaSemantics||'NO_PRIOR_ISSUER_OBSERVATION'),
+        epistemic:String(snapshot?.epistemic||'ISSUER_PUBLISHED_HOLDINGS_LEVEL_NOT_NET_FUND_FLOW_OR_FORECAST'),
+        netFundFlowClaim:false,
+        directionalClaim:false,
+        causalClaim:false,
+        researchOnly:true,
+        canExecute:false
+      }
+    }));
+  }
+  return rows.filter(Boolean);
+}
+
 function walletInput(symbol,snapshot,ingestedAt){
   const features=walletCohortSnapshotToExtraFeatures(snapshot);
   if(!features.length) return null;
@@ -951,7 +1013,8 @@ export function buildResearchDataPlaneSnapshots({
   dexContextSnapshot=null,
   dexPromotionSnapshot=null,
   cftcCotSnapshot=null,
-  officialPrimaryContextSnapshot=null
+  officialPrimaryContextSnapshot=null,
+  issuerEtfContextSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -968,6 +1031,7 @@ export function buildResearchDataPlaneSnapshots({
     dexContextInput(s,dexContextSnapshot,t),
     dexPromotionInput(s,dexPromotionSnapshot,t),
     cftcCotInput(s,cftcCotSnapshot,t),
-    ...officialPrimaryInputs(s,officialPrimaryContextSnapshot,t)
+    ...officialPrimaryInputs(s,officialPrimaryContextSnapshot,t),
+    ...issuerEtfInputs(s,issuerEtfContextSnapshot,t)
   ].filter(Boolean);
 }

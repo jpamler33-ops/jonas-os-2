@@ -424,3 +424,37 @@ test('SEC filing is not fanned out to unrelated asset without broad CRYPTO tag',
   });
   assert.equal(rows.some(x=>x.domain==='SEC_FILING'),false);
 });
+
+
+test('issuer ETF holdings map only to the matching BTC or ETH research stream',()=>{
+  const context={
+    ok:true,
+    rows:[
+      {
+        ok:true,source:'ISHARES_DIGITAL_ASSET_HOLDINGS',fundTicker:'IBIT',fundName:'iShares Bitcoin Trust ETF',
+        assetTicker:'BTC',sourceEventId:'IBIT:2026-09-28',asOfDate:1_500_000,availableAt:1_999_900,
+        assetQuantity:800000,assetQuantityChangeShare:.01,sharesOutstanding:1400000000,sharesOutstandingChangeShare:.02,
+        assetMarketValueUsd:66000000000,cashUsd:20000,observationDayGap:1,
+        deltaSemantics:'CONSECUTIVE_ISSUER_HOLDINGS_CHANGE_NOT_NET_FUND_FLOW'
+      },
+      {
+        ok:true,source:'ISHARES_DIGITAL_ASSET_HOLDINGS',fundTicker:'ETHA',fundName:'iShares Ethereum Trust ETF',
+        assetTicker:'ETH',sourceEventId:'ETHA:2026-09-28',asOfDate:1_500_000,availableAt:1_999_900,
+        assetQuantity:4000000,assetQuantityChangeShare:.03,sharesOutstanding:500000000,sharesOutstandingChangeShare:.04,
+        assetMarketValueUsd:16000000000,cashUsd:10000,observationDayGap:1,
+        deltaSemantics:'CONSECUTIVE_ISSUER_HOLDINGS_CHANGE_NOT_NET_FUND_FLOW'
+      }
+    ]
+  };
+  const btc=buildResearchDataPlaneSnapshots({symbol:'BTCUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:context});
+  const eth=buildResearchDataPlaneSnapshots({symbol:'ETHUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:context});
+  const sol=buildResearchDataPlaneSnapshots({symbol:'SOLUSDT',ingestedAt:2_000_000,issuerEtfContextSnapshot:context});
+  assert.equal(btc.length,1);
+  assert.equal(eth.length,1);
+  assert.equal(sol.length,0);
+  assert.equal(btc[0].domain,'ETF_HOLDINGS');
+  assert.equal(btc[0].provenance.fundTicker,'IBIT');
+  assert.equal(eth[0].provenance.fundTicker,'ETHA');
+  assert.equal(btc[0].provenance.netFundFlowClaim,false);
+  assert.ok(btc[0].features.some(x=>x.id==='research.etf.assetQuantityChangeShare'&&x.value===.01));
+});

@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V5';
+export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V6';
 
 const defs=[];
 
@@ -186,6 +186,14 @@ define('research.exchange.krakenRemovedMarkets','EXCHANGE_CONTEXT',{unit:'COUNT'
 define('research.exchange.btcVenueCoverage','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:2,description:'Count of Coinbase/Kraken public universes containing BTC spot markets'});
 define('research.exchange.ethVenueCoverage','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:2,description:'Count of Coinbase/Kraken public universes containing ETH spot markets'});
 define('research.exchange.solVenueCoverage','EXCHANGE_CONTEXT',{unit:'COUNT',min:0,max:2,description:'Count of Coinbase/Kraken public universes containing SOL spot markets'});
+
+define('research.etf.assetQuantityLog','ETF_HOLDINGS',{unit:'LOG_ASSET_UNITS',min:0,description:'log1p issuer-published BTC/ETH quantity held by the tracked trust'});
+define('research.etf.assetQuantityChangeShare','ETF_HOLDINGS',{unit:'RATE',min:-1,max:100,description:'Change in issuer-published asset quantity versus prior unique holdings date; not net fund flow'});
+define('research.etf.sharesOutstandingLog','ETF_HOLDINGS',{unit:'LOG_SHARES',min:0,description:'log1p issuer-published fund shares outstanding'});
+define('research.etf.sharesOutstandingChangeShare','ETF_HOLDINGS',{unit:'RATE',min:-1,max:100,description:'Change in shares outstanding versus prior unique holdings date; not exact cash flow'});
+define('research.etf.marketValueLogUsd','ETF_HOLDINGS',{unit:'LOG_USD',min:0,description:'log1p issuer-published digital-asset holding market value'});
+define('research.etf.cashShare','ETF_HOLDINGS',{unit:'SHARE',min:0,max:1,description:'Issuer-published USD cash market value divided by asset plus cash market value'});
+define('research.etf.observationDayGap','ETF_HOLDINGS',{unit:'DAYS',min:0,max:365,description:'Calendar-day gap to the prior unique issuer holdings observation used for deltas'});
 
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
