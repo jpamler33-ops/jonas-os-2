@@ -467,7 +467,29 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER V6.1',description:['**Ein Einstiegspunkt für das komplette BIGGJ Research OS.**','','**DESK**','\`/needs\` · Was BIGGJ braucht','\`/learned\` · Learned Playbook','\`/app\` · iPhone Command Center','','**INTELLIGENCE**','\`/news\` · relevante Live-News','\`/world\` · Weltlage','\`/memecoins\` · Live DEX Radar','\`/traders\` · Public Trader Watch','','**TRADING**','\`/cockpit\` · aktive Shadow-Trades','\`/charts\` · One-Tap Chart Desk','\`/superchart BTC\` · direkter Chart','\`/portfolio\` · Shadow-Portfolio','','**BRAIN**','\`/brain\` · aktueller Denk-/Research-State','\`/research\` · nächste Forschungsarbeit','\`/progress\` · Lernfortschritt','','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
+function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANNEL UX V7',description:[
+  '**Ein Einstiegspunkt für das komplette BIGGJ Research OS — ohne durch alle Channels scrollen zu müssen.**',
+  '',
+  '**90%-PFAD · täglich relevant**',
+  '#trade-cockpit → aktive Shadow-Trades',
+  '#chart-desk → Charts / Radar / Forecast',
+  '#news-feed + #world-watch → deutsche Live-News',
+  '#biggj-needs → aktuelle Lücken und höchste Hebel',
+  '#performance → Ergebnis und Drawdown',
+  '',
+  '**CHANNEL OPERATIONS**',
+  '#channel-supervisor → überwacht jeden Channel-Manager',
+  '#channel-improvements → priorisierte Reparaturen/Verbesserungen',
+  '#errors → technische Fehler und Warnungen',
+  '',
+  '**DEEP RESEARCH**',
+  '#brain-pulse → aktueller Research-State',
+  '#research-queue → nächste Tests',
+  '#evidence-ledger → Belege / Coverage',
+  '#decision-trace → strukturierte Entscheidungsgründe',
+  '',
+  '**SHADOW_ONLY · REAL ORDERS BLOCKED**'
+].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
   return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
@@ -540,6 +562,151 @@ export function buildDiscordDataHealthPayload(snapshot={}){
     {name:'Current Runtime Blockers',value:(hard.concat(warnings).slice(0,6).join('\n')||'none').slice(0,1024),inline:false}
   ],footer:{text:MARKERS.data},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
+
+function buildForecastDeskPayload(snapshot={}){
+  const h=snapshot?.health||{};
+  const f=h?.institutionalForecastRuntime||{};
+  return {embeds:[{
+    title:'BIGGJ // FORECAST DESK',
+    description:'**Probabilistische Forecasts, Unsicherheit und Invalidation — kein Kursversprechen.**',
+    fields:[
+      {name:'Forecast-Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},
+      {name:'Status',value:String(f?.status||'—'),inline:true},
+      {name:'Modus',value:'SHADOW_ONLY · Point-in-Time',inline:true},
+      {name:'Arbeitsweg',value:'1. Forecast öffnen · 2. Unsicherheit prüfen · 3. Gegenargumente/Invalidation · 4. Accuracy später gegen Outcome prüfen.',inline:false}
+    ],
+    footer:{text:MARKERS.forecasts},
+    timestamp:new Date().toISOString()
+  }],components:[
+    {type:1,components:[
+      {type:2,style:1,label:'BTC Forecast',custom_id:'dc3:forecast:BTCUSDT'},
+      {type:2,style:1,label:'ETH Forecast',custom_id:'dc3:forecast:ETHUSDT'},
+      {type:2,style:1,label:'SOL Forecast',custom_id:'dc3:forecast:SOLUSDT'}
+    ]},
+    {type:1,components:[
+      {type:2,style:2,label:'BTC Accuracy',custom_id:'dc3:accuracy:BTCUSDT'},
+      {type:2,style:2,label:'Super Radar',custom_id:'dc3:terminal:radar'}
+    ]}
+  ],allowedMentions:{parse:[]}};
+}
+
+function buildAnomalyWatchPayload(snapshot={}){
+  const discovery=snapshot?.discovery||{};
+  const h=snapshot?.health||{};
+  const warnings=Array.isArray(h?.operationalReadiness?.warningReasons)?h.operationalReadiness.warningReasons:[];
+  const candidates=(Array.isArray(discovery?.topCandidates)?discovery.topCandidates:Array.isArray(discovery?.candidates)?discovery.candidates:[])
+    .slice(0,8)
+    .map(x=>'• **'+String(x?.symbol||x?.asset||'UNBEKANNT')+'** · '+String(x?.status||x?.reason||'BEOBACHTEN'))
+    .join('\n')||'Aktuell keine priorisierten Anomalie-Kandidaten im Serving-State.';
+  return {embeds:[{
+    title:'BIGGJ // ANOMALIE-WATCH',
+    description:'**Regimewechsel, ungewöhnliche Marktstruktur und Research-Hinweise.** Ein Signal ist noch kein Trade.',
+    fields:[
+      {name:'Aktuelle Kandidaten',value:candidates.slice(0,1024),inline:false},
+      {name:'Runtime-Warnungen',value:(warnings.slice(0,6).join('\n')||'Keine aktuellen Runtime-Warnungen.').slice(0,1024),inline:false},
+      {name:'Regel',value:'Anomalie → Kontext → Evidenz → Gegenargument → Invalidation. Erst danach darf sie in eine Shadow-These einfließen.',inline:false}
+    ],
+    footer:{text:MARKERS.anomalies},
+    timestamp:new Date().toISOString()
+  }],components:[
+    {type:1,components:[
+      {type:2,style:1,label:'Super Radar',custom_id:'dc3:terminal:radar'},
+      {type:2,style:2,label:'BTC X-Ray',custom_id:'dc3:xray:BTCUSDT'},
+      {type:2,style:2,label:'ETH X-Ray',custom_id:'dc3:xray:ETHUSDT'},
+      {type:2,style:2,label:'SOL X-Ray',custom_id:'dc3:xray:SOLUSDT'}
+    ]}
+  ],allowedMentions:{parse:[]}};
+}
+
+function buildReplayDeskPayload(snapshot={}){
+  const recent=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
+  const rows=recent.slice(0,8).map(x=>{
+    const pnl=Number(x?.realizedNetPnlQuote??x?.netPnlQuote??x?.pnlQuote);
+    return '• **'+String(x?.symbol||'UNBEKANNT')+'** · '+String(x?.side||'—')+' · '+(Number.isFinite(pnl)?money(pnl):'—')+' · '+String(x?.exitReason||x?.closeReason||'geschlossen');
+  }).join('\n')||'Noch keine abgeschlossenen Shadow-Trades für Replay.';
+  const symbols=[];
+  for(const x of recent){
+    const s=normalizeDiscordSymbol(x?.symbol);
+    if(s&&!symbols.includes(s))symbols.push(s);
+    if(symbols.length>=3)break;
+  }
+  const components=symbols.length?[{type:1,components:symbols.map(s=>({type:2,style:2,label:s.replace('USDT','')+' Replay',custom_id:'dc3:tradereplay:'+s}))}]:[];
+  return {embeds:[{
+    title:'BIGGJ // TRADE-REPLAY DESK',
+    description:'**Vergangene Shadow-Trades Point-in-Time nachprüfen statt Ergebnis-Hindsight.**',
+    fields:[
+      {name:'Letzte Abschlüsse',value:rows.slice(0,1024),inline:false},
+      {name:'Review-Reihenfolge',value:'These beim Entry → damals verfügbare Daten → Invalidation → Ausführung → Exit → Lernpunkt. Gewinn ≠ automatisch gute Entscheidung.',inline:false}
+    ],
+    footer:{text:MARKERS.replay},
+    timestamp:new Date().toISOString()
+  }],components,allowedMentions:{parse:[]}};
+}
+
+function buildErrorDeskPayload(snapshot={},recentErrors=[],translationHealth=null,managerState=null){
+  const h=snapshot?.health||{};
+  const hard=Array.isArray(h?.operationalReadiness?.hardReasons)?h.operationalReadiness.hardReasons:[];
+  const warnings=Array.isArray(h?.operationalReadiness?.warningReasons)?h.operationalReadiness.warningReasons:[];
+  const errors=(Array.isArray(recentErrors)?recentErrors:[]).slice(0,8).map(x=>
+    '• '+new Date(Number(x?.at)||Date.now()).toLocaleTimeString('de-DE',{timeZone:'Europe/Berlin'})+' · **'+String(x?.scope||'SYSTEM')+'** · '+String(x?.message||'UNBEKANNT')
+  ).join('\n')||'Keine aktuellen Discord-/Channel-Manager-Fehler.';
+  return {embeds:[{
+    title:'BIGGJ // FEHLER & DIAGNOSE',
+    description:'**Technische Fehler, Datenwarnungen und Manager-Probleme an einer Stelle.**',
+    fields:[
+      {name:'Letzte Fehler',value:errors.slice(0,1024),inline:false},
+      {name:'Runtime-Blocker',value:(hard.concat(warnings).slice(0,8).join('\n')||'Keine aktuellen Blocker.').slice(0,1024),inline:false},
+      {name:'Channel-Manager',value:managerState?'Probleme '+String(managerState.problems)+' / '+String(managerState.managers)+' · Supervisor '+String(managerState.supervisor?.status||'—'):'—',inline:true},
+      {name:'Deutsch-Übersetzung',value:translationHealth?(translationHealth.ok?'OK':'FEHLER')+' · Erfolge '+String(translationHealth.successes)+' · Fehler '+String(translationHealth.failures):'—',inline:true}
+    ],
+    footer:{text:MARKERS.errors},
+    timestamp:new Date().toISOString()
+  }],components:[{type:1,components:[
+    {type:2,style:2,label:'Datenstatus',custom_id:'dc3:home:data'},
+    {type:2,style:2,label:'Brain Pulse',custom_id:'dc6:brain:pulse'},
+    {type:2,style:2,label:'Entscheidungen',custom_id:'dc6:brain:decisions'}
+  ]}],allowedMentions:{parse:[]}};
+}
+
+function buildChannelSupervisorPayload(managerState={},translationHealth=null){
+  const counts=managerState?.counts||{};
+  const problems=(managerState?.topProblems||[]).slice(0,10).map(x=>
+    '• **#'+String(x.name)+'** · '+String(x.status)+' → '+String(x.decision)+'\n  '+String(x.reason)
+  ).join('\n')||'Alle Channel-Manager melden einen gesunden bzw. erwarteten Zustand.';
+  return {embeds:[{
+    title:'BIGGJ // CHANNEL-MANAGER SUPERVISOR',
+    description:'**Jeder Channel hat einen eigenen Manager. Dieser Supervisor überwacht wiederum alle Manager.**\nManager prüfen Zweck, Freshness, Fehler, Layout und nächsten Handlungsbedarf.',
+    fields:[
+      {name:'Gesamtzustand',value:String(managerState?.supervisor?.status||'—')+' · '+String(managerState?.healthy||0)+' gesund / '+String(managerState?.managers||0)+' Manager',inline:false},
+      {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
+      {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
+      {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
+      {name:'Sicherheitsgrenze',value:'Auto-Reparatur nur für UI/Refresh/Layout. Keine Live-Orders, keine stillen PRIMARY-Policy-Änderungen.',inline:false}
+    ],
+    footer:{text:'BIGGJ_CHANNEL_SUPERVISOR_V1'},
+    timestamp:new Date().toISOString()
+  }],allowedMentions:{parse:[]}};
+}
+
+function buildChannelImprovementsPayload(managerState={},translationHealth=null){
+  const actions=(managerState?.supervisor?.nextActions||[]).slice(0,12).map((x,i)=>
+    '**'+(i+1)+'. #'+String(x.channel)+' · '+String(x.decision)+'**\n'+String(x.suggestion)
+  ).join('\n\n')||'Aktuell keine zwingende Channel-Verbesserung offen.';
+  const translationSuggestion=translationHealth&&!translationHealth.ok
+    ?'\n\n**Übersetzung:** Dienst ist gestört. Deutsche News im Strict-Mode werden lieber zurückgehalten als ungeprüft englisch gepostet.'
+    :'';
+  return {embeds:[{
+    title:'BIGGJ // CHANNEL-VERBESSERUNGEN',
+    description:'**Priorisierte Verbesserungsliste aus den einzelnen Channel-Managern.**'+translationSuggestion,
+    fields:[
+      {name:'Nächste Verbesserungen',value:actions.slice(0,1024),inline:false},
+      {name:'Entscheidungslogik',value:'BROKEN → Layout reparieren · DEGRADED → Ursache isolieren/retry · STALE/EMPTY → Refresh · HEALTHY → nichts ändern.',inline:false}
+    ],
+    footer:{text:'BIGGJ_CHANNEL_IMPROVEMENTS_V1'},
+    timestamp:new Date().toISOString()
+  }],allowedMentions:{parse:[]}};
+}
+
 function closedTradePayload(position={}){
   const pnl=Number(position?.realizedNetPnlQuote),ret=Number(position?.realizedReturnPct);
   const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT');
