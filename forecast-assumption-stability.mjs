@@ -171,6 +171,8 @@ function initialCore({
     firstPersistentStaleAt:null,
     firstRecoveryAt:null,
     firstRecoveredStableAt:null,
+    recoveryOriginState:null,
+    supportEstablishmentCount:0,
     transientFlickerCount:0,
     persistentStaleCount:0,
     recoveryCount:0,
@@ -298,9 +300,15 @@ export function observeAssumptionStability(prior,{
     if(prior.state==='PERSISTENT_STALE'){
       next.state='PERSISTENT_STALE';
     }else if(prior.state==='RECOVERING'){
-      next.state='PERSISTENT_STALE';
-      next.relapseCount=Number(prior.relapseCount||0)+1;
-      type='RECOVERY_FAILED';
+      if(prior.recoveryOriginState==='ISSUE_UNSUPPORTED'){
+        next.state='ISSUE_UNSUPPORTED';
+        next.recoveryOriginState=null;
+        type='ISSUE_SUPPORT_ESTABLISHMENT_FAILED';
+      }else{
+        next.state='PERSISTENT_STALE';
+        next.relapseCount=Number(prior.relapseCount||0)+1;
+        type='RECOVERY_FAILED';
+      }
     }else if(prior.state==='ISSUE_UNSUPPORTED'&&!prior.hasEstablishedSupport){
       next.state='ISSUE_UNSUPPORTED';
     }else{
@@ -352,18 +360,29 @@ export function observeAssumptionStability(prior,{
       const continuingRecovery=prior.state==='RECOVERING'&&prior.lastCurrentSupported===true&&prior.supportedSince!=null;
       next.supportedSince=continuingRecovery?prior.supportedSince:at;
       next.supportedObservationCount=continuingRecovery?Number(prior.supportedObservationCount||0)+1:1;
+      next.recoveryOriginState=continuingRecovery
+        ?prior.recoveryOriginState
+        :prior.state;
       next.currentRecoveryDurationMs=Math.max(0,at-Number(next.supportedSince));
       const recovered=
         next.supportedObservationCount>=cfg.minRecoveryObservations&&
         next.currentRecoveryDurationMs>=cfg.minRecoveryDurationMs;
 
       if(recovered){
+        const origin=next.recoveryOriginState;
         next.state='SUPPORTED_STABLE';
         next.hasEstablishedSupport=true;
         next.firstRecoveredStableAt=prior.firstRecoveredStableAt??at;
-        next.recoveryCount=Number(prior.recoveryCount||0)+1;
-        type='PERSISTENT_STALE_RECOVERED';
+        next.recoveryOriginState=null;
+        if(origin==='ISSUE_UNSUPPORTED'){
+          next.supportEstablishmentCount=Number(prior.supportEstablishmentCount||0)+1;
+          type='ISSUE_UNSUPPORTED_SUPPORT_ESTABLISHED';
+        }else{
+          next.recoveryCount=Number(prior.recoveryCount||0)+1;
+          type='PERSISTENT_STALE_RECOVERED';
+        }
         details={
+          recoveryOriginState:origin,
           supportedObservationCount:next.supportedObservationCount,
           recoveryDurationMs:next.currentRecoveryDurationMs
         };
