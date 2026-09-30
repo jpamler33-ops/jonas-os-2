@@ -145,7 +145,7 @@ export function buildShadowTradeQualityModel(ledger,{
 }={}){
   const closed=(ledger?.positions||[]).filter(p=>
     p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED'&&
-    String(p.entryMode||'STANDARD').toUpperCase()!=='CHALLENGER'&&
+    !['CHALLENGER','LAB_UNCONSTRAINED'].includes(String(p.entryMode||'STANDARD').toUpperCase())&&
     finite(p.realizedReturnPct)!=null&&finite(p.realizedNetPnlQuote)!=null
   );
   const maps={
