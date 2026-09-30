@@ -982,7 +982,7 @@ export function biggjLivingResearchRuntimeSummary(value){
     retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
     retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
     researchEpisodeResolverVersion:BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION,
-    resolvedResearchEpisodes:(value?.researchEpisodeResolution||[])
+    conservativeEpisodePartitions:(value?.researchEpisodeResolution||[])
       .reduce((n,x)=>n+Number(x?.counts?.independentEpisodes||0),0),
     unresolvedResearchCases:(value?.researchEpisodeResolution||[])
       .reduce((n,x)=>n+Number(x?.counts?.unresolvedCases||0),0),
