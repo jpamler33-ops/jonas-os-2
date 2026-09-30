@@ -133,6 +133,14 @@ import {
   AUTONOMOUS_RESEARCH_TRAINING_FACTORY_VERSION
 } from './autonomous-research-training-factory.mjs';
 import {
+  loadBiggjAutonomousOperator,
+  saveBiggjAutonomousOperator,
+  refreshBiggjAutonomousOperator,
+  recordBiggjAutonomousOperatorActionResults,
+  biggjAutonomousOperatorSummary,
+  BIGGJ_AUTONOMOUS_OPERATOR_VERSION
+} from './biggj-autonomous-operator.mjs';
+import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
@@ -903,6 +911,11 @@ const autonomousResearchFactoryFile=process.env.TCX_AUTONOMOUS_RESEARCH_FACTORY_
 let autonomousResearchFactoryState=await loadAutonomousResearchTrainingFactory(autonomousResearchFactoryFile);
 let autonomousResearchFactoryHealthy=true;
 let autonomousResearchFactoryLastError=null;
+const autonomousOperatorFile=process.env.TCX_AUTONOMOUS_OPERATOR_FILE||'/data/tcx-biggj-autonomous-operator.json';
+let autonomousOperatorState=await loadBiggjAutonomousOperator(autonomousOperatorFile);
+let autonomousOperatorHealthy=true;
+let autonomousOperatorLastError=null;
+const autonomousOperatorRefreshMs=Math.max(30_000,Math.min(300_000,Number(process.env.TCX_AUTONOMOUS_OPERATOR_MS||60_000)));
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
 let featureResearchState = await loadFeatureResearch(featureResearchFile);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
@@ -8119,6 +8132,7 @@ async function onchainResearchStartupProbe(){
 }
 
 async function syncFeatureResearch(reason='update'){
+  const started=Date.now();
   try{
     const beforeStatus=featureResearchState?.status||'UNINITIALIZED';
     const expectedFeatureExperimentIds=new Set(activeFeatureResearchFeatures.map(x=>x.id));
@@ -8153,10 +8167,12 @@ async function syncFeatureResearch(reason='update'){
       supported:summary.supported.length,
       changed:beforeStatus!==summary.status
     }));
+    recordOperation(observability,{name:'forecast_feature_research_sync',ok:true,latencyMs:Date.now()-started,error:null});
     return summary;
   }catch(err){
     const msg=err instanceof Error?err.message:String(err);
     recordError(observability,{scope:'forecast_feature_research',message:msg});
+    recordOperation(observability,{name:'forecast_feature_research_sync',ok:false,latencyMs:Date.now()-started,error:msg});
     console.error('feature research error',reason,msg);
     return null;
   }
@@ -9006,6 +9022,179 @@ async function autonomousResearchFactoryWatcher(){
   }
 }
 
+function autonomousOperatorOwnerPolicies(){
+  const max3=(value,floor=120_000)=>Math.max(floor,Math.max(1,Number(value)||0)*3);
+  return {
+    AUTOLEARN_AND_COVERAGE_CURRICULUM:{
+      enabled:autoLearnEnabled===true,
+      operations:['forecast_autolearn_cycle'],
+      maxSilentMs:max3(autoLearnSweepMs,180_000),
+      recoveryAction:null
+    },
+    LIVING_RESEARCH_RUNTIME:{
+      enabled:true,
+      operations:['biggj_living_research_refresh'],
+      maxSilentMs:Math.max(600_000,autonomousResearchFactoryRefreshMs*4),
+      recoveryAction:'REFRESH_LIVING_RESEARCH'
+    },
+    FORECAST_OUTCOME_WATCHER:{
+      enabled:true,
+      operations:['forecast_outcome_watch'],
+      maxSilentMs:max3(forecastOutcomeCheckMs,180_000),
+      recoveryAction:null
+    },
+    SHADOW_COMPETITION_WORKER:{
+      enabled:shadowCompetitionEnabled===true&&shadowCompetitionServingWorkerEnabled===true,
+      operations:['forecast_shadow_competition'],
+      maxSilentMs:max3(shadowCompetitionEvalMs,300_000),
+      recoveryAction:null
+    },
+    FORECAST_CANDIDATE_LAB:{
+      enabled:shadowCompetitionEnabled===true&&shadowCompetitionServingWorkerEnabled===true,
+      operations:['forecast_shadow_competition'],
+      maxSilentMs:max3(shadowCompetitionEvalMs,300_000),
+      recoveryAction:null
+    },
+    ADVERSARIAL_STRESS_LAB:{
+      enabled:shadowCompetitionEnabled===true&&shadowCompetitionServingWorkerEnabled===true,
+      operations:['forecast_shadow_competition'],
+      maxSilentMs:max3(shadowCompetitionEvalMs,300_000),
+      recoveryAction:null
+    },
+    RESEARCH_DATA_GOVERNANCE:{
+      enabled:true,
+      operations:['research_data_plane_append'],
+      maxSilentMs:max3(autoLearnSweepMs,300_000),
+      recoveryAction:null
+    },
+    RESEARCH_DEPENDENCY_GRAPH:{
+      enabled:autoLearnEnabled===true,
+      operations:['forecast_autolearn_cycle'],
+      maxSilentMs:max3(autoLearnSweepMs,300_000),
+      recoveryAction:null
+    },
+    FORECAST_FEATURE_RESEARCH:{
+      enabled:true,
+      operations:['forecast_feature_research_sync'],
+      maxSilentMs:Math.max(600_000,autonomousResearchFactoryRefreshMs*4),
+      recoveryAction:'SYNC_FEATURE_RESEARCH'
+    },
+    MODEL_CANDIDATE_REGISTRY:{
+      enabled:shadowCompetitionEnabled===true&&shadowCompetitionServingWorkerEnabled===true,
+      operations:['forecast_shadow_competition'],
+      maxSilentMs:max3(shadowCompetitionEvalMs,300_000),
+      recoveryAction:null
+    },
+    LEARNED_CHALLENGER_ENGINE:{
+      enabled:autoLearnEnabled===true,
+      operations:['forecast_autolearn_cycle'],
+      maxSilentMs:max3(autoLearnSweepMs,300_000),
+      recoveryAction:null
+    },
+    SHADOW_STRATEGY_LEAGUE:{
+      enabled:strategyLeagueEnabled===true,
+      operations:['strategy_league_watch'],
+      maxSilentMs:max3(strategyLeagueWatchMs,300_000),
+      recoveryAction:null
+    }
+  };
+}
+
+async function executeAutonomousOperatorAction(action){
+  const started=Date.now();
+  try{
+    if(action?.type==='REFRESH_LIVING_RESEARCH'){
+      await refreshBiggjLivingResearch('autonomous-operator-recovery');
+    }else if(action?.type==='SYNC_FEATURE_RESEARCH'){
+      await syncFeatureResearch('autonomous-operator-recovery');
+    }else if(action?.type==='REFRESH_RESEARCH_STACK'){
+      maybeEvaluateClaimAssumptionResearch('autonomous-operator-stall-recovery',{force:false});
+      await refreshBiggjLivingResearch('autonomous-operator-stall-recovery');
+      await syncFeatureResearch('autonomous-operator-stall-recovery');
+      await refreshAutonomousResearchFactory('OPERATOR_STALL_RECOVERY');
+    }else{
+      throw new Error('UNSUPPORTED_OPERATOR_ACTION:'+String(action?.type||'UNKNOWN'));
+    }
+    recordOperation(observability,{name:'biggj_autonomous_operator_recovery',ok:true,latencyMs:Date.now()-started,error:null});
+    return {actionId:action.actionId,ok:true};
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'biggj_autonomous_operator',message:msg});
+    recordOperation(observability,{name:'biggj_autonomous_operator_recovery',ok:false,latencyMs:Date.now()-started,error:msg});
+    return {actionId:action?.actionId||null,ok:false,error:msg};
+  }
+}
+
+async function refreshAutonomousOperator(reason='PERIODIC_OPERATOR_CYCLE'){
+  const started=Date.now();
+  try{
+    const now=Date.now();
+    const obs=observabilitySnapshot(observability,{now});
+    const refreshed=refreshBiggjAutonomousOperator(autonomousOperatorState,{
+      factorySummary:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+      operations:obs.operations,
+      ownerPolicies:autonomousOperatorOwnerPolicies(),
+      uptimeMs:obs.uptimeMs,
+      asOf:now,
+      reason
+    });
+    autonomousOperatorState=refreshed.state;
+    const admission=await storageWriteAdmission('biggj-autonomous-operator');
+    if(admission.allowed){
+      await saveBiggjAutonomousOperator(autonomousOperatorFile,autonomousOperatorState);
+      autonomousOperatorHealthy=true;
+      autonomousOperatorLastError=null;
+    }else{
+      autonomousOperatorHealthy=false;
+      autonomousOperatorLastError=admission.reason||'STORAGE_WRITE_BLOCKED';
+    }
+
+    const results=[];
+    for(const action of refreshed.actions){
+      results.push(await executeAutonomousOperatorAction(action));
+    }
+    if(results.length){
+      autonomousOperatorState=recordBiggjAutonomousOperatorActionResults(autonomousOperatorState,results,{asOf:Date.now()});
+      const resultAdmission=await storageWriteAdmission('biggj-autonomous-operator-results');
+      if(resultAdmission.allowed)await saveBiggjAutonomousOperator(autonomousOperatorFile,autonomousOperatorState);
+    }
+    const summary=biggjAutonomousOperatorSummary(autonomousOperatorState);
+    console.log('[TCX_BIGGJ_AUTONOMOUS_OPERATOR]',JSON.stringify({
+      reason,
+      mode:summary.mode,
+      operatorNeeded:summary.operatorNeeded,
+      humanJobRemaining:summary.humanJobRemaining,
+      automationCoverage:summary.automationCoverage,
+      activeIncidents:summary.activeIncidents,
+      approvalRequired:summary.approvalRequired,
+      exhaustedRecoveries:summary.exhaustedRecoveries,
+      recoveryResults:results,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false,
+      automaticPrimaryMutation:false,
+      automaticPromotion:false
+    }));
+    recordOperation(observability,{name:'biggj_autonomous_operator_cycle',ok:autonomousOperatorHealthy,latencyMs:Date.now()-started,error:autonomousOperatorLastError});
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    autonomousOperatorHealthy=false;
+    autonomousOperatorLastError=msg;
+    recordError(observability,{scope:'biggj_autonomous_operator',message:msg});
+    recordOperation(observability,{name:'biggj_autonomous_operator_cycle',ok:false,latencyMs:Date.now()-started,error:msg});
+    console.error('[TCX_BIGGJ_AUTONOMOUS_OPERATOR_ERROR]',msg);
+    return biggjAutonomousOperatorSummary(autonomousOperatorState);
+  }
+}
+
+async function autonomousOperatorWatcher(){
+  while(running){
+    await sleep(autonomousOperatorRefreshMs);
+    if(!running)break;
+    await refreshAutonomousOperator('PERIODIC_OPERATOR_CYCLE');
+  }
+}
+
 function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
@@ -9037,6 +9226,14 @@ function missionControlData(){
     lastError:autonomousResearchFactoryLastError,
     file:autonomousResearchFactoryFile,
     refreshMs:autonomousResearchFactoryRefreshMs
+  },
+  autonomousOperator:{
+    ...biggjAutonomousOperatorSummary(autonomousOperatorState),
+    version:BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
+    healthy:autonomousOperatorHealthy,
+    lastError:autonomousOperatorLastError,
+    file:autonomousOperatorFile,
+    refreshMs:autonomousOperatorRefreshMs
   },
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
@@ -9314,6 +9511,9 @@ async function gracefulShutdown(signal) {
   await saveAutonomousResearchTrainingFactory(autonomousResearchFactoryFile,autonomousResearchFactoryState).catch(err=>{
     console.error('[TCX_AUTONOMOUS_RESEARCH_FACTORY_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
   });
+  await saveBiggjAutonomousOperator(autonomousOperatorFile,autonomousOperatorState).catch(err=>{
+    console.error('[TCX_BIGGJ_AUTONOMOUS_OPERATOR_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
+  });
   await biggjLivingResearchRefreshQueue.catch(()=>{});
   await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState).catch(err=>{
     console.error('[TCX_BIGGJ_LIVING_RESEARCH_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
@@ -9334,6 +9534,7 @@ liquidationResearchStream.start();
 await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
 await refreshAutonomousResearchFactory('STARTUP');
+await refreshAutonomousOperator('STARTUP');
 const me = await tg('getMe',{});
 if(discordBridge){
   try{
@@ -9361,6 +9562,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   strategyLeagueHealthy,
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+  autonomousOperator:biggjAutonomousOperatorSummary(autonomousOperatorState),
   auditLedger:{
     healthy:auditLedger.healthy,
     fileBytes:Number(auditLedger.fileBytes||0),
@@ -9453,4 +9655,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher()]);
