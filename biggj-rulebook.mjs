@@ -436,15 +436,24 @@ export function evaluateBiggjRulebook({
 
 export function evaluateBiggjRuntimeRulebook({
   health={},
-  newsEvents=[],
-  asOf=Date.now()
+  newsEvents=null,
+  asOf=Date.now(),
+  newsFreshnessMs=10*60_000
 }={}){
+  const now=Number(asOf)||Date.now();
   const kernel=health?.institutionalKernel||{};
   const operator=health?.autonomousOperator||{};
   const governance=health?.governanceTriage||{};
+  const globalIntel=health?.globalIntel||{};
+  const memecoin=health?.memecoinRadar||{};
+  const discord=health?.discordBridge||{};
+  const readiness=health?.operationalReadiness||{};
+  const events=arr(newsEvents??globalIntel?.recent);
+  const explicitViolations=[];
+
   const facts={
-    execution:kernel.execution??operator.execution,
-    canExecute:kernel.canExecute??operator.canExecute,
+    execution:kernel.execution??operator.execution??governance.execution,
+    canExecute:kernel.canExecute??operator.canExecute??governance.canExecute,
     canExecuteLive:operator.canExecuteLive??governance.canExecuteLive,
     abstainFirstClass:true,
     automaticPrimaryMutation:operator.automaticPrimaryMutation??governance.automaticProductionMutation,
@@ -452,25 +461,86 @@ export function evaluateBiggjRuntimeRulebook({
     automaticSkillTransition:operator.automaticSkillTransition??governance.automaticSkillTransition,
     pointInTimeRequired:true
   };
-  const explicitViolations=[];
-  const news=arr(newsEvents);
-  if(news.some(x=>x?.verified===true&&Number(x?.independentConfirmation||0)<=0)){
+
+  for(const event of events){
+    const availableAt=Number(event?.availableAt||event?.timestamp||0);
+    if(Number.isFinite(availableAt)&&availableAt>now+5000){
+      explicitViolations.push({
+        ruleId:'DATA-001',
+        reason:'FUTURE_DATED_NEWS_EVENT_IN_RUNTIME',
+        detail:String(event?.id||event?.title||'UNKNOWN_EVENT')+' availableAt='+availableAt+' > asOf='+now
+      });
+    }
+    if(event?.verified===true&&Number(event?.independentConfirmation||0)<=0){
+      explicitViolations.push({
+        ruleId:'NEWS-003',
+        reason:'VERIFIED_WITHOUT_RECORDED_INDEPENDENT_CONFIRMATION',
+        detail:String(event?.id||event?.title||'UNKNOWN_EVENT')
+      });
+    }
+  }
+
+  const lastNews=Number(globalIntel?.lastRefreshAt||0);
+  if(globalIntel?.sourceReady===true&&lastNews>0&&now-lastNews>Math.max(60_000,Number(newsFreshnessMs)||600_000)){
     explicitViolations.push({
-      ruleId:'NEWS-003',
-      reason:'VERIFIED_WITHOUT_RECORDED_INDEPENDENT_CONFIRMATION',
-      detail:'At least one current news event is marked verified without independent confirmation.'
+      ruleId:'DATA-004',
+      reason:'LIVE_NEWS_SOURCE_READY_BUT_STALE',
+      detail:'lastRefreshAgeMs='+(now-lastNews)
     });
   }
+
+  const memeRows=arr(memecoin?.rows);
+  if(memeRows.some(row=>!String(row?.chainId||'').trim()||!String(row?.tokenAddress||'').trim())){
+    explicitViolations.push({
+      ruleId:'MEME-003',
+      reason:'MEMECOIN_ROW_WITHOUT_CHAIN_ADDRESS_IDENTITY',
+      detail:'At least one memecoin radar row lacks chainId or tokenAddress.'
+    });
+  }
+
+  if(discord?.enabled!==false){
+    const coverage=Number(discord?.channelManagerCoverage);
+    if(Number.isFinite(coverage)&&coverage<1){
+      explicitViolations.push({
+        ruleId:'CH-001',
+        reason:'CHANNEL_MANAGER_COVERAGE_INCOMPLETE',
+        detail:'coverage='+coverage
+      });
+    }
+    if(String(discord?.channelManagerMetaStatus||'').toUpperCase()==='BLIND_SPOTS'){
+      explicitViolations.push({
+        ruleId:'CH-001',
+        reason:'CHANNEL_MANAGER_META_SUPERVISOR_BLIND_SPOTS',
+        detail:'Meta supervisor reports blind spots.'
+      });
+    }
+  }
+
+  if(readiness?.ready===true&&arr(readiness?.hardReasons).length){
+    explicitViolations.push({
+      ruleId:'OPS-001',
+      reason:'READY_WITH_HARD_READINESS_REASONS',
+      detail:arr(readiness.hardReasons).slice(0,8).join(' | ')
+    });
+  }
+
   const assessment=evaluateBiggjRulebook({
     facts,
     explicitViolations,
     operation:'RUNTIME_CONSTITUTION',
-    asOf
+    asOf:now
   });
   return fingerprinted({
     ...assessment,
     source:'OBSERVED_RUNTIME_PLUS_FIXED_CONSTITUTION',
-    note:'Missing core facts remain explicitly unproven; PASS never means every semantic rule was automatically inspected.'
+    runtimeSignals:{
+      newsEventsChecked:events.length,
+      memecoinRowsChecked:memeRows.length,
+      channelManagerCoverage:Number.isFinite(Number(discord?.channelManagerCoverage))?Number(discord.channelManagerCoverage):null,
+      readinessReady:readiness?.ready===true,
+      newsSourceReady:globalIntel?.sourceReady===true
+    },
+    note:'PASS bedeutet: alle beobachteten maschinenprüfbaren Invarianten sind aktuell erfüllt. Nicht beobachtbare semantische Regeln bleiben weiterhin als feste Policy aktiv.'
   });
 }
 
