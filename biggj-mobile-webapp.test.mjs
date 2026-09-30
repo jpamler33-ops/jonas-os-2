@@ -55,3 +55,29 @@ test('service worker and icon remain local first-party assets',()=>{
   assert.match(icon,/^<svg/);
   assert.match(icon,/viewBox="0 0 512 512"/);
 });
+
+
+test('mobile intel separates world, general news, memecoins and trader source truth',()=>{
+  const html=renderBiggjMobileApp({
+    generatedAt:1_800_000_000_000,
+    health:{
+      autonomousOperator:{mode:'HANDS_OFF'},
+      marketRadar:{rows:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12}]},
+      globalIntel:{source:'GDELT DOC 2.1',recent:[
+        {title:'Ceasefire update',family:'GEOPOLITICS',status:'DEVELOPING',verified:false,availableAt:1_800_000_000_000},
+        {title:'Bitcoin update',family:'CRYPTO',status:'WATCH',verified:false,availableAt:1_800_000_000_000}
+      ]},
+      memecoinRadar:{source:'DEXSCREENER_PUBLIC_API',rows:[
+        {chainId:'solana',pair:{symbol:'MEME',priceUsd:.01,liquidityUsd:100000,priceChangeH1:3,buysH1:20,sellsH1:10}}
+      ],metas:[{name:'AI memes',tokenCount:5,volume:1000,liquidity:500}]},
+      traderWatch:{sourceReady:false,nextNeed:'PIT public performance feed'}
+    },
+    portfolio:{}
+  });
+  assert.match(html,/World situation/);
+  assert.match(html,/General relevant news/);
+  assert.match(html,/Memecoin radar/);
+  assert.match(html,/Trader watch/);
+  assert.match(html,/not independently verified/);
+  assert.match(html,/Market radar/);
+});
