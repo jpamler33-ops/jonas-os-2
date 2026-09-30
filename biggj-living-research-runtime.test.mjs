@@ -305,12 +305,65 @@ test('common-cause clustering prevents correlated cases from inflating independe
   assert.equal(skill.evidenceSummary.independentEpisodes,2);
   const summary=biggjLivingResearchRuntimeSummary(separated.state);
   const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
+  assert.equal(row.status,'LEARNING');
   assert.equal(row.recommendedStatus,'LEARNING');
-  assert.equal(row.status,'DISCOVERING','research runtime must not auto-apply the recommendation');
+  assert.equal(separated.researchLifecycleTransitions.length,1);
+  assert.equal(separated.researchLifecycleTransitions[0].fromStatus,'DISCOVERING');
+  assert.equal(separated.researchLifecycleTransitions[0].toStatus,'LEARNING');
+  assert.equal(separated.researchLifecycleTransitions[0].scope,'RESEARCH_ONLY');
   assert.ok(summary.conservativeEpisodePartitions>=2);
   assert.equal(summary.researchEvidence.independentEpisodes,2);
+  assert.equal(summary.researchLifecycle.automaticStageAdvance,true);
+  assert.equal(summary.researchLifecycle.maximumAutomaticStatus,'TESTING');
+  assert.equal(summary.researchLifecycle.explicitReviewRequiredBeyondTesting,true);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.primaryMutationAllowed,false);
+});
+
+test('unchanged source state may still apply one pending research-only lifecycle step',()=>{
+  const DAY=24*60*60*1000;
+  const createdAt=20*DAY;
+  const initial=createBiggjLivingResearchRuntime({asOf:createdAt-10_000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:createdAt-3*DAY,symbol:'BTCUSDT'}),
+      thesisMemory({forecastId:'F2',observedAt:createdAt-2*DAY,symbol:'ETHUSDT'}),
+      thesisMemory({forecastId:'F3',observedAt:createdAt-DAY,symbol:'SOLUSDT'})
+    ],
+    asOf:createdAt,
+    reason:'DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+
+  const forward=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F4',observedAt:createdAt+2*DAY,symbol:'BTCUSDT'}),
+      thesisMemory({forecastId:'F5',observedAt:createdAt+4*DAY,symbol:'ETHUSDT'})
+    ],
+    asOf:createdAt+5*DAY,
+    reason:'FORWARD_CASES'
+  });
+  const skill=forward.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.ok(['DISCOVERING','LEARNING'].includes(skill.status));
+
+  const same=refreshBiggjLivingResearchRuntime(forward.state,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F4',observedAt:createdAt+2*DAY,symbol:'BTCUSDT'}),
+      thesisMemory({forecastId:'F5',observedAt:createdAt+4*DAY,symbol:'ETHUSDT'})
+    ],
+    asOf:createdAt+5*DAY+1000,
+    reason:'UNCHANGED_SOURCE_LIFECYCLE_CHECK'
+  });
+  if(skill.status==='DISCOVERING'){
+    assert.equal(same.changed,true);
+    assert.equal(same.researchLifecycleTransitions.length,1);
+    assert.equal(same.state.skillTree.nodes.find(x=>x.skillId===skillId).status,'LEARNING');
+    assert.ok(same.reasons.includes('RESEARCH_LIFECYCLE_ADVANCED_WITHOUT_NEW_SOURCE'));
+  }else{
+    assert.equal(same.changed,false);
+  }
+  assert.equal(same.state.canInfluencePrimary,false);
+  assert.equal(same.state.canExecuteLive,false);
 });
 
 test('association milestones bind modelled non-causal evidence without becoming independent validation',()=>{
