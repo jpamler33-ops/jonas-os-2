@@ -162,6 +162,23 @@ test('explicit falsifier hit breaks a theory and preserves it in the graveyard',
   assert.equal(graveyard[0].theoryId,theory.theoryId);
 });
 
+test('rediscovering a falsified theory is flagged against the graveyard instead of treated as new',()=>{
+  const {ledger:base,theory}=newTheory();
+  let ledger=add(base,theory.theoryId,0,{
+    evidenceId:'graveyard_falsifier',
+    polarity:'CONTRA',
+    falsifierHit:true,
+    independenceKey:'graveyard_episode',
+    sourceControllerId:'external_controller',
+    outOfSample:true
+  }).ledger;
+  const duplicate=registerTheory(ledger,theoryInput(),{at:T0+50_000});
+  assert.equal(duplicate.created,false);
+  assert.equal(duplicate.reason,'MATCHES_GRAVEYARD_THEORY');
+  assert.equal(duplicate.existingTheoryId,theory.theoryId);
+  assert.equal(duplicate.existingDerivedStatus,'BROKEN');
+});
+
 test('robust research can become bridge-eligible but still cannot mutate primary trading',()=>{
   const {ledger:base,theory}=newTheory();
   let ledger=base;
