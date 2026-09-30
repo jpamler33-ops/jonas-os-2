@@ -149,6 +149,13 @@ import {
   BIGGJ_GOVERNANCE_TRIAGE_VERSION
 } from './biggj-governance-triage.mjs';
 import {
+  BIGGJ_RULEBOOK_VERSION,
+  verifyBiggjRulebook,
+  biggjRulebookSummary,
+  evaluateBiggjRulebook,
+  evaluateBiggjRuntimeRulebook
+} from './biggj-rulebook.mjs';
+import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
@@ -293,6 +300,12 @@ async function storageWriteAdmission(scope){
   }
   return admission;
 }
+
+const biggjRulebookVerification=verifyBiggjRulebook();
+if(!biggjRulebookVerification.ok){
+  throw new Error('BIGGJ_RULEBOOK_INVALID:'+biggjRulebookVerification.reasons.join(','));
+}
+const biggjRulebookStaticSummary=biggjRulebookSummary();
 
 const token = process.env.TCX_TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error('Missing TCX_TELEGRAM_BOT_TOKEN');
@@ -9036,10 +9049,26 @@ function currentPersistenceCompatibility(){
   });
 }
 
+function currentBiggjRulebookAssessment(){
+  return evaluateBiggjRulebook({
+    operation:'SERVING_CORE',
+    facts:{
+      execution:autonomousOperatorState?.safety?.execution,
+      canExecute:autonomousOperatorState?.safety?.canExecute,
+      canExecuteLive:autonomousOperatorState?.safety?.canExecuteLive,
+      abstainFirstClass:true,
+      automaticPrimaryMutation:autonomousOperatorState?.safety?.automaticPrimaryMutation,
+      automaticPromotion:autonomousOperatorState?.safety?.automaticPromotion,
+      automaticSkillTransition:autonomousOperatorState?.safety?.automaticSkillTransition,
+      pointInTimeRequired:true
+    }
+  });
+}
+
 function currentOperationalReadiness(){
   const snapshot=observabilitySnapshot(observability);
   const slo=deriveSloHealth(snapshot);
-  return evaluateOperationalReadiness({
+  const base=evaluateOperationalReadiness({
     auditLedger,
     marketFabric,
     releaseRegistry,
@@ -9062,6 +9091,32 @@ function currentOperationalReadiness(){
     persistenceCompatibility:currentPersistenceCompatibility(),
     localFilePersistence:true,
     replicaCount:configuredReplicaCount
+  });
+  const rulebook=currentBiggjRulebookAssessment();
+  if(rulebook.state!=='BLOCKED'){
+    return Object.freeze({...base,rulebook:{
+      version:BIGGJ_RULEBOOK_VERSION,
+      state:rulebook.state,
+      violations:rulebook.violations.slice(0,12),
+      missingCoreFacts:rulebook.counts.missingCoreFacts
+    }});
+  }
+  const hardReasons=[...new Set([
+    ...(base.hardReasons||[]),
+    ...rulebook.violations.filter(v=>v.severity==='HARD').map(v=>'RULEBOOK_'+v.ruleId)
+  ])];
+  return Object.freeze({
+    ...base,
+    state:'NOT_READY',
+    ready:false,
+    httpStatus:503,
+    hardReasons,
+    rulebook:{
+      version:BIGGJ_RULEBOOK_VERSION,
+      state:rulebook.state,
+      violations:rulebook.violations.slice(0,12),
+      missingCoreFacts:rulebook.counts.missingCoreFacts
+    }
   });
 }
 
@@ -9483,6 +9538,17 @@ function missionControlData(){
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
+ const rulebookRuntime=evaluateBiggjRuntimeRulebook({
+   health,
+   newsEvents:health.globalIntel?.recent||[],
+   asOf:now
+ });
+ health.biggjRulebook={
+   ...biggjRulebookStaticSummary,
+   verification:biggjRulebookVerification,
+   runtime:rulebookRuntime
+ };
+ if(rulebookRuntime.state==='BLOCKED')health.ok=false;
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
@@ -9584,6 +9650,12 @@ const server = http.createServer((req,res) => {
       },
       discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'},
       alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
+      biggjRulebook:{
+        version:BIGGJ_RULEBOOK_VERSION,
+        verification:biggjRulebookVerification,
+        summary:biggjRulebookStaticSummary,
+        runtime:currentBiggjRulebookAssessment()
+      },
       institutionalKernel:{
         version:INSTITUTIONAL_KERNEL_VERSION,
         ledgerHealthy:auditLedger.healthy,
@@ -9811,6 +9883,20 @@ await syncFeatureResearch('startup');
 await refreshPublicExperienceIntel('startup');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
+const startupRulebook=currentBiggjRulebookAssessment();
+console.log('[TCX_BIGGJ_RULEBOOK]',JSON.stringify({
+  version:BIGGJ_RULEBOOK_VERSION,
+  verification:biggjRulebookVerification,
+  rules:biggjRulebookStaticSummary.rules,
+  domains:biggjRulebookStaticSummary.domains,
+  hardRules:biggjRulebookStaticSummary.hardRules,
+  runtimeState:startupRulebook.state,
+  violations:startupRulebook.violations,
+  missingCoreFacts:startupRulebook.counts.missingCoreFacts,
+  execution:'SHADOW_ONLY',
+  canExecute:false,
+  canExecuteLive:false
+}));
 const me = await tg('getMe',{});
 if(discordBridge){
   try{
