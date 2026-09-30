@@ -195,6 +195,7 @@ export function buildForecastThesisDeclarations({
       provenanceIds:[
         'INDEX:'+String(evidenceIndex??'UNKNOWN'),
         'DISAGREEMENT_COUNT:'+String(disagreementCount),
+        'CONTRADICTION_SCORE:'+String(Number(audit?.contradictionScore??1)),
         'GATE:'+evidenceGate,
         'FINGERPRINT:'+String(evidenceRecord?.fingerprint??''),
         ...disagreementLayers.map(x=>'CONFLICT_LAYER:'+x)
