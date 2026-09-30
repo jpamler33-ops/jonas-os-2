@@ -54,11 +54,11 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
   const channels=BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.flatMap(section=>section.channels.map(x=>x.name));
   assert.deepEqual(channels,[
     'brain-pulse','knowledge','research-queue','hypotheses','changes',
-    'experiments','skill-tree','review-queue','progress','evidence-ledger','decision-trace'
+    'experiments','skill-tree','review-queue','learning-timeline','progress','evidence-ledger','decision-trace'
   ]);
 
   const panels=buildBiggjDiscordObservabilityPanelMap(snapshot);
-  assert.equal(panels.length,11);
+  assert.equal(panels.length,12);
   assert.deepEqual(panels.map(x=>x.channel),channels);
   for(const panel of panels)assertDiscordPayload(panel.payload);
 });
@@ -66,7 +66,7 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
 test('every BIGGJ operator view remains within Discord embed/component limits',()=>{
   const state=createBiggjLivingResearchRuntime({asOf:1_800_000_000_000});
   const snapshot=buildBiggjDiscordObservabilitySnapshot({livingResearchState:state,asOf:1_800_000_000_000});
-  for(const view of ['pulse','knowledge','research','hypotheses','changes','experiments','skills','reviews','progress','evidence','decisions']){
+  for(const view of ['pulse','knowledge','research','hypotheses','changes','experiments','skills','reviews','timeline','progress','evidence','decisions']){
     const payload=buildBiggjDiscordObservabilityPayload(view,snapshot);
     assertDiscordPayload(payload);
     assert.match(payload.embeds[0].footer.text,/structured state, not hidden chain-of-thought/);
@@ -100,4 +100,27 @@ test('review queue is visible but remains manual-only and non-executable',()=>{
   assert.equal(payload.components.length,2);
   assert.equal(payload.components[0].components.length,5);
   assert.equal(payload.components[1].components.length,5);
+});
+
+
+test('learning timeline is PIT-bounded and separates activity from quality',()=>{
+  const asOf=1_800_000_000_000;
+  const base=createBiggjLivingResearchRuntime({asOf});
+  const state={
+    ...base,
+    researchProtocols:[
+      ...(base.researchProtocols||[]),
+      {protocolId:'P-PAST',skillId:'SKILL_PAST',state:'REGISTERED',registeredAt:asOf-1_000},
+      {protocolId:'P-FUTURE',skillId:'SKILL_FUTURE',state:'REGISTERED',registeredAt:asOf+1_000}
+    ]
+  };
+  const snapshot=buildBiggjDiscordObservabilitySnapshot({livingResearchState:state,asOf});
+  assert.ok(snapshot.learningTimeline.events.some(x=>x.ref==='P-PAST'));
+  assert.ok(!snapshot.learningTimeline.events.some(x=>x.ref==='P-FUTURE'));
+  assert.ok(snapshot.learningTimeline.events.every(x=>x.at<=snapshot.generatedAt));
+  assert.ok(snapshot.learningTimeline.last24h.total>=1);
+  const payload=buildBiggjDiscordObservabilityPayload('timeline',snapshot);
+  assertDiscordPayload(payload);
+  assert.match(payload.embeds[0].title,/LEARNING TIMELINE/);
+  assert.match(payload.embeds[0].description,/Aktivität ist nicht automatisch Fortschritt/);
 });
