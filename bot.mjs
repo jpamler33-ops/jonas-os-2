@@ -169,6 +169,7 @@ import {
   observeInstitutionalForecastOutcomePoint,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
+  evaluateForecastClaimAssumptionResearch,
   episodeVectorExtraFeatures,
   INSTITUTIONAL_FORECAST_RUNTIME_VERSION
 } from './institutional-forecast-runtime.mjs';
@@ -292,6 +293,7 @@ const researchValidityConfig = Object.freeze({
 });
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_OUTCOME_CHECK_MS || 60000));
+const claimAssumptionEvalMs = Math.max(5*60_000, Number(process.env.TCX_CLAIM_ASSUMPTION_EVAL_MS || 15*60_000));
 const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
@@ -658,6 +660,77 @@ async function compactForecastRuntimeToCold(reason='maintenance'){
 }
 const forecastBootColdCompaction=await compactForecastRuntimeToCold('startup');
 const forecastSeedAtBoot = seedInstitutionalForecastRuntimeFromEpisodes(forecastRuntime,episodes);
+
+let claimAssumptionResearchLastRunAt=0;
+let claimAssumptionResearchLastState=null;
+let claimAssumptionResearchLastLoggedObservationCount=0;
+let claimAssumptionResearchLastSummary=null;
+
+function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
+  const now=Date.now();
+  if(!forecastRuntime.healthy) return null;
+  if(!force&&now-claimAssumptionResearchLastRunAt<claimAssumptionEvalMs) return claimAssumptionResearchLastSummary;
+  claimAssumptionResearchLastRunAt=now;
+  const started=Date.now();
+  try{
+    const report=evaluateForecastClaimAssumptionResearch(forecastRuntime,{
+      limit:forecastJournalMaxEntries
+    });
+    const state=String(report?.conclusion?.state||'UNKNOWN');
+    const observations=Number(report?.acceptedObservationCount||0);
+    const summary={
+      version:report?.version||null,
+      proposalId:report?.proposalId||'CLAIM_ASSUMPTION_GRAPH',
+      evaluatedAt:report?.evaluatedAt??null,
+      observations,
+      rejectedObservations:Number(report?.rejectedObservationCount||0),
+      customDeclarationObservations:Number(report?.coverage?.customDeclarationObservations||0),
+      challengerAlerts:Number(report?.coverage?.challengerAlertObservations||0),
+      baselineAlerts:Number(report?.coverage?.baselineAlertObservations||0),
+      readiness:report?.readiness?.ready===true,
+      readinessReasons:Array.isArray(report?.readiness?.reasons)?report.readiness.reasons:[],
+      state,
+      reasons:Array.isArray(report?.conclusion?.reasons)?report.conclusion.reasons:[],
+      manualPromotionReviewEligible:report?.conclusion?.manualPromotionReviewEligible===true,
+      killReviewEligible:report?.conclusion?.killReviewEligible===true,
+      primaryRecallDifference:report?.primary?.pairedFailureDetection?.recallDifference??null,
+      primaryMcNemarP:report?.primary?.pairedFailureDetection?.test?.pValue??null,
+      falsePositiveRateDifference:report?.primary?.pairedFalseAlerts?.falsePositiveRateDifference??null,
+      falseAlertMcNemarP:report?.primary?.pairedFalseAlerts?.test?.pValue??null,
+      automaticProductionMutation:false,
+      execution:'SHADOW_ONLY',
+      canInfluencePrimary:false,
+      canExecuteLive:false
+    };
+    const stateChanged=state!==claimAssumptionResearchLastState;
+    const milestone=observations>=claimAssumptionResearchLastLoggedObservationCount+25;
+    claimAssumptionResearchLastSummary=summary;
+    claimAssumptionResearchLastState=state;
+    if(stateChanged||milestone||force){
+      claimAssumptionResearchLastLoggedObservationCount=observations;
+      console.log('[TCX_CLAIM_ASSUMPTION_RESEARCH]',JSON.stringify({reason,...summary}));
+    }
+    recordOperation(observability,{
+      name:'claim_assumption_research_evaluator',
+      ok:Number(report?.rejectedObservationCount||0)===0,
+      latencyMs:Date.now()-started,
+      error:Number(report?.rejectedObservationCount||0)>0?'INVALID_SHADOW_OBSERVATIONS_PRESENT':null
+    });
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'claim_assumption_research_evaluator',message:msg});
+    recordOperation(observability,{
+      name:'claim_assumption_research_evaluator',
+      ok:false,
+      latencyMs:Date.now()-started,
+      error:msg
+    });
+    console.error('[TCX_CLAIM_ASSUMPTION_RESEARCH_ERROR]',JSON.stringify({reason,error:msg}));
+    return null;
+  }
+}
+
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
 let shadowCompetitionLastHistorySize = Number(shadowCompetitionState?.evaluatedHistoryRows||0);
@@ -8336,6 +8409,7 @@ async function forecastOutcomeWatcher() {
           postMemory:postAdmission.memory
         }));
         if(postAdmission.allowed){
+          maybeEvaluateClaimAssumptionResearch('resolved-outcomes');
           await syncFeatureResearch('resolved-outcomes');
         }else{
           console.warn('resolved-outcome feature research deferred for memory headroom',JSON.stringify({
@@ -8479,6 +8553,14 @@ function missionControlData(){
   marketDataFabric:{healthy:marketFabric.healthy,events:marketFabric.events.length},
   shadowOms:{healthy:shadowOmsHealthy,total:shadowOrders.length,active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,filled:shadowOrders.filter(o=>o.status==='FILLED').length},
   institutionalForecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
+  claimAssumptionResearch:claimAssumptionResearchLastSummary||{
+    state:'NOT_EVALUATED',
+    observations:0,
+    automaticProductionMutation:false,
+    execution:'SHADOW_ONLY',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  },
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
   researchCoverage,
