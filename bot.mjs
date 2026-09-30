@@ -8924,6 +8924,7 @@ function autonomousResearchFactoryInputs(now=Date.now()){
     strategyLeagueSummary:strategyLeagueSummary(strategyLeagueLedger,{asOf:now}),
     researchDataPlaneSummary:researchDataPlaneSummary(researchDataPlane),
     researchDataGovernanceSummary:researchDataGovernanceSummary(researchDataGovernance,{now}),
+    researchCoverageSummary:buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now}),
     historyStats:{
       rows:forecastRuntime.engine.historySize(),
       progressAt:forecastRuntime.engine.historyProgressAt(Number.POSITIVE_INFINITY,{limit:shadowCompetitionHistoryRows})
@@ -8964,7 +8965,19 @@ async function refreshAutonomousResearchFactory(reason='PERIODIC_REFRESH'){
         automatic:summary.automatic,
         manual:summary.manual,
         dataNeeds:summary.dataNeeds.slice(0,8),
-        nextTasks:summary.nextTasks.slice(0,5).map(x=>({type:x.type,subject:x.subject,handler:x.autoHandler})),
+        researchLeverage:{
+          leverCount:summary.leverage?.leverCount??0,
+          stalledTasks:summary.leverage?.stalledTaskCount??0,
+          batchOpportunities:summary.leverage?.batchOpportunityCount??0,
+          dataReadiness:summary.leverage?.dataState?.readiness??null
+        },
+        nextTasks:summary.nextTasks.slice(0,5).map(x=>({
+          type:x.type,
+          subject:x.subject,
+          handler:x.autoHandler,
+          effectivePriority:x.effectivePriority,
+          topLevers:x.topLevers
+        })),
         execution:'SHADOW_ONLY',
         canExecuteLive:false,
         automaticPrimaryMutation:false
