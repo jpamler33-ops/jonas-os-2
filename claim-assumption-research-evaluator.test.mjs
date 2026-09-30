@@ -66,7 +66,9 @@ function observation(i,{
   intervalMiss=false,
   custom=true,
   revisionWarning=false,
-  staleAssumptionIds=[]
+  structuralWarning=revisionWarning,
+  staleAssumptionIds=[],
+  persistentAssumptionIds=structuralWarning?staleAssumptionIds:[]
 }={}){
   const sidecar=challenger?alertSidecar:(custom?cleanSidecar:genericSidecar);
   return createForecastClaimAssumptionShadowObservation(sidecar,{
@@ -102,15 +104,22 @@ function observation(i,{
       sidecarBytes:1600
     },
     thesisRevisionState:{
-      eventsBeforeMaturity:revisionWarning?1:0,
+      eventsBeforeMaturity:(revisionWarning||structuralWarning)?1:0,
       staleAssumptionIdsAtMaturity:revisionWarning?[...staleAssumptionIds]:[],
       everStaleAssumptionIdsBeforeMaturity:revisionWarning?[...staleAssumptionIds]:[],
+      transientFlickerAssumptionIdsAtMaturity:revisionWarning&&!structuralWarning?[...staleAssumptionIds]:[],
+      persistentStaleAssumptionIdsAtMaturity:structuralWarning?[...persistentAssumptionIds]:[],
+      everPersistentStaleAssumptionIdsBeforeMaturity:structuralWarning?[...persistentAssumptionIds]:[],
       firstStaleAt:revisionWarning?300000+i*10:null,
+      firstPersistentStaleAt:structuralWarning?300100+i*10:null,
       firstWatchAt:null,
       firstForecastInvalidatedAt:null,
       firstWarningAt:revisionWarning?300000+i*10:null,
       warningAvailableBeforeMaturity:revisionWarning,
       warningLeadMs:revisionWarning?1000:null,
+      firstStructuralWarningAt:structuralWarning?300100+i*10:null,
+      structuralWarningAvailableBeforeMaturity:structuralWarning,
+      structuralWarningLeadMs:structuralWarning?900:null,
       forecastInvalidatedBeforeMaturity:false
     }
   });
@@ -258,10 +267,50 @@ test('pre-outcome thesis revision warnings measure failure capture, false-warnin
   assert.equal(a.neverStaleBeforeMaturity,48);
   assert.ok(a.directionFailureRateDifference>0);
   assert.equal(a.associationReady,true);
-  assert.equal(a.interpretation,'PROSPECTIVE_STALENESS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF');
+  assert.equal(a.interpretation,'RAW_SUPPORT_LOSS_ASSOCIATION_ONLY_NOT_CAUSAL_PROOF');
+  assert.equal(a.persistenceFiltered.persistentStaleBeforeMaturity,32);
+  assert.equal(a.persistenceFiltered.neverPersistentStaleBeforeMaturity,48);
+  assert.ok(a.persistenceFiltered.directionFailureRateDifference>0);
+  assert.equal(a.persistenceFiltered.associationReady,true);
+  assert.equal(r.preOutcomeRevision.structural.warningsBeforeMaturity,32);
+  assert.equal(r.preOutcomeRevision.structural.failuresWithPriorWarning,24);
+  assert.equal(r.preOutcomeRevision.structural.successesWithPriorWarning,8);
+  assert.equal(r.preOutcomeRevision.structural.medianWarningLeadMs,900);
   assert.equal(r.methodology.preOutcomeWarningsUseOnlyEventsKnownByHorizonMaturity,true);
   assert.equal(r.canInfluencePrimary,false);
   assert.equal(r.canExecuteLive,false);
+});
+
+test('persistence filter excludes transient flicker from structural warning statistics',()=>{
+  const rows=[];
+  let i=0;
+  for(let n=0;n<20;n++){
+    rows.push(observation(i++,{
+      topCorrect:false,
+      revisionWarning:true,
+      structuralWarning:n<5,
+      staleAssumptionIds:['THESIS_TEST_SUPPORT'],
+      persistentAssumptionIds:n<5?['THESIS_TEST_SUPPORT']:[]
+    }));
+  }
+  for(let n=0;n<20;n++){
+    rows.push(observation(i++,{
+      topCorrect:true,
+      revisionWarning:true,
+      structuralWarning:n<2,
+      staleAssumptionIds:['THESIS_TEST_SUPPORT'],
+      persistentAssumptionIds:n<2?['THESIS_TEST_SUPPORT']:[]
+    }));
+  }
+  const r=evaluateClaimAssumptionResearch(dataset(rows),{config:lowThresholds});
+  assert.equal(r.preOutcomeRevision.warningsBeforeMaturity,40);
+  assert.equal(r.preOutcomeRevision.structural.warningsBeforeMaturity,7);
+  assert.equal(r.preOutcomeRevision.structural.failuresWithPriorWarning,5);
+  assert.equal(r.preOutcomeRevision.structural.successesWithPriorWarning,2);
+  const a=r.byPreOutcomeStaleAssumption.find(x=>x.assumptionId==='THESIS_TEST_SUPPORT');
+  assert.equal(a.staleBeforeMaturity,40);
+  assert.equal(a.persistenceFiltered.persistentStaleBeforeMaturity,7);
+  assert.equal(r.methodology.transientFlickerIsNotCountedAsPersistentStaleness,true);
 });
 
 test('same frozen dataset produces same evaluation fingerprint',()=>{
