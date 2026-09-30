@@ -716,54 +716,68 @@ let claimAssumptionResearchLastState=null;
 let claimAssumptionResearchLastLoggedObservationCount=0;
 let claimAssumptionResearchLastSummary=null;
 let claimAssumptionResearchLastReport=null;
-let biggjLivingResearchLastLoggedFingerprint=null;
+let biggjLivingResearchRefreshQueue=Promise.resolve();
 
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
-  const started=Date.now();
-  try{
-    const thesisMemories=forecastRuntime?.intelligence?.thesisMemories?.()||[];
-    const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
-      thesisMemories,
-      claimAssumptionReport:report,
-      asOf:Date.now(),
-      reason
-    });
-    if(refreshed.changed){
-      const admission=await storageWriteAdmission('biggj-living-research');
-      if(!admission.allowed){
-        biggjLivingResearchHealthy=false;
-        console.warn('[TCX_BIGGJ_LIVING_RESEARCH_PERSIST_DEFERRED]',JSON.stringify({
-          reason:admission.reason||'STORAGE_WRITE_BLOCKED',
-          refreshReason:reason,
-          execution:'SHADOW_ONLY',
-          canExecuteLive:false
-        }));
-        return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-      }
-      await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
-      biggjLivingResearchState=refreshed.state;
-      biggjLivingResearchHealthy=true;
-      const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-      if(
-        refreshed.discoveredSkillIds.length>0||
-        biggjLivingResearchLastLoggedFingerprint!==biggjLivingResearchState.fingerprint
-      ){
-        biggjLivingResearchLastLoggedFingerprint=biggjLivingResearchState.fingerprint;
-        console.log('[TCX_BIGGJ_LIVING_RESEARCH]',JSON.stringify({
-          reason,
-          revision:summary.revision,
-          activeAgendaItems:summary.activeAgendaItems,
-          researchRequired:summary.researchRequired,
-          discoveredResearchOnlySkills:summary.discoveredResearchOnlySkills,
-          newSkillIds:refreshed.discoveredSkillIds,
-          topAgenda:summary.topAgenda,
-          automaticPromotion:false,
-          automaticKill:false,
-          automaticExperimentLaunch:false,
-          primaryMutationAllowed:false,
-          execution:'SHADOW_ONLY',
-          canExecuteLive:false
-        }));
+  const run=async()=>{
+    const started=Date.now();
+    try{
+      const thesisMemories=forecastRuntime?.intelligence?.thesisMemories?.()||[];
+      const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
+        thesisMemories,
+        claimAssumptionReport:report,
+        asOf:Date.now(),
+        reason
+      });
+      if(refreshed.changed){
+        const previousAgendaById=new Map((biggjLivingResearchState?.agenda||[]).map(x=>[String(x.assumptionId),String(x.status)]));
+        const newAgendaItems=(refreshed.state?.agenda||[])
+          .filter(x=>!previousAgendaById.has(String(x.assumptionId)))
+          .map(x=>({assumptionId:x.assumptionId,status:x.status,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
+        const newlyResearchRequired=(refreshed.state?.agenda||[])
+          .filter(x=>String(x.status)==='RESEARCH_REQUIRED'&&previousAgendaById.get(String(x.assumptionId))!=='RESEARCH_REQUIRED')
+          .map(x=>({assumptionId:x.assumptionId,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
+        const admission=await storageWriteAdmission('biggj-living-research');
+        if(!admission.allowed){
+          biggjLivingResearchHealthy=false;
+          console.warn('[TCX_BIGGJ_LIVING_RESEARCH_PERSIST_DEFERRED]',JSON.stringify({
+            reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+            refreshReason:reason,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
+          return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+        }
+        await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
+        biggjLivingResearchState=refreshed.state;
+        biggjLivingResearchHealthy=true;
+        const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+        if(newAgendaItems.length>0||newlyResearchRequired.length>0||refreshed.discoveredSkillIds.length>0){
+          console.log('[TCX_BIGGJ_RESEARCH_AGENDA]',JSON.stringify({
+            reason,
+            revision:summary.revision,
+            activeAgendaItems:summary.activeAgendaItems,
+            researchRequired:summary.researchRequired,
+            newAgendaItems,
+            newlyResearchRequired,
+            newSkillIds:refreshed.discoveredSkillIds,
+            newProtocolIds:refreshed.createdProtocolIds||[],
+            topResearchBottlenecks:summary.topResearchBottlenecks,
+            automaticPromotion:false,
+            automaticKill:false,
+            automaticExperimentLaunch:false,
+            primaryMutationAllowed:false,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
+        }
+        recordOperation(observability,{
+          name:'biggj_living_research_refresh',
+          ok:true,
+          latencyMs:Date.now()-started,
+          error:null
+        });
+        return summary;
       }
       recordOperation(observability,{
         name:'biggj_living_research_refresh',
@@ -771,36 +785,31 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
         latencyMs:Date.now()-started,
         error:null
       });
-      return summary;
+      return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+    }catch(err){
+      biggjLivingResearchHealthy=false;
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'biggj_living_research',message:msg});
+      recordOperation(observability,{
+        name:'biggj_living_research_refresh',
+        ok:false,
+        latencyMs:Date.now()-started,
+        error:msg
+      });
+      console.error('[TCX_BIGGJ_LIVING_RESEARCH_ERROR]',JSON.stringify({
+        reason,
+        error:msg,
+        primaryMutationAllowed:false,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+      return null;
     }
-    recordOperation(observability,{
-      name:'biggj_living_research_refresh',
-      ok:true,
-      latencyMs:Date.now()-started,
-      error:null
-    });
-    return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-  }catch(err){
-    biggjLivingResearchHealthy=false;
-    const msg=err instanceof Error?err.message:String(err);
-    recordError(observability,{scope:'biggj_living_research',message:msg});
-    recordOperation(observability,{
-      name:'biggj_living_research_refresh',
-      ok:false,
-      latencyMs:Date.now()-started,
-      error:msg
-    });
-    console.error('[TCX_BIGGJ_LIVING_RESEARCH_ERROR]',JSON.stringify({
-      reason,
-      error:msg,
-      primaryMutationAllowed:false,
-      execution:'SHADOW_ONLY',
-      canExecuteLive:false
-    }));
-    return null;
-  }
+  };
+  const queued=biggjLivingResearchRefreshQueue.then(run,run);
+  biggjLivingResearchRefreshQueue=queued.then(()=>undefined,()=>undefined);
+  return queued;
 }
-
 function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
   const now=Date.now();
   if(!forecastRuntime.healthy) return null;
@@ -9180,6 +9189,10 @@ async function gracefulShutdown(signal) {
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
   await persistForecastRuntime(`shutdown:${signal}`,{force:true});
+  await biggjLivingResearchRefreshQueue.catch(()=>{});
+  await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState).catch(err=>{
+    console.error('[TCX_BIGGJ_LIVING_RESEARCH_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
+  });
   await researchDataPlaneAppendQueue.catch(()=>{});
   await saveResearchDataGovernance(researchGovernanceFile,researchDataGovernance).catch(()=>{});
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});

@@ -1197,6 +1197,14 @@ export function biggjLivingResearchRuntimeSummary(value){
       distinctPersistentForecasts:x.distinctPersistentForecasts,
       topFalsifier:x.falsifiers?.[0]?.code??null
     })),
+    topResearchBottlenecks:active.slice(0,5).map(x=>({
+      assumptionId:x.assumptionId,
+      status:x.status,
+      informationValue:x.informationValue,
+      primaryCapabilityId:x.primaryCapabilityId,
+      distinctPersistentForecasts:x.distinctPersistentForecasts,
+      topFalsifier:x.falsifiers?.[0]?.code??null
+    })),
     observedForecasts:(value?.observedForecastIds||[]).length,
     retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
     retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
@@ -1206,6 +1214,7 @@ export function biggjLivingResearchRuntimeSummary(value){
     unresolvedResearchCases:(value?.researchEpisodeResolution||[])
       .reduce((n,x)=>n+Number(x?.counts?.unresolvedCases||0),0),
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
+    discoveredResearchOnlySkillIds:[...(value?.discoveredSkillIds||[])],
     researchReviews:{
       version:BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION,
       open:Number(value?.researchReviewQueue?.ticketCount||0),

@@ -583,6 +583,9 @@ test('runtime persistence round-trip preserves fingerprint and research state',a
   assert.deepEqual(reopened.state.researchProtocols,out.state.researchProtocols);
   const raw=JSON.parse(await readFile(file,'utf8'));
   assert.equal(raw.fingerprint,out.state.fingerprint);
+  const summary=biggjLivingResearchRuntimeSummary(reopened.state);
+  assert.deepEqual(summary.discoveredResearchOnlySkillIds,out.state.discoveredSkillIds);
+  assert.deepEqual(summary.topResearchBottlenecks,summary.topAgenda);
 });
 
 test('legacy persisted living research state backfills review queue without corruption reset',async()=>{
