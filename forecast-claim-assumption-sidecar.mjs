@@ -370,7 +370,8 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
   evaluationMetrics=null,
   outcome=null,
   baselineAuditState=null,
-  overhead=null
+  overhead=null,
+  thesisRevisionState=null
 }={}){
   const sv=verifyForecastClaimAssumptionSidecar(sidecar);
   if(!sv.ok) throw new Error('forecast claim-assumption sidecar invalid');
@@ -467,6 +468,25 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       traceBytes:Math.max(0,Math.floor(Number(overhead?.traceBytes)||0)),
       sidecarBytes:Math.max(0,Math.floor(Number(overhead?.sidecarBytes)||0))
     },
+    preOutcomeThesisRevisionState:thesisRevisionState?{
+      eventsBeforeMaturity:Math.max(0,Math.floor(Number(thesisRevisionState?.eventsBeforeMaturity)||0)),
+      staleAssumptionIdsAtMaturity:Array.isArray(thesisRevisionState?.staleAssumptionIdsAtMaturity)
+        ?[...new Set(thesisRevisionState.staleAssumptionIdsAtMaturity.map(String))].sort()
+        :[],
+      everStaleAssumptionIdsBeforeMaturity:Array.isArray(thesisRevisionState?.everStaleAssumptionIdsBeforeMaturity)
+        ?[...new Set(thesisRevisionState.everStaleAssumptionIdsBeforeMaturity.map(String))].sort()
+        :[],
+      firstStaleAt:Number.isFinite(Number(thesisRevisionState?.firstStaleAt))?Number(thesisRevisionState.firstStaleAt):null,
+      firstWatchAt:Number.isFinite(Number(thesisRevisionState?.firstWatchAt))?Number(thesisRevisionState.firstWatchAt):null,
+      firstForecastInvalidatedAt:Number.isFinite(Number(thesisRevisionState?.firstForecastInvalidatedAt))
+        ?Number(thesisRevisionState.firstForecastInvalidatedAt)
+        :null,
+      firstWarningAt:Number.isFinite(Number(thesisRevisionState?.firstWarningAt))?Number(thesisRevisionState.firstWarningAt):null,
+      warningAvailableBeforeMaturity:thesisRevisionState?.warningAvailableBeforeMaturity===true,
+      warningLeadMs:Number.isFinite(Number(thesisRevisionState?.warningLeadMs))?Number(thesisRevisionState.warningLeadMs):null,
+      forecastInvalidatedBeforeMaturity:thesisRevisionState?.forecastInvalidatedBeforeMaturity===true,
+      interpretation:'PRE_OUTCOME_REVISION_SIGNAL_NOT_CAUSAL_PROOF'
+    }:null,
     semantics:{
       forwardShadowMeasurementOnly:true,
       linksIssuanceStateToLaterOutcome:true,
@@ -474,6 +494,7 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       doesNotRewriteIssuanceGraph:true,
       doesNotChangeForecastEvaluation:true,
       pairedResearchComparisonOnly:true,
+      preOutcomeRevisionStateUsesOnlyEventsKnownByMaturity:true,
       outcomeAssociationIsNotCausation:true
     },
     execution:'SHADOW_ONLY',
