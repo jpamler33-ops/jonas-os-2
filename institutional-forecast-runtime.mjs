@@ -24,6 +24,13 @@ import {
 } from './forecast-claim-assumption-sidecar.mjs';
 import { evaluateProbabilityCalibrationGate } from './forecast-runtime/forecast/evaluation.js';
 import { evaluateClaimAssumptionResearch } from './claim-assumption-research-evaluator.mjs';
+import {
+  createInitialForecastThesisRevisionMemory,
+  createForecastThesisRevisionArtifact,
+  applyForecastThesisRevision,
+  forecastThesisPreOutcomeRevisionState,
+  verifyForecastThesisRevisionMemory
+} from './forecast-thesis-revision-memory.mjs';
 import { sha256 } from './institutional-kernel.mjs';
 
 export const INSTITUTIONAL_FORECAST_RUNTIME_VERSION='TCX_INSTITUTIONAL_FORECAST_RUNTIME_V1';
@@ -1407,9 +1414,27 @@ export function issueInstitutionalForecast(runtime,{
     runtime.issuances=trimIssuances(runtime.issuances,runtime.maxIssuances);
   }
 
+  const effectiveIssuance=prior??issuance;
+  if(effectiveIssuance?.claimAssumptionSidecar){
+    const tracked=runtime.intelligence.get(raw.forecastId);
+    if(!tracked?.thesisMemory){
+      const memory=createInitialForecastThesisRevisionMemory({
+        forecastId:raw.forecastId,
+        issuance:effectiveIssuance
+      });
+      runtime.intelligence.bindThesis(raw.forecastId,memory);
+    }else{
+      const mv=verifyForecastThesisRevisionMemory(tracked.thesisMemory);
+      if(!mv.ok) throw new Error('tracked thesis revision memory invalid: '+mv.reasons.join(','));
+      if(tracked.thesisMemory.issueGraphFingerprint!==effectiveIssuance.claimAssumptionSidecar.graphFingerprint){
+        throw new Error('tracked thesis revision memory graph mismatch');
+      }
+    }
+  }
+
   return deepFreeze({
     forecastId:raw.forecastId,
-    issuance:prior??issuance,
+    issuance:effectiveIssuance,
     duplicate:Boolean(prior),
     claimAssumptionSidecarStatus:prior
       ?(prior.claimAssumptionSidecar?'MATCHED_EXISTING':'LEGACY_MISSING')
