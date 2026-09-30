@@ -1416,6 +1416,44 @@ export function issueInstitutionalForecast(runtime,{
   });
 }
 
+function researchTraceBaselineAuditState(trace){
+  const reasons=[];
+  const safetyState=String(trace?.safety?.state??'UNKNOWN').toUpperCase();
+  const validityState=String(trace?.validity?.state??'UNKNOWN').toUpperCase();
+  const contradictionCount=Array.isArray(trace?.contradictions)?trace.contradictions.length:0;
+  const forecastGate=String(trace?.forecast?.overallGate??'UNKNOWN').toUpperCase();
+  const scienceGate=String(trace?.science?.gate??'UNKNOWN').toUpperCase();
+
+  if(safetyState!=='NORMAL') reasons.push('SAFETY_'+safetyState);
+  if(validityState!=='VALID') reasons.push('VALIDITY_'+validityState);
+  if(contradictionCount>0) reasons.push('CONTRADICTIONS_PRESENT');
+  if(forecastGate!=='PASS') reasons.push('FORECAST_GATE_'+forecastGate);
+  if(scienceGate!=='PASS') reasons.push('SCIENCE_GATE_'+scienceGate);
+
+  return {
+    alert:reasons.length>0,
+    reasons,
+    safetyState,
+    validityState,
+    contradictionCount,
+    forecastGate,
+    scienceGate
+  };
+}
+
+function claimAssumptionObservationOverhead(issuance){
+  const sidecar=issuance?.claimAssumptionSidecar;
+  const graph=sidecar?.graph;
+  const bytes=value=>Buffer.byteLength(JSON.stringify(value??null),'utf8');
+  return {
+    graphNodes:Array.isArray(graph?.nodes)?graph.nodes.length:0,
+    graphEdges:Array.isArray(graph?.edges)?graph.edges.length:0,
+    graphBytes:bytes(graph),
+    traceBytes:bytes(issuance?.trace),
+    sidecarBytes:bytes(sidecar)
+  };
+}
+
 function evaluationsFromResolved(runtime,resolved){
   const evaluations=[];
   for(const row of resolved){
@@ -1457,7 +1495,11 @@ function evaluationsFromResolved(runtime,resolved){
           horizonId:row.horizonId,
           maturedAt:row.dueAt,
           observedAt:row.resolution.resolvedAt,
-          evaluationId:evaluation.evaluationId
+          evaluationId:evaluation.evaluationId,
+          evaluationMetrics:evaluation.metrics,
+          outcome:evaluation.outcome,
+          baselineAuditState:researchTraceBaselineAuditState(issuance.trace),
+          overhead:claimAssumptionObservationOverhead(issuance)
         }
       );
       const observationVerification=verifyForecastClaimAssumptionShadowObservation(claimAssumptionObservation);
