@@ -6,11 +6,12 @@ This repository is developed by multiple parallel ChatGPT sessions. Treat GitHub
 
 Before changing code:
 
-1. Read the latest commits on `main`.
-2. Read recent open and merged pull requests.
-3. For relevant PRs, read the comment containing `TCX_CHAT_HANDOVER_V1`.
-4. Inspect any branch that overlaps your intended files.
-5. Preserve parallel work. Never overwrite another chat's branch or silently replace a file from an older base.
+1. Read the open GitHub issue titled `[BIGGJ] Project Status` as the fast operator index.
+2. Read the latest commits on `main`.
+3. Read recent open and merged pull requests.
+4. For relevant PRs, read the comment containing `TCX_CHAT_HANDOVER_V1`.
+5. Inspect any branch that overlaps your intended files.
+6. Preserve parallel work. Never overwrite another chat's branch or silently replace a file from an older base.
 
 If `main` moved after your branch was created, compare the new commits first. Recreate or rebase your work on current `main` when necessary.
 

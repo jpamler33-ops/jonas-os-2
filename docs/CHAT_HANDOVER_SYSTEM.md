@@ -30,13 +30,25 @@ Parallel chats would constantly overwrite or conflict with a shared file.
 Per-PR capsules are isolated, timestamped by GitHub, searchable, and tied to the
 exact code that was changed.
 
+## Project status index
+
+The open GitHub issue titled `[BIGGJ] Project Status` is the fast, automatically
+refreshed operator index. It summarizes current `main`, open parallel work,
+recent merges and recent GitHub Actions signals. It is not a replacement for
+the per-PR handover capsules.
+
+The issue is maintained by `.github/workflows/biggj-project-status.yml`.
+Its body contains machine-readable `BIGGJ_PROJECT_STATUS_V1` metadata.
+
 ## What a new chat should do
 
-1. Inspect current `main`.
-2. Inspect recent open and merged PRs.
-3. Read the relevant `TCX_CHAT_HANDOVER_V1` comments.
-4. Continue from the newest compatible state.
-5. If an old PR diverged, transplant the useful diff to a fresh branch instead
+1. Read `AGENTS.md`.
+2. Read the open `[BIGGJ] Project Status` issue.
+3. Inspect current `main`.
+4. Inspect recent open and merged PRs.
+5. Read the relevant `TCX_CHAT_HANDOVER_V1` comments.
+6. Continue from the newest compatible state.
+7. If an old PR diverged, transplant the useful diff to a fresh branch instead
    of blindly merging it.
 
 ## What still requires judgment
