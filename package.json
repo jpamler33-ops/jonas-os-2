@@ -39,7 +39,8 @@
     "test:forecast-thesis-declarations": "node --test forecast-thesis-declarations.test.mjs",
     "test:forecast-thesis-revisions": "node --test forecast-thesis-revision-memory.test.mjs",
     "test:assumption-stability": "node --test forecast-assumption-stability.test.mjs",
-    "test:living-research": "node --test biggj-living-research-runtime.test.mjs"
+    "test:biggj-living-research": "node --test biggj-living-research-runtime.test.mjs biggj-living-research-integration.test.mjs",
+    "test:living-research": "npm run test:biggj-living-research"
   },
   "engines": {
     "node": ">=22"

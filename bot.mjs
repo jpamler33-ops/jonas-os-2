@@ -703,7 +703,6 @@ let claimAssumptionResearchLastState=null;
 let claimAssumptionResearchLastLoggedObservationCount=0;
 let claimAssumptionResearchLastSummary=null;
 let claimAssumptionResearchLastReport=null;
-let biggjLivingResearchLastLoggedFingerprint=null;
 let biggjLivingResearchRefreshQueue=Promise.resolve();
 
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
@@ -720,6 +719,13 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
       reason
     });
     if(refreshed.changed){
+      const previousAgendaById=new Map((biggjLivingResearchState?.agenda||[]).map(x=>[String(x.assumptionId),String(x.status)]));
+      const newAgendaItems=(refreshed.state?.agenda||[])
+        .filter(x=>!previousAgendaById.has(String(x.assumptionId)))
+        .map(x=>({assumptionId:x.assumptionId,status:x.status,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
+      const newlyResearchRequired=(refreshed.state?.agenda||[])
+        .filter(x=>String(x.status)==='RESEARCH_REQUIRED'&&previousAgendaById.get(String(x.assumptionId))!=='RESEARCH_REQUIRED')
+        .map(x=>({assumptionId:x.assumptionId,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
       const admission=await storageWriteAdmission('biggj-living-research');
       if(!admission.allowed){
         biggjLivingResearchHealthy=false;
@@ -735,19 +741,16 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
       biggjLivingResearchState=refreshed.state;
       biggjLivingResearchHealthy=true;
       const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-      if(
-        refreshed.discoveredSkillIds.length>0||
-        biggjLivingResearchLastLoggedFingerprint!==biggjLivingResearchState.fingerprint
-      ){
-        biggjLivingResearchLastLoggedFingerprint=biggjLivingResearchState.fingerprint;
-        console.log('[TCX_BIGGJ_LIVING_RESEARCH]',JSON.stringify({
+      if(newAgendaItems.length>0||newlyResearchRequired.length>0||refreshed.discoveredSkillIds.length>0){
+        console.log('[TCX_BIGGJ_RESEARCH_AGENDA]',JSON.stringify({
           reason,
           revision:summary.revision,
           activeAgendaItems:summary.activeAgendaItems,
           researchRequired:summary.researchRequired,
-          discoveredResearchOnlySkills:summary.discoveredResearchOnlySkills,
+          newAgendaItems,
+          newlyResearchRequired,
           newSkillIds:refreshed.discoveredSkillIds,
-          topAgenda:summary.topAgenda,
+          topResearchBottlenecks:summary.topResearchBottlenecks,
           automaticPromotion:false,
           automaticKill:false,
           automaticExperimentLaunch:false,

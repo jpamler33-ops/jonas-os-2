@@ -296,6 +296,9 @@ test('runtime persistence round-trip preserves fingerprint and research state',a
   assert.equal(verifyBiggjLivingResearchRuntime(reopened.state).ok,true);
   const raw=JSON.parse(await readFile(file,'utf8'));
   assert.equal(raw.fingerprint,out.state.fingerprint);
+  const summary=biggjLivingResearchRuntimeSummary(reopened.state);
+  assert.deepEqual(summary.discoveredResearchOnlySkillIds,out.state.discoveredSkillIds);
+  assert.deepEqual(summary.topResearchBottlenecks,summary.topAgenda);
 });
 
 test('corrupt runtime is quarantined and safely restarted research-only',async()=>{

@@ -655,10 +655,19 @@ export function biggjLivingResearchRuntimeSummary(value){
       distinctPersistentForecasts:x.distinctPersistentForecasts,
       topFalsifier:x.falsifiers?.[0]?.code??null
     })),
+    topResearchBottlenecks:active.slice(0,5).map(x=>({
+      assumptionId:x.assumptionId,
+      status:x.status,
+      informationValue:x.informationValue,
+      primaryCapabilityId:x.primaryCapabilityId,
+      distinctPersistentForecasts:x.distinctPersistentForecasts,
+      topFalsifier:x.falsifiers?.[0]?.code??null
+    })),
     observedForecasts:(value?.observedForecastIds||[]).length,
     retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
     retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
+    discoveredResearchOnlySkillIds:[...(value?.discoveredSkillIds||[])],
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
       :null,
