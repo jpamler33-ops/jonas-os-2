@@ -37,7 +37,8 @@ test('new user activity rearms the ten minute idle window',()=>{
   x.completeReset(5,{at:t,newHomeMessageId:22});
   t+=60_000;
   const touch=x.touch(5,{at:t});
-  assert.equal(touch.hadExpired,true);
+  assert.equal(touch.wasResetDone,true);
+  assert.equal(touch.hadExpired,false);
   t+=599_999;
   assert.equal(x.claimExpired({at:t}).length,0);
   t+=1;
