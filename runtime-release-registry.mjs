@@ -27,6 +27,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-oms.mjs',
   'streaming-json-persistence.mjs',
   'autonomous-shadow-trader.mjs',
+  'shadow-dual-wallet.mjs',
   'biggj-trading-policy.mjs',
   'shadow-portfolio-ledger.mjs',
   'shadow-capital-academy.mjs',
