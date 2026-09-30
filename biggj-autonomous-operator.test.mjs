@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { sha256 } from './institutional-kernel.mjs';
 
 import {
   BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
@@ -334,4 +335,70 @@ test('intentional worker deferral stays operator-free while passive data accumul
   assert.equal(summary.operatorNeeded,false);
   assert.equal(summary.activeIncidents,0);
   assert.equal(out.actions.length,0);
+});
+
+
+test('previously unresolved recovery becomes verified once the incident disappears',()=>{
+  const base=createBiggjAutonomousOperator({asOf:now-1000});
+  const {fingerprint,...core}=base;
+  const unresolved={
+    ...core,
+    updatedAt:now-500,
+    revision:1,
+    recoveryHistory:[{
+      at:now-10_000,
+      actionId:'old-action',
+      incidentKey:'RESEARCH_STALLED|RESEARCH_FACTORY',
+      type:'REFRESH_RESEARCH_STACK',
+      subject:'RESEARCH_FACTORY',
+      attempt:1,
+      result:'EXECUTED_UNRESOLVED',
+      completedAt:now-9_000,
+      verifiedAt:now-8_000
+    }]
+  };
+  const seeded={...unresolved,fingerprint:sha256(unresolved)};
+  const out=refreshBiggjAutonomousOperator(seeded,{
+    factorySummary:factory({mode:'WAITING_FOR_DATA',operatorDataOnly:true,nextTasks:[]}),
+    operations:{},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  assert.equal(out.state.recoveryHistory.at(-1).result,'VERIFIED_RESOLVED');
+  assert.equal(biggjAutonomousOperatorSummary(out.state).unresolvedRecoveries,0);
+  assert.equal(biggjAutonomousOperatorSummary(out.state).verifiedResolvedRecoveries,1);
+});
+
+test('previously unresolved recovery stays unresolved while its incident remains active',()=>{
+  const base=createBiggjAutonomousOperator({asOf:now-1000});
+  const {fingerprint,...core}=base;
+  const unresolved={
+    ...core,
+    updatedAt:now-500,
+    revision:1,
+    recoveryHistory:[{
+      at:now-10_000,
+      actionId:'old-action',
+      incidentKey:'RESEARCH_STALLED|RESEARCH_FACTORY',
+      type:'REFRESH_RESEARCH_STACK',
+      subject:'RESEARCH_FACTORY',
+      attempt:1,
+      result:'EXECUTED_UNRESOLVED',
+      completedAt:now-9_000,
+      verifiedAt:now-8_000
+    }]
+  };
+  const seeded={...unresolved,fingerprint:sha256(unresolved)};
+  const out=refreshBiggjAutonomousOperator(seeded,{
+    factorySummary:factory({mode:'RESEARCH_STALLED',operatorDataOnly:false,nextTasks:[]}),
+    operations:{},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const prior=out.state.recoveryHistory.find(x=>x.actionId==='old-action');
+  assert.equal(prior.result,'EXECUTED_UNRESOLVED');
+  assert.equal(biggjAutonomousOperatorSummary(out.state).unresolvedRecoveries,1);
+  assert.equal(out.state.recoveryHistory.some(x=>x.result==='PLANNED'),true);
 });

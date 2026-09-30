@@ -333,7 +333,7 @@ export function refreshBiggjAutonomousOperator(state,{
 
   const recoveryHistory=arr(base.recoveryHistory)
     .map(row=>{
-      if(row?.result!=='EXECUTED'||!row?.incidentKey)return row;
+      if(!['EXECUTED','EXECUTED_UNRESOLVED'].includes(String(row?.result))||!row?.incidentKey)return row;
       if(!incidents[row.incidentKey]){
         return {...row,result:'VERIFIED_RESOLVED',verifiedAt:t};
       }
