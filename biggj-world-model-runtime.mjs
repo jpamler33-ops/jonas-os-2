@@ -158,6 +158,68 @@ function rotationView(rotation={}){
   };
 }
 
+function median(values=[]){
+  const xs=values.map(x=>finite(x)).filter(x=>x!=null).sort((a,b)=>a-b);
+  if(!xs.length)return null;
+  const m=Math.floor(xs.length/2);
+  return xs.length%2?xs[m]:(xs[m-1]+xs[m])/2;
+}
+
+function latentStateResearchCandidate({states=[],graph={},rotation={},shock={},asOf}={}){
+  const observedReturns=(graph?.nodes||[]).map(x=>finite(x?.return1h)).filter(x=>x!=null);
+  const absReturns=observedReturns.map(Math.abs);
+  const meanReturn=observedReturns.length?observedReturns.reduce((a,b)=>a+b,0)/observedReturns.length:null;
+  const directionalAgreement=observedReturns.length&&meanReturn!=null
+    ?observedReturns.filter(x=>Math.sign(x)===Math.sign(meanReturn)||x===0).length/observedReturns.length
+    :null;
+  const edgeStrengths=(graph?.edges||[]).map(x=>finite(x?.strength)).filter(x=>x!=null);
+  const witness=states.map(x=>finite(x?.state?.witnessAgreement)).filter(x=>x!=null);
+  const contradictions=states.map(x=>finite(x?.state?.contradiction)).filter(x=>x!=null);
+  const dimensions={
+    crossSectionalMotion:median(absReturns),
+    directionalAgreement,
+    networkCoupling:edgeStrengths.length?edgeStrengths.reduce((a,b)=>a+b,0)/edgeStrengths.length:null,
+    rotationSeparation:finite(rotation?.rotationStrength),
+    activeShockFraction:(graph?.nodes||[]).length
+      ?Math.min(1,(shock?.origins||[]).length/(graph.nodes.length||1))
+      :null,
+    witnessAgreement:median(witness),
+    contradictionLoad:median(contradictions)
+  };
+  const coverage={
+    markets:(graph?.nodes||[]).length,
+    radarStates:states.length,
+    associationEdges:(graph?.edges||[]).length,
+    populatedDimensions:Object.values(dimensions).filter(x=>x!=null).length,
+    totalDimensions:Object.keys(dimensions).length
+  };
+  const researchReady=
+    coverage.markets>=5&&
+    coverage.radarStates>=3&&
+    coverage.populatedDimensions>=4;
+  const candidateKey=researchReady
+    ?[
+      dimensions.directionalAgreement!=null?(dimensions.directionalAgreement>=.7?'SYNC':'MIXED'):'NA',
+      dimensions.networkCoupling!=null?(dimensions.networkCoupling>=.6?'COUPLED':'LOOSE'):'NA',
+      dimensions.rotationSeparation!=null?(dimensions.rotationSeparation>=.5?'ROTATING':'BALANCED'):'NA',
+      dimensions.activeShockFraction!=null?(dimensions.activeShockFraction>=.2?'SHOCKED':'QUIET'):'NA'
+    ].join('|')
+    :null;
+  return {
+    status:researchReady?'RESEARCH_CANDIDATE':'INSUFFICIENT',
+    estimatorPromoted:false,
+    candidateKey,
+    dimensions,
+    coverage,
+    epistemicClass:'MODELLED',
+    causal:false,
+    decisionAuthority:false,
+    tradingAuthority:false,
+    asOf,
+    meaning:'HEURISTIC_STATE_EMBEDDING_FOR_RESEARCH_ONLY_NOT_A_VALIDATED_LATENT_MARKET_STATE'
+  };
+}
+
 export function buildBiggjWorldModelRuntime({
   seriesBySymbol={},
   radarRows=[],
@@ -223,6 +285,13 @@ export function buildBiggjWorldModelRuntime({
   const informationFlow=informationFlowHypotheses(leadLag);
   const shocks=shockView(shock);
   const rotationState=rotationView(rotation);
+  const latentCandidate=latentStateResearchCandidate({
+    states,
+    graph,
+    rotation:rotationState,
+    shock:shocks,
+    asOf:t
+  });
 
   const unknowns=[
     {
@@ -268,6 +337,7 @@ export function buildBiggjWorldModelRuntime({
       status:'UNKNOWN',
       estimatorPromoted:false,
       dimensions:[],
+      researchCandidate:latentCandidate,
       meaning:'NO_CANONICAL_LATENT_STATE_IS_INFERRED'
     },
     unknowns,
@@ -322,6 +392,9 @@ export function verifyBiggjWorldModelRuntime(runtime){
   if(runtime?.canInfluencePrimary!==false) reasons.push('PRIMARY_INFLUENCE_INVALID');
   if(runtime?.canExecuteLive!==false) reasons.push('LIVE_EXECUTION_INVALID');
   if(runtime?.latentState?.estimatorPromoted!==false) reasons.push('LATENT_STATE_PROMOTION_INVALID');
+  if(runtime?.latentState?.researchCandidate?.decisionAuthority!==false) reasons.push('LATENT_CANDIDATE_DECISION_AUTHORITY_INVALID');
+  if(runtime?.latentState?.researchCandidate?.tradingAuthority!==false) reasons.push('LATENT_CANDIDATE_TRADING_AUTHORITY_INVALID');
+  if(runtime?.latentState?.researchCandidate?.epistemicClass!=='MODELLED') reasons.push('LATENT_CANDIDATE_CLASS_INVALID');
   if(runtime?.epistemicPolicy?.observedAssociationIsNotCausality!==true) reasons.push('ASSOCIATION_CAUSALITY_GUARD_MISSING');
   if(runtime?.epistemicPolicy?.leadLagIsHypothesisOnly!==true) reasons.push('LEAD_LAG_GUARD_MISSING');
   if((runtime?.informationFlowHypotheses?.candidates||[]).some(x=>x.causal!==false||x.predictivePermission!==false)) reasons.push('FLOW_HYPOTHESIS_AUTHORITY_INVALID');
