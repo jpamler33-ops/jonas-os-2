@@ -698,6 +698,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   if(!token||!applicationId||!guildId||typeof handleUpdate!=='function')throw new Error('DISCORD_BRIDGE_CONFIG_INVALID');
   const client=new Client({intents:[GatewayIntentBits.Guilds]});
   const rest=new REST({version:'10'}).setToken(token);
+  const channelManagers=createBiggjChannelManagerRuntime({sections:SERVER_LAYOUT,profileFor:biggjChannelExperienceProfile});
+  const germanTranslator=createGermanTranslationProvider({
+    fetchImpl:globalThis.fetch,
+    timeoutMs:Math.max(2000,Math.min(12000,Number(process.env.TCX_GERMAN_TRANSLATION_TIMEOUT_MS||4500)))
+  });
+  const strictGermanNews=String(process.env.TCX_DISCORD_STRICT_GERMAN_NEWS||'1')!=='0';
   const contexts=new Map();
   const channelCache=new Map();
   const tradeCards=new Map();
@@ -722,7 +728,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -740,6 +746,26 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       logger.error('[TCX_DISCORD]',JSON.stringify(detail));
     }catch{}
   }
+  async function managed(name,fn,{detail=null,rethrow=true}={}){
+    try{
+      const result=await fn();
+      channelManagers.success(name,detail);
+      return result;
+    }catch(err){
+      channelManagers.failure(name,err,detail);
+      fail('channel:'+name,err);
+      if(rethrow)throw err;
+      return null;
+    }
+  }
+  function managerSnapshot(){
+    const snap=channelManagers.snapshot();
+    state.channelManagerProblems=snap.problems;
+    state.channelSupervisorStatus=snap.supervisor.status;
+    state.translationHealth=germanTranslator.health();
+    return snap;
+  }
+
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
     const ctx=contexts.get(String(chatId)); const chunks=splitText(body.text,2000); let first=null;
