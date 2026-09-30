@@ -1,4 +1,4 @@
-export const PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION='TCX_PUBLIC_MARKET_CONTEXT_V1';
+export const PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION='TCX_PUBLIC_MARKET_CONTEXT_V2';
 
 function finite(v){
   const n=Number(v);
@@ -12,10 +12,15 @@ function log1pNonNegative(v){
   const n=finite(v);
   return n!=null&&n>=0?Math.log1p(n):null;
 }
+function share(part,total){
+  const p=finite(part),t=finite(total);
+  return p!=null&&t!=null&&t>0?Math.max(0,Math.min(1,p/t)):null;
+}
 
 export function publicMarketContextToExtraFeatures(context){
   const s=context?.sentiment||null;
   const g=context?.global||null;
+  const d=context?.defi||null;
   const rows=[];
   const add=(id,value)=>{
     const n=finite(value);
@@ -35,20 +40,30 @@ export function publicMarketContextToExtraFeatures(context){
     add('research.marketContext.activeCryptocurrenciesLog',log1pNonNegative(g.activeCryptocurrencies));
     add('research.marketContext.activeMarketsLog',log1pNonNegative(g.activeMarkets));
   }
+  if(d){
+    add('research.defi.totalTvlLog',log1pNonNegative(d.totalTvlUsd));
+    add('research.defi.chainCountLog',log1pNonNegative(d.chainCount));
+    add('research.defi.ethereumTvlShare',share(d.ethereumTvlUsd,d.totalTvlUsd));
+    add('research.defi.solanaTvlShare',share(d.solanaTvlUsd,d.totalTvlUsd));
+    add('research.defi.bitcoinTvlShare',share(d.bitcoinTvlUsd,d.totalTvlUsd));
+    add('research.defi.top10TvlShare',d.top10TvlShare);
+  }
   return rows;
 }
 
 export function createPublicMarketContextProvider({
   fetchImpl=globalThis.fetch,
   alternativeBase='https://api.alternative.me',
+  defiLlamaBase='https://api.llama.fi',
   timeoutMs=8000,
   cacheTtlMs=300000
 }={}){
   if(typeof fetchImpl!=='function') throw new Error('fetch implementation required');
-  const base=String(alternativeBase).replace(/\/+$/,'');
+  const altBase=String(alternativeBase).replace(/\/+$/,'');
+  const llamaBase=String(defiLlamaBase).replace(/\/+$/,'');
   const cache=new Map();
 
-  async function fetchJson(path){
+  async function fetchJson(base,path,errorPrefix){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||8000));
     try{
@@ -57,7 +72,7 @@ export function createPublicMarketContextProvider({
         headers:{accept:'application/json','user-agent':'TCX/1.0 public-market-context'},
         signal:controller.signal
       });
-      if(!res?.ok) throw new Error('ALTERNATIVE_HTTP_'+String(res?.status??'UNKNOWN'));
+      if(!res?.ok) throw new Error(String(errorPrefix||'PUBLIC_CONTEXT')+'_HTTP_'+String(res?.status??'UNKNOWN'));
       return await res.json();
     }finally{
       clearTimeout(timer);
@@ -75,7 +90,7 @@ export function createPublicMarketContextProvider({
 
   async function fetchFearGreed({force=false}={}){
     return cached('fear-greed',async()=>{
-      const body=await fetchJson('/fng/?limit=2&format=json');
+      const body=await fetchJson(altBase,'/fng/?limit=2&format=json','ALTERNATIVE');
       const rows=Array.isArray(body?.data)?body.data:[];
       const current=rows[0]||null;
       const previous=rows[1]||null;
@@ -98,7 +113,7 @@ export function createPublicMarketContextProvider({
 
   async function fetchGlobal({force=false}={}){
     return cached('global',async()=>{
-      const body=await fetchJson('/v2/global/');
+      const body=await fetchJson(altBase,'/v2/global/','ALTERNATIVE');
       const d=body?.data||{};
       return Object.freeze({
         activeCryptocurrencies:finite(d?.active_cryptocurrencies),
@@ -113,19 +128,47 @@ export function createPublicMarketContextProvider({
     },{force});
   }
 
+  async function fetchDefi({force=false}={}){
+    return cached('defi-chains',async()=>{
+      const body=await fetchJson(llamaBase,'/v2/chains','DEFILLAMA');
+      const rows=(Array.isArray(body)?body:[]).map(x=>({
+        name:text(x?.name),
+        tvl:finite(x?.tvl)
+      })).filter(x=>x.name&&x.tvl!=null&&x.tvl>=0);
+      if(!rows.length) throw new Error('DEFILLAMA_CHAIN_TVL_MISSING');
+      const totalTvlUsd=rows.reduce((sum,x)=>sum+x.tvl,0);
+      const byName=new Map(rows.map(x=>[x.name.toLowerCase(),x.tvl]));
+      const top10TvlUsd=rows.slice().sort((a,b)=>b.tvl-a.tvl).slice(0,10).reduce((sum,x)=>sum+x.tvl,0);
+      return Object.freeze({
+        totalTvlUsd,
+        chainCount:rows.length,
+        ethereumTvlUsd:byName.get('ethereum')??null,
+        solanaTvlUsd:byName.get('solana')??null,
+        bitcoinTvlUsd:byName.get('bitcoin')??null,
+        top10TvlShare:totalTvlUsd>0?top10TvlUsd/totalTvlUsd:null,
+        source:'DefiLlama Public API',
+        endpoint:'/v2/chains',
+        epistemic:'CURRENT_DEFI_TVL_SNAPSHOT_NOT_FLOW_OR_FORECAST'
+      });
+    },{force});
+  }
+
   async function fetchContext({force=false}={}){
-    const [sentiment,global]=await Promise.allSettled([
+    const [sentiment,global,defi]=await Promise.allSettled([
       fetchFearGreed({force}),
-      fetchGlobal({force})
+      fetchGlobal({force}),
+      fetchDefi({force})
     ]);
     return Object.freeze({
       version:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
       capturedAt:Date.now(),
       sentiment:sentiment.status==='fulfilled'?sentiment.value:null,
       global:global.status==='fulfilled'?global.value:null,
+      defi:defi.status==='fulfilled'?defi.value:null,
       errors:Object.freeze([
         ...(sentiment.status==='rejected'?[{source:'fear-greed',error:sentiment.reason instanceof Error?sentiment.reason.message:String(sentiment.reason)}]:[]),
-        ...(global.status==='rejected'?[{source:'global',error:global.reason instanceof Error?global.reason.message:String(global.reason)}]:[])
+        ...(global.status==='rejected'?[{source:'global',error:global.reason instanceof Error?global.reason.message:String(global.reason)}]:[]),
+        ...(defi.status==='rejected'?[{source:'defi',error:defi.reason instanceof Error?defi.reason.message:String(defi.reason)}]:[])
       ])
     });
   }
@@ -134,6 +177,7 @@ export function createPublicMarketContextProvider({
     version:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
     fetchFearGreed,
     fetchGlobal,
+    fetchDefi,
     fetchContext
   });
 }
