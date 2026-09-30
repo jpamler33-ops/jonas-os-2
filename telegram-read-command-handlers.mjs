@@ -187,6 +187,14 @@ export function createReadCommandHandlers(deps={}){
         await tg("sendMessage",{chat_id:chatId,text:"Shadow-Portfolio gerade nicht verfügbar."});
       }
     },
+    "/wallets":async ({chatId})=>{
+      try{ await showShadowPortfolio(chatId); }
+      catch(err){
+        const msg=message(err);
+        recordError(observability,{scope:"command.wallets",message:msg});
+        await tg("sendMessage",{chat_id:chatId,text:"Dual-Wallet-Ansicht gerade nicht verfügbar."});
+      }
+    },
     "/why_not_trade":async ({chatId})=>{
       try{ await showTradeDiscoveryDiagnostics(chatId); }
       catch(err){
