@@ -31,8 +31,12 @@ import {
   publicMarketContextToExtraFeatures,
   PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION
 } from './expansion-runtime/public-market-context-provider.mjs';
+import {
+  dexScreenerTrendingMetasToExtraFeatures,
+  DEXSCREENER_PUBLIC_PROVIDER_VERSION
+} from './expansion-runtime/dexscreener-public-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V4';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V5';
 
 function finite(v){
   const n=Number(v);
@@ -513,7 +517,85 @@ function publicContextInputs(symbol,context,ingestedAt){
     }
   }
 
+  if(context?.defi){
+    const featureIds=[
+      'research.defi.totalTvlLog',
+      'research.defi.chainCountLog',
+      'research.defi.ethereumTvlShare',
+      'research.defi.solanaTvlShare',
+      'research.defi.bitcoinTvlShare',
+      'research.defi.top10TvlShare'
+    ];
+    const features=featureIds.map(id=>byId.get(id)).filter(Boolean);
+    if(features.length){
+      const availableAt=finite(context?.capturedAt)??ingestedAt;
+      const eventTime=availableAt;
+      rows.push(createResearchFeatureSnapshot({
+        streamKey:symbol,
+        domain:'DEFI_CONTEXT',
+        source:'DEFILLAMA_PUBLIC_CHAINS',
+        sourceVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+        sourceEventId:makeSourceEventId({symbol,source:'DEFILLAMA_PUBLIC_CHAINS',eventTime,features:features.map(x=>[x.id,x.value])}),
+        eventTime,
+        availableAt,
+        ingestedAt,
+        ttlMs:30*60_000,
+        finality:'OBSERVED',
+        quality:{
+          completeness:features.length/featureIds.length,
+          sourceCount:1,
+          expectedSourceCount:1,
+          status:'CURRENT_PUBLIC_DEFI_TVL_SNAPSHOT'
+        },
+        features,
+        provenance:{
+          adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+          providerVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+          upstreamSource:String(context.defi.source||'DefiLlama Public API'),
+          endpoint:String(context.defi.endpoint||'/v2/chains'),
+          timestampSemantics:'CAPTURE_TIME_CURRENT_SNAPSHOT',
+          epistemic:String(context.defi.epistemic||'CURRENT_DEFI_TVL_SNAPSHOT_NOT_FLOW_OR_FORECAST'),
+          researchOnly:true
+        }
+      }));
+    }
+  }
+
   return rows.filter(Boolean);
+}
+
+function dexContextInput(symbol,snapshot,ingestedAt){
+  const features=dexScreenerTrendingMetasToExtraFeatures(snapshot);
+  if(!features.length) return null;
+  const availableAt=finite(snapshot?.capturedAt)??ingestedAt;
+  const eventTime=eventTimeOrAvailable(snapshot?.capturedAt,availableAt);
+  return createResearchFeatureSnapshot({
+    streamKey:symbol,
+    domain:'DEX_CONTEXT',
+    source:'DEXSCREENER_TRENDING_METAS',
+    sourceVersion:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+    sourceEventId:makeSourceEventId({symbol,source:'DEXSCREENER_TRENDING_METAS',eventTime,features:features.map(x=>[x.id,x.value])}),
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:10*60_000,
+    finality:'OBSERVED',
+    quality:{
+      completeness:features.length/8,
+      sourceCount:1,
+      expectedSourceCount:1,
+      status:'CURRENT_PUBLIC_DEX_TRENDING_SNAPSHOT'
+    },
+    features,
+    provenance:{
+      adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+      providerVersion:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+      upstreamSource:String(snapshot?.source||'DEXSCREENER_PUBLIC_API'),
+      timestampSemantics:'CAPTURE_TIME_CURRENT_SNAPSHOT',
+      epistemic:String(snapshot?.epistemic||'TRENDING_META_ACTIVITY_NOT_SOCIAL_SENTIMENT_OR_FORECAST'),
+      researchOnly:true
+    }
+  });
 }
 
 function walletInput(symbol,snapshot,ingestedAt){
@@ -564,7 +646,8 @@ export function buildResearchDataPlaneSnapshots({
   entityFlowSnapshot=null,
   walletSnapshot=null,
   externalSnapshot=null,
-  publicContextSnapshot=null
+  publicContextSnapshot=null,
+  dexContextSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -577,6 +660,7 @@ export function buildResearchDataPlaneSnapshots({
     entityFlowInput(s,entityFlowSnapshot,t),
     walletInput(s,walletSnapshot,t),
     ...externalInputs(s,externalSnapshot,t),
-    ...publicContextInputs(s,publicContextSnapshot,t)
+    ...publicContextInputs(s,publicContextSnapshot,t),
+    dexContextInput(s,dexContextSnapshot,t)
   ].filter(Boolean);
 }

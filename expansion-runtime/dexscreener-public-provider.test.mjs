@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDexScreenerPublicProvider } from './dexscreener-public-provider.mjs';
+import { createDexScreenerPublicProvider, dexScreenerTrendingMetasToExtraFeatures } from './dexscreener-public-provider.mjs';
 
 function response(body,status=200){
   return {ok:status>=200&&status<300,status,json:async()=>body};
@@ -35,4 +35,34 @@ test('trending metas are normalized without inventing missing values',async()=>{
   assert.equal(out.rows[0].name,'AI Agents');
   assert.equal(out.rows[0].marketCapChange.h1,2.5);
   assert.equal(out.rows[0].marketCapChange.h6,null);
+});
+
+
+test('trending metas convert to governed research features without inventing values',()=>{
+  const rows=dexScreenerTrendingMetasToExtraFeatures({
+    rows:[
+      {marketCap:1000,liquidity:100,volume:200,marketCapChange:{h1:10,h24:20}},
+      {marketCap:3000,liquidity:300,volume:100,marketCapChange:{h1:-2,h24:4}}
+    ]
+  });
+  const byId=new Map(rows.map(x=>[x.id,x.value]));
+  assert.equal(byId.get('research.dex.trendingTopLiquidityShare'),.75);
+  assert.equal(byId.get('research.dex.trendingVolumeLiquidityRatio'),.75);
+  assert.equal(byId.get('research.dex.trendingH1MedianPct'),4);
+  assert.equal(byId.get('research.dex.trendingH24MedianPct'),12);
+  assert.ok(byId.get('research.dex.trendingMarketCapLog')>0);
+  assert.ok(byId.get('research.dex.trendingLiquidityLog')>0);
+});
+
+
+test('missing DEX aggregates stay missing instead of becoming synthetic zeros',()=>{
+  const rows=dexScreenerTrendingMetasToExtraFeatures({
+    rows:[{marketCap:null,liquidity:null,volume:null,marketCapChange:{}}]
+  });
+  const ids=new Set(rows.map(x=>x.id));
+  assert.equal(ids.has('research.dex.trendingMarketCapLog'),false);
+  assert.equal(ids.has('research.dex.trendingLiquidityLog'),false);
+  assert.equal(ids.has('research.dex.trendingVolumeLog'),false);
+  assert.equal(ids.has('research.dex.trendingVolumeLiquidityRatio'),false);
+  assert.equal(ids.has('research.dex.trendingMetaCountLog'),true);
 });

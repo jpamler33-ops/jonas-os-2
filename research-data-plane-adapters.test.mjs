@@ -205,3 +205,55 @@ test('public market context enters the governed research plane',()=>{
   assert.ok(market.features.some(x=>x.id==='research.marketContext.volumeToCapRatio'&&x.value===.25));
   assert.equal(sentiment.provenance.attributionRequired,true);
 });
+
+
+test('DefiLlama liquidity context enters the governed research plane',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    publicContextSnapshot:{
+      capturedAt:1_999_900,
+      defi:{
+        totalTvlUsd:1000,
+        chainCount:4,
+        ethereumTvlUsd:600,
+        solanaTvlUsd:250,
+        bitcoinTvlUsd:50,
+        top10TvlShare:1,
+        source:'DefiLlama Public API',
+        endpoint:'/v2/chains',
+        epistemic:'CURRENT_DEFI_TVL_SNAPSHOT_NOT_FLOW_OR_FORECAST'
+      }
+    }
+  });
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].domain,'DEFI_CONTEXT');
+  assert.equal(rows[0].source,'DEFILLAMA_PUBLIC_CHAINS');
+  assert.equal(rows[0].quality.completeness,1);
+  assert.equal(rows[0].eventTime,1_999_900);
+  assert.equal(rows[0].provenance.timestampSemantics,'CAPTURE_TIME_CURRENT_SNAPSHOT');
+  assert.ok(rows[0].features.some(x=>x.id==='research.defi.ethereumTvlShare'&&x.value===.6));
+});
+
+test('DEX Screener trending context enters the governed research plane',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'SOLUSDT',
+    ingestedAt:2_000_000,
+    dexContextSnapshot:{
+      capturedAt:1_999_900,
+      source:'DEXSCREENER_PUBLIC_API',
+      epistemic:'TRENDING_META_ACTIVITY_NOT_SOCIAL_SENTIMENT_OR_FORECAST',
+      rows:[
+        {marketCap:1000,liquidity:100,volume:200,marketCapChange:{h1:10,h24:20}},
+        {marketCap:3000,liquidity:300,volume:100,marketCapChange:{h1:-2,h24:4}}
+      ]
+    }
+  });
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].domain,'DEX_CONTEXT');
+  assert.equal(rows[0].source,'DEXSCREENER_TRENDING_METAS');
+  assert.equal(rows[0].quality.completeness,1);
+  assert.equal(rows[0].eventTime,1_999_900);
+  assert.equal(rows[0].provenance.timestampSemantics,'CAPTURE_TIME_CURRENT_SNAPSHOT');
+  assert.ok(rows[0].features.some(x=>x.id==='research.dex.trendingTopLiquidityShare'&&x.value===.75));
+});
