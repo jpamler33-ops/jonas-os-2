@@ -163,7 +163,7 @@ test('quarantined research sources force a data-quality blocked state',()=>{
         {skillId:'x',nextGate:'FORWARD_SHADOW',priority:.5,uncertainty:.5}
       ]
     }),
-    researchDataGovernanceSummary:{quarantinedSources:2},
+    researchDataGovernanceSummary:{quarantinedSources:['DERIVATIVES:SOURCE_A','ONCHAIN:SOURCE_B']},
     asOf:2000
   });
   assert.equal(refreshed.state.mode,'DATA_QUALITY_BLOCKED');
@@ -217,4 +217,31 @@ test('factory state persists and reloads with fingerprint verification',async()=
   assert.deepEqual(loaded,state);
   const raw=await readFile(file,'utf8');
   assert.match(raw,/TCX_AUTONOMOUS_RESEARCH_TRAINING_FACTORY_V1/);
+});
+
+
+test('registry accounts for multiple registered candidates and league reads nested account totals',()=>{
+  const state=createAutonomousResearchTrainingFactory({asOf:1000});
+  const refreshed=refreshAutonomousResearchTrainingFactory(state,{
+    livingResearchState:baseLivingResearch(),
+    modelCandidateRegistrySummary:{
+      seq:4,
+      candidates:[
+        {candidateId:'c1',status:'REGISTERED'},
+        {candidateId:'c2',status:'REGISTERED'}
+      ]
+    },
+    strategyLeagueSummary:{
+      fingerprint:'league-1',
+      strategies:[
+        {strategyId:'S1',account:{openPositions:2,closedTrades:11}},
+        {strategyId:'S2',account:{openPositions:1,closedTrades:9}}
+      ]
+    },
+    asOf:2000
+  });
+  assert.equal(refreshed.state.queue.filter(x=>x.type==='EVALUATE_REGISTERED_CANDIDATES').length,2);
+  const league=refreshed.state.queue.find(x=>x.type==='CONTINUE_STRATEGY_LEAGUE');
+  assert.equal(league.metadata.open,3);
+  assert.equal(league.metadata.closed,20);
 });
