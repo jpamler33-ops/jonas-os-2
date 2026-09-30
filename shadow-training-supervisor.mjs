@@ -262,8 +262,8 @@ export function evaluateShadowTrainingSupervisor(ledger,academy,{
   return freeze({...core,fingerprint:sha256(core)});
 }
 
-export function supervisedShadowBudget(supervisor,{academyNotionalQuote=100}={}){
-  const base=Math.max(1,finite(academyNotionalQuote,100));
+export function supervisedShadowBudget(supervisor,{academyNotionalQuote=200}={}){
+  const base=Math.max(1,finite(academyNotionalQuote,200));
   const mult=clamp(finite(supervisor?.risk?.multiplier,.25),.25,1);
   const notionalQuote=Math.max(1,base*mult);
   const core={
