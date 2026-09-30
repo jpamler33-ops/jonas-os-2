@@ -222,9 +222,9 @@ export function syncLivingResearchIntoEpistemicKernel(ledger,livingResearchState
 export function biggjEpistemicRuntimeSummary(ledger,{asOf=Date.now()}={}){
   const snapshot=epistemicKernelSnapshot(ledger,{asOf});
   return deepFreeze({
+    ...snapshot,
     version:BIGGJ_EPISTEMIC_RUNTIME_VERSION,
     kernelVersion:BIGGJ_EPISTEMIC_KERNEL_VERSION,
-    ...snapshot,
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
     canInfluencePrimary:false,
