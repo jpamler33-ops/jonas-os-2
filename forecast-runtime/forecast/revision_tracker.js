@@ -92,6 +92,39 @@ export class ForecastRevisionTracker {
             .filter(r => r.thesisMemory)
             .map(r => structuredClone(r.thesisMemory));
     }
+    lightweightStats() {
+        let thesisMemoryCount = 0;
+        let thesisRevisionEvents = 0;
+        let staleThesisForecasts = 0;
+        let transientFlickerThesisForecasts = 0;
+        let persistentStaleThesisForecasts = 0;
+        let thesisStabilityEvents = 0;
+        for (const r of this.records.values()) {
+            const memory = r.thesisMemory;
+            if (!memory) continue;
+            thesisMemoryCount++;
+            thesisRevisionEvents += Number(memory.eventCount || 0);
+            thesisStabilityEvents += Number(memory.stabilityEventCount || 0);
+            const assumptions = memory.assumptions || [];
+            if (assumptions.some(a => a?.issueSupported === true && a?.currentSupported === false))
+                staleThesisForecasts++;
+            if (assumptions.some(a => a?.stability?.state === 'TRANSIENT_FLICKER'))
+                transientFlickerThesisForecasts++;
+            if (assumptions.some(a =>
+                a?.stability?.state === 'PERSISTENT_STALE' || a?.stability?.state === 'RECOVERING'
+            ))
+                persistentStaleThesisForecasts++;
+        }
+        return {
+            recordCount: this.records.size,
+            thesisMemoryCount,
+            thesisRevisionEvents,
+            staleThesisForecasts,
+            transientFlickerThesisForecasts,
+            persistentStaleThesisForecasts,
+            thesisStabilityEvents
+        };
+    }
     all() { return [...this.records.values()].map(x => structuredClone(x)); }
     snapshot() { return { version: 1, records: this.all() }; }
     restore(s) { if (s.version !== 1)
