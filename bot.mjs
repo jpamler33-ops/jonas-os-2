@@ -529,9 +529,13 @@ const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:g
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
 const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.TCX_GLOBAL_NEWS_REFRESH_MS||120_000)));
 const globalNewsTimeoutMs=Math.max(8000,Math.min(30_000,Number(process.env.TCX_GLOBAL_NEWS_TIMEOUT_MS||18_000)));
+const globalNewsSecondaryTimeoutMs=Math.max(4000,Math.min(20_000,Number(process.env.TCX_GLOBAL_NEWS_SECONDARY_TIMEOUT_MS||8000)));
+const globalNewsGdeltCooldownMs=Math.max(60_000,Math.min(60*60_000,Number(process.env.TCX_GLOBAL_NEWS_GDELT_COOLDOWN_MS||10*60_000)));
 const biggjPublicNewsProvider=createBiggjPublicNewsProvider({
   fetchImpl:globalThis.fetch,
   timeoutMs:globalNewsTimeoutMs,
+  secondaryTimeoutMs:globalNewsSecondaryTimeoutMs,
+  gdeltCooldownMs:globalNewsGdeltCooldownMs,
   cacheTtlMs:Math.min(globalNewsRefreshMs,120_000)
 });
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
@@ -3795,6 +3799,10 @@ const globalIntelEvents=[];
 let globalIntelLastRefreshAt=null;
 let globalIntelLastError=null;
 let globalIntelLastSource=null;
+let globalIntelRecoveries=[];
+let globalIntelFallbackUsed=false;
+let globalIntelProviderHealth=null;
+let globalIntelGdeltCooldownUntil=null;
 let memecoinExperienceSnapshot=null;
 let memecoinExperienceLastError=null;
 
@@ -3828,9 +3836,17 @@ async function refreshPublicExperienceIntel(reason='periodic'){
     replaceGlobalIntelEvents(feed.events);
     globalIntelLastRefreshAt=Date.now();
     globalIntelLastError=feed.errors?.length?feed.errors.map(x=>x.queryClass+':'+x.error).join(' | '):null;
-    globalIntelLastSource=feed.source||'GDELT DOC 2.1';
+    globalIntelLastSource=feed.source||'GDELT DOC 2.1 / Google News RSS';
+    globalIntelRecoveries=Array.isArray(feed.recoveries)?feed.recoveries.slice(0,12):[];
+    globalIntelFallbackUsed=feed.fallbackUsed===true;
+    globalIntelProviderHealth=feed.providerHealth||null;
+    globalIntelGdeltCooldownUntil=Number(feed.gdeltCooldownUntil||0)||null;
   }else{
     globalIntelLastError=newsResult.reason instanceof Error?newsResult.reason.message:String(newsResult.reason);
+    globalIntelRecoveries=[];
+    globalIntelFallbackUsed=false;
+    globalIntelProviderHealth=null;
+    globalIntelGdeltCooldownUntil=null;
   }
   if(memeResult.status==='fulfilled'||trendResult.status==='fulfilled'){
     memecoinExperienceSnapshot={
@@ -3862,8 +3878,12 @@ async function refreshPublicExperienceIntel(reason='periodic'){
     newsEvents:globalIntelEvents.length,
     newsSource:globalIntelLastSource,
     newsError:globalIntelLastError,
-    newsRecoveries:newsResult.status==='fulfilled'?(newsResult.value?.recoveries||[]):[],
+    newsRecoveries:globalIntelRecoveries,
+    newsFallbackUsed:globalIntelFallbackUsed,
+    newsProviderHealth:globalIntelProviderHealth,
+    newsGdeltCooldownUntil:globalIntelGdeltCooldownUntil,
     newsTimeoutMs:globalNewsTimeoutMs,
+    newsSecondaryTimeoutMs:globalNewsSecondaryTimeoutMs,
     memecoins:memecoinExperienceSnapshot?.rows?.length||0,
     metas:memecoinExperienceSnapshot?.metas?.length||0,
     memecoinError:memecoinExperienceLastError,
@@ -9399,6 +9419,10 @@ function missionControlData(){
     source:globalIntelLastSource,
     lastRefreshAt:globalIntelLastRefreshAt,
     lastError:globalIntelLastError,
+    recoveries:globalIntelRecoveries,
+    fallbackUsed:globalIntelFallbackUsed,
+    providerHealth:globalIntelProviderHealth,
+    gdeltCooldownUntil:globalIntelGdeltCooldownUntil,
     eventCount:globalIntelEvents.length,
     recent:[...globalIntelSnapshot()]
       .sort((a,b)=>Number(b?.availableAt||b?.timestamp||0)-Number(a?.availableAt||a?.timestamp||0))
