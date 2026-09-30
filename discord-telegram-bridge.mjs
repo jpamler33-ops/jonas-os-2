@@ -1440,6 +1440,81 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const out=await Promise.allSettled([refreshForecastDesk(),refreshAnomalyDesk(),refreshReplayDesk(),refreshErrorDesk()]);
     return out.filter(x=>x.status==='fulfilled').length;
   }
+  function managerRepairGroup(name){
+    if(BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'OBSERVABILITY';
+    if(BIGGJ_EXPERIENCE_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'EXPERIENCE';
+    if(name.startsWith('academy-'))return 'ACADEMY';
+    if(['btc','eth','sol'].includes(name))return 'MARKETS';
+    if(['live-trades','theses','closed-trades'].includes(name))return 'TRADES';
+    return name;
+  }
+
+  async function repairManagerProblem(problem){
+    const name=String(problem?.name||'');
+    if(!name||['channel-supervisor','channel-improvements'].includes(name))return false;
+    if(problem?.decision==='REPAIR_LAYOUT'){
+      await ensureLayout();
+      return true;
+    }
+    const group=managerRepairGroup(name);
+    if(group==='OBSERVABILITY'){await refreshBiggjObservabilityPanels();return true;}
+    if(group==='EXPERIENCE'){await refreshExperiencePanels();return true;}
+    if(group==='ACADEMY'){await ensureAcademy();return true;}
+    if(group==='MARKETS'){await refreshMarketPanels();return true;}
+    if(group==='TRADES'){await syncTradeCards();return true;}
+    if(name==='start-here'){await ensureStart();return true;}
+    if(name==='tcx-terminal'){await refreshTerminal();return true;}
+    if(name==='market-overview'){await refreshOverview();return true;}
+    if(name==='performance'){await refreshPerformance();return true;}
+    if(name==='system-status'){await refreshSystem();return true;}
+    if(name==='data-health'){await refreshDataHealth();return true;}
+    if(name==='global-intel'){await refreshGlobalIntel();return true;}
+    if(name==='news-feed'){await refreshNewsFeed();return true;}
+    if(name==='world-watch'){await refreshWorldWatch();return true;}
+    if(name==='memecoins'){await refreshMemecoinLab();return true;}
+    if(name==='forecasts'){await refreshForecastDesk();return true;}
+    if(name==='anomalies'){await refreshAnomalyDesk();return true;}
+    if(name==='trade-replay'){await refreshReplayDesk();return true;}
+    if(name==='errors'){await refreshErrorDesk();return true;}
+    return false;
+  }
+
+  async function refreshChannelSupervisor({autoRepair=true}={}){
+    channelManagers.success('channel-supervisor','Supervisor-Zyklus gestartet');
+    channelManagers.success('channel-improvements','Verbesserungsanalyse gestartet');
+    let before=managerSnapshot();
+    const repaired=[];
+    if(autoRepair){
+      const groups=new Set();
+      for(const problem of before.topProblems||[]){
+        if(repaired.length>=4)break;
+        const group=managerRepairGroup(problem.name);
+        if(groups.has(group)||['channel-supervisor','channel-improvements'].includes(problem.name))continue;
+        groups.add(group);
+        try{
+          if(await repairManagerProblem(problem))repaired.push({channel:problem.name,decision:problem.decision});
+        }catch(err){
+          channelManagers.failure(problem.name,err,'Auto-Reparatur fehlgeschlagen');
+          fail('channel-supervisor:'+problem.name,err);
+        }
+      }
+    }
+    const after=managerSnapshot();
+    const translation=germanTranslator.health();
+    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation));
+    await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation));
+    const finalState=managerSnapshot();
+    try{logger.info?.('[BIGGJ_CHANNEL_SUPERVISOR] '+JSON.stringify({
+      status:finalState.supervisor.status,
+      managers:finalState.managers,
+      healthy:finalState.healthy,
+      problems:finalState.problems,
+      repaired,
+      translation:translation.ok?'OK':'DEGRADED'
+    }));}catch{}
+    return finalState;
+  }
+
   async function dispatchReadCommand(channelName,text){
     const c=channelCache.get(channelName); if(!c)return false; const chatId=fakeChatId(guildId,c.id,'panel');
     await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
@@ -1731,6 +1806,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     }
     state.tradeCards=tradeCards.size;
     state.lastTradeSyncStats={...syncStats};
+    channelManagers.success('live-trades','Trade-Sync '+positions.length+' Positionen');
+    channelManagers.success('theses','Thesis-Sync '+positions.length+' Positionen');
+    channelManagers.success('closed-trades','Closed-Trade Feed überwacht');
+    }catch(err){
+      channelManagers.failure('live-trades',err,'Trade-Sync fehlgeschlagen');
+      channelManagers.failure('theses',err,'Trade-Sync fehlgeschlagen');
+      throw err;
     }finally{
       state.lastTradeSyncAt=Date.now();
       state.lastTradeSyncDurationMs=Math.max(0,state.lastTradeSyncAt-syncStartedAt);
@@ -1779,14 +1861,33 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshNewsFeed,120000);
     addTimer(refreshWorldWatch,120000);
     addTimer(refreshMemecoinLab,120000);
+    addTimer(refreshAuxiliaryDesks,60000);
+    addTimer(()=>refreshChannelSupervisor({autoRepair:true}),60000);
     addSerialTimer(syncTradeCards,tradeSyncIntervalMs);
     addSerialTimer(drainVisualRefreshQueue,250);
     addTimer(syncHealthAlerts,30000);
     addTimer(maybeDailyReport,60000);
   }
   async function bootstrapV2(){
-    try{const setup=await ensureLayout();await ensureStart();await ensureAcademy();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
-    catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
+    try{
+      const setup=await ensureLayout();
+      await ensureStart();
+      await ensureAcademy();
+      await Promise.allSettled([
+        refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),
+        refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
+        refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),syncTradeCards(),syncHealthAlerts()
+      ]);
+      await refreshAuxiliaryDesks();
+      await refreshChannelSupervisor({autoRepair:true});
+      startSchedulers();
+      return setup;
+    }catch(err){
+      state.setupStatus='NEEDS_PERMISSION';
+      state.setupError=err instanceof Error?err.message:String(err);
+      fail('setup',err);
+      return {ok:false,error:state.setupError};
+    }
   }
   async function setupCommand(interaction){
     await interaction.deferReply({ephemeral:true});
