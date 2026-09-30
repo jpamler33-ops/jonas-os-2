@@ -1123,7 +1123,8 @@ test('gzip persistence snapshots mutable tracker fields once before async sideca
     traceContext:traceContext(inp),
     generatedAt:inp.asOf+100
   });
-  const record=r.intelligence.get(issued.forecastId);
+  const record=r.intelligence.tracker.records.get(issued.forecastId);
+  assert.ok(record,'live tracker record required');
   let reads=0;
   Object.defineProperty(record,'revisions',{
     configurable:true,
