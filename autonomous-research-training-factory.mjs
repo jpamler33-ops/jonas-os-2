@@ -351,10 +351,19 @@ function sourceFingerprint(input){
     strategyLeagueFingerprint:input?.strategyLeagueSummary?.fingerprint??null,
     researchDataPlaneSeq:finite(input?.researchDataPlaneSummary?.seq),
     researchGovernanceFingerprint:input?.researchDataGovernanceSummary?.fingerprint??null,
-    researchCoverageGeneratedAt:finite(input?.researchCoverageSummary?.generatedAt,null),
-    researchCoverageAverage:finite(input?.researchCoverageSummary?.averageCoverage,null),
-    researchCoverageBlocked:finite(input?.researchCoverageSummary?.blocked,null),
-    researchCoverageInsufficient:finite(input?.researchCoverageSummary?.insufficient,null),
+    researchCoverageFingerprint:sha256({
+      symbols:finite(input?.researchCoverageSummary?.symbols),
+      healthy:finite(input?.researchCoverageSummary?.healthy),
+      degraded:finite(input?.researchCoverageSummary?.degraded),
+      blocked:finite(input?.researchCoverageSummary?.blocked),
+      insufficient:finite(input?.researchCoverageSummary?.insufficient),
+      averageCoverage:finite(input?.researchCoverageSummary?.averageCoverage,null),
+      blockedFeatures:finite(input?.researchCoverageSummary?.blockedFeatures),
+      degradedFeatures:finite(input?.researchCoverageSummary?.degradedFeatures),
+      topBlockedSources:input?.researchCoverageSummary?.topBlockedSources??[],
+      topBlockedFeatures:input?.researchCoverageSummary?.topBlockedFeatures??[],
+      worstSymbols:input?.researchCoverageSummary?.worstSymbols??[]
+    }),
     historyRows:finite(input?.historyStats?.rows),
     historyProgressAt:finite(input?.historyStats?.progressAt)
   };
