@@ -167,7 +167,7 @@ function maybeRecoveryAction(incident,{asOf,policy}){
   });
 }
 
-function markPlannedRecoveries(incidents,actions,asOf){
+function markPlannedRecoveries(incidents,actions,asOf,policy){
   const next={...incidents};
   for(const action of actions){
     const row=next[action.incidentKey];
@@ -176,7 +176,7 @@ function markPlannedRecoveries(incidents,actions,asOf){
       ...row,
       recoveryAttempts:finite(row.recoveryAttempts,0)+1,
       lastRecoveryAt:asOf,
-      exhausted:finite(row.recoveryAttempts,0)+1>=3
+      exhausted:finite(row.recoveryAttempts,0)+1>=finite(policy?.maxRecoveryAttempts,3)
     };
   }
   return next;
@@ -272,7 +272,7 @@ export function refreshBiggjAutonomousOperator(state,{
     const action=maybeRecoveryAction(row,{asOf:t,policy:p});
     if(action&&actions.length<p.maxActionsPerCycle)actions.push(action);
   }
-  incidents=markPlannedRecoveries(incidents,actions,t);
+  incidents=markPlannedRecoveries(incidents,actions,t,p);
 
   const escalationIncidents=Object.values(incidents).filter(x=>
     x.kind==='APPROVAL_REQUIRED'||
