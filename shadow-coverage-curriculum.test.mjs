@@ -54,6 +54,14 @@ test('coverage curriculum skips calibrated PASS horizons and keeps blocked resea
   assert.ok(x.candidates.every(c=>c.execution==='SHADOW_ONLY'&&c.canExecuteLive===false));
 });
 
+test('coverage probe default stays small at 5 USDT virtual notional',()=>{
+  const x=deriveCoverageCurriculumCandidates(issuance(),{now:301_000,assetClass:'CORE'});
+  assert.equal(x.candidates.length,1);
+  assert.equal(x.candidates[0].notionalQuote,5);
+  assert.equal(x.candidates[0].entryMode,'COVERAGE_PROBE');
+  assert.equal(x.candidates[0].canExecuteLive,false);
+});
+
 test('coverage key prevents another trade in the same symbol horizon slot',()=>{
   const first=deriveCoverageCurriculumCandidates(issuance(),{now:301_000});
   const key=first.candidates.find(x=>x.horizonId==='15m').coverageKey;
