@@ -47,6 +47,7 @@ test('BIGGJ V5 exposes governed operator observability navigation',()=>{
     "name:'research'",
     "name:'skills'",
     "name:'reviews'",
+    "name:'timeline'",
     "name:'progress'",
     "name:'decisions'",
     'dc6:brain:'
@@ -60,6 +61,7 @@ test('BIGGJ V5 exposes governed operator observability navigation',()=>{
     'experiments',
     'skill-tree',
     'review-queue',
+    'learning-timeline',
     'progress',
     'evidence-ledger',
     'decision-trace'
