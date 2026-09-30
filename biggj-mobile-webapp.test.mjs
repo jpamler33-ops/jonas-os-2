@@ -12,20 +12,20 @@ import {
 
 test('BIGGJ mobile app is installable as a standalone PWA',()=>{
   const manifest=JSON.parse(biggjWebManifest());
-  assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_MOBILE_COMMAND_CENTER_V2');
+  assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_MOBILE_COMMAND_CENTER_V3');
   assert.equal(manifest.start_url,'/mission-control');
   assert.equal(manifest.scope,'/');
   assert.equal(manifest.display,'standalone');
   assert.ok(Array.isArray(manifest.icons)&&manifest.icons.length>=1);
 });
 
-test('mobile app renders five primary tabs and iPhone install metadata',()=>{
+test('mobile app renders six primary tabs and iPhone install metadata',()=>{
   const html=renderBiggjMobileApp({
     generatedAt:1_800_000_000_000,
     health:{autonomousOperator:{mode:'HANDS_OFF'}},
     portfolio:{}
   });
-  for(const tab of ['overview','markets','research','trades','system']){
+  for(const tab of ['overview','markets','signals','research','trades','system']){
     assert.match(html,new RegExp('data-tab="'+tab+'"'));
   }
   assert.match(html,/apple-mobile-web-app-capable/);
@@ -83,7 +83,7 @@ test('mobile intel separates world, general news, memecoins and trader source tr
 });
 
 
-test('V2 renders BIGGJ command-center hierarchy and live states',()=>{
+test('V3 renders BIGGJ command-center hierarchy and live states',()=>{
   const html=renderBiggjMobileApp({
     generatedAt:1_800_000_000_000,
     health:{
@@ -113,9 +113,35 @@ test('canonical mission-control renderer delegates to the V2 mobile app',async()
 });
 
 
-test('canonical route serves mobile V2 and legacy route keeps technical dashboard',async()=>{
+test('canonical route serves mobile V3 and legacy route keeps technical dashboard',async()=>{
   const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.match(source,/renderBiggjMobileApp\(snapshot\)/);
   assert.match(source,/req\.url === '\/mission-control\/legacy'/);
   assert.match(source,/renderMissionControlHtml\(snapshot\)/);
+});
+
+
+test('mobile Signal Lab uses canonical no-store APIs and never renders raw probability without display gate',()=>{
+  const html=renderBiggjMobileApp({
+    generatedAt:1_800_000_000_000,
+    health:{
+      autonomousOperator:{mode:'HANDS_OFF'},
+      biggjProofFeed:{counts:{resolved:2,hits:1,misses:1,committed:2},liveRows:[],rows:[]}
+    },
+    portfolio:{}
+  });
+  assert.match(html,/data-tab="signals"/);
+  assert.match(html,/\/signal-lab\.json/);
+  assert.match(html,/\/proof-feed\.json/);
+  assert.match(html,/p\.displayAllowed===true/);
+  assert.match(html,/SUPPRESSED/);
+  assert.match(html,/Mode-Lenses filtern Evidence/);
+  assert.match(html,/Forecast-Time-Hashes/);
+});
+
+test('service worker bypasses cache for live signal and proof JSON',()=>{
+  const sw=biggjServiceWorker();
+  assert.match(sw,/signal-lab\.json/);
+  assert.match(sw,/proof-feed\.json/);
+  assert.match(sw,/cache:'no-store'/);
 });
