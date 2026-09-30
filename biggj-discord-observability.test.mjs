@@ -22,6 +22,8 @@ function assertDiscordPayload(payload){
       assert.ok(String(field.value||'').length<=1024);
     }
     assert.ok(String(embed.footer?.text||'').length<=2048);
+    const aggregate=String(embed.title||'').length+String(embed.description||'').length+String(embed.footer?.text||'').length+(embed.fields||[]).reduce((n,x)=>n+String(x.name||'').length+String(x.value||'').length,0);
+    assert.ok(aggregate<=6000);
   }
   assert.ok((payload.components||[]).length<=5);
   for(const row of payload.components||[])assert.ok((row.components||[]).length<=5);
