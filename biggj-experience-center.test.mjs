@@ -193,3 +193,54 @@ test('needs panel still surfaces a real stalled research deadlock when not passi
   assert.match(text,/Research Deadlock/);
   assert.match(text,/trotz verfügbarer Inputs/);
 });
+
+
+test('passive data-quality wait is not shown as a human blocker',()=>{
+  const x=snapshot();
+  x.health.autonomousOperator={
+    mode:'WAITING_FOR_DATA',
+    operatorNeeded:false,
+    humanJobRemaining:'EXCEPTIONS_ONLY',
+    waitingForData:true,
+    automationCoverage:1
+  };
+  x.health.autonomousResearchFactory={
+    mode:'DATA_QUALITY_BLOCKED',
+    operatorDataOnly:false,
+    dataNeeds:['MORE_POINT_IN_TIME_DATA']
+  };
+  x.health.researchCoverage={
+    averageCoverage:.72,
+    blocked:1,
+    blockedFeatures:3
+  };
+  const text=JSON.stringify(buildBiggjNeedsPayload(x));
+  assert.doesNotMatch(text,/Research coverage reparieren/);
+  assert.doesNotMatch(text,/Datenqualität/);
+  assert.doesNotMatch(text,/Operator-Eskalation/);
+  assert.doesNotMatch(text,/Mehr Live Data/);
+  assert.match(text,/Mensch nötig: NEIN/);
+  assert.match(text,/Nur Datensammlung: JA/);
+  assert.match(text,/Automatisiert: 100%/);
+});
+
+test('real data-quality block remains visible when operator action is actually needed',()=>{
+  const x=snapshot();
+  x.health.autonomousOperator={
+    mode:'ESCALATION_REQUIRED',
+    operatorNeeded:true,
+    humanJobRemaining:'DATA_QUALITY_BLOCKED',
+    waitingForData:false,
+    automationCoverage:1
+  };
+  x.health.autonomousResearchFactory={
+    mode:'DATA_QUALITY_BLOCKED',
+    operatorDataOnly:false,
+    dataNeeds:['AUDITABLE_POINT_IN_TIME_EVIDENCE']
+  };
+  const text=JSON.stringify(buildBiggjNeedsPayload(x));
+  assert.match(text,/Datenqualität/);
+  assert.match(text,/Operator-Eskalation/);
+  assert.match(text,/Mensch nötig: JA/);
+  assert.match(text,/Nur Datensammlung: NEIN/);
+});

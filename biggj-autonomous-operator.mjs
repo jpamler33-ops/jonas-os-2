@@ -38,7 +38,8 @@ const PASSIVE_DATA_NEEDS=new Set([
 
 function isPassiveDataWait(factorySummary,assessments,tasks){
   const needs=arr(factorySummary?.dataNeeds).map(String);
-  if(String(factorySummary?.mode)!=='RESEARCH_STALLED')return false;
+  const mode=String(factorySummary?.mode||'UNINITIALIZED');
+  if(!['RESEARCH_STALLED','DATA_QUALITY_BLOCKED','DATA_COLLECTION_ONLY'].includes(mode))return false;
   if(!needs.length||!tasks.length)return false;
   if(!needs.every(x=>PASSIVE_DATA_NEEDS.has(x)))return false;
   if(!tasks.every(x=>x?.automaticShadowEligible===true&&x?.manualReviewRequired!==true))return false;
@@ -296,7 +297,7 @@ export function refreshBiggjAutonomousOperator(state,{
   if(factoryMode==='MANUAL_REVIEW_REQUIRED'&&!assessments.some(x=>x.state==='APPROVAL_REQUIRED')){
     add('APPROVAL_REQUIRED','RESEARCH_FACTORY','MANUAL_REVIEW_REQUIRED',null);
   }
-  if(factoryMode==='DATA_QUALITY_BLOCKED'){
+  if(factoryMode==='DATA_QUALITY_BLOCKED'&&!waitingForData){
     add('DATA_QUALITY_BLOCKED','RESEARCH_DATA','GOVERNANCE_OR_COVERAGE_BLOCKED',null);
   }
   if(factoryMode==='AUTOMATION_GAP'){
