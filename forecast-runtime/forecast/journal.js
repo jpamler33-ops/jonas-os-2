@@ -106,7 +106,6 @@ export class ForecastLearningJournal {
                 e.status='PROOF_INVALID';
                 continue;
             }
-            e.proofIntegrity=proof.status;
             const actualDirection = direction(ret, e.flatThreshold), s = score(e.probabilities, actualDirection), intervalMiss = ret < e.interval.q10 || ret > e.interval.q90;
             const resolution = { resolvedAt: point.timestamp, resolvedPrice: point.price, actualReturn: ret, actualDirection, maxAdverseReturn: e.runningMaxAdverseReturn, maxFavorableReturn: e.runningMaxFavorableReturn, brier: s.brier, logLoss: s.logLoss, absoluteReturnError: Math.abs(ret - e.expectedReturn), intervalMiss, topCorrect: s.topCorrect };
             e.resolution = resolution;
@@ -124,7 +123,6 @@ export class ForecastLearningJournal {
             e.proofIntegrity=proof.status;
             return;
         }
-        e.proofIntegrity=proof.status;
         const r = e.resolution, q = clamp(quality * e.dataQuality, 0, 1);
         // Drift is monitoring, not model fitting: keep observing every resolved shadow forecast so a drift ABSTAIN can later recover.
         this.engine.drift.add({ id: e.id, symbol: e.symbol, horizonMs: e.horizonMs, resolvedAt: r.resolvedAt, regimeId: e.regimeId, features: structuredClone(e.features), brier: r.brier, logLoss: r.logLoss, intervalMiss: r.intervalMiss, topProbability: Math.max(e.probabilities.up, e.probabilities.down, e.probabilities.flat), topCorrect: r.topCorrect, quality: q });
@@ -140,14 +138,23 @@ export class ForecastLearningJournal {
         }
     }
     lightweightStats() {
-        let pending = 0, resolved = 0, expired = 0, proofInvalid = 0;
+        let pending = 0, resolved = 0, expired = 0;
         for (const e of this.entries) {
             if (e.status === 'PENDING') pending++;
             else if (e.status === 'RESOLVED') resolved++;
             else if (e.status === 'EXPIRED') expired++;
-            else if (e.status === 'PROOF_INVALID') proofInvalid++;
         }
-        return { total: this.entries.length, pending, resolved, expired, proofInvalid };
+        return { total: this.entries.length, pending, resolved, expired };
+    }
+    proofIntegrityStats() {
+        let verified=0, legacy=0, invalid=0;
+        for(const e of this.entries){
+            const proof=verifyForecastJournalProofCommitment(e);
+            if(proof.status==='VERIFIED')verified++;
+            else if(proof.status==='LEGACY_UNCOMMITTED')legacy++;
+            else invalid++;
+        }
+        return { total:this.entries.length, verified, legacy, invalid };
     }
     probabilityCalibrationRows() {
         return this.entries
@@ -183,8 +190,8 @@ export class ForecastLearningJournal {
                 continue;
             const copy = structuredClone(e);
             const proof=verifyForecastJournalProofCommitment(copy);
-            copy.proofIntegrity=proof.status;
             if(proof.status==='MISMATCH'||proof.status==='UNSUPPORTED_COMMITMENT_VERSION'){
+                copy.proofIntegrity=proof.status;
                 copy.status='PROOF_INVALID';
             }
             this.entries.push(copy);
