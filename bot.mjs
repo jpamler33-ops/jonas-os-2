@@ -9131,7 +9131,10 @@ async function refreshAutonomousOperator(reason='PERIODIC_OPERATOR_CYCLE'){
     const now=Date.now();
     const obs=observabilitySnapshot(observability,{now});
     const refreshed=refreshBiggjAutonomousOperator(autonomousOperatorState,{
-      factorySummary:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+      factorySummary:{
+        ...autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+        nextTasks:Array.isArray(autonomousResearchFactoryState?.queue)?autonomousResearchFactoryState.queue:[]
+      },
       operations:obs.operations,
       ownerPolicies:autonomousOperatorOwnerPolicies(),
       uptimeMs:obs.uptimeMs,
