@@ -62,6 +62,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-public-news-provider.mjs',
   'biggj-channel-operations.mjs',
   'biggj-german-translation.mjs',
+  'biggj-rulebook.mjs',
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
   'biggj-autonomous-operator.mjs',
