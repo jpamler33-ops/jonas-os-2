@@ -1,3 +1,4 @@
+import { sha256 } from './institutional-kernel.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -147,7 +148,7 @@ test('contract drift blocks review instead of creating a transition ticket',()=>
   const skill=mutated.nodes.find(x=>x.skillId===skillId);
   skill.hypothesis='Retrospectively changed hypothesis.';
   const {fingerprint,...core}=mutated;
-  mutated.fingerprint=(await import('./institutional-kernel.mjs')).sha256(core);
+  mutated.fingerprint=sha256(core);
   const queue=buildBiggjResearchReviewQueue({tree:mutated,protocols:[protocol],asOf:5000});
   assert.equal(queue.ticketCount,0);
   assert.equal(queue.blockedCount,1);
