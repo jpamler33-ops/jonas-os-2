@@ -3,6 +3,7 @@ import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSI
 import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobileApp, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
+import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
@@ -546,8 +547,15 @@ const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.
 const globalNewsTimeoutMs=Math.max(8000,Math.min(30_000,Number(process.env.TCX_GLOBAL_NEWS_TIMEOUT_MS||18_000)));
 const globalNewsSecondaryTimeoutMs=Math.max(4000,Math.min(20_000,Number(process.env.TCX_GLOBAL_NEWS_SECONDARY_TIMEOUT_MS||8000)));
 const globalNewsGdeltCooldownMs=Math.max(60_000,Math.min(60*60_000,Number(process.env.TCX_GLOBAL_NEWS_GDELT_COOLDOWN_MS||10*60_000)));
+const biggjOfficialIntelProvider=createBiggjOfficialIntelProvider({
+  fetchImpl:globalThis.fetch,
+  timeoutMs:Math.min(globalNewsTimeoutMs,10_000),
+  cacheTtlMs:Math.min(globalNewsRefreshMs,120_000),
+  userAgent:process.env.TCX_OFFICIAL_INTEL_USER_AGENT||'BIGGJ/1.0 official-primary-source-research'
+});
 const biggjPublicNewsProvider=createBiggjPublicNewsProvider({
   fetchImpl:globalThis.fetch,
+  officialProvider:biggjOfficialIntelProvider,
   timeoutMs:globalNewsTimeoutMs,
   secondaryTimeoutMs:globalNewsSecondaryTimeoutMs,
   gdeltCooldownMs:globalNewsGdeltCooldownMs,

@@ -178,3 +178,57 @@ test('provider caches the normalized feed inside its TTL',async()=>{
   assert.equal(calls,2);
   assert.strictEqual(a,b);
 });
+
+
+test('official primary events are merged first and keep provenance over duplicate discovery headlines',async()=>{
+  const officialEvent={
+    id:'official_fed_press:x',
+    title:'Federal Reserve issues FOMC statement',
+    headline:'Federal Reserve issues FOMC statement',
+    url:'https://www.federalreserve.gov/newsevents/pressreleases/fomc-test.htm',
+    source:'Federal Reserve Board',
+    sourceId:'FED_PRESS',
+    availableAt:NOW-60_000,
+    timestamp:NOW-60_000,
+    family:'MACRO',
+    eventFamily:'MACRO',
+    status:'HIGH_IMPACT',
+    verified:false,
+    independentConfirmation:0,
+    primarySource:true,
+    publicationAuthenticity:'DIRECT_OFFICIAL_FEED',
+    affectedAssets:['USD','RATES'],
+    worldRelevant:true,
+    epistemic:'OFFICIAL_PRIMARY_SOURCE_PUBLICATION_NOT_INDEPENDENTLY_CORROBORATED'
+  };
+  const officialProvider={
+    fetchFeed:async()=>({
+      articleCount:1,
+      sourceCount:7,
+      healthySourceCount:7,
+      failedSourceCount:0,
+      events:[officialEvent],
+      errors:[],
+      providerHealth:{FED_PRESS:{ok:true,rows:1}}
+    })
+  };
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='api.gdeltproject.org') return jsonResponse({articles:[
+      {title:'Federal Reserve issues FOMC statement',url:'https://aggregator.example/duplicate',domain:'aggregator.example',seendate:'20260930T095900Z'},
+      {title:'Bitcoin market update',url:'https://crypto.example/a',domain:'crypto.example',seendate:'20260930T095800Z'}
+    ]});
+    throw new Error('unexpected '+url);
+  };
+  const p=createBiggjPublicNewsProvider({fetchImpl,officialProvider,now:()=>NOW});
+  const out=await p.fetchFeed();
+  assert.equal(out.ok,true);
+  assert.ok(out.source.includes('Official primary feeds'));
+  assert.equal(out.providerHealth.official.healthySourceCount,7);
+  const fed=out.events.find(x=>x.title==='Federal Reserve issues FOMC statement');
+  assert.equal(fed.sourceId,'FED_PRESS');
+  assert.equal(fed.primarySource,true);
+  assert.equal(fed.verified,false);
+  assert.equal(fed.independentConfirmation,0);
+  assert.equal(out.events.some(x=>x.url==='https://aggregator.example/duplicate'),false);
+});
