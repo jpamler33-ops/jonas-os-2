@@ -495,7 +495,7 @@ export function evaluateBiggjSkillProgress(tree,skillId){
   verifyTreeShape(tree);
   const node=tree.nodes.find(x=>x.skillId===skillId);
   if(!node) throw new Error('skill missing');
-  const e=node.evidenceSummary||blankEvidence();
+  const e=evidenceSummary(node.evidence||[]);
   const validationTotal=Number(e.validationTotal||0);
   const validationForwardShadow=Number(e.validationForwardShadow||0);
   const validationIndependentEpisodes=Number(e.validationIndependentEpisodes||0);
@@ -572,7 +572,7 @@ export function evaluateBiggjSkillProgress(tree,skillId){
     recommendedStatus:recommended,
     promotionStage,
     evidenceSummary:{...e},
-    uncertainty:node.uncertainty,
+    uncertainty:clamp(1-validationIndependentEpisodes/(validationIndependentEpisodes+20)),
     dependencyGates:{
       testing:gateSummary(testingDependencyGate),
       decision:gateSummary(decisionDependencyGate),
@@ -624,7 +624,7 @@ export function applyBiggjSkillStatusTransition(tree,{
 }
 
 function researchPriority(node){
-  const e=node.evidenceSummary||blankEvidence();
+  const e=evidenceSummary(node.evidence||[]);
   const evidenceDeficit=1-clamp(Number(e.validationIndependentEpisodes||0)/30);
   const statusNeed={
     UNKNOWN:1,DISCOVERING:.92,LEARNING:.78,TESTING:.62,VALIDATED:.35,TRUSTED:.12,DECAYING:.95,RETIRED:0
@@ -648,6 +648,7 @@ export function buildBiggjResearchQueue(tree,{limit=25}={}){
     .map(node=>{
       const leverage=canonicalSkillLeverage(node.capabilityId);
       const dependencyGate=evaluateBiggjSkillDependencyGate(tree,{skillId:node.skillId,phase:'TESTING'});
+      const currentEvidence=evidenceSummary(node.evidence||[]);
       return {
         skillId:node.skillId,
         capabilityId:node.capabilityId,
@@ -657,9 +658,9 @@ export function buildBiggjResearchQueue(tree,{limit=25}={}){
         priority:clamp(researchPriority(node)*(dependencyGate.ready?1:Math.max(.70,1-.10*dependencyGate.blockers.length))),
         question:node.question||defaultQuestion(node),
         uncertainty:node.uncertainty,
-        independentEpisodes:node.evidenceSummary?.independentEpisodes||0,
-        validationIndependentEpisodes:node.evidenceSummary?.validationIndependentEpisodes||0,
-        validationEvidenceTotal:node.evidenceSummary?.validationTotal||0,
+        independentEpisodes:currentEvidence.independentEpisodes,
+        validationIndependentEpisodes:currentEvidence.validationIndependentEpisodes,
+        validationEvidenceTotal:currentEvidence.validationTotal,
         nextGate:evaluateBiggjSkillProgress(tree,node.skillId).recommendedStatus,
         dependencyLeverage:leverage.score,
         directUnlocks:leverage.directUnlocks,
