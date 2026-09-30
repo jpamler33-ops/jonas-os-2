@@ -467,6 +467,31 @@ function researchSkillForTemplate(tree,template){
   )||null;
 }
 
+function templateForResearchSkill(skill){
+  return ASSUMPTION_RESEARCH_TEMPLATES.find(template=>
+    skill?.kind==='DISCOVERED_SKILL'&&
+    skill?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1'&&
+    skill?.parentSkillId==='seed:'+template.primaryCapabilityId&&
+    skill?.title===template.title
+  )||null;
+}
+
+function researchProtocolForSkill(protocols,skillId){
+  return (protocols||[]).find(protocol=>
+    protocol?.version===BIGGJ_RESEARCH_PROTOCOL_VERSION&&
+    String(protocol?.skillId)===String(skillId)
+  )||null;
+}
+
+function missingResearchProtocolSkillIds(state){
+  const protocols=state?.researchProtocols||[];
+  return (state?.skillTree?.nodes||[])
+    .filter(skill=>templateForResearchSkill(skill))
+    .filter(skill=>!researchProtocolForSkill(protocols,skill.skillId))
+    .map(skill=>skill.skillId)
+    .sort();
+}
+
 function evidenceHasProvenance(node,key,value){
   for(const evidence of node?.evidence||[]){
     for(const item of evidence?.provenance||[]){
@@ -801,12 +826,14 @@ export function refreshBiggjLivingResearchRuntime(state,{
   const memories=normalizeMemories(thesisMemories);
   assertLivingResearchPointInTime(memories,claimAssumptionReport,t);
   const sourceFingerprint=sha256(compactSource(memories,claimAssumptionReport));
-  if(sourceFingerprint===state.sourceFingerprint){
+  const missingProtocolsBeforeRefresh=missingResearchProtocolSkillIds(state);
+  if(sourceFingerprint===state.sourceFingerprint&&missingProtocolsBeforeRefresh.length===0){
     return deepFreeze({
       changed:false,
       state,
       discoveredSkillIds:[],
       boundEvidenceIds:[],
+      createdProtocolIds:[],
       reasons:['SOURCE_STATE_UNCHANGED']
     });
   }
@@ -854,6 +881,29 @@ export function refreshBiggjLivingResearchRuntime(state,{
     tree=proposed;
   }
 
+  const researchProtocols=[...(state.researchProtocols||[])];
+  const createdProtocolIds=[];
+  for(const skill of (tree.nodes||[]).filter(x=>templateForResearchSkill(x))){
+    if(researchProtocolForSkill(researchProtocols,skill.skillId)) continue;
+    const template=templateForResearchSkill(skill);
+    const protocol=compileBiggjResearchProtocol({
+      tree,
+      skillId:skill.skillId,
+      agendaItem:{
+        assumptionId:template.assumptionId,
+        researchContract:{
+          title:template.title,
+          question:template.question,
+          hypothesis:template.hypothesis,
+          falsifier:template.falsifier
+        }
+      },
+      registeredAt:t
+    });
+    researchProtocols.push(protocol);
+    createdProtocolIds.push(protocol.protocolId);
+  }
+
   const boundEvidenceIds=[];
   const researchEpisodeResolution=[];
   for(const signal of signals){
@@ -899,6 +949,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
     persistentCaseRegistry,
     stabilityEventRegistry,
     researchEpisodeResolution,
+    researchProtocols,
     assumptionSignals:signals,
     agenda,
     discoveredSkillIds:uniq([...(state.discoveredSkillIds||[]),...discovered]),
@@ -914,6 +965,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
     state:finalized(core),
     discoveredSkillIds:discovered,
     boundEvidenceIds:uniq(boundEvidenceIds),
+    createdProtocolIds,
     reasons:[]
   });
 }
