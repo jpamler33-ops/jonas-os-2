@@ -278,6 +278,7 @@ export function refreshBiggjAutonomousOperator(state,{
     x.kind==='APPROVAL_REQUIRED'||
     x.kind==='AUTOMATION_GAP'||
     (x.kind==='OWNER_DISABLED'&&!x.recoveryAction)||
+    (x.kind==='OWNER_UNHEALTHY'&&!x.recoveryAction&&x.cycles>=3)||
     (x.kind==='DATA_QUALITY_BLOCKED'&&x.cycles>=3)||
     x.recoveryAttempts>=p.maxRecoveryAttempts
   );
