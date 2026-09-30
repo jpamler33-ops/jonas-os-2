@@ -189,6 +189,9 @@ test('three distinct persistent forecast cases create one deterministic research
   assert.equal(discoveryEvidence.independentEpisodeId,null);
   assert.equal(discoveryEvidence.provenance[0].kind,'DISCOVERY_COHORT');
   assert.equal(discoveryEvidence.provenance[0].inSampleDiscoveryEvidence,true);
+  assert.equal(discoveryEvidence.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
 
   const duplicate=refreshBiggjLivingResearchRuntime(out.state,{
     thesisMemories:memories,
@@ -231,12 +234,19 @@ test('new post-hypothesis persistent cases bind as prospective evidence but cann
   assert.equal(prospective.provenance[0].independenceResolved,true);
   assert.equal(prospective.provenance[0].statisticalIndependenceProven,false);
   assert.equal(prospective.provenance[0].crossSymbolAloneNeverCreatesIndependence,true);
+  assert.equal(prospective.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  assert.equal(skill.evidenceSummary.validationForwardShadow,0);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
 
   const summary=biggjLivingResearchRuntimeSummary(next.state);
   const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
   assert.equal(row.status,'DISCOVERING');
   assert.equal(row.recommendedStatus,'DISCOVERING');
   assert.equal(row.independentEpisodes,1);
+  assert.equal(row.validationEvidenceTotal,0);
+  assert.equal(row.validationForwardShadow,0);
+  assert.equal(row.validationIndependentEpisodes,0);
   assert.ok(row.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
 
   const repeated=refreshBiggjLivingResearchRuntime(next.state,{
@@ -303,12 +313,18 @@ test('common-cause clustering prevents correlated cases from inflating independe
   });
   skill=separated.state.skillTree.nodes.find(x=>x.skillId===skillId);
   assert.equal(skill.evidenceSummary.independentEpisodes,2);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
   const summary=biggjLivingResearchRuntimeSummary(separated.state);
   const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
-  assert.equal(row.recommendedStatus,'LEARNING');
+  assert.equal(row.recommendedStatus,'DISCOVERING');
   assert.equal(row.status,'DISCOVERING','research runtime must not auto-apply the recommendation');
+  assert.equal(row.validationIndependentEpisodes,0);
+  assert.equal(row.validationEvidenceTotal,0);
+  assert.ok(row.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
   assert.ok(summary.conservativeEpisodePartitions>=2);
   assert.equal(summary.researchEvidence.independentEpisodes,2);
+  assert.equal(summary.researchEvidence.validationIndependentEpisodes,0);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.primaryMutationAllowed,false);
 });
@@ -340,6 +356,8 @@ test('association milestones bind modelled non-causal evidence without becoming 
   assert.equal(firstAssociation.independentEpisodeId,null);
   assert.equal(firstAssociation.provenance[0].associationMilestone,'THESIS_WITNESS_SUPPORT_ADEQUATE:80');
   assert.equal(firstAssociation.provenance[0].causalInterpretation,false);
+  assert.equal(firstAssociation.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
 
   const updated=refreshBiggjLivingResearchRuntime(created.state,{
     thesisMemories:[],
@@ -366,6 +384,9 @@ test('association milestones bind modelled non-causal evidence without becoming 
   assert.equal(secondAssociation.forwardShadow,false);
   assert.equal(secondAssociation.independentEpisodeId,null);
   assert.equal(secondAssociation.provenance[0].postHypothesisSubsetResolved,false);
+  assert.equal(secondAssociation.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
 });
 
 test('persistent research cases survive removal from hot forecast tracker',()=>{
@@ -539,6 +560,8 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.ok(summary.researchEvidence.skillCount>=1);
   assert.ok(summary.researchEvidence.evidenceTotal>=1);
   assert.equal(summary.researchEvidence.independentEpisodes,0);
+  assert.equal(summary.researchEvidence.validationEvidenceTotal,0);
+  assert.equal(summary.researchEvidence.validationIndependentEpisodes,0);
   assert.ok(summary.validationHarness);
   assert.ok(summary.validationHarness.discoveredSkillCount>=1);
   assert.equal(summary.validationHarness.automaticStatusTransitionAllowed,false);
