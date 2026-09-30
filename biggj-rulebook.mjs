@@ -434,6 +434,46 @@ export function evaluateBiggjRulebook({
   });
 }
 
+export function evaluateBiggjRuntimeRulebook({
+  health={},
+  newsEvents=[],
+  asOf=Date.now()
+}={}){
+  const kernel=health?.institutionalKernel||{};
+  const operator=health?.autonomousOperator||{};
+  const governance=health?.governanceTriage||{};
+  const facts={
+    execution:kernel.execution??operator.execution,
+    canExecute:kernel.canExecute??operator.canExecute,
+    canExecuteLive:operator.canExecuteLive??governance.canExecuteLive,
+    abstainFirstClass:true,
+    automaticPrimaryMutation:operator.automaticPrimaryMutation??governance.automaticProductionMutation,
+    automaticPromotion:operator.automaticPromotion??governance.automaticPromotion,
+    automaticSkillTransition:operator.automaticSkillTransition??governance.automaticSkillTransition,
+    pointInTimeRequired:true
+  };
+  const explicitViolations=[];
+  const news=arr(newsEvents);
+  if(news.some(x=>x?.verified===true&&Number(x?.independentConfirmation||0)<=0)){
+    explicitViolations.push({
+      ruleId:'NEWS-003',
+      reason:'VERIFIED_WITHOUT_RECORDED_INDEPENDENT_CONFIRMATION',
+      detail:'At least one current news event is marked verified without independent confirmation.'
+    });
+  }
+  const assessment=evaluateBiggjRulebook({
+    facts,
+    explicitViolations,
+    operation:'RUNTIME_CONSTITUTION',
+    asOf
+  });
+  return fingerprinted({
+    ...assessment,
+    source:'OBSERVED_RUNTIME_PLUS_FIXED_CONSTITUTION',
+    note:'Missing core facts remain explicitly unproven; PASS never means every semantic rule was automatically inspected.'
+  });
+}
+
 export function assertBiggjRulebookAdmission(input={}){
   const result=evaluateBiggjRulebook(input);
   if(result.state==='BLOCKED'){
