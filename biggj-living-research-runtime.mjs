@@ -6,13 +6,34 @@ import {
   createBiggjSkillTree,
   reconcileBiggjSkillTreeWithCapabilityMap,
   proposeBiggjChildSkill,
+  recordBiggjSkillEvidence,
+  evaluateBiggjSkillProgress,
   buildBiggjResearchQueue,
   biggjSkillTreeSnapshot,
   verifyBiggjSkillTree
 } from './biggj-skill-tree.mjs';
 import { canonicalSkillLeverage } from './biggj-skill-dependency-graph.mjs';
+import {
+  resolveBiggjResearchEpisodes,
+  researchEpisodeAssignment,
+  BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION
+} from './biggj-research-episode-resolver.mjs';
+import {
+  compileBiggjResearchProtocol,
+  verifyBiggjResearchProtocol,
+  researchProtocolSummary,
+  BIGGJ_RESEARCH_PROTOCOL_VERSION
+} from './biggj-research-protocol-compiler.mjs';
+import { biggjResearchValidationSummary } from './biggj-research-validation-harness.mjs';
+import {
+  buildBiggjResearchReviewQueue,
+  applyBiggjResearchReviewDecision,
+  verifyBiggjResearchReviewQueue,
+  BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION
+} from './biggj-research-review-queue.mjs';
 
 export const BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION='TCX_BIGGJ_LIVING_RESEARCH_RUNTIME_V1';
+export const BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION='TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2';
 
 const deepFreeze=value=>{
   if(value&&typeof value==='object'&&!Object.isFrozen(value)){
@@ -118,6 +139,9 @@ function normalizeMemories(thesisMemories){
     .filter(Boolean)
     .map(memory=>({
       forecastId:String(memory?.forecastId||'UNKNOWN'),
+      symbol:String(memory?.symbol||'UNKNOWN').toUpperCase(),
+      decisionAsOf:finite(memory?.decisionAsOf),
+      issueKnowledgeAt:finite(memory?.issueKnowledgeAt),
       firstPersistentStaleAt:finite(memory?.firstPersistentStaleAt),
       assumptions:(memory?.assumptions||[]).map(a=>({
         assumptionId:String(a?.assumptionId||'UNKNOWN'),
@@ -189,6 +213,9 @@ function mergePersistentCaseRegistry(existing,memories,{observedAt,maxRows=10_00
         caseId:'persistent-case:'+sha256({forecastId:memory.forecastId,assumptionId:row.assumptionId}).slice(0,24),
         forecastId:memory.forecastId,
         assumptionId:row.assumptionId,
+        symbol:String(prior?.symbol||memory.symbol||'UNKNOWN').toUpperCase(),
+        decisionAsOf:finite(prior?.decisionAsOf,memory.decisionAsOf),
+        issueKnowledgeAt:finite(prior?.issueKnowledgeAt,memory.issueKnowledgeAt),
         firstPersistentStaleAt:firstAt.length?Math.min(...firstAt):null,
         persistentStaleCount:Math.max(Number(prior?.persistentStaleCount||0),Number(st.persistentStaleCount||0),1),
         transientFlickerCount:Math.max(Number(prior?.transientFlickerCount||0),Number(st.transientFlickerCount||0)),
@@ -389,8 +416,13 @@ function collectSignalFor(template,memories,report,{
 
 function compactSource(memories,report){
   return {
+    researchEvidenceBindingVersion:BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
+    researchProtocolVersion:BIGGJ_RESEARCH_PROTOCOL_VERSION,
     memories:memories.map(m=>({
       forecastId:m.forecastId,
+      symbol:m.symbol,
+      decisionAsOf:m.decisionAsOf,
+      issueKnowledgeAt:m.issueKnowledgeAt,
       firstPersistentStaleAt:m.firstPersistentStaleAt,
       assumptions:m.assumptions.map(a=>({
         assumptionId:a.assumptionId,
@@ -411,8 +443,316 @@ function compactSource(memories,report){
   };
 }
 
+function assertLivingResearchPointInTime(memories,claimAssumptionReport,asOf){
+  const t=Number(asOf);
+  const reportAt=finite(claimAssumptionReport?.evaluatedAt);
+  if(reportAt!=null&&reportAt>t) throw new Error('future claim-assumption research report blocked');
+  for(const memory of memories||[]){
+    const memoryPersistentAt=finite(memory?.firstPersistentStaleAt);
+    if(memoryPersistentAt!=null&&memoryPersistentAt>t) throw new Error('future thesis persistence state blocked');
+    for(const row of memory?.assumptions||[]){
+      const persistentAt=finite(row?.stability?.firstPersistentStaleAt);
+      if(persistentAt!=null&&persistentAt>t) throw new Error('future assumption persistence state blocked');
+    }
+    for(const event of memory?.stabilityEvents||[]){
+      const eventAt=finite(event?.observedAt);
+      if(eventAt!=null&&eventAt>t) throw new Error('future thesis stability event blocked');
+    }
+  }
+}
+
 function currentTreeMapFingerprint(){
   return createBiggjSkillTree({asOf:0}).capabilityMapFingerprint;
+}
+
+function researchSkillForTemplate(tree,template){
+  return (tree?.nodes||[]).find(node=>
+    node?.kind==='DISCOVERED_SKILL'&&
+    node?.parentSkillId==='seed:'+template.primaryCapabilityId&&
+    node?.title===template.title&&
+    node?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1'
+  )||null;
+}
+
+function templateForResearchSkill(skill){
+  return ASSUMPTION_RESEARCH_TEMPLATES.find(template=>
+    skill?.kind==='DISCOVERED_SKILL'&&
+    skill?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1'&&
+    skill?.parentSkillId==='seed:'+template.primaryCapabilityId&&
+    skill?.title===template.title
+  )||null;
+}
+
+function researchProtocolForSkill(protocols,skillId){
+  return (protocols||[]).find(protocol=>
+    protocol?.version===BIGGJ_RESEARCH_PROTOCOL_VERSION&&
+    String(protocol?.skillId)===String(skillId)
+  )||null;
+}
+
+function missingResearchProtocolSkillIds(state){
+  const protocols=state?.researchProtocols||[];
+  return (state?.skillTree?.nodes||[])
+    .filter(skill=>templateForResearchSkill(skill))
+    .filter(skill=>!researchProtocolForSkill(protocols,skill.skillId))
+    .map(skill=>skill.skillId)
+    .sort();
+}
+
+function evidenceHasProvenance(node,key,value){
+  for(const evidence of node?.evidence||[]){
+    for(const item of evidence?.provenance||[]){
+      if(item&&String(item?.[key]??'')===String(value)) return true;
+    }
+  }
+  return false;
+}
+
+function prospectiveCaseSelected(caseRow,index){
+  if(index<20) return true;
+  const hex=sha256(String(caseRow?.caseId||'')).slice(0,8);
+  return Number.parseInt(hex,16)%5===0;
+}
+
+function bindResearchEvidence(tree,{
+  signal,
+  template,
+  persistentCaseRegistry=[],
+  claimAssumptionReport=null,
+  asOf
+}={}){
+  let next=tree;
+  let skill=researchSkillForTemplate(next,template);
+  if(!skill) return {tree:next,boundEvidenceIds:[]};
+
+  const bound=[];
+  const cases=(persistentCaseRegistry||[])
+    .filter(row=>row.assumptionId===template.assumptionId)
+    .sort((a,b)=>
+      Number(a.firstSeenByLivingResearchAt||0)-Number(b.firstSeenByLivingResearchAt||0)||
+      String(a.caseId).localeCompare(String(b.caseId))
+    );
+  const episodePlan=resolveBiggjResearchEpisodes(cases,{
+    hypothesisCreatedAt:Number(skill.createdAt),
+    asOf:Number(asOf)
+  });
+
+  const discoveryCases=cases.filter(row=>
+    Number(row.firstSeenByLivingResearchAt||Infinity)<=Number(skill.createdAt)
+  );
+  if(discoveryCases.length){
+    const cohortCaseIds=discoveryCases.map(x=>x.caseId).sort();
+    const cohortId='discovery-cohort:'+sha256({
+      skillId:skill.skillId,
+      assumptionId:template.assumptionId,
+      caseIds:cohortCaseIds
+    }).slice(0,24);
+    if(!evidenceHasProvenance(skill,'cohortId',cohortId)){
+      const latestKnownAt=Math.max(
+        ...discoveryCases.map(x=>Number(x.firstSeenByLivingResearchAt||0)),
+        Number(skill.createdAt||0)
+      );
+      const persistentTimes=discoveryCases
+        .map(x=>finite(x.firstPersistentStaleAt))
+        .filter(x=>x!=null);
+      next=recordBiggjSkillEvidence(next,{
+        skillId:skill.skillId,
+        epistemicClass:'INFERRED',
+        asOf:Number(skill.createdAt),
+        availableAt:Math.min(Number(skill.createdAt),latestKnownAt),
+        sourceId:'BIGGJ_LIVING_RESEARCH_DISCOVERY_COHORT',
+        independentEpisodeId:null,
+        statement:
+          'Discovery cohort contained '+discoveryCases.length+
+          ' persistent '+template.assumptionId+
+          ' forecast cases known when this research skill was created. This is in-sample discovery evidence, not forward validation.',
+        outcome:'NEUTRAL',
+        metricDelta:null,
+        forwardShadow:false,
+        pointInTime:true,
+        futureLeakage:false,
+        auditReady:false,
+        scientificGuardsPassed:false,
+        chronologicalStable:false,
+        costStressPassed:false,
+        concentrationPassed:false,
+        winnerRemovalPassed:false,
+        validationEligible:false,
+        provenance:[{
+          kind:'DISCOVERY_COHORT',
+          cohortId,
+          assumptionId:template.assumptionId,
+          caseCount:discoveryCases.length,
+          caseSetFingerprint:sha256(cohortCaseIds),
+          earliestPersistentStaleAt:persistentTimes.length?Math.min(...persistentTimes):null,
+          latestFirstSeenByLivingResearchAt:Math.max(...discoveryCases.map(x=>Number(x.firstSeenByLivingResearchAt||0))),
+          inSampleDiscoveryEvidence:true,
+          causalInterpretation:false
+        }]
+      });
+      skill=researchSkillForTemplate(next,template);
+      const evidence=skill?.evidence?.find(x=>evidenceHasProvenance({evidence:[x]},'cohortId',cohortId));
+      if(evidence) bound.push(evidence.evidenceId);
+    }
+  }
+
+  skill=researchSkillForTemplate(next,template);
+  const prospectiveCases=cases.filter(row=>
+    Number(row.firstSeenByLivingResearchAt||0)>Number(skill?.createdAt||Infinity)
+  );
+  for(let i=0;i<prospectiveCases.length;i++){
+    const row=prospectiveCases[i];
+    if(!prospectiveCaseSelected(row,i)) continue;
+    skill=researchSkillForTemplate(next,template);
+    if(evidenceHasProvenance(skill,'persistentCaseId',row.caseId)) continue;
+    const knownAt=Number(row.firstSeenByLivingResearchAt||asOf);
+    const episodeAssignment=researchEpisodeAssignment(episodePlan,row.caseId);
+    const independentEpisodeId=episodeAssignment?.independenceResolved===true
+      ?episodeAssignment.independentEpisodeId
+      :null;
+    next=recordBiggjSkillEvidence(next,{
+      skillId:skill.skillId,
+      epistemicClass:'INFERRED',
+      asOf:knownAt,
+      availableAt:knownAt,
+      sourceId:'THESIS_STABILITY_MEMORY',
+      independentEpisodeId,
+      statement:
+        'A new prospective forecast case entered persistent staleness for '+
+        template.assumptionId+
+        ' after the research hypothesis already existed. '+
+        (independentEpisodeId
+          ?'The case was assigned to a conservative common-cause episode; cases sharing that episode cannot inflate the independent-episode count.'
+          :'Episode independence remains unresolved and contributes no independent-episode count.'),
+      outcome:'NEUTRAL',
+      metricDelta:null,
+      forwardShadow:true,
+      pointInTime:true,
+      futureLeakage:false,
+      auditReady:false,
+      scientificGuardsPassed:false,
+      chronologicalStable:false,
+      costStressPassed:false,
+      concentrationPassed:false,
+      winnerRemovalPassed:false,
+      validationEligible:false,
+      provenance:[{
+        kind:'PROSPECTIVE_PERSISTENT_CASE',
+        persistentCaseId:row.caseId,
+        forecastId:row.forecastId,
+        assumptionId:row.assumptionId,
+        firstPersistentStaleAt:row.firstPersistentStaleAt,
+        firstSeenByLivingResearchAt:row.firstSeenByLivingResearchAt,
+        sampledAfterFirstTwenty:i>=20,
+        episodeResolverVersion:BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION,
+        independentEpisodeId,
+        episodeStatus:episodeAssignment?.status??'UNRESOLVED',
+        episodeReasons:[...(episodeAssignment?.reasons||[])],
+        episodeAnchorCaseId:episodeAssignment?.episodeAnchorCaseId??null,
+        independenceResolved:episodeAssignment?.independenceResolved===true,
+        statisticalIndependenceProven:false,
+        crossSymbolAloneNeverCreatesIndependence:true,
+        causalInterpretation:false
+      }]
+    });
+    skill=researchSkillForTemplate(next,template);
+    const evidence=skill?.evidence?.find(x=>evidenceHasProvenance({evidence:[x]},'persistentCaseId',row.caseId));
+    if(evidence) bound.push(evidence.evidenceId);
+  }
+
+  skill=researchSkillForTemplate(next,template);
+  const association=signal?.association||{};
+  const milestone=association.associationReady===true
+    ?Math.floor(Math.max(0,Number(association.observations)||0)/20)*20
+    :0;
+  if(milestone>=40){
+    const associationKey=template.assumptionId+':'+milestone;
+    if(!evidenceHasProvenance(skill,'associationMilestone',associationKey)){
+      const reportAt=finite(claimAssumptionReport?.evaluatedAt,asOf);
+      const evidenceAsOf=Math.max(Number(skill.createdAt||0),Number(reportAt||0));
+      next=recordBiggjSkillEvidence(next,{
+        skillId:skill.skillId,
+        epistemicClass:'MODELLED',
+        asOf:evidenceAsOf,
+        availableAt:Number(reportAt||evidenceAsOf),
+        sourceId:'CLAIM_ASSUMPTION_RESEARCH_EVALUATOR',
+        independentEpisodeId:null,
+        statement:
+          'Persistence-filtered outcome association reached '+milestone+
+          ' observations for '+template.assumptionId+
+          '. This is an association snapshot only; it does not prove assumption truth, causality, or counterfactual benefit.',
+        outcome:'NEUTRAL',
+        metricDelta:null,
+        forwardShadow:false,
+        pointInTime:true,
+        futureLeakage:false,
+        auditReady:false,
+        scientificGuardsPassed:false,
+        chronologicalStable:false,
+        costStressPassed:false,
+        concentrationPassed:false,
+        winnerRemovalPassed:false,
+        validationEligible:false,
+        provenance:[{
+          kind:'PERSISTENCE_FILTERED_ASSOCIATION',
+          associationMilestone:associationKey,
+          assumptionId:template.assumptionId,
+          observations:association.observations,
+          persistentStaleBeforeMaturity:association.persistentStaleBeforeMaturity,
+          neverPersistentStaleBeforeMaturity:association.neverPersistentStaleBeforeMaturity,
+          directionFailureRateDifference:association.directionFailureRateDifference,
+          intervalMissRateDifference:association.intervalMissRateDifference,
+          interpretation:association.interpretation,
+          postHypothesisSubsetResolved:false,
+          causalInterpretation:false
+        }]
+      });
+      skill=researchSkillForTemplate(next,template);
+      const evidence=skill?.evidence?.find(x=>evidenceHasProvenance({evidence:[x]},'associationMilestone',associationKey));
+      if(evidence) bound.push(evidence.evidenceId);
+    }
+  }
+
+  return {
+    tree:next,
+    boundEvidenceIds:uniq(bound),
+    episodePlan
+  };
+}
+
+function livingResearchEvidenceSummary(tree){
+  const rows=(tree?.nodes||[])
+    .filter(x=>x?.kind==='DISCOVERED_SKILL'&&x?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1')
+    .map(node=>{
+      const progress=evaluateBiggjSkillProgress(tree,node.skillId);
+      const evidence=progress.evidenceSummary||{};
+      return {
+        skillId:node.skillId,
+        title:node.title,
+        status:node.status,
+        evidenceTotal:Number(evidence.total||0),
+        forwardShadow:Number(evidence.forwardShadow||0),
+        independentEpisodes:Number(evidence.independentEpisodes||0),
+        validationEvidenceTotal:Number(evidence.validationTotal||0),
+        validationForwardShadow:Number(evidence.validationForwardShadow||0),
+        validationIndependentEpisodes:Number(evidence.validationIndependentEpisodes||0),
+        auditReady:Number(evidence.auditReady||0),
+        sciencePassed:Number(evidence.sciencePassed||0),
+        recommendedStatus:progress.recommendedStatus,
+        reasons:[...(progress.reasons||[])]
+      };
+    })
+    .sort((a,b)=>b.evidenceTotal-a.evidenceTotal||a.skillId.localeCompare(b.skillId));
+  return {
+    skillCount:rows.length,
+    evidenceTotal:rows.reduce((n,x)=>n+x.evidenceTotal,0),
+    forwardShadow:rows.reduce((n,x)=>n+x.forwardShadow,0),
+    independentEpisodes:rows.reduce((n,x)=>n+x.independentEpisodes,0),
+    validationEvidenceTotal:rows.reduce((n,x)=>n+x.validationEvidenceTotal,0),
+    validationForwardShadow:rows.reduce((n,x)=>n+x.validationForwardShadow,0),
+    validationIndependentEpisodes:rows.reduce((n,x)=>n+x.validationIndependentEpisodes,0),
+    rows
+  };
 }
 
 export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
@@ -429,6 +769,10 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     observedForecastIds:[],
     persistentCaseRegistry:[],
     stabilityEventRegistry:[],
+    researchEpisodeResolution:[],
+    researchProtocols:[],
+    researchReviewQueue:buildBiggjResearchReviewQueue({tree:skillTree,protocols:[],asOf:t}),
+    researchReviewDecisions:[],
     assumptionSignals:[],
     agenda:[],
     discoveredSkillIds:[],
@@ -437,6 +781,10 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     invariants:{
       pointInTime:true,
       researchOnlyAutonomousDiscovery:true,
+      conservativeResearchEpisodeResolution:true,
+      crossSymbolAloneNeverCreatesIndependence:true,
+      researchProtocolsArePreregistered:true,
+      retrospectiveConfirmatoryRelabelingForbidden:true,
       automaticPromotion:false,
       automaticKill:false,
       automaticExperimentLaunch:false,
@@ -465,6 +813,34 @@ export function verifyBiggjLivingResearchRuntime(value){
     if(!Array.isArray(value?.observedForecastIds)) reasons.push('OBSERVED_FORECAST_IDS_INVALID');
     if(!Array.isArray(value?.persistentCaseRegistry)) reasons.push('PERSISTENT_CASE_REGISTRY_INVALID');
     if(!Array.isArray(value?.stabilityEventRegistry)) reasons.push('STABILITY_EVENT_REGISTRY_INVALID');
+    if(value?.researchReviewQueue!=null){
+      const rqv=verifyBiggjResearchReviewQueue(value.researchReviewQueue);
+      if(!rqv.ok) reasons.push('RESEARCH_REVIEW_QUEUE_INVALID:'+rqv.reasons.join('|'));
+    }
+    if(value?.researchReviewDecisions!=null&&!Array.isArray(value.researchReviewDecisions)){
+      reasons.push('RESEARCH_REVIEW_DECISIONS_INVALID');
+    }
+    if(value?.researchProtocols!=null&&!Array.isArray(value.researchProtocols)){
+      reasons.push('RESEARCH_PROTOCOLS_INVALID');
+    }else{
+      const protocolIds=new Set();
+      const protocolSkillVersions=new Set();
+      for(const protocol of value?.researchProtocols||[]){
+        const pv=verifyBiggjResearchProtocol(protocol);
+        if(!pv.ok) reasons.push('RESEARCH_PROTOCOL_INVALID:'+String(protocol?.protocolId||'UNKNOWN'));
+        if(protocolIds.has(protocol?.protocolId)) reasons.push('RESEARCH_PROTOCOL_ID_DUPLICATE:'+String(protocol?.protocolId||'UNKNOWN'));
+        protocolIds.add(protocol?.protocolId);
+        const key=String(protocol?.version||'UNKNOWN')+':'+String(protocol?.skillId||'UNKNOWN');
+        if(protocolSkillVersions.has(key)) reasons.push('RESEARCH_PROTOCOL_SKILL_VERSION_DUPLICATE:'+key);
+        protocolSkillVersions.add(key);
+        if(!(value?.skillTree?.nodes||[]).some(x=>x.skillId===protocol?.skillId)){
+          reasons.push('RESEARCH_PROTOCOL_SKILL_MISSING:'+String(protocol?.skillId||'UNKNOWN'));
+        }
+        if(Number.isFinite(Number(value?.updatedAt))&&Number(protocol?.registeredAt)>Number(value.updatedAt)){
+          reasons.push('RESEARCH_PROTOCOL_FUTURE_REGISTRATION:'+String(protocol?.protocolId||'UNKNOWN'));
+        }
+      }
+    }
     const tv=verifyBiggjSkillTree(value?.skillTree);
     if(!tv.ok) reasons.push('SKILL_TREE_INVALID:'+tv.reasons.join('|'));
     const expected=sha256(coreOf(value));
@@ -487,12 +863,16 @@ export function refreshBiggjLivingResearchRuntime(state,{
   if(t==null) throw new Error('asOf must be finite');
 
   const memories=normalizeMemories(thesisMemories);
+  assertLivingResearchPointInTime(memories,claimAssumptionReport,t);
   const sourceFingerprint=sha256(compactSource(memories,claimAssumptionReport));
-  if(sourceFingerprint===state.sourceFingerprint){
+  const missingProtocolsBeforeRefresh=missingResearchProtocolSkillIds(state);
+  if(sourceFingerprint===state.sourceFingerprint&&missingProtocolsBeforeRefresh.length===0){
     return deepFreeze({
       changed:false,
       state,
       discoveredSkillIds:[],
+      boundEvidenceIds:[],
+      createdProtocolIds:[],
       reasons:['SOURCE_STATE_UNCHANGED']
     });
   }
@@ -540,6 +920,54 @@ export function refreshBiggjLivingResearchRuntime(state,{
     tree=proposed;
   }
 
+  const researchProtocols=[...(state.researchProtocols||[])];
+  const createdProtocolIds=[];
+  for(const skill of (tree.nodes||[]).filter(x=>templateForResearchSkill(x))){
+    if(researchProtocolForSkill(researchProtocols,skill.skillId)) continue;
+    const template=templateForResearchSkill(skill);
+    const protocol=compileBiggjResearchProtocol({
+      tree,
+      skillId:skill.skillId,
+      agendaItem:{
+        assumptionId:template.assumptionId,
+        researchContract:{
+          title:template.title,
+          question:template.question,
+          hypothesis:template.hypothesis,
+          falsifier:template.falsifier
+        }
+      },
+      registeredAt:t
+    });
+    researchProtocols.push(protocol);
+    createdProtocolIds.push(protocol.protocolId);
+  }
+
+  const boundEvidenceIds=[];
+  const researchEpisodeResolution=[];
+  for(const signal of signals){
+    if(!signal.researchRequired) continue;
+    const template=templateByAssumption().get(signal.assumptionId);
+    const binding=bindResearchEvidence(tree,{
+      signal,
+      template,
+      persistentCaseRegistry,
+      claimAssumptionReport,
+      asOf:t
+    });
+    tree=binding.tree;
+    boundEvidenceIds.push(...binding.boundEvidenceIds);
+    if(binding.episodePlan){
+      researchEpisodeResolution.push({
+        assumptionId:signal.assumptionId,
+        version:binding.episodePlan.version,
+        fingerprint:binding.episodePlan.fingerprint,
+        counts:{...binding.episodePlan.counts},
+        policy:{...binding.episodePlan.policy}
+      });
+    }
+  }
+
   const agenda=signals
     .filter(x=>x.status!=='DORMANT')
     .map(x=>({
@@ -559,6 +987,14 @@ export function refreshBiggjLivingResearchRuntime(state,{
     observedForecastIds,
     persistentCaseRegistry,
     stabilityEventRegistry,
+    researchEpisodeResolution,
+    researchProtocols,
+    researchReviewQueue:buildBiggjResearchReviewQueue({
+      tree,
+      protocols:researchProtocols,
+      asOf:t
+    }),
+    researchReviewDecisions:[...(state.researchReviewDecisions||[])].slice(-256),
     assumptionSignals:signals,
     agenda,
     discoveredSkillIds:uniq([...(state.discoveredSkillIds||[]),...discovered]),
@@ -573,6 +1009,8 @@ export function refreshBiggjLivingResearchRuntime(state,{
     changed:true,
     state:finalized(core),
     discoveredSkillIds:discovered,
+    boundEvidenceIds:uniq(boundEvidenceIds),
+    createdProtocolIds,
     reasons:[]
   });
 }
@@ -607,8 +1045,51 @@ export async function openBiggjLivingResearchRuntime(filePath,{asOf=Date.now()}=
       ...coreOf(state),
       updatedAt:finite(asOf,Date.now()),
       skillTree:tree,
+      researchReviewQueue:buildBiggjResearchReviewQueue({
+        tree,
+        protocols:state.researchProtocols||[],
+        asOf
+      }),
+      researchReviewDecisions:Array.isArray(state.researchReviewDecisions)
+        ?state.researchReviewDecisions
+        :[],
       canonicalResearchQueue:buildBiggjResearchQueue(tree,{limit:20}).queue,
       lastRefreshReason:'CAPABILITY_MAP_RECONCILIATION'
+    };
+    state=finalized(core);
+    reconciled=true;
+  }
+
+  if(state.researchReviewQueue==null||!Array.isArray(state.researchReviewDecisions)){
+    const migratedAt=finite(asOf,Date.now());
+    const migrationCore={
+      migrationId:'research-review-queue:'+sha256({
+        priorFingerprint:state.fingerprint,
+        migratedAt
+      }).slice(0,24),
+      kind:'RESEARCH_REVIEW_QUEUE_BACKFILL',
+      at:migratedAt,
+      evidenceRewritten:false,
+      skillStatusRewritten:false,
+      protocolRewritten:false,
+      productionMutationPerformed:false
+    };
+    const core={
+      ...coreOf(state),
+      updatedAt:Math.max(Number(state.updatedAt||0),migratedAt),
+      researchReviewQueue:buildBiggjResearchReviewQueue({
+        tree:state.skillTree,
+        protocols:state.researchProtocols||[],
+        asOf:migratedAt
+      }),
+      researchReviewDecisions:Array.isArray(state.researchReviewDecisions)
+        ?state.researchReviewDecisions
+        :[],
+      migrations:[
+        ...(state.migrations||[]),
+        migrationCore
+      ].slice(-128),
+      lastRefreshReason:'RESEARCH_REVIEW_QUEUE_BACKFILL'
     };
     state=finalized(core);
     reconciled=true;
@@ -625,6 +1106,58 @@ export async function openBiggjLivingResearchRuntime(filePath,{asOf=Date.now()}=
   };
 }
 
+export function applyBiggjLivingResearchReviewDecision(state,{
+  ticketId,
+  approved,
+  asOf=Date.now(),
+  reviewer='OPERATOR'
+}={}){
+  const v=verifyBiggjLivingResearchRuntime(state);
+  if(!v.ok) throw new Error('living research runtime invalid: '+v.reasons.join(','));
+  const ticket=(state?.researchReviewQueue?.tickets||[]).find(x=>x.ticketId===ticketId);
+  if(!ticket) throw new Error('research review ticket missing');
+  const result=applyBiggjResearchReviewDecision({
+    tree:state.skillTree,
+    ticket,
+    approved,
+    asOf,
+    reviewer
+  });
+  const nextTree=result.tree;
+  const nextQueue=buildBiggjResearchReviewQueue({
+    tree:nextTree,
+    protocols:state.researchProtocols||[],
+    asOf
+  });
+  const core={
+    ...coreOf(state),
+    updatedAt:Number(asOf),
+    revision:Number(state.revision||0)+1,
+    skillTree:nextTree,
+    researchReviewQueue:nextQueue,
+    researchReviewDecisions:[
+      ...(state.researchReviewDecisions||[]),
+      structuredClone(result.decision)
+    ].slice(-256),
+    canonicalResearchQueue:buildBiggjResearchQueue(nextTree,{limit:20}).queue,
+    lastRefreshReason:'EXPLICIT_RESEARCH_REVIEW_DECISION',
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  };
+  return deepFreeze({
+    changed:result.changed,
+    state:finalized(core),
+    decision:result.decision,
+    productionMutationPerformed:false,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  });
+}
+
 export async function saveBiggjLivingResearchRuntime(filePath,state){
   const v=verifyBiggjLivingResearchRuntime(state);
   if(!v.ok) throw new Error('living research runtime invalid: '+v.reasons.join(','));
@@ -639,6 +1172,15 @@ export function biggjLivingResearchRuntimeSummary(value){
   const v=verifyBiggjLivingResearchRuntime(value);
   const active=(value?.agenda||[]);
   const researchRequired=active.filter(x=>x.status==='RESEARCH_REQUIRED');
+  const protocols=(value?.researchProtocols||[])
+    .map(protocol=>researchProtocolSummary(protocol,value?.skillTree))
+    .sort((a,b)=>Number(a.registeredAt||0)-Number(b.registeredAt||0)||String(a.protocolId).localeCompare(String(b.protocolId)));
+  const protocolStateCounts=Object.fromEntries(
+    [...new Set(protocols.map(x=>x.state))].sort().map(state=>[
+      state,
+      protocols.filter(x=>x.state===state).length
+    ])
+  );
   return deepFreeze({
     version:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION,
     integrity:v.ok?'VALID':'INVALID',
@@ -666,8 +1208,40 @@ export function biggjLivingResearchRuntimeSummary(value){
     observedForecasts:(value?.observedForecastIds||[]).length,
     retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
     retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
+    researchEpisodeResolverVersion:BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION,
+    conservativeEpisodePartitions:(value?.researchEpisodeResolution||[])
+      .reduce((n,x)=>n+Number(x?.counts?.independentEpisodes||0),0),
+    unresolvedResearchCases:(value?.researchEpisodeResolution||[])
+      .reduce((n,x)=>n+Number(x?.counts?.unresolvedCases||0),0),
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
     discoveredResearchOnlySkillIds:[...(value?.discoveredSkillIds||[])],
+    researchReviews:{
+      version:BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION,
+      open:Number(value?.researchReviewQueue?.ticketCount||0),
+      blocked:Number(value?.researchReviewQueue?.blockedCount||0),
+      decisions:(value?.researchReviewDecisions||[]).length,
+      automaticApply:false,
+      topTickets:(value?.researchReviewQueue?.tickets||[]).slice(0,8).map(x=>({
+        ticketId:x.ticketId,
+        skillId:x.skillId,
+        fromStatus:x.fromStatus,
+        proposedStatus:x.proposedStatus,
+        evidenceState:x.evidenceState
+      }))
+    },
+    researchProtocols:{
+      version:BIGGJ_RESEARCH_PROTOCOL_VERSION,
+      total:protocols.length,
+      backfilled:protocols.filter(x=>x.backfilledForExistingSkill).length,
+      stateCounts:protocolStateCounts,
+      protocols:protocols.slice(0,12)
+    },
+    researchEvidence:verifyBiggjSkillTree(value?.skillTree).ok
+      ?livingResearchEvidenceSummary(value.skillTree)
+      :null,
+    validationHarness:verifyBiggjSkillTree(value?.skillTree).ok
+      ?biggjResearchValidationSummary(value.skillTree,{limit:5})
+      :null,
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
       :null,

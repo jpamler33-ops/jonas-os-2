@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-09-30T02:03:57.416Z",
+  "updatedAt": "2026-09-30T08:28:31.521Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -23,7 +23,7 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
+      "status": "CLOSED",
       "outcomes": {
         "h1": {
           "observedAt": "2026-09-29T18:03:22.334Z",
@@ -35,6 +35,12 @@
           "observedAt": "2026-09-29T18:03:22.334Z",
           "price": 83208.4,
           "return": -0.007203017225436592,
+          "direction": -1
+        },
+        "h24": {
+          "observedAt": "2026-09-30T08:28:31.521Z",
+          "price": 83129.6,
+          "return": -0.008143215597747777,
           "direction": -1
         }
       },
@@ -100,18 +106,46 @@
           "price": 83423.6,
           "return": -0.0019226098681210946,
           "direction": -1
+        },
+        "h4": {
+          "observedAt": "2026-09-30T08:28:31.521Z",
+          "price": 83129.6,
+          "return": -0.005440016845268736,
+          "direction": -1
         }
       },
       "caseId": "5e153287a3cc18a89c44654a3c0c2ce5069ace444c5a225708ee9532c1e3eba2"
+    },
+    {
+      "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
+      "openedAt": "2026-09-30T08:28:31.521Z",
+      "entryPrice": 83129.6,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "evidenceFeatures": {
+        "fundingMedian": 0.00883993446136495,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 83129.6
+      },
+      "evidenceGuards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "evidenceClassification": "OBSERVED_DERIVED",
+      "status": "OPEN",
+      "outcomes": {},
+      "caseId": "4651a9aa16acacde167eb236cf318bfcd246049c103112b6313bab23a9d25fd0"
     }
   ],
   "summary": {
     "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
-    "totalCases": 3,
-    "eligibleCases": 3,
+    "totalCases": 4,
+    "eligibleCases": 4,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 3,
+        "cases": 4,
         "horizons": {
           "h1": {
             "n": 3,
@@ -119,14 +153,14 @@
             "positiveRate": 0.3333333333333333
           },
           "h4": {
-            "n": 2,
-            "meanReturn": -0.0013427222401885541,
-            "positiveRate": 0.5
+            "n": 3,
+            "meanReturn": -0.002708487108548615,
+            "positiveRate": 0.3333333333333333
           },
           "h24": {
-            "n": 0,
-            "meanReturn": null,
-            "positiveRate": null
+            "n": 1,
+            "meanReturn": -0.008143215597747777,
+            "positiveRate": 0
           }
         }
       }
@@ -141,10 +175,10 @@
       "minN": 30,
       "validationN": 100
     },
-    "eligibleCases": 3,
+    "eligibleCases": 4,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 3,
+        "cases": 4,
         "horizons": {
           "h1": {
             "n": 3,
@@ -155,18 +189,18 @@
             "claimAllowed": false
           },
           "h4": {
-            "n": 2,
-            "meanReturn": -0.0013427222401885541,
-            "hitRate": 0.5,
-            "wilsonLower95": 0.09452865480086611,
+            "n": 3,
+            "meanReturn": -0.002708487108548615,
+            "hitRate": 0.3333333333333333,
+            "wilsonLower95": 0.061490315276160515,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
           "h24": {
-            "n": 0,
-            "meanReturn": null,
-            "hitRate": null,
-            "wilsonLower95": null,
+            "n": 1,
+            "meanReturn": -0.008143215597747777,
+            "hitRate": 0,
+            "wilsonLower95": 0,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           }

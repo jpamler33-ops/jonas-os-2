@@ -12,7 +12,8 @@ import {
   saveBiggjLivingResearchRuntime,
   verifyBiggjLivingResearchRuntime,
   biggjLivingResearchRuntimeSummary,
-  biggjAssumptionResearchTemplates
+  biggjAssumptionResearchTemplates,
+  BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION
 } from './biggj-living-research-runtime.mjs';
 
 function thesisMemory({
@@ -22,10 +23,16 @@ function thesisMemory({
   persistentStaleCount=1,
   falsifiers=['WITNESS_NOT_SATISFIED'],
   eventType='PERSISTENT_STALE_CONFIRMED',
-  observedAt=1000
+  observedAt=1000,
+  symbol='BTCUSDT',
+  decisionAsOf=observedAt-2000,
+  issueKnowledgeAt=observedAt-1000
 }={}){
   return {
     forecastId,
+    symbol,
+    decisionAsOf,
+    issueKnowledgeAt,
     firstPersistentStaleAt:state==='PERSISTENT_STALE'?observedAt:null,
     assumptions:[{
       assumptionId,
@@ -63,6 +70,7 @@ function report({
   ready=false,
   direction=.0,
   interval=.0,
+  observations=80,
   evaluatedAt=5000
 }={}){
   const core={
@@ -70,9 +78,9 @@ function report({
     byPreOutcomeStaleAssumption:[{
       assumptionId,
       persistenceFiltered:{
-        observations:80,
-        persistentStaleBeforeMaturity:30,
-        neverPersistentStaleBeforeMaturity:50,
+        observations,
+        persistentStaleBeforeMaturity:Math.floor(observations*.375),
+        neverPersistentStaleBeforeMaturity:observations-Math.floor(observations*.375),
         associationReady:ready,
         directionFailureRateDifference:direction,
         intervalMissRateDifference:interval,
@@ -98,6 +106,11 @@ test('initial living research runtime is a governed research-only skill graph',(
   assert.deepEqual(state.observedForecastIds,[]);
   assert.deepEqual(state.persistentCaseRegistry,[]);
   assert.deepEqual(state.stabilityEventRegistry,[]);
+  assert.deepEqual(state.researchProtocols,[]);
+  assert.equal(state.researchReviewQueue.ticketCount,0);
+  assert.deepEqual(state.researchReviewDecisions,[]);
+  assert.equal(state.invariants.researchProtocolsArePreregistered,true);
+  assert.equal(state.invariants.retrospectiveConfirmatoryRelabelingForbidden,true);
   assert.ok(state.skillTree.nodes.length>=159);
 });
 
@@ -142,7 +155,7 @@ test('one or two persistent forecasts stay in evidence collection',()=>{
   assert.equal(out.discoveredSkillIds.length,0);
 });
 
-test('three independent persistent forecast cases create one deterministic research-only child skill',()=>{
+test('three distinct persistent forecast cases create one deterministic research-only child skill',()=>{
   const initial=createBiggjLivingResearchRuntime({asOf:1000});
   const memories=[
     thesisMemory({forecastId:'F1',observedAt:2000}),
@@ -159,8 +172,18 @@ test('three independent persistent forecast cases create one deterministic resea
   assert.equal(signal.researchRequired,true);
   assert.equal(signal.distinctPersistentForecasts,3);
   assert.equal(out.discoveredSkillIds.length,1);
+  assert.equal(out.createdProtocolIds.length,1);
+  assert.equal(out.state.researchProtocols.length,1);
 
   const skill=out.state.skillTree.nodes.find(x=>x.skillId===out.discoveredSkillIds[0]);
+  const protocol=out.state.researchProtocols[0];
+  assert.equal(protocol.skillId,skill.skillId);
+  assert.equal(protocol.registeredAt,5000);
+  assert.equal(protocol.skillCreatedAt,5000);
+  assert.equal(protocol.backfilledForExistingSkill,false);
+  assert.equal(protocol.preregistration.confirmatoryEvidenceMustBeKnownAfter,5000);
+  assert.equal(protocol.authority.automaticExperimentLaunch,false);
+  assert.equal(protocol.authority.automaticSkillStatusTransition,false);
   assert.ok(skill);
   assert.equal(skill.kind,'DISCOVERED_SKILL');
   assert.equal(skill.status,'DISCOVERING');
@@ -169,6 +192,21 @@ test('three independent persistent forecast cases create one deterministic resea
   assert.equal(skill.parentSkillId,'seed:EVIDENCE_INDEPENDENCE');
   assert.equal(skill.productionMutationAllowed,false);
   assert.equal(skill.canExecuteLive,false);
+  assert.equal(skill.evidenceSummary.total,1);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
+  assert.equal(skill.evidenceSummary.independentEpisodes,0);
+  assert.equal(skill.evidenceSummary.auditReady,0);
+  assert.equal(skill.evidenceSummary.sciencePassed,0);
+  assert.equal(out.boundEvidenceIds.length,1);
+  const discoveryEvidence=skill.evidence[0];
+  assert.equal(discoveryEvidence.epistemicClass,'INFERRED');
+  assert.equal(discoveryEvidence.forwardShadow,false);
+  assert.equal(discoveryEvidence.independentEpisodeId,null);
+  assert.equal(discoveryEvidence.provenance[0].kind,'DISCOVERY_COHORT');
+  assert.equal(discoveryEvidence.provenance[0].inSampleDiscoveryEvidence,true);
+  assert.equal(discoveryEvidence.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
 
   const duplicate=refreshBiggjLivingResearchRuntime(out.state,{
     thesisMemories:memories,
@@ -177,7 +215,195 @@ test('three independent persistent forecast cases create one deterministic resea
   });
   assert.equal(duplicate.changed,false);
   assert.deepEqual(duplicate.discoveredSkillIds,[]);
+  assert.deepEqual(duplicate.createdProtocolIds,[]);
+  assert.equal(duplicate.state.researchProtocols.length,1);
   assert.equal(duplicate.state.skillTree.nodes.length,out.state.skillTree.nodes.length);
+});
+
+test('new post-hypothesis persistent cases bind as prospective evidence but cannot advance maturity alone',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+
+  const next=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[thesisMemory({forecastId:'F4',observedAt:6000})],
+    asOf:7000,
+    reason:'PROSPECTIVE_CASE'
+  });
+  const skill=next.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(next.boundEvidenceIds.length,1);
+  assert.equal(skill.evidenceSummary.total,2);
+  assert.equal(skill.evidenceSummary.forwardShadow,1);
+  assert.equal(skill.evidenceSummary.independentEpisodes,1);
+  const prospective=skill.evidence.find(x=>x.forwardShadow===true);
+  assert.ok(prospective);
+  assert.equal(prospective.epistemicClass,'INFERRED');
+  assert.ok(prospective.independentEpisodeId);
+  assert.equal(prospective.provenance[0].kind,'PROSPECTIVE_PERSISTENT_CASE');
+  assert.equal(prospective.provenance[0].independenceResolved,true);
+  assert.equal(prospective.provenance[0].statisticalIndependenceProven,false);
+  assert.equal(prospective.provenance[0].crossSymbolAloneNeverCreatesIndependence,true);
+  assert.equal(prospective.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  assert.equal(skill.evidenceSummary.validationForwardShadow,0);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
+
+  const summary=biggjLivingResearchRuntimeSummary(next.state);
+  const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
+  assert.equal(row.status,'DISCOVERING');
+  assert.equal(row.recommendedStatus,'DISCOVERING');
+  assert.equal(row.independentEpisodes,1);
+  assert.equal(row.validationEvidenceTotal,0);
+  assert.equal(row.validationForwardShadow,0);
+  assert.equal(row.validationIndependentEpisodes,0);
+  assert.ok(row.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
+
+  const repeated=refreshBiggjLivingResearchRuntime(next.state,{
+    thesisMemories:[thesisMemory({forecastId:'F4',observedAt:6000})],
+    asOf:8000,
+    reason:'REPEAT_CASE'
+  });
+  assert.equal(repeated.changed,false);
+  assert.equal(repeated.state.skillTree.nodes.find(x=>x.skillId===skillId).evidenceSummary.total,2);
+});
+
+test('common-cause clustering prevents correlated cases from inflating independent episodes',()=>{
+  const DAY=24*60*60*1000;
+  const createdAt=10*DAY;
+  const initial=createBiggjLivingResearchRuntime({asOf:createdAt-10_000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:createdAt-3*60*60*1000}),
+      thesisMemory({forecastId:'F2',observedAt:createdAt-2*60*60*1000}),
+      thesisMemory({forecastId:'F3',observedAt:createdAt-1*60*60*1000})
+    ],
+    asOf:createdAt,
+    reason:'DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+
+  const clustered=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[
+      thesisMemory({
+        forecastId:'F4',
+        observedAt:createdAt+6*60*60*1000,
+        symbol:'BTCUSDT',
+        falsifiers:['WITNESS_NOT_SATISFIED']
+      }),
+      thesisMemory({
+        forecastId:'F5',
+        observedAt:createdAt+7*60*60*1000,
+        symbol:'ETHUSDT',
+        falsifiers:['WITNESS_EXTERNAL_COUNT_LT_2']
+      })
+    ],
+    asOf:createdAt+2*DAY,
+    reason:'CORRELATED_FORWARD_CASES'
+  });
+  let skill=clustered.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  const forward=skill.evidence.filter(x=>x.forwardShadow===true);
+  assert.equal(forward.length,2);
+  assert.ok(forward[0].independentEpisodeId);
+  assert.equal(forward[0].independentEpisodeId,forward[1].independentEpisodeId);
+  assert.equal(skill.evidenceSummary.independentEpisodes,1);
+  assert.equal(skill.status,'DISCOVERING');
+
+  const separated=refreshBiggjLivingResearchRuntime(clustered.state,{
+    thesisMemories:[
+      thesisMemory({
+        forecastId:'F6',
+        observedAt:createdAt+80*60*60*1000,
+        symbol:'SOLUSDT',
+        falsifiers:['WITNESS_MATERIAL_CONTRADICTION']
+      })
+    ],
+    asOf:createdAt+4*DAY,
+    reason:'SEPARATED_FORWARD_CASE'
+  });
+  skill=separated.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(skill.evidenceSummary.independentEpisodes,2);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  const summary=biggjLivingResearchRuntimeSummary(separated.state);
+  const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
+  assert.equal(row.recommendedStatus,'DISCOVERING');
+  assert.equal(row.status,'DISCOVERING','research runtime must not auto-apply the recommendation');
+  assert.equal(row.validationIndependentEpisodes,0);
+  assert.equal(row.validationEvidenceTotal,0);
+  assert.ok(row.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
+  assert.ok(summary.conservativeEpisodePartitions>=2);
+  assert.equal(summary.researchEvidence.independentEpisodes,2);
+  assert.equal(summary.researchEvidence.validationIndependentEpisodes,0);
+  assert.equal(summary.automaticPromotion,false);
+  assert.equal(summary.primaryMutationAllowed,false);
+});
+
+test('association milestones bind modelled non-causal evidence without becoming independent validation',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000})
+    ],
+    claimAssumptionReport:report({
+      ready:true,
+      observations:80,
+      direction:.18,
+      interval:.12,
+      evaluatedAt:5000
+    }),
+    asOf:5000,
+    reason:'ASSOCIATION_DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+  let skill=created.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(skill.evidenceSummary.total,2);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
+  const firstAssociation=skill.evidence.find(x=>x.epistemicClass==='MODELLED');
+  assert.ok(firstAssociation);
+  assert.equal(firstAssociation.forwardShadow,false);
+  assert.equal(firstAssociation.independentEpisodeId,null);
+  assert.equal(firstAssociation.provenance[0].associationMilestone,'THESIS_WITNESS_SUPPORT_ADEQUATE:80');
+  assert.equal(firstAssociation.provenance[0].causalInterpretation,false);
+  assert.equal(firstAssociation.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+
+  const updated=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[],
+    claimAssumptionReport:report({
+      ready:true,
+      observations:100,
+      direction:.20,
+      interval:.14,
+      evaluatedAt:7000
+    }),
+    asOf:7000,
+    reason:'ASSOCIATION_MILESTONE'
+  });
+  skill=updated.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(updated.boundEvidenceIds.length,1);
+  assert.equal(skill.evidenceSummary.total,3);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
+  assert.equal(skill.evidenceSummary.independentEpisodes,0);
+  assert.equal(skill.status,'DISCOVERING');
+  const secondAssociation=skill.evidence.find(x=>
+    x.provenance?.some(p=>p.associationMilestone==='THESIS_WITNESS_SUPPORT_ADEQUATE:100')
+  );
+  assert.ok(secondAssociation);
+  assert.equal(secondAssociation.forwardShadow,false);
+  assert.equal(secondAssociation.independentEpisodeId,null);
+  assert.equal(secondAssociation.provenance[0].postHypothesisSubsetResolved,false);
+  assert.equal(secondAssociation.validationEligible,false);
+  assert.equal(skill.evidenceSummary.validationTotal,0);
+  assert.equal(skill.evidenceSummary.validationIndependentEpisodes,0);
 });
 
 test('persistent research cases survive removal from hot forecast tracker',()=>{
@@ -266,6 +492,25 @@ test('association evidence can raise research priority but remains explicitly no
   assert.equal(out.discoveredSkillIds.length,1);
 });
 
+test('evidence binding semantics are versioned and future-dated inputs fail closed',()=>{
+  assert.equal(
+    BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
+    'TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2'
+  );
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+
+  assert.throws(()=>refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[],
+    claimAssumptionReport:report({evaluatedAt:5001}),
+    asOf:5000
+  }),/future claim-assumption research report blocked/);
+
+  assert.throws(()=>refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[thesisMemory({forecastId:'FUTURE',observedAt:6000})],
+    asOf:5000
+  }),/future thesis persistence state blocked|future assumption persistence state blocked|future thesis stability event blocked/);
+});
+
 test('all assumption templates target canonical skill nodes',()=>{
   const state=createBiggjLivingResearchRuntime({asOf:1000});
   const ids=new Set(state.skillTree.nodes.map(x=>x.skillId));
@@ -275,6 +520,46 @@ test('all assumption templates target canonical skill nodes',()=>{
       assert.ok(ids.has('seed:'+id),id);
     }
   }
+});
+
+test('existing research skill without a protocol is backfilled at current knowledge time without relabeling old evidence',()=>{
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'DISCOVERY'
+  });
+  const legacy=structuredClone(created.state);
+  delete legacy.fingerprint;
+  delete legacy.researchProtocols;
+  const legacyState={...legacy,fingerprint:sha256(legacy)};
+  assert.equal(verifyBiggjLivingResearchRuntime(legacyState).ok,true);
+
+  const backfilled=refreshBiggjLivingResearchRuntime(legacyState,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:9000,
+    reason:'PROTOCOL_BACKFILL'
+  });
+  assert.equal(backfilled.changed,true);
+  assert.equal(backfilled.discoveredSkillIds.length,0);
+  assert.equal(backfilled.createdProtocolIds.length,1);
+  assert.equal(backfilled.state.researchProtocols.length,1);
+  const protocol=backfilled.state.researchProtocols[0];
+  assert.equal(protocol.registeredAt,9000);
+  assert.equal(protocol.backfilledForExistingSkill,true);
+
+  const summary=biggjLivingResearchRuntimeSummary(backfilled.state);
+  assert.equal(summary.researchProtocols.backfilled,1);
+  assert.equal(summary.researchProtocols.stateCounts.AWAITING_PROSPECTIVE_EVIDENCE,1);
+  assert.equal(summary.researchProtocols.protocols[0].postRegistrationEvidence.total,0);
 });
 
 test('runtime persistence round-trip preserves fingerprint and research state',async()=>{
@@ -294,11 +579,51 @@ test('runtime persistence round-trip preserves fingerprint and research state',a
   assert.equal(reopened.recoveredFromCorrupt,false);
   assert.equal(reopened.state.fingerprint,out.state.fingerprint);
   assert.equal(verifyBiggjLivingResearchRuntime(reopened.state).ok,true);
+  assert.equal(reopened.state.researchProtocols.length,out.state.researchProtocols.length);
+  assert.deepEqual(reopened.state.researchProtocols,out.state.researchProtocols);
   const raw=JSON.parse(await readFile(file,'utf8'));
   assert.equal(raw.fingerprint,out.state.fingerprint);
   const summary=biggjLivingResearchRuntimeSummary(reopened.state);
   assert.deepEqual(summary.discoveredResearchOnlySkillIds,out.state.discoveredSkillIds);
   assert.deepEqual(summary.topResearchBottlenecks,summary.topAgenda);
+});
+
+test('legacy persisted living research state backfills review queue without corruption reset',async()=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'biggj-living-research-review-migration-'));
+  const file=path.join(dir,'runtime.json');
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+  const populated=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:2000}),
+      thesisMemory({forecastId:'F2',observedAt:3000}),
+      thesisMemory({forecastId:'F3',observedAt:4000})
+    ],
+    asOf:5000,
+    reason:'LEGACY_REVIEW_MIGRATION_FIXTURE'
+  }).state;
+
+  const legacy=structuredClone(populated);
+  delete legacy.researchReviewQueue;
+  delete legacy.researchReviewDecisions;
+  const {fingerprint,...legacyCore}=legacy;
+  legacy.fingerprint=sha256(legacyCore);
+  await writeFile(file,JSON.stringify(legacy,null,2)+'\n','utf8');
+
+  const reopened=await openBiggjLivingResearchRuntime(file,{asOf:6000});
+  assert.equal(reopened.recoveredFromCorrupt,false);
+  assert.equal(reopened.created,false);
+  assert.equal(reopened.reconciled,true);
+  assert.ok(reopened.state.researchReviewQueue);
+  assert.deepEqual(reopened.state.researchReviewDecisions,[]);
+  assert.equal(reopened.state.skillTree.nodes.length,populated.skillTree.nodes.length);
+  assert.equal(reopened.state.discoveredSkillIds.length,populated.discoveredSkillIds.length);
+  assert.equal(reopened.state.researchProtocols.length,populated.researchProtocols.length);
+  assert.equal(reopened.state.migrations.at(-1).kind,'RESEARCH_REVIEW_QUEUE_BACKFILL');
+  assert.equal(reopened.state.migrations.at(-1).evidenceRewritten,false);
+  assert.equal(reopened.state.migrations.at(-1).skillStatusRewritten,false);
+  assert.equal(reopened.state.migrations.at(-1).protocolRewritten,false);
+  assert.equal(reopened.state.migrations.at(-1).productionMutationPerformed,false);
+  assert.equal(verifyBiggjLivingResearchRuntime(reopened.state).ok,true);
 });
 
 test('corrupt runtime is quarantined and safely restarted research-only',async()=>{
@@ -331,6 +656,24 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.ok(summary.observedForecasts>=3);
   assert.ok(summary.retainedPersistentCases>=3);
   assert.ok(summary.retainedStabilityEvents>=3);
+  assert.ok(summary.researchEvidence);
+  assert.ok(summary.researchEvidence.skillCount>=1);
+  assert.ok(summary.researchEvidence.evidenceTotal>=1);
+  assert.equal(summary.researchEvidence.independentEpisodes,0);
+  assert.equal(summary.researchEvidence.validationEvidenceTotal,0);
+  assert.equal(summary.researchEvidence.validationIndependentEpisodes,0);
+  assert.ok(summary.validationHarness);
+  assert.ok(summary.validationHarness.discoveredSkillCount>=1);
+  assert.equal(summary.validationHarness.automaticStatusTransitionAllowed,false);
+  assert.equal(summary.validationHarness.automaticExperimentLaunchAllowed,false);
+  assert.equal(summary.researchProtocols.total,1);
+  assert.equal(summary.researchProtocols.backfilled,0);
+  assert.equal(summary.researchProtocols.stateCounts.AWAITING_PROSPECTIVE_EVIDENCE,1);
+  assert.equal(summary.researchProtocols.protocols[0].automaticExperimentLaunch,false);
+  assert.equal(summary.researchProtocols.protocols[0].automaticSkillStatusTransition,false);
+  assert.equal(summary.researchReviews.open,0);
+  assert.equal(summary.researchReviews.blocked,0);
+  assert.equal(summary.researchReviews.automaticApply,false);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.automaticKill,false);
   assert.equal(summary.automaticExperimentLaunch,false);

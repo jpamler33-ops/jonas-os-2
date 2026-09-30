@@ -80,6 +80,35 @@ export class ForecastLearningJournal {
             this.engine.modelPerformance.add({ id: `${e.id}:${m.modelId}`, symbol: e.symbol, horizonMs: e.horizonMs, resolvedAt: r.resolvedAt, regimeId: e.regimeId, modelId: m.modelId, predicted: p, expectedReturn: m.expectedReturn, actualDirection: r.actualDirection, actualReturn: r.actualReturn, brier: ms.brier, logLoss: ms.logLoss, absoluteReturnError: Math.abs(r.actualReturn - m.expectedReturn), quality: q });
         }
     }
+    lightweightStats() {
+        let pending = 0, resolved = 0, expired = 0;
+        for (const e of this.entries) {
+            if (e.status === 'PENDING') pending++;
+            else if (e.status === 'RESOLVED') resolved++;
+            else if (e.status === 'EXPIRED') expired++;
+        }
+        return { total: this.entries.length, pending, resolved, expired };
+    }
+    probabilityCalibrationRows() {
+        return this.entries
+            .filter(e => e.status === 'RESOLVED' && e.resolution)
+            .map(e => ({
+                status: e.status,
+                probabilities: {
+                    up: e.probabilities.up,
+                    down: e.probabilities.down,
+                    flat: e.probabilities.flat
+                },
+                operationalConfidence: e.operationalConfidence,
+                resolution: {
+                    topCorrect: e.resolution.topCorrect,
+                    brier: e.resolution.brier,
+                    logLoss: e.resolution.logLoss,
+                    absoluteReturnError: e.resolution.absoluteReturnError,
+                    intervalMiss: e.resolution.intervalMiss
+                }
+            }));
+    }
     all() { return this.entries.map(e => structuredClone(e)); }
     pending() { return this.entries.filter(e => e.status === 'PENDING').map(e => structuredClone(e)); }
     report() { return evaluateForecastJournal(this.entries); }

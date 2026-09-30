@@ -72,6 +72,10 @@ import {
   SHADOW_TRAINING_SUPERVISOR_VERSION
 } from './shadow-training-supervisor.mjs';
 import {
+  buildBiggjTradingAcademy, renderBiggjTradingAcademy,
+  BIGGJ_TRADING_ACADEMY_VERSION
+} from './biggj-trading-academy.mjs';
+import {
   loadStrategyLeagueLedger, saveStrategyLeagueLedger,
   reconcileStrategyLeagueEntries, replaceStrategyLeaguePosition,
   markStrategyLeaguePosition, closeStrategyLeaguePosition,
@@ -109,6 +113,7 @@ import {
 } from './adversarial-stress-lab.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, deepDiveKeyboard, globalIntelKeyboard, renderGlobalIntelFeed, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
+import { createTelegramChatLifecycle, TELEGRAM_CHAT_LIFECYCLE_VERSION } from './telegram-chat-lifecycle.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
 import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
@@ -119,6 +124,7 @@ import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './tel
 import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } from './telegram-mutation-command-handlers.mjs';
 import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } from './telegram-update-dispatcher.mjs';
 import { createDiscordTelegramBridge, isDiscordChatId } from './discord-telegram-bridge.mjs';
+import { buildBiggjDiscordObservabilitySnapshot } from './biggj-discord-observability.mjs';
 import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
@@ -289,6 +295,9 @@ const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 1
 const telegramApiTimeoutMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_API_TIMEOUT_MS || 12000));
 const telegramLongPollTimeoutMs = Math.max(30000, Number(process.env.TCX_TELEGRAM_LONG_POLL_TIMEOUT_MS || 35000));
 const telegramUpdateTimeoutMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_UPDATE_TIMEOUT_MS || 20000));
+const telegramChatIdleResetMs = Math.max(60_000, Number(process.env.TCX_TELEGRAM_CHAT_IDLE_RESET_MS || 10*60_000));
+const telegramChatResetSweepMs = Math.max(1_000, Math.min(60_000, Number(process.env.TCX_TELEGRAM_CHAT_RESET_SWEEP_MS || 5_000)));
+const telegramChatMaxTrackedUiMessages = Math.max(4, Math.min(100, Number(process.env.TCX_TELEGRAM_CHAT_MAX_UI_MESSAGES || 24)));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
 const researchAlertCheckMs = Math.max(30000, Number(process.env.TCX_RESEARCH_ALERT_CHECK_MS || 60000));
 const researchValidityStaleMs = Math.max(60000, Number(process.env.TCX_RESEARCH_VALIDITY_STALE_MS || 600000));
@@ -464,6 +473,10 @@ function servingMemoryPressure(){
 }
 
 const sessions = new Map();
+const telegramChatLifecycle=createTelegramChatLifecycle({
+  idleMs:telegramChatIdleResetMs,
+  maxTrackedUiMessages:telegramChatMaxTrackedUiMessages
+});
 const witnessCache = new Map();
 const radarCache = new Map();
 const researchAlertContextCache = new Map();
@@ -707,57 +720,64 @@ let biggjLivingResearchRefreshQueue=Promise.resolve();
 
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
   const run=async()=>{
-  const started=Date.now();
-  try{
-    const thesisMemories=(forecastRuntime?.intelligence?.all?.()||[])
-      .map(x=>x?.thesisMemory)
-      .filter(Boolean);
-    const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
-      thesisMemories,
-      claimAssumptionReport:report,
-      asOf:Date.now(),
-      reason
-    });
-    if(refreshed.changed){
-      const previousAgendaById=new Map((biggjLivingResearchState?.agenda||[]).map(x=>[String(x.assumptionId),String(x.status)]));
-      const newAgendaItems=(refreshed.state?.agenda||[])
-        .filter(x=>!previousAgendaById.has(String(x.assumptionId)))
-        .map(x=>({assumptionId:x.assumptionId,status:x.status,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
-      const newlyResearchRequired=(refreshed.state?.agenda||[])
-        .filter(x=>String(x.status)==='RESEARCH_REQUIRED'&&previousAgendaById.get(String(x.assumptionId))!=='RESEARCH_REQUIRED')
-        .map(x=>({assumptionId:x.assumptionId,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
-      const admission=await storageWriteAdmission('biggj-living-research');
-      if(!admission.allowed){
-        biggjLivingResearchHealthy=false;
-        console.warn('[TCX_BIGGJ_LIVING_RESEARCH_PERSIST_DEFERRED]',JSON.stringify({
-          reason:admission.reason||'STORAGE_WRITE_BLOCKED',
-          refreshReason:reason,
-          execution:'SHADOW_ONLY',
-          canExecuteLive:false
-        }));
-        return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-      }
-      await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
-      biggjLivingResearchState=refreshed.state;
-      biggjLivingResearchHealthy=true;
-      const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-      if(newAgendaItems.length>0||newlyResearchRequired.length>0||refreshed.discoveredSkillIds.length>0){
-        console.log('[TCX_BIGGJ_RESEARCH_AGENDA]',JSON.stringify({
-          reason,
-          revision:summary.revision,
-          activeAgendaItems:summary.activeAgendaItems,
-          researchRequired:summary.researchRequired,
-          newAgendaItems,
-          newlyResearchRequired,
-          newSkillIds:refreshed.discoveredSkillIds,
-          topResearchBottlenecks:summary.topResearchBottlenecks,
-          automaticPromotion:false,
-          automaticKill:false,
-          automaticExperimentLaunch:false,
-          primaryMutationAllowed:false,
-          execution:'SHADOW_ONLY',
-          canExecuteLive:false
-        }));
+    const started=Date.now();
+    try{
+      const thesisMemories=forecastRuntime?.intelligence?.thesisMemories?.()||[];
+      const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
+        thesisMemories,
+        claimAssumptionReport:report,
+        asOf:Date.now(),
+        reason
+      });
+      if(refreshed.changed){
+        const previousAgendaById=new Map((biggjLivingResearchState?.agenda||[]).map(x=>[String(x.assumptionId),String(x.status)]));
+        const newAgendaItems=(refreshed.state?.agenda||[])
+          .filter(x=>!previousAgendaById.has(String(x.assumptionId)))
+          .map(x=>({assumptionId:x.assumptionId,status:x.status,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
+        const newlyResearchRequired=(refreshed.state?.agenda||[])
+          .filter(x=>String(x.status)==='RESEARCH_REQUIRED'&&previousAgendaById.get(String(x.assumptionId))!=='RESEARCH_REQUIRED')
+          .map(x=>({assumptionId:x.assumptionId,informationValue:x.informationValue,primaryCapabilityId:x.primaryCapabilityId}));
+        const admission=await storageWriteAdmission('biggj-living-research');
+        if(!admission.allowed){
+          biggjLivingResearchHealthy=false;
+          console.warn('[TCX_BIGGJ_LIVING_RESEARCH_PERSIST_DEFERRED]',JSON.stringify({
+            reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+            refreshReason:reason,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
+          return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+        }
+        await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
+        biggjLivingResearchState=refreshed.state;
+        biggjLivingResearchHealthy=true;
+        const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+        if(newAgendaItems.length>0||newlyResearchRequired.length>0||refreshed.discoveredSkillIds.length>0){
+          console.log('[TCX_BIGGJ_RESEARCH_AGENDA]',JSON.stringify({
+            reason,
+            revision:summary.revision,
+            activeAgendaItems:summary.activeAgendaItems,
+            researchRequired:summary.researchRequired,
+            newAgendaItems,
+            newlyResearchRequired,
+            newSkillIds:refreshed.discoveredSkillIds,
+            newProtocolIds:refreshed.createdProtocolIds||[],
+            topResearchBottlenecks:summary.topResearchBottlenecks,
+            automaticPromotion:false,
+            automaticKill:false,
+            automaticExperimentLaunch:false,
+            primaryMutationAllowed:false,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
+        }
+        recordOperation(observability,{
+          name:'biggj_living_research_refresh',
+          ok:true,
+          latencyMs:Date.now()-started,
+          error:null
+        });
+        return summary;
       }
       recordOperation(observability,{
         name:'biggj_living_research_refresh',
@@ -765,40 +785,31 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
         latencyMs:Date.now()-started,
         error:null
       });
-      return summary;
+      return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+    }catch(err){
+      biggjLivingResearchHealthy=false;
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'biggj_living_research',message:msg});
+      recordOperation(observability,{
+        name:'biggj_living_research_refresh',
+        ok:false,
+        latencyMs:Date.now()-started,
+        error:msg
+      });
+      console.error('[TCX_BIGGJ_LIVING_RESEARCH_ERROR]',JSON.stringify({
+        reason,
+        error:msg,
+        primaryMutationAllowed:false,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+      return null;
     }
-    recordOperation(observability,{
-      name:'biggj_living_research_refresh',
-      ok:true,
-      latencyMs:Date.now()-started,
-      error:null
-    });
-    return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
-  }catch(err){
-    biggjLivingResearchHealthy=false;
-    const msg=err instanceof Error?err.message:String(err);
-    recordError(observability,{scope:'biggj_living_research',message:msg});
-    recordOperation(observability,{
-      name:'biggj_living_research_refresh',
-      ok:false,
-      latencyMs:Date.now()-started,
-      error:msg
-    });
-    console.error('[TCX_BIGGJ_LIVING_RESEARCH_ERROR]',JSON.stringify({
-      reason,
-      error:msg,
-      primaryMutationAllowed:false,
-      execution:'SHADOW_ONLY',
-      canExecuteLive:false
-    }));
-    return null;
-  }
   };
   const queued=biggjLivingResearchRefreshQueue.then(run,run);
   biggjLivingResearchRefreshQueue=queued.then(()=>undefined,()=>undefined);
   return queued;
 }
-
 function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
   const now=Date.now();
   if(!forecastRuntime.healthy) return null;
@@ -850,7 +861,6 @@ function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=
       latencyMs:Date.now()-started,
       error:Number(report?.rejectedObservationCount||0)>0?'INVALID_SHADOW_OBSERVATIONS_PRESENT':null
     });
-    void refreshBiggjLivingResearch('claim-assumption-evaluation',report);
     return summary;
   }catch(err){
     const msg=err instanceof Error?err.message:String(err);
@@ -1060,15 +1070,6 @@ const institutionalConfig = Object.freeze({
     version:RESEARCH_DATA_GOVERNANCE_VERSION,
     objective:'SOURCE_QUALITY_AND_POINT_IN_TIME_DATA_CONTROL',
     canExecuteLive:false
-  },
-  biggjLivingResearch:{
-    version:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION,
-    objective:'PERSISTENT_THESIS_FAILURE_TO_RESEARCH_ONLY_SKILL_DISCOVERY',
-    automaticPromotion:false,
-    automaticKill:false,
-    automaticExperimentLaunch:false,
-    primaryMutationAllowed:false,
-    canExecuteLive:false
   }
 });
 
@@ -1129,8 +1130,7 @@ try {
       forecastProduct:FORECAST_PRODUCT_VERSION,
       researchDataPlane:RESEARCH_DATA_PLANE_VERSION,
       researchDataGovernance:RESEARCH_DATA_GOVERNANCE_VERSION,
-      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION,
-      biggjLivingResearch:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
+      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -2706,6 +2706,15 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
   };
 }
 
+function trackTelegramUiMessage(method,body,result){
+  if(!body?.reply_markup) return;
+  if(!['sendMessage','sendPhoto','sendDocument','sendAnimation','sendVideo','editMessageText','editMessageMedia','editMessageCaption'].includes(String(method))) return;
+  const chatId=body?.chat_id??result?.chat?.id;
+  const messageId=result?.message_id??body?.message_id;
+  if(chatId===undefined||chatId===null||isDiscordChatId(chatId)) return;
+  telegramChatLifecycle.recordUiMessage(chatId,messageId);
+}
+
 async function tg(method, body) {
   if(discordBridge?.handlesTelegramCall(method,body)) return discordBridge.telegramCall(method,body);
   const timeoutMs=method==='getUpdates'?telegramLongPollTimeoutMs:telegramApiTimeoutMs;
@@ -2718,9 +2727,13 @@ async function tg(method, body) {
   const data = await res.json().catch(() => ({ ok:false, description:`HTTP ${res.status}` }));
   if (!res.ok || !data.ok) {
     const msg = String(data?.description || `Telegram HTTP ${res.status}`);
-    if ((method === 'editMessageText' || method === 'editMessageMedia') && msg.includes('message is not modified')) return null;
+    if ((method === 'editMessageText' || method === 'editMessageMedia') && msg.includes('message is not modified')) {
+      trackTelegramUiMessage(method,body,null);
+      return null;
+    }
     throw new Error(msg);
   }
+  trackTelegramUiMessage(method,body,data.result);
   return data.result;
 }
 
@@ -2734,6 +2747,7 @@ async function tgMultipart(method, fields, fileField, fileName, fileBuffer, mime
   const res = await fetch(`${telegramApi}/${method}`, { method:"POST", body:form });
   const data = await res.json().catch(() => ({ ok:false, description:`HTTP ${res.status}` }));
   if (!res.ok || !data.ok) throw new Error(String(data?.description || `Telegram HTTP ${res.status}`));
+  trackTelegramUiMessage(method,fields,data.result);
   return data.result;
 }
 
@@ -3276,15 +3290,15 @@ async function showCommandMarkets(chatId,messageId,command){
   });
 }
 
-async function showStart(chatId, messageId) {
+async function showStart(chatId, messageId, {silent=false}={}) {
   sessions.delete(String(chatId));
   const payload = {
     chat_id:chatId,
     text:productHomeText({marketCount:markets.length,systemStatus:'ONLINE'}),
     reply_markup:productHomeKeyboard()
   };
-  if (messageId) await tg('editMessageText', { ...payload, message_id:messageId });
-  else await tg('sendMessage', payload);
+  if (messageId) return tg('editMessageText', { ...payload, message_id:messageId });
+  return tg('sendMessage', {...payload,disable_notification:silent===true});
 }
 
 function homeBackKeyboard(extra=[]) {
@@ -4788,59 +4802,20 @@ function shadowOrderDetail(order) {
 }
 
 async function showShadowCapitalAcademy(chatId,messageId=null){
-  const a=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Date.now(),timeZone:shadowStatsTimeZone});
-  const active=a.stages.find(x=>x.id===a.activeStage)||a.stages[0];
-  const pct=v=>(Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—');
-  const money=v=>(Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—');
-  const lines=[
-    '🏆 TCX CAPITAL ACADEMY','',
-    'AKTUELLER STATUS',
-    'Erreichte Stufe: '+(a.achievedStage==='UNRANKED'?'noch keine':a.achievedStage.replaceAll('_',' ')),
-    'Aktuelle Challenge: '+a.activeStageLabel,
-    'Fortschritt: '+pct(a.stageProgress),
-    'Abgeschlossene Trades: '+a.metrics.closedTrades,
-    'Gesamt-PnL: '+money(a.metrics.netPnlQuote),
-    'Profit Factor: '+(a.metrics.profitFactor==null?'—':fmt(a.metrics.profitFactor,2)),
-    'Max. Drawdown: '+pct(a.metrics.maxDrawdownPct),'',
-    'CHALLENGE-KRITERIEN'
-  ];
-  for(const x of active.criteria){
-    const value=x.id.includes('drawdown')||x.id.includes('positive_')||x.id.includes('single_trade')
-      ?pct(x.value)
-      :x.id.includes('profit_factor')||x.id==='meme_pf'
-        ?fmt(x.value,2)
-        :x.id.includes('expectancy')||x.id.includes('net_pnl')
-          ?money(x.value)
-          :fmt(x.value,0);
-    lines.push((x.pass?'✅ ':'⬜ ')+x.label+' · aktuell '+value);
-  }
-  lines.push(
-    '',
-    'RISIKO-LIZENZ DIESER STUFE',
-    'Max. offene Trades: '+a.riskPolicy.maxOpenTotal,
-    'Max. je Coin: '+a.riskPolicy.maxOpenPerSymbol,
-    'Max. Memecoins offen: '+a.riskPolicy.maxOpenMemecoin,
-    'Max. Gesamt-Exposure: '+pct(a.riskPolicy.maxExposurePct),
-    'Tagesverlust-Limit: '+pct(a.riskPolicy.dailyLossLimitPct),
-    'Positions-Skalierung: '+fmt(a.riskPolicy.notionalMultiplier,2)+'×',
-    'Memecoin-Skalierung: '+fmt(a.riskPolicy.memeMultiplier,2)+'×','',
-    'LIVE-GUARD',
-    'Core Entries: '+(a.guard.coreAllowed?'🟢 freigegeben':'⛔ pausiert'),
-    'Meme Entries: '+(a.guard.memeAllowed?'🟢 freigegeben':'⛔ pausiert'),
-    'Heutiger PnL: '+money(a.guard.dailyRealizedPnlQuote),
-    'Verlustserie: '+a.guard.lossStreak,
-    ...(a.guard.blockers.length?['Blocker: '+a.guard.blockers.join(', ')]:[]),
-    ...(a.guard.memeBlockers.length&&!a.guard.memeAllowed?['Meme-Blocker: '+a.guard.memeBlockers.join(', ')]:[]),
-    '',
-    'Die Academy erhöht simulierte Risikobudgets nur nach bestandenen Challenges.',
-    'CAPITAL_READY_SIM ist kein Nachweis für echte zukünftige Gewinne.',
-    'Mode: SHADOW_ONLY · echte Orders bleiben gesperrt.'
-  );
-  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[
-    [{text:'🔄 Prüfen',callback_data:'home:academy'},{text:'📈 Statistik',callback_data:'home:stats_day'}],
-    [{text:'🏆 Academy',callback_data:'home:academy'},{text:'💼 Portfolio',callback_data:'home:portfolio'}],
-    [{text:'🏠 Start',callback_data:'home'}]
-  ]}};
+  const now=Date.now();
+  const legacy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:now,timeZone:shadowStatsTimeZone});
+  const supervisor=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,legacy,{asOf:now});
+  const academy=buildBiggjTradingAcademy(shadowPortfolioLedger,{academy:legacy,supervisor,asOf:now});
+  const payload={
+    chat_id:chatId,
+    text:renderBiggjTradingAcademy(academy),
+    reply_markup:{inline_keyboard:[
+      [{text:'🎯 ACTIVE QUEST',callback_data:'home:academy'},{text:'🧠 COACH',callback_data:'home:coach'}],
+      [{text:'🏁 STRATEGY LEAGUE',callback_data:'home:league'},{text:'📈 STATS',callback_data:'home:stats_day'}],
+      [{text:'💼 PORTFOLIO',callback_data:'home:portfolio'},{text:'↻ REFRESH',callback_data:'home:academy'}],
+      [{text:'🏠 COMMAND CENTER',callback_data:'home'}]
+    ]}
+  };
   if(messageId) return tg('editMessageText',{...payload,message_id:messageId});
   return tg('sendMessage',payload);
 }
@@ -6827,13 +6802,64 @@ async function handleCommand(msg){
   return routeTelegramCommand(msg);
 }
 
+async function deleteTrackedTelegramUi(chatId,messageIds=[]){
+  let deleted=0,failed=0;
+  const ids=[...new Set((messageIds||[]).map(Number).filter(x=>Number.isInteger(x)&&x>0))].reverse();
+  for(const messageId of ids){
+    try{
+      await tg('deleteMessage',{chat_id:chatId,message_id:messageId});
+      deleted++;
+    }catch(err){
+      failed++;
+      const msg=err instanceof Error?err.message:String(err);
+      if(!msg.includes('message to delete not found')&&!msg.includes("message can't be deleted")){
+        console.warn('[TCX_TELEGRAM_IDLE_DELETE_FAILED]',JSON.stringify({chatId:String(chatId),messageId,error:msg}));
+      }
+    }finally{
+      telegramChatLifecycle.forgetUiMessage(chatId,messageId);
+    }
+  }
+  return {deleted,failed};
+}
+
+async function resetTelegramIdleChat(item,{silent=true,reason='IDLE_TIMEOUT'}={}){
+  const chatId=item?.chatId;
+  sessions.delete(String(chatId));
+  const cleanup=await deleteTrackedTelegramUi(chatId,item?.uiMessageIds||[]);
+  telegramChatLifecycle.clearUiMessages(chatId);
+  const home=await showStart(chatId,null,{silent});
+  return {chatId,cleanup,homeMessageId:home?.message_id??null,reason};
+}
+
 async function handle(update) {
   const msg = update?.message;
+  const q = update?.callback_query;
+  const activityChatId=msg?.chat?.id??q?.message?.chat?.id;
+  const discordActivity=String(q?.id||'').startsWith('discordcb:')||isDiscordChatId(activityChatId);
+  if(activityChatId!==undefined&&activityChatId!==null&&!discordActivity&&permitted(activityChatId)){
+    const activity=telegramChatLifecycle.touch(activityChatId);
+    if(activity.hadExpired){
+      await deleteTrackedTelegramUi(activityChatId,activity.expiredUiMessageIds);
+      telegramChatLifecycle.clearUiMessages(activityChatId);
+      sessions.delete(String(activityChatId));
+      if(q?.id){
+        await ack(q.id,'Session nach 10 Min. neu gestartet');
+        await showStart(activityChatId,null,{silent:false});
+        return;
+      }
+      const isCommand=typeof msg?.text==='string'&&msg.text.trim().startsWith('/');
+      if(!isCommand){
+        await showStart(activityChatId,null,{silent:false});
+        return;
+      }
+    }
+  }
+
   if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
     if (await handleCommand(msg)) return;
   }
 
-  const q = update?.callback_query;
+  
   if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
   const chatId = q.message.chat.id;
   const messageId = q.message.message_id;
@@ -7309,6 +7335,36 @@ async function poll() {
       telegramLastPollError=err instanceof Error?err.message:String(err);
       console.error('poll error', telegramLastPollError);
       await sleep(1500);
+    }
+  }
+}
+
+async function telegramChatResetWatcher(){
+  while(running){
+    await sleep(telegramChatResetSweepMs);
+    const due=telegramChatLifecycle.claimExpired({limit:50});
+    for(const item of due){
+      try{
+        const reset=await resetTelegramIdleChat(item,{silent:true,reason:'IDLE_TIMEOUT'});
+        telegramChatLifecycle.completeReset(item.chatId,{
+          newHomeMessageId:reset.homeMessageId
+        });
+        console.info('[TCX_TELEGRAM_IDLE_RESET]',JSON.stringify({
+          chatId:String(item.chatId),
+          idleMs:item.idleForMs,
+          deletedUiMessages:reset.cleanup.deleted,
+          deleteFailures:reset.cleanup.failed,
+          homeMessageId:reset.homeMessageId,
+          lifecycle:TELEGRAM_CHAT_LIFECYCLE_VERSION
+        }));
+      }catch(err){
+        telegramChatLifecycle.failReset(item.chatId);
+        console.error('[TCX_TELEGRAM_IDLE_RESET_FAILED]',JSON.stringify({
+          chatId:String(item.chatId),
+          idleMs:item.idleForMs,
+          error:err instanceof Error?err.message:String(err)
+        }));
+      }
     }
   }
 }
@@ -8384,11 +8440,22 @@ async function shadowCompetitionWatcher(){
           await sleep(shadowCompetitionEvalMs);
           continue;
         }
-        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY,{limit:shadowCompetitionHistoryRows});
-        const historyProgressAt=forecastHistoryProgressAt(history);
-        if(shadowCompetitionLastHistoryProgressAt>0&&!forecastHistoryHasAdvanced(history,shadowCompetitionLastHistoryProgressAt)){
+        const preflightHistoryProgressAt=forecastRuntime.engine.historyProgressAt(
+          Number.POSITIVE_INFINITY,
+          {limit:shadowCompetitionHistoryRows}
+        );
+        if(
+          shadowCompetitionLastHistoryProgressAt>0&&
+          preflightHistoryProgressAt<=shadowCompetitionLastHistoryProgressAt
+        ){
           shadowCompetitionWorkerNoChangeSkips++;
-          shadowCompetitionWorkerLastDecision={...admission,at:Date.now(),allowed:false,reason:'NO_NEW_PIT_HISTORY',historyProgressAt};
+          shadowCompetitionWorkerLastDecision={
+            ...admission,
+            at:Date.now(),
+            allowed:false,
+            reason:'NO_NEW_PIT_HISTORY',
+            historyProgressAt:preflightHistoryProgressAt
+          };
           recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'SKIPPED_NO_NEW_PIT_HISTORY'});
           await sleep(shadowCompetitionEvalMs);
           continue;
@@ -8401,6 +8468,9 @@ async function shadowCompetitionWatcher(){
 
         let result=null;
         let freshAdmission=null;
+        let payloadAdmission=null;
+        let history=null;
+        let historyProgressAt=preflightHistoryProgressAt;
         let heapBefore=0;
         try{
           const freshMemory=process.memoryUsage();
@@ -8416,44 +8486,78 @@ async function shadowCompetitionWatcher(){
             hardRssMb:900,
             hardExternalMb:shadowCompetitionHardExternalMb
           });
-          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs};
+          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs,stage:'PRE_SNAPSHOT'};
           if(freshAdmission.allowed){
-            const cfg=forecastRuntime.engine.configSnapshot();
-            const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
-            heapBefore=Math.round(freshMemory.heapUsed/1024/1024);
-            result=await runForecastShadowEvaluationWorker({
-              competitionState:shadowCompetitionState,
-              experimentGovernorState,
-              historyRows:history,
-              incumbentConfig:cfg,
-              releaseId,
-              minSeedRows:shadowCompetitionMinSeedRows,
-              minimumTrainCases:shadowCompetitionMinTrainCases,
-              maxGeneratedHypotheses:4,
-              now:Date.now()
-            },{
-              timeoutMs:shadowCompetitionWorkerTimeoutMs,
-              maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+            history=forecastRuntime.engine.historySnapshot(
+              Number.POSITIVE_INFINITY,
+              {limit:shadowCompetitionHistoryRows}
+            );
+            historyProgressAt=forecastHistoryProgressAt(history);
+
+            const payloadMemory=process.memoryUsage();
+            payloadAdmission=evaluateShadowWorkerAdmission({
+              mode:'ON',
+              heapUsedMb:Math.round(payloadMemory.heapUsed/1024/1024),
+              rssMb:Math.round(payloadMemory.rss/1024/1024),
+              externalMb:Math.round(payloadMemory.external/1024/1024),
+              autoHeapMb:shadowCompetitionAutoHeapMb,
+              autoRssMb:shadowCompetitionAutoRssMb,
+              autoExternalMb:shadowCompetitionAutoExternalMb,
+              hardHeapMb:300,
+              hardRssMb:900,
+              hardExternalMb:shadowCompetitionHardExternalMb
             });
+            shadowCompetitionWorkerLastDecision={
+              ...payloadAdmission,
+              at:Date.now(),
+              slotWaitMs,
+              stage:'POST_SNAPSHOT_HARD_GATE',
+              historyRows:history.length,
+              historyProgressAt
+            };
+            if(payloadAdmission.allowed){
+              const cfg=forecastRuntime.engine.configSnapshot();
+              const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
+              heapBefore=Math.round(payloadMemory.heapUsed/1024/1024);
+              result=await runForecastShadowEvaluationWorker({
+                competitionState:shadowCompetitionState,
+                experimentGovernorState,
+                historyRows:history,
+                incumbentConfig:cfg,
+                releaseId,
+                minSeedRows:shadowCompetitionMinSeedRows,
+                minimumTrainCases:shadowCompetitionMinTrainCases,
+                maxGeneratedHypotheses:4,
+                now:Date.now()
+              },{
+                timeoutMs:shadowCompetitionWorkerTimeoutMs,
+                maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+              });
+            }
           }
         }finally{
           if(activeBackgroundResearchJob==='shadow-competition') activeBackgroundResearchJob=null;
         }
 
-        if(!freshAdmission?.allowed){
+        const finalAdmission=freshAdmission?.allowed?payloadAdmission:freshAdmission;
+        if(!finalAdmission?.allowed){
           shadowCompetitionWorkerMemoryDeferrals++;
+          const stage=freshAdmission?.allowed?'POST_SNAPSHOT_HARD_GATE':'PRE_SNAPSHOT';
           console.warn('shadow competition deferred after research-slot wait',JSON.stringify({
             mode:shadowCompetitionWorkerMode,
-            reason:freshAdmission?.reason||'MEMORY_PRESSURE',
+            stage,
+            reason:finalAdmission?.reason||'MEMORY_PRESSURE',
             slotWaitMs,
-            memory:freshAdmission?.memory||null,
-            limits:freshAdmission?.limits||null
+            memory:finalAdmission?.memory||null,
+            limits:finalAdmission?.limits||null,
+            historyRows:Array.isArray(history)?history.length:0
           }));
+          history=null;
           recordOperation(observability,{
             name:'forecast_shadow_competition',
             ok:true,
             latencyMs:Date.now()-started,
-            error:'DEFERRED_AFTER_SLOT_'+String(freshAdmission?.reason||'MEMORY_PRESSURE')
+            error:'DEFERRED_'+stage+'_'+String(finalAdmission?.reason||'MEMORY_PRESSURE')
           });
           await sleep(shadowCompetitionEvalMs);
           continue;
@@ -8461,15 +8565,17 @@ async function shadowCompetitionWatcher(){
 
         shadowCompetitionState=result.competitionState;
         experimentGovernorState=result.experimentGovernorState;
-        shadowCompetitionLastHistorySize=Number(result.historyRows||history.length);
+        shadowCompetitionLastHistorySize=Number(result.historyRows||(history?.length||0));
         shadowCompetitionLastHistoryProgressAt=historyProgressAt;
         shadowCompetitionWorkerRuns++;
         shadowCompetitionWorkerLastDecision={
-          ...admission,
+          ...payloadAdmission,
           at:Date.now(),
           allowed:true,
           reason:'WORKER_COMPLETED',
-          historyProgressAt
+          stage:'WORKER_COMPLETED',
+          historyProgressAt,
+          slotWaitMs
         };
 
         await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);
@@ -8830,6 +8936,13 @@ function missionControlData(){
  const openPositions=allShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
  const recentClosed=allShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
  const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now,runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:portfolio.openPositions,openDiscoveryPositions:countOpenDiscoveryPositions(allShadowPositions)}});
+ health.biggjObservability=buildBiggjDiscordObservabilitySnapshot({
+  livingResearchState:biggjLivingResearchState,
+  claimAssumptionResearch:health.claimAssumptionResearch,
+  researchCoverage,
+  discovery,
+  asOf:now
+ });
  return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
@@ -9121,12 +9234,6 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
-  biggjLivingResearch:{
-    ...biggjLivingResearchRuntimeSummary(biggjLivingResearchState),
-    healthy:biggjLivingResearchHealthy,
-    recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
-    file:biggjLivingResearchFile
-  },
   auditLedger:{
     healthy:auditLedger.healthy,
     fileBytes:Number(auditLedger.fileBytes||0),
@@ -9219,4 +9326,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher()]);
