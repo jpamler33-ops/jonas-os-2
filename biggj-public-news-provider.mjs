@@ -76,7 +76,9 @@ function articleCore(raw,queryClass,now){
   const url=text(raw?.url||raw?.url_mobile,900);
   if(!title||!url)return null;
   const family=eventFamily(title);
-  const availableAt=parseGdeltDate(raw?.seendate||raw?.seenDate||raw?.publishedAt)||now;
+  const parsedAt=parseGdeltDate(raw?.seendate||raw?.seenDate||raw?.publishedAt);
+  if(parsedAt!=null&&parsedAt>now+5000)return null;
+  const availableAt=parsedAt??now;
   const domain=text(raw?.domain||(()=>{try{return new URL(url).hostname}catch{return ''}})(),160);
   return Object.freeze({
     id:'gdelt:'+Buffer.from(url).toString('base64url').slice(0,72),
