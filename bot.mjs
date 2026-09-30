@@ -148,6 +148,7 @@ import { openResearchDataPlane, appendResearchDataPlane, preflightResearchDataPl
 import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } from './research-data-plane-adapters.mjs';
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
+import { buildForecastThesisDeclarations, forecastThesisDeclarationSummary, FORECAST_THESIS_DECLARATIONS_VERSION } from './forecast-thesis-declarations.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -6062,6 +6063,22 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   });
 
   const evidenceRecord=evidenceAppend.record;
+  const issuanceGeneratedAt=Math.max(Date.now(),Number(input.asOf));
+  const claimAssumptionDeclarations=buildForecastThesisDeclarations({
+    symbol,
+    asOf:Number(input.asOf),
+    generatedAt:issuanceGeneratedAt,
+    inputFingerprint:input.inputFingerprint,
+    state,
+    witnessReport,
+    mechanism:r15,
+    evidenceRecord,
+    researchDependencyGraph,
+    scientificValidity:scienceCore.validity
+  });
+  const claimAssumptionDeclarationSummary=forecastThesisDeclarationSummary(claimAssumptionDeclarations);
+  markForecastMemory('thesis-declarations');
+
   const traceContext={
     data:{
       fabricSeq:Number(envelope.dataFabric?.seq??marketFabric.seq),
@@ -6128,6 +6145,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       type:'WITNESS_CONTRADICTION',
       code:String(code)
     })),
+    claimAssumptionDeclarations,
     provenance:{
       source:issuanceSource,
       version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION
@@ -6144,7 +6162,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     dataSafety:safety,
     researchValidity:researchAdmissionValidity,
     traceContext,
-    generatedAt:Math.max(Date.now(),input.asOf)
+    generatedAt:issuanceGeneratedAt
   });
 
   const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
@@ -6313,6 +6331,12 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       researchDependencyCoverage:Number(researchDependencyGraph?.impact?.coverage||0),
       researchDependencyBlockedFeatures:Number(researchDependencyGraph?.impact?.blockedFeatures||0),
       researchDependencyFingerprint:researchDependencyGraph?.fingerprint||null,
+      thesisDeclarationsVersion:FORECAST_THESIS_DECLARATIONS_VERSION,
+      thesisDeclarationFingerprint:claimAssumptionDeclarationSummary.fingerprint,
+      thesisClaims:claimAssumptionDeclarationSummary.claims,
+      thesisAssumptions:claimAssumptionDeclarationSummary.assumptions,
+      thesisUnsupportedMaterialAssumptions:claimAssumptionDeclarationSummary.unsupportedMaterialAssumptions.length,
+      thesisMechanismCausalStatus:claimAssumptionDeclarationSummary.mechanismCausalStatus,
       autoShadowTradePlaced:autoShadowTrade?.placed===true,
       autoShadowTradeEligible:autoShadowTrade?.eligible===true,
       autoShadowTradeReason:autoShadowTrade?.reason||null,
