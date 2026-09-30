@@ -119,6 +119,12 @@ export class ForecastLearningJournal {
     feedResolved(e, quality = 1) {
         if (e.status !== 'RESOLVED' || !e.resolution)
             return;
+        const proof=verifyForecastJournalProofCommitment(e);
+        if(proof.status==='MISMATCH'||proof.status==='UNSUPPORTED_COMMITMENT_VERSION'){
+            e.proofIntegrity=proof.status;
+            return;
+        }
+        e.proofIntegrity=proof.status;
         const r = e.resolution, q = clamp(quality * e.dataQuality, 0, 1);
         // Drift is monitoring, not model fitting: keep observing every resolved shadow forecast so a drift ABSTAIN can later recover.
         this.engine.drift.add({ id: e.id, symbol: e.symbol, horizonMs: e.horizonMs, resolvedAt: r.resolvedAt, regimeId: e.regimeId, features: structuredClone(e.features), brier: r.brier, logLoss: r.logLoss, intervalMiss: r.intervalMiss, topProbability: Math.max(e.probabilities.up, e.probabilities.down, e.probabilities.flat), topCorrect: r.topCorrect, quality: q });
@@ -176,6 +182,11 @@ export class ForecastLearningJournal {
             if (this.keys.has(e.id))
                 continue;
             const copy = structuredClone(e);
+            const proof=verifyForecastJournalProofCommitment(copy);
+            copy.proofIntegrity=proof.status;
+            if(proof.status==='MISMATCH'||proof.status==='UNSUPPORTED_COMMITMENT_VERSION'){
+                copy.status='PROOF_INVALID';
+            }
             this.entries.push(copy);
             this.keys.add(copy.id);
         }
