@@ -371,6 +371,20 @@ function tasksFromMarketScienceDirector(summary={}){
       }));
       continue;
     }
+    if(kind==='WORLD_MODEL_VALIDATION'){
+      tasks.push(task({...base,
+        type:'COLLECT_INDEPENDENT_EPISODES',
+        reason:'SCIENCE_DIRECTOR_WORLD_MODEL_VALIDATION_REQUIRES_INDEPENDENT_EVIDENCE',
+        dataNeeds:[
+          'POINT_IN_TIME_WORLD_MODEL_EVIDENCE',
+          'INDEPENDENT_EPISODES',
+          'TEMPORAL_HOLDOUT',
+          'REGIME_DIVERSITY',
+          next==='ADVERSARIAL_FALSIFICATION'?'PLACEBO_LAG_EVIDENCE':'FORWARD_STATE_STABILITY'
+        ]
+      }));
+      continue;
+    }
 
     tasks.push(task({...base,
       type:'RESEARCH_DEFINITION',
