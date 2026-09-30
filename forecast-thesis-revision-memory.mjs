@@ -538,11 +538,76 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96,stabil
   });
 }
 
+function legacyPreOutcomeRevisionState(memory,maturity){
+  const events=(memory.events||[])
+    .filter(x=>Number(x.observedAt)<=maturity)
+    .sort((a,b)=>Number(a.observedAt)-Number(b.observedAt)||String(a.eventId).localeCompare(String(b.eventId)));
+  const stale=new Set();
+  const everStale=new Set();
+  let firstStaleAt=null;
+  let firstWatchAt=null;
+  let firstInvalidatedAt=null;
+
+  for(const event of events){
+    for(const t of event.supportTransitions||[]){
+      if(t.transition==='SUPPORT_LOST'){
+        stale.add(t.assumptionId);
+        everStale.add(t.assumptionId);
+        if(firstStaleAt==null) firstStaleAt=Number(event.observedAt);
+      }else if(t.transition==='SUPPORT_RESTORED'){
+        stale.delete(t.assumptionId);
+      }
+    }
+    const status=String(event.forecastAssessmentTransition?.to||'UNKNOWN').toUpperCase();
+    if(status==='WATCH'&&firstWatchAt==null) firstWatchAt=Number(event.observedAt);
+    if(status==='INVALIDATED'&&firstInvalidatedAt==null) firstInvalidatedAt=Number(event.observedAt);
+  }
+
+  const warningTimes=[firstStaleAt,firstWatchAt,firstInvalidatedAt].filter(Number.isFinite);
+  const firstWarningAt=warningTimes.length?Math.min(...warningTimes):null;
+  return deepFreeze({
+    version:LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION,
+    forecastId:memory.forecastId,
+    maturedAt:maturity,
+    eventsBeforeMaturity:events.length,
+    staleAssumptionIdsAtMaturity:[...stale].sort(),
+    everStaleAssumptionIdsBeforeMaturity:[...everStale].sort(),
+    firstStaleAt,
+    firstWatchAt,
+    firstForecastInvalidatedAt:firstInvalidatedAt,
+    firstWarningAt,
+    warningAvailableBeforeMaturity:firstWarningAt!=null&&firstWarningAt<=maturity,
+    warningLeadMs:firstWarningAt==null?null:Math.max(0,maturity-firstWarningAt),
+    forecastInvalidatedBeforeMaturity:firstInvalidatedAt!=null,
+    semantics:{
+      preOutcomeOnly:true,
+      warningIsNotProofForecastWouldFail:true,
+      leadTimeIsDescriptiveNotCounterfactualCausation:true
+    },
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
+  });
+}
+
 export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
   const mv=verifyForecastThesisRevisionMemory(memory);
   if(!mv.ok) throw new Error('thesis revision memory invalid: '+mv.reasons.join(','));
-  const working=upgradeForecastThesisRevisionMemory(memory);
   const maturity=finite(maturedAt,'maturedAt');
+
+  if(memory.version===LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION){
+    return legacyPreOutcomeRevisionState(memory,maturity);
+  }
+  if(
+    memory?.migration?.fromVersion===LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION&&
+    Number.isFinite(Number(memory?.migration?.migratedAt))&&
+    maturity<Number(memory.migration.migratedAt)
+  ){
+    return legacyPreOutcomeRevisionState(memory,maturity);
+  }
+
+  const working=memory;
   const events=(working.events||[])
     .filter(x=>Number(x.observedAt)<=maturity)
     .sort((a,b)=>Number(a.observedAt)-Number(b.observedAt)||String(a.eventId).localeCompare(String(b.eventId)));
