@@ -3526,7 +3526,7 @@ function commandMenuKeyboard(){
   return {inline_keyboard:[
     [{text:'🔮 Kursprognose',callback_data:'cmd:forecast'},{text:'📊 Coin analysieren',callback_data:'cmd:market'}],
     [{text:'🧠 Marktcheck',callback_data:'cmd:intelligence'},{text:'📈 Chart',callback_data:'cmd:chart'}],
-    [{text:'🔎 Daten & Belege',callback_data:'cmd:evidence'},{text:'🧠 Was TCX gelernt hat',callback_data:'cmd:memory'}],
+    [{text:'🔎 Daten & Belege',callback_data:'cmd:evidence'},{text:'🧠 Science Memory',callback_data:'cmd:memory'}],
     [{text:'⚙️ Profi-Analyse',callback_data:'cmd:engine'},{text:'🖥 System',callback_data:'cmd:system'}],
     [{text:'🏠 Start',callback_data:'home'}]
   ]};
@@ -3535,7 +3535,7 @@ async function showCommandMenu(chatId,messageId){
   const payload={
     chat_id:chatId,
     text:[
-      '⚙️ ALLE TCX-FUNKTIONEN','',
+      '⚙️ BIGGJ MODULE','',
       'Wähle einfach aus, was du wissen willst.',
       'Bei Coin-Funktionen wählst du danach nur noch BTC, ETH, SOL usw. aus.','',
       'Die normalen Ansichten erklären Ergebnisse einfach.',
@@ -3588,7 +3588,7 @@ async function showMarkets(chatId,messageId) {
     chat_id:chatId,
     text:[
       '📊 COIN ANALYSIEREN','',
-      'Wähle einen Coin. TCX zeigt dir danach auf einen Blick:',
+      'Wähle einen Coin. Die Decision-Application zeigt dir danach auf einen Blick:'
       '• aktuellen Preis und 24h-Bewegung',
       '• Richtung und Marktphase',
       '• Kauf-/Verkaufsdruck',
@@ -4228,6 +4228,50 @@ async function showGlobalIntel(chatId,messageId,filter='TOP'){
 }
 
 async function showHomeSection(chatId,messageId,section) {
+  if(section==='SCIENCE'){
+    const snap=missionControlData(),os=snap.biggj||snap.health?.biggjMarketScienceOs||{},s=os.science||{},f=s.frontier||{},d=s.director||{},q=d.nextResearchQuestion||null;
+    const text=[
+      'BIGGJ // MARKET SCIENCE','━━━━━━━━━━━━━━━━━━━━','',
+      'KNOWLEDGE FRONTIER',
+      'Theorien       '+Number(f.total||0),
+      'Evidence       '+Number(f.evidence||0),
+      'Experimente    '+Number(f.experiments||0),
+      'Surprises      '+Number(f.surprises||0),
+      'Robust         '+Number(f.robust||0),
+      'Broken         '+Number(f.broken||0),'',
+      'NÄCHSTE FRAGE',
+      q?.question||'Noch keine priorisierte Forschungsfrage.','',
+      'Reality schlägt Modelle · Unknown ist ein gültiger Zustand.',
+      'PnL kann keine Theorie promoten.'
+    ].join('\n');
+    return deliverTelegramTextCard(tg,chatId,messageId,{text:text.slice(0,4096),reply_markup:{inline_keyboard:[[{text:'◎ World Model',callback_data:'home:world'},{text:'⌬ Laboratory',callback_data:'home:lab'}],[{text:'⌁ Decisions',callback_data:'cmd:forecast'},{text:'🏠 BIGGJ',callback_data:'home'}]]}});
+  }
+  if(section==='WORLD'){
+    const snap=missionControlData(),world=(snap.biggj||snap.health?.biggjMarketScienceOs||{}).worldModel||{};
+    const markets=(world.markets||[]).slice(0,10).map(x=>'• '+String(x.symbol||'UNKNOWN').replace('USDT','/USDT')+' · '+String(x.regime||'UNKNOWN')+' · '+String(x.epistemicClass||'INFERRED'));
+    const text=[
+      'BIGGJ // WORLD MODEL','━━━━━━━━━━━━━━━━━━━━','',
+      'MARKET STATES  '+Number(world.marketsObserved||0),'',
+      ...(markets.length?markets:['Noch keine kanonischen Marktstates.']),'',
+      'LATENT STATE       '+String(world.latentStateDiscovery?.status||'UNKNOWN'),
+      'INFORMATION FLOW   '+String(world.informationFlowGraph?.status||'UNKNOWN'),
+      'PREDICTABILITY     '+String(world.predictabilityField?.status||'UNKNOWN'),'',
+      'Nicht implementierte Zustände werden nicht erfunden.'
+    ].join('\n');
+    return deliverTelegramTextCard(tg,chatId,messageId,{text:text.slice(0,4096),reply_markup:{inline_keyboard:[[{text:'◉ Science',callback_data:'home:science'},{text:'⌬ Lab',callback_data:'home:lab'}],[{text:'▤ Reality Feed',callback_data:'home:news'},{text:'🏠 BIGGJ',callback_data:'home'}]]}});
+  }
+  if(section==='LAB'){
+    const snap=missionControlData(),lab=(snap.biggj||snap.health?.biggjMarketScienceOs||{}).laboratory||{};
+    const agenda=(lab.agenda||[]).slice(0,8).map((x,i)=>(i+1)+'. '+String(x.nextExperimentType||x.kind||'EXPERIMENT')+'\n   '+String(x.question||x.nextExperimentPurpose||'—'));
+    const text=[
+      'BIGGJ // SCIENTIFIC LAB','━━━━━━━━━━━━━━━━━━━━','',
+      'EXPERIMENTS '+Number(lab.experimentCount||0)+' · AUTO '+Number(lab.automaticResearchTasks||0)+' · MANUAL '+Number(lab.manualResearchTasks||0),'',
+      ...(agenda.length?agenda:['Keine priorisierte Experiment-Queue.']),'',
+      'Synthetic worlds ≠ real evidence.',
+      'Lab results dürfen PRIMARY nicht direkt verändern.'
+    ].join('\n');
+    return deliverTelegramTextCard(tg,chatId,messageId,{text:text.slice(0,4096),reply_markup:{inline_keyboard:[[{text:'◉ Science',callback_data:'home:science'},{text:'◎ World',callback_data:'home:world'}],[{text:'⌁ Decisions',callback_data:'cmd:forecast'},{text:'🏠 BIGGJ',callback_data:'home'}]]}});
+  }
   if(section==='TERMINAL') return showSuperRadar(chatId,messageId);
   if(section==='DATA') return showDataStatus(chatId,messageId);
   if(section==='MARKETS') return showMarkets(chatId,messageId);
@@ -10251,7 +10295,7 @@ const server = http.createServer(async (req,res) => {
     res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
     res.end(JSON.stringify({
       ok:readiness.ready,
-      service:'TCX Telegram',
+      service:'BIGGJ Market Science OS',
       readiness,
       releaseId:runtimeManifest?.releaseId||null,
       execution:'SHADOW_ONLY',
@@ -10264,7 +10308,7 @@ const server = http.createServer(async (req,res) => {
     res.writeHead(200,{'content-type':'application/json'});
     res.end(JSON.stringify({
       ok:true,
-      service:'TCX Telegram',
+      service:'BIGGJ Market Science OS',
       mobileWebApp:{version:BIGGJ_MOBILE_WEBAPP_VERSION,path:'/mission-control',installable:true},
       execution:'SHADOW_ONLY',
       markets:markets.map(x => x.symbol),
@@ -10572,7 +10616,7 @@ const persistenceSmoke=runPersistenceSmokeTest();
 console.log('[TCX_PERSISTENCE_SMOKE]',JSON.stringify(persistenceSmoke));
 const startupReadiness=currentOperationalReadiness();
 console.log('[TCX_STARTUP_READY]',JSON.stringify({
-  service:'TCX Telegram UI',
+  service:'BIGGJ Market Science OS',
   botUsername:me?.username||'UNKNOWN',
   markets:markets.length,
   releaseId:runtimeManifest?.releaseId||null,
