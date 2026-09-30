@@ -61,6 +61,14 @@ import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
 import {
+  deriveUnconstrainedLabWalletCandidate,
+  shadowDualWalletSummary,
+  SHADOW_DUAL_WALLET_VERSION,
+  LAB_WALLET_ID,
+  LAB_UNCONSTRAINED_ENTRY_MODE,
+  LAB_UNCONSTRAINED_ENTRY_ROLE
+} from './shadow-dual-wallet.mjs';
+import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
   markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
@@ -456,6 +464,11 @@ const coverageCurriculumEnabled = String(process.env.TCX_COVERAGE_CURRICULUM_ENA
 const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 5));
 const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
 const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
+const labWalletEnabled = String(process.env.TCX_LAB_WALLET_ENABLED || '1') !== '0';
+const labWalletUnitNotionalQuote = Math.max(1, Number(process.env.TCX_LAB_WALLET_UNIT_NOTIONAL_QUOTE || 500));
+const labWalletCooldownMs = Math.max(60_000, Number(process.env.TCX_LAB_WALLET_COOLDOWN_MS || 15*60_000));
+const labWalletMaxAgeMs = Math.max(60_000, Number(process.env.TCX_LAB_WALLET_MAX_AGE_MS || 30*60_000));
+const labWalletOperationalMaxOpen = Math.max(8, Math.min(256, Math.floor(Number(process.env.TCX_LAB_WALLET_OPERATIONAL_MAX_OPEN || 64) || 64)));
 const forecastJournalMaxEntries = Math.max(1000, Math.min(3000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 1500) || 1500)));
 const forecastAuditMaxEvents = Math.max(200, Math.floor(Number(process.env.TCX_FORECAST_AUDIT_MAX_EVENTS || 1000) || 1000));
 const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_ISSUANCES || 1500) || 1500));
@@ -2339,6 +2352,115 @@ async function maybePlaceAutonomousShadowTrade(issuance,{auditHealthy=false,port
     execution:'SHADOW_ONLY'
   }));
   return {...decision,placed:true,orderId:order.id,status:order.status,opportunityAllocation,leverageRisk,leverageLab,primaryLeveragePolicy,portfolioRisk,marginQuote:effectiveMarginQuote,requestedMarginQuote:marginQuote,leveragedExposureQuote};
+}
+
+
+async function maybePlaceUnconstrainedLabWalletTrade(issuance,{auditHealthy=false,portfolioPrepared=false}={}){
+  const now=Date.now();
+  if(!labWalletEnabled){
+    return {placed:false,eligible:false,reason:'LAB_WALLET_DISABLED',walletId:LAB_WALLET_ID,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:false,eligible:false,reason:'LAB_WALLET_RUNTIME_UNHEALTHY',walletId:LAB_WALLET_ID,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!portfolioPrepared){
+    const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
+    if(reconciled.changed){
+      shadowPortfolioLedger=reconciled.ledger;
+      await persistShadowPortfolio('pre-lab-wallet-reconcile');
+    }
+  }
+
+  const labOrders=shadowOrders
+    .filter(o=>String(o?.strategyMeta?.role||'').toUpperCase()===LAB_UNCONSTRAINED_ENTRY_ROLE)
+    .sort((a,b)=>Number(b?.createdAt||0)-Number(a?.createdAt||0));
+  const symbol=String(issuance?.symbol||'').toUpperCase();
+  const lastSymbolOrder=labOrders.find(o=>String(o?.symbol||'').toUpperCase()===symbol);
+  if(lastSymbolOrder&&now-Number(lastSymbolOrder.createdAt||0)<labWalletCooldownMs){
+    return {placed:false,eligible:false,reason:'LAB_OPERATIONAL_SYMBOL_COOLDOWN',walletId:LAB_WALLET_ID,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  const openLab=(shadowPortfolioLedger.positions||[]).filter(p=>
+    p?.status==='OPEN'&&String(p?.entryMode||'').toUpperCase()===LAB_UNCONSTRAINED_ENTRY_MODE
+  );
+  if(openLab.length>=labWalletOperationalMaxOpen){
+    return {placed:false,eligible:false,reason:'LAB_OPERATIONAL_OPEN_CAP',walletId:LAB_WALLET_ID,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const existingDecisionKeys=[
+    ...labOrders.map(o=>o?.strategyMeta?.labDecisionKey),
+    ...(shadowPortfolioLedger.positions||[]).map(p=>p?.labDecisionKey)
+  ].filter(Boolean);
+  const decision=deriveUnconstrainedLabWalletCandidate(issuance,{
+    now,
+    maxAgeMs:labWalletMaxAgeMs,
+    notionalQuote:labWalletUnitNotionalQuote,
+    existingDecisionKeys
+  });
+  if(!decision.eligible) return {...decision,placed:false};
+
+  const order=await placeShadowOrder({
+    symbol:decision.symbol,
+    side:decision.side,
+    type:'MARKET',
+    notionalQuote:decision.notionalQuote,
+    strategyMeta:{
+      strategy:AUTONOMOUS_SHADOW_TRADER_VERSION,
+      role:LAB_UNCONSTRAINED_ENTRY_ROLE,
+      entryMode:LAB_UNCONSTRAINED_ENTRY_MODE,
+      walletId:LAB_WALLET_ID,
+      assetClass:assetClassForSymbol(decision.symbol),
+      strategyLane:['LAB',decision.symbol,decision.horizonId,decision.side].join(':'),
+      labWalletVersion:SHADOW_DUAL_WALLET_VERSION,
+      labDecisionKey:decision.labDecisionKey,
+      labCapitalFacility:decision.capitalFacility,
+      labCalibrationStatus:decision.calibrationStatus,
+      labCounterfactualOnly:decision.counterfactualOnly===true,
+      labPrimaryIsolation:true,
+      horizonOnlyExit:true,
+      issuanceId:decision.issuanceId,
+      forecastFingerprint:decision.forecastFingerprint,
+      horizonId:decision.horizonId,
+      horizonMs:decision.horizonMs,
+      admissionGate:decision.admissionGate,
+      expectedReturn:decision.expectedReturn,
+      generatedAt:decision.generatedAt
+    }
+  });
+  if(auditLedger.healthy){
+    await appendInstitutionalAudit('TCX_SHADOW_LAB_WALLET_ENTRY',{
+      version:SHADOW_DUAL_WALLET_VERSION,
+      at:now,
+      walletId:LAB_WALLET_ID,
+      labDecisionKey:decision.labDecisionKey,
+      symbol:decision.symbol,
+      side:decision.side,
+      horizonId:decision.horizonId,
+      notionalQuote:decision.notionalQuote,
+      admissionGate:decision.admissionGate,
+      calibrationStatus:decision.calibrationStatus,
+      counterfactualOnly:decision.counterfactualOnly,
+      capitalFacility:'UNLIMITED_VIRTUAL',
+      primaryPerformanceExcluded:true,
+      orderId:order.id,
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false
+    });
+  }
+  recordOperation(observability,{name:'shadow_lab_wallet_entry',ok:true,latencyMs:0,error:null});
+  console.log('[TCX_SHADOW_LAB_WALLET_ENTRY]',JSON.stringify({
+    symbol:decision.symbol,
+    side:decision.side,
+    horizonId:decision.horizonId,
+    notionalQuote:decision.notionalQuote,
+    admissionGate:decision.admissionGate,
+    calibrationStatus:decision.calibrationStatus,
+    counterfactualOnly:decision.counterfactualOnly,
+    orderId:order.id,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  }));
+  return {...decision,placed:true,orderId:order.id,status:order.status};
 }
 
 
@@ -5309,7 +5431,7 @@ async function showShadowPortfolio(chatId,messageId=null){
 async function showTradeDiscoveryDiagnostics(chatId,messageId=null){
   const now=Date.now();
   const positions=shadowPortfolioLedger.positions||[];
-  const openStandardPositions=positions.filter(p=>p.status==='OPEN'&&!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())).length;
+  const openStandardPositions=positions.filter(p=>p.status==='OPEN'&&!['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE].includes(String(p.entryMode||'STANDARD').toUpperCase())).length;
   const academy=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:now,timeZone:shadowStatsTimeZone});
   const training=evaluateShadowTrainingSupervisor(shadowPortfolioLedger,academy,{asOf:now});
   const runtime={
@@ -6803,6 +6925,17 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       autoShadowTrade={placed:false,eligible:false,reason:'AUTO_SHADOW_ERROR'};
       recordError(observability,{scope:'auto_shadow_trade',message:msg});
       console.error('auto shadow trade error',symbol,msg);
+    }
+  }
+  let labWalletRun=null;
+  if(issuanceSource==='TCX_AUTOLEARN_V1'){
+    try{
+      labWalletRun=await maybePlaceUnconstrainedLabWalletTrade(issuance,{auditHealthy:auditHealthyAfter,portfolioPrepared:shadowActionPortfolioPrepared});
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      labWalletRun={placed:false,eligible:false,reason:'LAB_WALLET_ERROR'};
+      recordError(observability,{scope:'shadow_lab_wallet.entry',message:msg});
+      console.error('shadow lab wallet entry error',symbol,msg);
     }
   }
   let coverageCurriculumRun=null;
@@ -9931,8 +10064,9 @@ function missionControlData(){
  if(!health.biggjRulebook.healthy)health.ok=false;
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
+ const wallets=shadowDualWalletSummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
- const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION']);
+ const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE]);
  const primaryShadowPositions=allShadowPositions.filter(p=>!researchShadowModes.has(String(p?.entryMode||'STANDARD').toUpperCase()));
  const openPositions=primaryShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
  const recentClosed=primaryShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
@@ -9946,7 +10080,7 @@ function missionControlData(){
   asOf:now
  });
  health.experienceNeeds=deriveBiggjExperienceNeeds({health});
- return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
+ return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,wallets,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer(async (req,res) => {
