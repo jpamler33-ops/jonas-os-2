@@ -33,6 +33,10 @@ test('official feed parser preserves direct provenance without claiming independ
   assert.equal(rows.length,1);
   const x=rows[0];
   assert.equal(x.sourceId,'FED_PRESS');
+  assert.equal(x.publishedAt,Date.parse('2026-09-30T09:30:00Z'));
+  assert.equal(x.observedAt,NOW);
+  assert.equal(x.availableAt,NOW);
+  assert.equal(x.timestamp,NOW);
   assert.equal(x.primarySource,true);
   assert.equal(x.publicationAuthenticity,'DIRECT_OFFICIAL_FEED');
   assert.equal(x.verified,false);
