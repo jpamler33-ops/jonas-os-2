@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const BIGGJ_VISUAL_INTELLIGENCE_VERSION='BIGGJ_VISUAL_INTELLIGENCE_V4';
+export const BIGGJ_VISUAL_INTELLIGENCE_VERSION='BIGGJ_VISUAL_INTELLIGENCE_V5';
 
 function finite(v,fallback=null){
   if(v===null||v===undefined||v==='') return fallback;
@@ -26,10 +26,7 @@ function deriveProbabilityVector(position={}){
   if(dir==null||edge==null) return null;
   const opp=clamp(dir-edge,0,1);
   const flat=clamp(1-dir-opp,0,1);
-  const side=String(position.side||'').toUpperCase();
-  return side==='SHORT'
-    ?{continuation:dir,range:flat,invalidation:opp,source:'DERIVED_FROM_STORED_FORECAST_PROBABILITIES'}
-    :{continuation:dir,range:flat,invalidation:opp,source:'DERIVED_FROM_STORED_FORECAST_PROBABILITIES'};
+  return {continuation:dir,range:flat,invalidation:opp,source:'DERIVED_FROM_STORED_FORECAST_PROBABILITIES'};
 }
 function belief(name,value,{epistemic='MODELLED',note=''}={}){
   const v=finite(value);
@@ -39,9 +36,7 @@ function scoreReturnMagnitude(expectedReturn){
   const r=Math.abs(finite(expectedReturn,0));
   return clamp(r/.02,0,1);
 }
-function scoreEdge(edge){
-  return clamp(finite(edge,0)/.25,0,1);
-}
+function scoreEdge(edge){return clamp(finite(edge,0)/.25,0,1);}
 function scoreQuality(position){
   const q=finite(position.entryQualityScore);
   if(q!=null) return clamp(q);
@@ -66,13 +61,12 @@ function tradeLevels(position={}){
   const stopPrice=side==='SHORT'?entry*(1+sl):entry*(1-sl);
   const takeProfitPrice=side==='SHORT'?entry*(1-tp):entry*(1+tp);
   const current=finite(position.lastMark?.executableExitPrice,finite(position.lastMark?.price));
-  return freeze({
-    entryPrice:entry,
-    stopPrice,
-    takeProfitPrice,
-    currentPrice:current,
-    rewardRisk:sl>0?tp/sl:null
-  });
+  return freeze({entryPrice:entry,stopPrice,takeProfitPrice,currentPrice:current,rewardRisk:sl>0?tp/sl:null});
+}
+function admissionState(position={}){return String(position.admissionGate||'UNKNOWN').toUpperCase();}
+function isAdmitted(position={}){
+  const s=admissionState(position);
+  return !['ABSTAIN','REJECTED','BLOCKED','INVALID','UNKNOWN','MISSING'].includes(s);
 }
 
 export function buildBiggjTradeThesis(position,{asOf=Date.now()}={}){
@@ -88,8 +82,16 @@ export function buildBiggjTradeThesis(position,{asOf=Date.now()}={}){
     stress:belief('Stress robustness',scoreStress(position),{epistemic:'MODELLED'}),
     quality:belief('Entry quality',scoreQuality(position),{epistemic:'MODELLED'})
   });
-  const health=avgKnown(Object.values(beliefs).map(x=>x.value));
-  const knownCount=Object.values(beliefs).filter(x=>x.known).length;
+  const beliefValues=Object.values(beliefs);
+  const knownCount=beliefValues.filter(x=>x.known).length;
+  const evidenceCoverage=knownCount/beliefValues.length;
+  const evidenceStrength=avgKnown(beliefValues.map(x=>x.value));
+  const admitted=isAdmitted(position);
+  // Missing evidence must lower health instead of disappearing from the denominator.
+  // A non-admitted/ABSTAIN record may remain useful research evidence, but cannot
+  // present itself as a healthy trade thesis.
+  const thesisHealth=evidenceStrength==null?null:clamp(evidenceStrength*evidenceCoverage*(admitted?1:.5));
+  const thesisState=!admitted?'RESEARCH_ONLY':knownCount<6?'INCOMPLETE':'ADMITTED';
   const novelty=knownCount<3?'UNKNOWN':'UNASSESSED';
   const p=probability||{continuation:null,range:null,invalidation:null,source:'UNAVAILABLE'};
   const hypotheses=freeze([
@@ -106,44 +108,21 @@ export function buildBiggjTradeThesis(position,{asOf=Date.now()}={}){
     {id:'QUALITY',label:'Entry quality',value:beliefs.quality.value}
   ]);
   const whyNow=freeze([
-    {id:'FORECAST',state:beliefs.forecast.known?'KNOWN':'MISSING',detail:beliefs.forecast.known?'Directional forecast admitted':'No stored directional probability'},
+    {id:'FORECAST',state:beliefs.forecast.known?'KNOWN':'MISSING',detail:beliefs.forecast.known?'Directional forecast stored':'No stored directional probability'},
     {id:'REGIME',state:beliefs.regime.known?'KNOWN':'MISSING',detail:beliefs.regime.known?'Regime confidence '+round(beliefs.regime.value,3):'No regime confidence stored'},
     {id:'STRESS',state:beliefs.stress.known?'KNOWN':'MISSING',detail:beliefs.stress.known?'Stress robustness '+round(beliefs.stress.value,3):'No stress score stored'},
     {id:'QUALITY',state:beliefs.quality.known?'KNOWN':'MISSING',detail:beliefs.quality.known?'Entry quality '+round(beliefs.quality.value,3):'No quality score stored'},
-    {id:'ADMISSION',state:String(position.admissionGate||'UNKNOWN'),detail:'Forecast admission gate'},
+    {id:'ADMISSION',state:admissionState(position),detail:admitted?'Forecast admission passed':'Forecast not admitted; research observation only'},
     {id:'EXECUTION',state:'SHADOW_ONLY',detail:'Real execution blocked'}
   ]);
-  const thesisId='th_'+sha256({
-    positionId:String(position.positionId||''),
-    issuanceId:String(position.issuanceId||''),
-    forecastFingerprint:String(position.forecastFingerprint||''),
-    symbol,side,openedAt:finite(position.openedAt)
-  }).slice(0,16);
+  const thesisId='th_'+sha256({positionId:String(position.positionId||''),issuanceId:String(position.issuanceId||''),forecastFingerprint:String(position.forecastFingerprint||''),symbol,side,openedAt:finite(position.openedAt)}).slice(0,16);
   const core={
-    version:BIGGJ_VISUAL_INTELLIGENCE_VERSION,
-    thesisId,
-    positionId:String(position.positionId||''),
-    symbol,side,
-    status:String(position.status||'UNKNOWN').toUpperCase(),
-    openedAt:finite(position.openedAt),
-    horizonId:String(position.horizonId||''),
-    setupType:String(position.setupType||'UNKNOWN'),
-    setupScore:finite(position.setupScore),
-    entryMode:String(position.entryMode||'STANDARD'),
-    admissionGate:String(position.admissionGate||'UNKNOWN'),
-    thesisHealth:health,
-    knownBeliefs:knownCount,
-    novelty,
-    progress:progress(position,asOf),
-    beliefs,
-    hypotheses,
-    tradeDna:dna,
-    whyNow,
-    levels:tradeLevels(position),
-    mfe:finite(position.mfeMarginRoePct),
-    mae:finite(position.maeMarginRoePct),
-    execution:'SHADOW_ONLY',
-    canExecuteLive:false,
+    version:BIGGJ_VISUAL_INTELLIGENCE_VERSION,thesisId,positionId:String(position.positionId||''),symbol,side,
+    status:String(position.status||'UNKNOWN').toUpperCase(),openedAt:finite(position.openedAt),horizonId:String(position.horizonId||''),
+    setupType:String(position.setupType||'UNKNOWN'),setupScore:finite(position.setupScore),entryMode:String(position.entryMode||'STANDARD'),
+    admissionGate:admissionState(position),admitted,thesisState,thesisHealth,evidenceCoverage,evidenceStrength,knownBeliefs:knownCount,novelty,
+    progress:progress(position,asOf),beliefs,hypotheses,tradeDna:dna,whyNow,levels:tradeLevels(position),
+    mfe:finite(position.mfeMarginRoePct),mae:finite(position.maeMarginRoePct),execution:'SHADOW_ONLY',canExecuteLive:false,
     epistemic:'DERIVED_FROM_POINT_IN_TIME_SHADOW_POSITION_STATE'
   };
   return freeze({...core,fingerprint:sha256(core)});
@@ -151,55 +130,28 @@ export function buildBiggjTradeThesis(position,{asOf=Date.now()}={}){
 
 export function tradeOverlayFromPosition(position,{asOf=Date.now()}={}){
   const thesis=buildBiggjTradeThesis(position,{asOf});
-  const levels=thesis.levels;
-  if(!levels) return null;
-  return freeze({
-    version:BIGGJ_VISUAL_INTELLIGENCE_VERSION,
-    thesisId:thesis.thesisId,
-    symbol:thesis.symbol,
-    side:thesis.side,
-    status:thesis.status,
-    entryPrice:levels.entryPrice,
-    stopPrice:levels.stopPrice,
-    takeProfitPrice:levels.takeProfitPrice,
-    currentPrice:levels.currentPrice,
-    rewardRisk:levels.rewardRisk,
-    thesisHealth:thesis.thesisHealth,
-    progress:thesis.progress,
-    setupType:thesis.setupType,
-    execution:'SHADOW_ONLY',
-    canExecuteLive:false
-  });
+  const levels=thesis.levels;if(!levels) return null;
+  return freeze({version:BIGGJ_VISUAL_INTELLIGENCE_VERSION,thesisId:thesis.thesisId,symbol:thesis.symbol,side:thesis.side,status:thesis.status,
+    entryPrice:levels.entryPrice,stopPrice:levels.stopPrice,takeProfitPrice:levels.takeProfitPrice,currentPrice:levels.currentPrice,
+    rewardRisk:levels.rewardRisk,thesisHealth:thesis.thesisHealth,evidenceCoverage:thesis.evidenceCoverage,thesisState:thesis.thesisState,
+    progress:thesis.progress,setupType:thesis.setupType,execution:'SHADOW_ONLY',canExecuteLive:false});
 }
 
 export function renderBiggjThesisText(thesis){
   if(!thesis) return 'BIGGJ // THESIS unavailable';
   const pct=v=>finite(v)==null?'—':Math.round(clamp(v)*100)+'%';
-  const bar=v=>{
-    if(finite(v)==null) return '░░░░░░░░░░';
-    const n=Math.round(clamp(v)*10);return '█'.repeat(n)+'░'.repeat(10-n);
-  };
+  const bar=v=>{if(finite(v)==null) return '░░░░░░░░░░';const n=Math.round(clamp(v)*10);return '█'.repeat(n)+'░'.repeat(10-n);};
   const lines=[
-    'BIGGJ // LIVING THESIS · '+thesis.symbol.replace('USDT','/USDT'),
-    '━━━━━━━━━━━━━━━━━━━━',
+    'BIGGJ // LIVING THESIS · '+thesis.symbol.replace('USDT','/USDT'),'━━━━━━━━━━━━━━━━━━━━',
     thesis.side+' · '+thesis.status+' · '+thesis.setupType,
-    'THESIS '+thesis.thesisId,
-    '',
+    'THESIS '+thesis.thesisId,'',
+    'THESIS STATE   '+thesis.thesisState,
     'THESIS HEALTH  '+bar(thesis.thesisHealth)+' '+pct(thesis.thesisHealth),
-    'KNOWN BELIEFS  '+thesis.knownBeliefs+'/6',
-    'NOVELTY        '+thesis.novelty,
-    '',
-    'GHOST PATHS',
-    ...thesis.hypotheses.map(x=>x.label.padEnd(20,' ')+' '+bar(x.support)+' '+pct(x.support)),
-    '',
-    'TRADE DNA',
-    ...thesis.tradeDna.map(x=>x.label.padEnd(18,' ')+' '+bar(x.value)+' '+pct(x.value)),
-    '',
-    'WHY NOW',
-    ...thesis.whyNow.map(x=>'• '+x.id+' · '+x.state+' · '+x.detail),
-    '',
-    'EPISTEMIC: '+thesis.epistemic,
-    'SHADOW_ONLY · REAL ORDERS BLOCKED'
+    'EVIDENCE       '+bar(thesis.evidenceCoverage)+' '+pct(thesis.evidenceCoverage)+' · '+thesis.knownBeliefs+'/6 known',
+    'NOVELTY        '+thesis.novelty,'','GHOST PATHS',
+    ...thesis.hypotheses.map(x=>x.label.padEnd(20,' ')+' '+bar(x.support)+' '+pct(x.support)),'','TRADE DNA',
+    ...thesis.tradeDna.map(x=>x.label.padEnd(18,' ')+' '+bar(x.value)+' '+pct(x.value)),'','WHY NOW',
+    ...thesis.whyNow.map(x=>'• '+x.id+' · '+x.state+' · '+x.detail),'','EPISTEMIC: '+thesis.epistemic,'SHADOW_ONLY · REAL ORDERS BLOCKED'
   ];
   return lines.join('\n').slice(0,4096);
 }
