@@ -2,6 +2,7 @@ export const BIGGJ_DISCORD_MARKET_SCIENCE_VERSION='BIGGJ_DISCORD_MARKET_SCIENCE_
 
 export const BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT=Object.freeze([
   {category:'BIGGJ • CONTROL ROOM',channels:[
+    {name:'start-here',topic:'Startpunkt für BIGGJ Market Science OS: Science → World Model → Lab → Decisions → Trading. SHADOW_ONLY.'},
     {name:'science-home',topic:'BIGGJ Startpunkt: Knowledge Frontier, nächste Forschungsfrage, Science-Status und epistemische Grenzen.'},
     {name:'world-model',topic:'Globales World Model: PIT Market States, Association Topology, Information-Flow-Hypothesen, Forecastability und Latent-State Research.'},
     {name:'science-lab',topic:'Research Laboratory: Experimente, Widersprüche, Missing Variables, OOS-/Placebo-/Regime-Tests und nächste Forschungsarbeit.'},
