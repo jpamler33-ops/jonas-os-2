@@ -123,6 +123,7 @@ import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
+  shadowWorkerHeadroomRetryPolicy,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced,
   FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
@@ -345,6 +346,14 @@ const shadowCompetitionWorkerMode=['0','OFF','FALSE','DISABLED'].includes(shadow
 const shadowCompetitionServingWorkerEnabled=shadowCompetitionWorkerMode!=='OFF';
 const shadowCompetitionAutoHeapMb=Math.max(220,Math.min(280,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_HEAP_MB||260)));
 const shadowCompetitionAutoRssMb=Math.max(450,Math.min(700,Number(process.env.TCX_SHADOW_COMPETITION_AUTO_RSS_MB||620)));
+const shadowCompetitionHeadroomRetryMs=Math.max(
+  5_000,
+  Math.min(60_000,Number(process.env.TCX_SHADOW_COMPETITION_HEADROOM_RETRY_MS||20_000))
+);
+const shadowCompetitionHeadroomPollMs=Math.max(
+  1_000,
+  Math.min(10_000,Number(process.env.TCX_SHADOW_COMPETITION_HEADROOM_POLL_MS||2_500))
+);
 const shadowCompetitionAutoExternalMb=Math.max(24,Math.min(
   servingGuardExternalMb,
   Number(process.env.TCX_SHADOW_COMPETITION_AUTO_EXTERNAL_MB||servingGuardExternalMb)
