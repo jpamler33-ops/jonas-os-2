@@ -59,6 +59,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-discord-observability.mjs',
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
+  'biggj-autonomous-operator.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
