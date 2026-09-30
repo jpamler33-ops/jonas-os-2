@@ -62,6 +62,7 @@ import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
 import {
   deriveUnconstrainedLabWalletCandidate,
+  buildLabWalletLearningModel,
   shadowDualWalletSummary,
   SHADOW_DUAL_WALLET_VERSION,
   LAB_WALLET_ID,
@@ -2390,11 +2391,13 @@ async function maybePlaceUnconstrainedLabWalletTrade(issuance,{auditHealthy=fals
     ...labOrders.map(o=>o?.strategyMeta?.labDecisionKey),
     ...(shadowPortfolioLedger.positions||[]).map(p=>p?.labDecisionKey)
   ].filter(Boolean);
+  const labLearning=buildLabWalletLearningModel(shadowPortfolioLedger,{asOf:now});
   const decision=deriveUnconstrainedLabWalletCandidate(issuance,{
     now,
     maxAgeMs:labWalletMaxAgeMs,
     notionalQuote:labWalletUnitNotionalQuote,
-    existingDecisionKeys
+    existingDecisionKeys,
+    learningModel:labLearning
   });
   if(!decision.eligible) return {...decision,placed:false};
 
@@ -2412,6 +2415,13 @@ async function maybePlaceUnconstrainedLabWalletTrade(issuance,{auditHealthy=fals
       strategyLane:['LAB',decision.symbol,decision.horizonId,decision.side].join(':'),
       labWalletVersion:SHADOW_DUAL_WALLET_VERSION,
       labDecisionKey:decision.labDecisionKey,
+      labLaneKey:decision.labLaneKey,
+      labSelectionScore:decision.labSelectionScore,
+      labSelectionComponents:decision.labSelectionComponents,
+      labLearningState:decision.labLearningState,
+      labLearningSamples:decision.labLearningSamples,
+      labHistoricalShrunkMeanReturn:decision.labHistoricalShrunkMeanReturn,
+      labHistoricalProfitFactor:decision.labHistoricalProfitFactor,
       labCapitalFacility:decision.capitalFacility,
       labCalibrationStatus:decision.calibrationStatus,
       labCounterfactualOnly:decision.counterfactualOnly===true,
@@ -2432,6 +2442,10 @@ async function maybePlaceUnconstrainedLabWalletTrade(issuance,{auditHealthy=fals
       at:now,
       walletId:LAB_WALLET_ID,
       labDecisionKey:decision.labDecisionKey,
+      labLaneKey:decision.labLaneKey,
+      labSelectionScore:decision.labSelectionScore,
+      labLearningState:decision.labLearningState,
+      labLearningSamples:decision.labLearningSamples,
       symbol:decision.symbol,
       side:decision.side,
       horizonId:decision.horizonId,
@@ -2455,6 +2469,9 @@ async function maybePlaceUnconstrainedLabWalletTrade(issuance,{auditHealthy=fals
     notionalQuote:decision.notionalQuote,
     admissionGate:decision.admissionGate,
     calibrationStatus:decision.calibrationStatus,
+    labLearningState:decision.labLearningState,
+    labLearningSamples:decision.labLearningSamples,
+    labSelectionScore:decision.labSelectionScore,
     counterfactualOnly:decision.counterfactualOnly,
     orderId:order.id,
     execution:'SHADOW_ONLY',
