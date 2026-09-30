@@ -491,6 +491,7 @@ function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANN
   '**WENN ETWAS NICHT FUNKTIONIERT**',
   '#channel-supervisor · überwacht jeden Channel-Manager',
   '#channel-improvements · priorisierte Fix-/Verbesserungsvorschläge',
+  '#rulebook · feste Soll-/Nicht-Soll-Regeln und erkannte Verstöße',
   '#errors · technische Fehler',
   '',
   '**Shortcuts** · \`/cockpit\` · \`/charts\` · \`/news\` · \`/world\` · \`/needs\` · \`/brain\`',
@@ -509,8 +510,9 @@ export function buildDiscordTerminalPayload(snapshot={}){
   ],footer:{text:MARKERS.terminal},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordSystemPayload(snapshot={}){
-  const h=snapshot?.health||{},r=h?.operationalReadiness||{},oms=h?.shadowOms||{},fabric=h?.marketDataFabric||{},tg=h?.telegramPolling||{};
-  const rows=[['Runtime',yesNo(r?.ready)],['Audit Ledger',yesNo(h?.institutionalKernel?.ledgerHealthy)],['Market Fabric',yesNo(fabric?.healthy)],['Shadow OMS',yesNo(oms?.healthy)],['Telegram',tg?.lastPollError?'● ERROR':'● OK'],['Discord','● OK']];
+  const h=snapshot?.health||{},r=h?.operationalReadiness||{},oms=h?.shadowOms||{},fabric=h?.marketDataFabric||{},tg=h?.telegramPolling||{},rb=h?.biggjRulebook?.runtime||{};
+  const rulebookState=String(rb?.state||'UNKNOWN').toUpperCase();
+  const rows=[['Runtime',yesNo(r?.ready)],['Rulebook',rulebookState==='PASS'?'● OK':rulebookState==='CAUTION'?'◐ CAUTION':'● '+rulebookState],['Audit Ledger',yesNo(h?.institutionalKernel?.ledgerHealthy)],['Market Fabric',yesNo(fabric?.healthy)],['Shadow OMS',yesNo(oms?.healthy)],['Telegram',tg?.lastPollError?'● ERROR':'● OK'],['Discord','● OK']];
   return {embeds:[{title:'TCX // SYSTEM STATUS',description:rows.map(([k,v])=>'\`'+k.padEnd(14)+'\` '+v).join('\n'),fields:[
     {name:'OMS',value:'Active '+String(oms?.active??0)+' · Filled '+String(oms?.filled??0),inline:true},
     {name:'Market Events',value:String(fabric?.events??'—'),inline:true},
@@ -702,7 +704,7 @@ function buildRulebookPayload(snapshot={}){
   }],allowedMentions:{parse:[]}};
 }
 
-function buildChannelSupervisorPayload(managerState={},translationHealth=null){
+function buildChannelSupervisorPayload(managerState={},translationHealth=null,rulebookRuntime=null){
   const counts=managerState?.counts||{};
   const problems=(managerState?.topProblems||[]).slice(0,10).map(x=>
     '• **#'+String(x.name)+'** · '+String(x.status)+' → '+String(x.decision)+'\n  '+String(x.reason)
@@ -716,26 +718,29 @@ function buildChannelSupervisorPayload(managerState={},translationHealth=null){
       {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
       {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
       {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
-      {name:'Sicherheitsgrenze',value:'Auto-Reparatur nur für UI/Refresh/Layout. Keine Live-Orders, keine stillen PRIMARY-Policy-Änderungen.',inline:false}
+      {name:'Rulebook',value:rulebookRuntime?String(rulebookRuntime.state||'UNKNOWN')+' · Verstöße '+String(rulebookRuntime?.counts?.failed||0)+' · HARD '+String(rulebookRuntime?.counts?.hard||0):'—',inline:true},
+      {name:'Sicherheitsgrenze',value:'Auto-Reparatur nur für UI/Refresh/Layout. Keine Live-Orders, keine stillen PRIMARY-Policy-Änderungen. HARD-Rulebook-Verstöße bleiben fail-closed.',inline:false}
     ],
     footer:{text:'BIGGJ_CHANNEL_SUPERVISOR_V1'},
     timestamp:new Date().toISOString()
   }],allowedMentions:{parse:[]}};
 }
 
-function buildChannelImprovementsPayload(managerState={},translationHealth=null){
+function buildChannelImprovementsPayload(managerState={},translationHealth=null,rulebookRuntime=null){
   const actions=(managerState?.supervisor?.nextActions||[]).slice(0,12).map((x,i)=>
     '**'+(i+1)+'. #'+String(x.channel)+' · '+String(x.decision)+'**\n'+String(x.suggestion)
   ).join('\n\n')||'Aktuell keine zwingende Channel-Verbesserung offen.';
   const translationSuggestion=translationHealth&&!translationHealth.ok
     ?'\n\n**Übersetzung:** Dienst ist gestört. Deutsche News im Strict-Mode werden lieber zurückgehalten als ungeprüft englisch gepostet.'
     :'';
+  const ruleIssues=Array.isArray(rulebookRuntime?.violations)?rulebookRuntime.violations.slice(0,6).map(v=>'• **'+String(v.ruleId)+'** · '+String(v.reason||v.title||'Regelverletzung')).join('\n'):'';
   return {embeds:[{
     title:'BIGGJ // CHANNEL-VERBESSERUNGEN',
     description:'**Priorisierte Verbesserungsliste aus den einzelnen Channel-Managern.**'+translationSuggestion,
     fields:[
       {name:'Nächste Verbesserungen',value:actions.slice(0,1024),inline:false},
-      {name:'Entscheidungslogik',value:'BROKEN → Layout reparieren · DEGRADED → Ursache isolieren/retry · STALE/EMPTY → Refresh · HEALTHY → nichts ändern.',inline:false}
+      {name:'Rulebook-Verstöße',value:(ruleIssues||'Keine aktuell erkannten Regelverstöße.').slice(0,1024),inline:false},
+      {name:'Entscheidungslogik',value:'BROKEN → Layout reparieren · DEGRADED → Ursache isolieren/retry · STALE/EMPTY → Refresh · HARD-Rule → blockieren · HEALTHY → nichts ändern.',inline:false}
     ],
     footer:{text:'BIGGJ_CHANNEL_IMPROVEMENTS_V1'},
     timestamp:new Date().toISOString()
@@ -1499,9 +1504,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     }
     const after=managerSnapshot();
     const translation=germanTranslator.health();
-    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation));
-    await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation));
-    await refreshRulebookPanel();
+    const mission=await safeMissionSnapshot();
+    const rulebookRuntime=mission?.health?.biggjRulebook?.runtime||null;
+    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation,rulebookRuntime));
+    await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation,rulebookRuntime));
+    await refreshStableManagedPanel('rulebook',MARKERS.rulebook,buildRulebookPayload(mission));
     const finalState=managerSnapshot();
     try{logger.info?.('[BIGGJ_CHANNEL_SUPERVISOR] '+JSON.stringify({
       status:finalState.supervisor.status,
@@ -1509,7 +1516,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       healthy:finalState.healthy,
       problems:finalState.problems,
       repaired,
-      translation:translation.ok?'OK':'DEGRADED'
+      translation:translation.ok?'OK':'DEGRADED',
+      rulebook:rulebookRuntime?.state||'UNKNOWN',
+      rulebookViolations:rulebookRuntime?.counts?.failed||0
     }));}catch{}
     return finalState;
   }
@@ -1525,7 +1534,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       fabric:h?.marketDataFabric?.healthy===true,
       oms:h?.shadowOms?.healthy===true,
       forecast:f?.healthy===true||f?.status==='HEALTHY',
-      telegram:!h?.telegramPolling?.lastPollError
+      telegram:!h?.telegramPolling?.lastPollError,
+      rulebook:String(h?.biggjRulebook?.runtime?.state||'UNKNOWN').toUpperCase()==='PASS'
     });
   }
   async function syncHealthAlerts(){
@@ -1536,7 +1546,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const previous=lastHealthDigest;lastHealthDigest=digest;
     const c=channelCache.get('alerts');if(!c)return;
     const now=JSON.parse(digest),before=JSON.parse(previous);
-    const labels={ready:'Runtime',fabric:'Marktdaten',oms:'Shadow OMS',forecast:'Forecast',telegram:'Telegram'};
+    const labels={ready:'Runtime',fabric:'Marktdaten',oms:'Shadow OMS',forecast:'Forecast',telegram:'Telegram',rulebook:'Rulebook'};
     const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>(labels[k]||k)+': '+(before[k]?'OK':'PRÜFEN')+' → '+(now[k]?'OK':'PRÜFEN'));
     await managed('alerts',()=>c.send({embeds:[{title:'TCX // STATUSÄNDERUNG',description:(changes.join('\n')||'Systemzustand hat sich geändert.').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}}),{detail:'Statusänderung gepostet',rethrow:false});
     state.lastAlertAt=Date.now();
@@ -1961,12 +1971,14 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='lesson'){await lessonCommand(interaction);return;}
     if(name==='supervisor'){
       await interaction.deferReply();
-      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health()));
+      const mission=await safeMissionSnapshot();
+      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health(),mission?.health?.biggjRulebook?.runtime||null));
       return;
     }
     if(name==='improvements'){
       await interaction.deferReply();
-      await interaction.editReply(buildChannelImprovementsPayload(managerSnapshot(),germanTranslator.health()));
+      const mission=await safeMissionSnapshot();
+      await interaction.editReply(buildChannelImprovementsPayload(managerSnapshot(),germanTranslator.health(),mission?.health?.biggjRulebook?.runtime||null));
       return;
     }
     if(name==='rulebook'){
