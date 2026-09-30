@@ -3881,7 +3881,7 @@ async function showCognitiveCore(chatId,messageId,symbol){
  ]}});
 }
 
-async function showSignalLab(chatId,messageId,symbol,horizonId='1h'){
+async function showSignalLab(chatId,messageId,symbol,horizonId='1h',mode='FULL'){
  const x=await terminalContext(symbol);
  const issuance=latestInstitutionalForecast(forecastRuntime,symbol);
  const lab=buildBiggjSignalLab({
@@ -3891,17 +3891,35 @@ async function showSignalLab(chatId,messageId,symbol,horizonId='1h'){
   risk:x.risk,
   accuracy:x.accuracy,
   horizonId,
-  mode:'FULL',
+  mode,
+  modeContext:{
+   structure:{
+    trend:x.state?.analysis?.trend??null,
+    mtfBias:x.state?.mtf?.bias??null,
+    eventCount:Array.isArray(x.events?.rows)?x.events.rows.length:Array.isArray(x.events?.events)?x.events.events.length:0
+   },
+   flow:{
+    state:x.state?.dashboard?.flow??null,
+    imbalance:x.state?.dashboard?.imbalance??null,
+    pressureScore:x.state?.dashboard?.pressureScore??null
+   },
+   liquidity:{
+    state:x.state?.dashboard?.liquidity??null,
+    spreadBps:x.state?.dashboard?.spreadBps??null,
+    liquidationClusters:Array.isArray(x.liquidation?.clusters)?x.liquidation.clusters.length:null,
+    hasSnapshot:Boolean(x.liquidation)
+   }
+  },
   asOf:x.state?.availableAt||Date.now()
  });
- return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjSignalLab(lab),reply_markup:signalLabKeyboard(symbol,horizonId)});
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjSignalLab(lab),reply_markup:signalLabKeyboard(symbol,horizonId,mode)});
 }
 async function showProofFeed(chatId,messageId,symbol=null){
  const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit:10,asOf:Date.now()});
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjProofFeed(feed),reply_markup:proofFeedKeyboard(symbol)});
 }
 async function showTerminalView(chatId,messageId,symbol,view){
- if(view==='SIGNAL')return showSignalLab(chatId,messageId,symbol,'1h');
+ if(view==='SIGNAL')return showSignalLab(chatId,messageId,symbol,'1h','FULL');
  const x=await terminalContext(symbol);
  const text=view==='RISK'?renderSuperRisk(x.risk):renderSuperSetup(x.setup);
  return deliverTelegramTextCard(tg,chatId,messageId,{text,reply_markup:terminalKeyboard(symbol)});
@@ -7297,7 +7315,7 @@ async function handle(update) {
       if(!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
       stopLiveAnalysisAuto(chatId);
       const textMessageId=(Array.isArray(q.message?.photo)&&q.message.photo.length>0)?null:messageId;
-      await showSignalLab(chatId,textMessageId,a.symbol,a.horizon||'1h'); await ack(q.id,'Signal Lab geladen'); return;
+      await showSignalLab(chatId,textMessageId,a.symbol,a.horizon||'1h',a.mode||'FULL'); await ack(q.id,'Signal Lab geladen'); return;
     }
     if (a.kind === 'PROOF_FEED') {
       if(a.symbol&&!symbolOk(a.symbol)){await ack(q.id,'Unbekannter Markt');return;}
