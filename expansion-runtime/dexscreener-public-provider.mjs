@@ -1,6 +1,7 @@
 export const DEXSCREENER_PUBLIC_PROVIDER_VERSION='TCX_DEXSCREENER_PUBLIC_PROVIDER_V1';
 
 function finite(v){
+  if(v==null||v==='') return null;
   const n=Number(v);
   return Number.isFinite(n)?n:null;
 }
