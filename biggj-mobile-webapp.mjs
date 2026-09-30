@@ -368,7 +368,11 @@ function renderWorld(){
   html+='<div class="marketRail">'+(markets.length?markets.map(x=>{const score=Number.isFinite(Number(x.score))?CLAMP(x.score):CLAMP(x.witnessAgreement);return '<div class="market"><div class="marketSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+'</div><div class="marketStatus">'+E(x.epistemicClass||'INFERRED')+' · '+E(x.regime||'UNKNOWN')+'</div><div class="marketScore">'+Math.round(score*100)+'</div><div class="bar"><i style="width:'+Math.round(score*100)+'%"></i></div><div class="marketFoot"><span>'+E(statusDE(x.status))+'</span><span>'+N(x.support)+' support</span></div></div>'}).join(''):empty('Noch keine kanonischen Marktstates verfügbar.'))+'</div>';
   html+=sectionHead('Regime Distribution',regimes.length+' Zustände');
   html+='<div class="stack">'+(regimes.length?regimes.map(x=>panel(E(x.regime),N(x.count)+' Märkte','INFERRED')).join(''):empty('Keine Regime-Verteilung verfügbar.'))+'</div>';
-  const assoc=world.associationGraph||{},flow=world.informationFlowGraph||{},pred=world.predictabilityField||{},rotation=world.rotation||{},shocks=world.shockMap||{};
+  const assoc=world.associationGraph||{},flow=world.informationFlowGraph||{},pred=world.predictabilityField||{},rotation=world.rotation||{},shocks=world.shockMap||{},latent=world.latentStateDiscovery||{},latentCandidate=latent.researchCandidate||{};
+  html+=sectionHead('Latent-State Research','canonical state bleibt '+E(latent.status||'UNKNOWN'));
+  html+=latentCandidate.status==='RESEARCH_CANDIDATE'
+    ?panel(E(latentCandidate.candidateKey||'STATE CANDIDATE'),Object.entries(latentCandidate.dimensions||{}).filter(([,v])=>Number.isFinite(Number(v))).map(([k,v])=>E(k)+' '+P(v)).join(' · ')+'<br><span class="warn">MODELLED · research only · no decision authority</span>',E(latentCandidate.epistemicClass||'MODELLED'),'researchCard required')
+    :empty('Noch kein ausreichend belegter Latent-State Research Candidate. Der kanonische Hidden State bleibt UNKNOWN.');
   html+=sectionHead('Market Topology',N(assoc.edges?.length)+' Association Edges');
   html+='<div class="stack">'+((assoc.edges||[]).slice(0,8).length?(assoc.edges||[]).slice(0,8).map(x=>panel(E(x.a)+' ↔ '+E(x.b),'Stärke '+P(x.strength)+' · n='+N(x.samples)+' · '+E(x.epistemicClass||'OBSERVED_ASSOCIATION'),'NOT CAUSAL')).join(''):empty('Noch keine belastbare PIT-Association im aktuellen Fenster.'))+'</div>';
   html+=sectionHead('Information-Flow Hypotheses',N(flow.candidates?.length)+' Kandidaten');
