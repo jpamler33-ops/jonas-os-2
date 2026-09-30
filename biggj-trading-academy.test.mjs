@@ -129,3 +129,14 @@ test('rendered academy exposes skill grid quest boss and debrief',()=>{
   assert.match(text,/SHADOW_ONLY/);
   assert.ok(text.length<=4096);
 });
+
+
+test('risk quest does not pass loss-streak control when recent sample is all losses',()=>{
+  const rows=Array.from({length:20},(_,i)=>trade(i,{pnl:-1,policy:false,trusted:false,attribution:false,leverage:2,capture:null}));
+  const x=buildBiggjTradingAcademy(ledger(rows),{academy,supervisor});
+  const riskQuest=x.mission.skillId==='RISK'?x.mission:null;
+  assert.ok(riskQuest);
+  const streak=riskQuest.checks.find(c=>c.label.includes('Verlustserie'));
+  assert.ok(streak);
+  assert.ok(streak.progress<1);
+});
