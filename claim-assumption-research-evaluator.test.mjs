@@ -150,8 +150,8 @@ test('paired evaluator flags false-positive burden rather than calling noisy ale
   const rows=[];
   let i=0;
   for(let n=0;n<20;n++) rows.push(observation(i++,{challenger:n<6,baseline:n<6,topCorrect:false}));
-  for(let n=0;n<40;n++) rows.push(observation(i++,{challenger:n<28,baseline:n<4,topCorrect:true}));
-  const r=evaluateClaimAssumptionResearch(dataset(rows),{config:{...lowThresholds,minConclusiveObservations:50}});
+  for(let n=0;n<100;n++) rows.push(observation(i++,{challenger:n<80,baseline:n<10,topCorrect:true}));
+  const r=evaluateClaimAssumptionResearch(dataset(rows),{config:{...lowThresholds,minConclusiveObservations:100}});
   assert.equal(r.readiness.ready,true);
   assert.ok(r.primary.pairedFalseAlerts.test.pValue<.05);
   assert.equal(r.conclusion.state,'FALSE_POSITIVE_BURDEN');
