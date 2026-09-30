@@ -146,7 +146,7 @@ test('BIGGJ V6.1 exposes one-tap user commands',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'CHANNEL UX V7'
+    'BIGGJ_DISCORD_CHANNEL_UX_V7'
   ]) assert.ok(source.includes(required),required);
 });
 
