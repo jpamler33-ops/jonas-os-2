@@ -59,6 +59,9 @@ test("product callbacks are deterministic",()=>{
   assert.deepEqual(parseProductCallback("accuracy:BTCUSDT"),{kind:"FORECAST_ACCURACY",symbol:"BTCUSDT",scope:"SYMBOL"});
   assert.deepEqual(parseProductCallback("accuracy:ALL"),{kind:"FORECAST_ACCURACY",symbol:null,scope:"ALL"});
   assert.deepEqual(parseProductCallback("superchart:BTCUSDT:FULL:15m"),{kind:"SUPERCHART",symbol:"BTCUSDT",mode:"FULL",interval:"15m"});
+  assert.deepEqual(parseProductCallback("signallab:BTCUSDT:1h"),{kind:"SIGNAL_LAB",symbol:"BTCUSDT",horizon:"1h"});
+  assert.deepEqual(parseProductCallback("proof:BTCUSDT"),{kind:"PROOF_FEED",symbol:"BTCUSDT"});
+  assert.deepEqual(parseProductCallback("proof:ALL"),{kind:"PROOF_FEED",symbol:null});
   assert.deepEqual(parseProductCallback("terminal:radar"),{kind:"SUPER_RADAR"});
   assert.deepEqual(parseProductCallback("terminal:setup:BTCUSDT"),{kind:"TERMINAL_VIEW",view:"SETUP",symbol:"BTCUSDT"});
   assert.deepEqual(parseProductCallback("terminal:risk:BTCUSDT"),{kind:"TERMINAL_VIEW",view:"RISK",symbol:"BTCUSDT"});
