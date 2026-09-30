@@ -368,10 +368,19 @@ function renderWorld(){
   html+='<div class="marketRail">'+(markets.length?markets.map(x=>{const score=Number.isFinite(Number(x.score))?CLAMP(x.score):CLAMP(x.witnessAgreement);return '<div class="market"><div class="marketSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+'</div><div class="marketStatus">'+E(x.epistemicClass||'INFERRED')+' · '+E(x.regime||'UNKNOWN')+'</div><div class="marketScore">'+Math.round(score*100)+'</div><div class="bar"><i style="width:'+Math.round(score*100)+'%"></i></div><div class="marketFoot"><span>'+E(statusDE(x.status))+'</span><span>'+N(x.support)+' support</span></div></div>'}).join(''):empty('Noch keine kanonischen Marktstates verfügbar.'))+'</div>';
   html+=sectionHead('Regime Distribution',regimes.length+' Zustände');
   html+='<div class="stack">'+(regimes.length?regimes.map(x=>panel(E(x.regime),N(x.count)+' Märkte','INFERRED')).join(''):empty('Keine Regime-Verteilung verfügbar.'))+'</div>';
-  html+=sectionHead('Ungeklärte World-Model-Schichten');
-  for(const item of [['Latent State',world.latentStateDiscovery],['Information Flow',world.informationFlowGraph],['Predictability Field',world.predictabilityField]]){
-    const v=item[1]||{};html+=panel(E(item[0])+' · <span class="warn">'+E(v.status||'UNKNOWN')+'</span>',E(v.reason||'Keine kanonische Aussage.'),'NO FABRICATION');
-  }
+  const assoc=world.associationGraph||{},flow=world.informationFlowGraph||{},pred=world.predictabilityField||{},rotation=world.rotation||{},shocks=world.shockMap||{};
+  html+=sectionHead('Market Topology',N(assoc.edges?.length)+' Association Edges');
+  html+='<div class="stack">'+((assoc.edges||[]).slice(0,8).length?(assoc.edges||[]).slice(0,8).map(x=>panel(E(x.a)+' ↔ '+E(x.b),'Stärke '+P(x.strength)+' · n='+N(x.samples)+' · '+E(x.epistemicClass||'OBSERVED_ASSOCIATION'),'NOT CAUSAL')).join(''):empty('Noch keine belastbare PIT-Association im aktuellen Fenster.'))+'</div>';
+  html+=sectionHead('Information-Flow Hypotheses',N(flow.candidates?.length)+' Kandidaten');
+  html+='<div class="stack">'+((flow.candidates||[]).slice(0,8).length?(flow.candidates||[]).slice(0,8).map(x=>panel(E(x.leader)+' → '+E(x.follower),'Lag '+N(x.lagBars)+' Bars · r '+(Number.isFinite(Number(x.rho))?Number(x.rho).toFixed(2):'—')+' · n='+N(x.samples),E(x.epistemicClass||'HYPOTHESIS')+' · NO CAUSAL PROOF')).join(''):empty('Kein Lead/Lag-Kandidat hat den Research-Screen passiert.'))+'</div>';
+  html+=sectionHead('Forecastability Evidence',E(pred.status||'INSUFFICIENT'));
+  html+='<div class="stack">'+((pred.markets||[]).slice(0,8).length?(pred.markets||[]).slice(0,8).map(x=>panel(E(String(x.symbol||'').replace('USDT','/USDT')),E(x.status||'INSUFFICIENT')+' · resolved '+N(x.resolved)+' · Gate '+E(x.calibrationGate||'UNKNOWN'),(x.matureHorizons||[]).length?E(x.matureHorizons.join(' · ')):'SAMMELT')).join(''):empty('Noch zu wenig aufgelöste PIT-Forecasts für ein belastbares Feld.'))+'</div>';
+  html+=sectionHead('Cross-Market State');
+  html+=panel('Rotation · '+E(rotation.status||'INSUFFICIENT'),'Relative Preisrotation · kein Beweis tatsächlicher Kapitalflüsse.',rotation.leader?.assetClass?'Leader '+E(rotation.leader.assetClass):'NO FLOW CLAIM');
+  html+=panel('Shock Map · '+E(shocks.status||'INSUFFICIENT'),N(shocks.origins?.length)+' beobachtete Shock Origins · '+N(shocks.associatedWaves?.length)+' assoziierte Wellen','ASSOCIATION ≠ PROPAGATION');
+  html+=sectionHead('Unknown Frontier');
+  const unknowns=(world.unknowns||[]);
+  html+='<div class="stack">'+(unknowns.length?unknowns.map(x=>panel(E(x.id||'UNKNOWN')+' · <span class="warn">'+E(x.status||'UNKNOWN')+'</span>',E(x.reason||'Nicht ausreichend identifiziert.'),(x.requiredEvidence||[]).length?E(x.requiredEvidence.join(' · ')):'UNKNOWN IS VALID')).join(''):empty('Keine expliziten Unknowns im Snapshot.'))+'</div>';
   html+=sectionHead('Reality Feed',events.length+' Events');
   html+='<div class="stack">'+(events.length?events.map(x=>panel(E(x.title||x.eventType||'Event'),'<span class="sourceTag">'+E(x.family||'OTHER')+'</span>'+E(x.marketStatus||x.status||'WATCH')+' · '+(x.verified?'verifiziert':'noch nicht unabhängig bestätigt'),x.availableAt?AGE(x.availableAt)+' alt':'LIVE')).join(''):empty('Noch kein Intelligence-Event im aktuellen Snapshot.'))+'</div>';
   return html+'</section>';
@@ -392,9 +401,10 @@ function renderLab(){
 }
 
 function renderSystem(){
-  const h=S.health||{},ready=h.operationalReadiness||{},op=h.autonomousOperator||{},factory=h.autonomousResearchFactory||{},fabric=h.marketDataFabric||{},oms=h.shadowOms||{},fr=h.institutionalForecastRuntime||{},dc=h.discordBridge||{},tg=h.telegramPolling||{},st=S.storage||{},lr=h.biggjLivingResearch||{};
+  const h=S.health||{},ready=h.operationalReadiness||{},op=h.autonomousOperator||{},factory=h.autonomousResearchFactory||{},fabric=h.marketDataFabric||{},oms=h.shadowOms||{},fr=h.institutionalForecastRuntime||{},dc=h.discordBridge||{},tg=h.telegramPolling||{},st=S.storage||{},lr=h.biggjLivingResearch||{},wm=h.biggjWorldModel||{};
   const rows=[
     ['Operational Readiness',ready.ready?'READY':ready.status||'CHECK'],
+    ['World Model',wm.healthy===true?'HEALTHY':wm.healthy===false?'CHECK':'WARMING'],
     ['Autonomous Operator',statusDE(op.mode)],
     ['Research Factory',statusDE(factory.mode)],
     ['Living Research',lr.integrity||'UNKNOWN'],
