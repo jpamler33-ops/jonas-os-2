@@ -54,11 +54,10 @@ test('future-dated articles are rejected to preserve point-in-time semantics',as
   assert.equal(out.events.some(x=>x.title==='Observed headline'),true);
 });
 
-test('provider degrades partially when one discovery query fails',async()=>{
-  let calls=0;
-  const fetchImpl=async()=>{
-    calls++;
-    if(calls===1)throw new Error('SOURCE_DOWN');
+test('provider degrades partially when one discovery query and its retry fail',async()=>{
+  const fetchImpl=async url=>{
+    const q=new URL(url).searchParams.get('query')||'';
+    if(q.includes('bitcoin'))throw new Error('SOURCE_DOWN');
     return response({articles:[
       {title:'Tariff negotiations affect global trade',url:'https://world.example/tariff',seendate:'20260930T095000Z'}
     ]});
@@ -68,6 +67,25 @@ test('provider degrades partially when one discovery query fails',async()=>{
   assert.equal(out.ok,true);
   assert.equal(out.errors.length,1);
   assert.equal(out.events.length,1);
+});
+
+test('provider retries a compact query after a primary timeout without surfacing a hard error',async()=>{
+  let calls=0;
+  const fetchImpl=async url=>{
+    calls++;
+    const q=new URL(url).searchParams.get('query')||'';
+    if(q.includes('crypto OR markets OR economy'))throw new Error('This operation was aborted');
+    return response({articles:[
+      {title:'Bitcoin market update after inflation data',url:'https://crypto.example/recovered',seendate:'20260930T095000Z'}
+    ]});
+  };
+  const p=createBiggjPublicNewsProvider({fetchImpl,now:()=>NOW});
+  const out=await p.fetchFeed();
+  assert.equal(out.ok,true);
+  assert.equal(out.errors.length,0);
+  assert.ok(out.recoveries.some(x=>x.queryClass==='GENERAL'&&x.strategy==='COMPACT_QUERY_RETRY'));
+  assert.ok(out.events.some(x=>x.url==='https://crypto.example/recovered'));
+  assert.ok(calls>=3);
 });
 
 test('provider caches the normalized feed inside its TTL',async()=>{
