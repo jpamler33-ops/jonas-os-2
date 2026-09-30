@@ -370,6 +370,12 @@ export function buildBiggjTradingAcademy(ledger,{
     },
     legacyAcademyStage:String(academy?.activeStage||'UNKNOWN'),
     trainingRiskMultiplier:finite(supervisor?.risk?.multiplier),
+    riskGuard:{
+      coreAllowed:academy?.guard?.coreAllowed!==false,
+      memeAllowed:academy?.guard?.memeAllowed!==false,
+      blockers:Array.isArray(academy?.guard?.blockers)?academy.guard.blockers.map(String).slice(0,12):[],
+      memeBlockers:Array.isArray(academy?.guard?.memeBlockers)?academy.guard.memeBlockers.map(String).slice(0,12):[]
+    },
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
     canExecute:false,
@@ -420,6 +426,13 @@ export function renderBiggjTradingAcademy(model){
     'BOSS CHALLENGE',
     String(x.boss?.title||'—')+' · '+(x.boss?.passed?'CLEARED':'ACTIVE'),
     'Progress '+bar(x.boss?.progress||0,12)+' '+pct(x.boss?.progress||0)
+  );
+  lines.push(
+    '',
+    'RISK GUARD',
+    'Core '+(x.riskGuard?.coreAllowed?'READY':'PAUSED')+' · Meme '+(x.riskGuard?.memeAllowed?'READY':'PAUSED'),
+    ...(x.riskGuard?.blockers?.length?['Blocker: '+x.riskGuard.blockers.join(', ')]:[]),
+    ...(x.riskGuard?.memeBlockers?.length&&!x.riskGuard?.memeAllowed?['Meme: '+x.riskGuard.memeBlockers.join(', ')]:[])
   );
   const d=x.debrief;
   if(d?.available){
