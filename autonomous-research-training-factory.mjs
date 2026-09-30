@@ -324,6 +324,91 @@ function tasksFromStrategyLeague(summary={}){
   })];
 }
 
+function tasksFromMarketScienceDirector(summary={}){
+  const tasks=[];
+  const agenda=arr(summary?.topAgenda?.length?summary.topAgenda:summary?.agenda).slice(0,12);
+  for(const row of agenda){
+    const kind=normalizedStatus(row?.kind);
+    const next=normalizedStatus(row?.nextExperimentType);
+    const subject=String(row?.theoryId||row?.surpriseId||row?.questionId||'MARKET_SCIENCE');
+    const base={
+      subject,
+      priority:clamp(row?.priority,.65),
+      informationValue:clamp(row?.expectedInformationGainProxy??row?.scientificLeverage??row?.priority,.65),
+      uncertainty:clamp(Math.max(
+        finite(row?.replicationGap,.5),
+        finite(row?.generalizationGap,.5),
+        finite(row?.contradictionSignal,0),
+        finite(row?.surpriseSignal,0)
+      ),.5),
+      source:'BIGGJ_MARKET_SCIENCE_DIRECTOR',
+      metadata:{
+        questionId:row?.questionId??null,
+        theoryId:row?.theoryId??null,
+        kind,
+        question:row?.question??null,
+        derivedStatus:row?.derivedStatus??null,
+        nextExperimentType:next,
+        expectedInformationGainProxy:finite(row?.expectedInformationGainProxy,null),
+        scientificLeverage:finite(row?.scientificLeverage,null),
+        priorityIsHeuristicNotProbability:true
+      }
+    };
+
+    if(kind==='EVIDENCE_GAP'&&['PROSPECTIVE_OBSERVATION','FORWARD_REPLICATION'].includes(next)){
+      tasks.push(task({...base,
+        type:'COLLECT_FORWARD_DATA',
+        reason:'SCIENCE_DIRECTOR_FORWARD_EVIDENCE_GAP',
+        dataNeeds:['POINT_IN_TIME_FORWARD_OBSERVATIONS']
+      }));
+      continue;
+    }
+    if(kind==='EVIDENCE_GAP'&&['INDEPENDENT_SOURCE_REPLICATION','CROSS_MARKET_REPLICATION','CROSS_REGIME_REPLICATION'].includes(next)){
+      tasks.push(task({...base,
+        type:'COLLECT_INDEPENDENT_EPISODES',
+        reason:'SCIENCE_DIRECTOR_GENERALIZATION_OR_INDEPENDENCE_GAP',
+        dataNeeds:['INDEPENDENT_EPISODES','SOURCE_DIVERSITY','MARKET_DIVERSITY','REGIME_DIVERSITY']
+      }));
+      continue;
+    }
+
+    tasks.push(task({...base,
+      type:'RESEARCH_DEFINITION',
+      reason:kind==='BROKEN_THEORY'
+        ?'SCIENCE_DIRECTOR_BROKEN_THEORY_REQUIRES_FAILURE_ANALYSIS'
+        :kind==='CONTRADICTION'
+          ?'SCIENCE_DIRECTOR_CONTRADICTION_REQUIRES_DISCRIMINATING_RESEARCH'
+          :kind==='UNKNOWN_UNKNOWN'
+            ?'SCIENCE_DIRECTOR_UNKNOWN_UNKNOWN_REQUIRES_RESEARCH_DEFINITION'
+            :'SCIENCE_DIRECTOR_NON_AUTOMATIC_EXPERIMENT_REQUIRES_RESEARCH_DEFINITION',
+      blocker:next||kind,
+      dataNeeds:uniq(row?.candidateMissingVariables)
+    }));
+  }
+
+  for(const request of arr(summary?.topDataRequests?.length?summary.topDataRequests:summary?.dataRequests).slice(0,8)){
+    tasks.push(task({
+      type:'RESEARCH_DEFINITION',
+      subject:String(request?.variable||request?.requestId||'MISSING_VARIABLE'),
+      reason:'SCIENCE_DIRECTOR_RECURRING_MISSING_VARIABLE_REQUEST',
+      priority:clamp(request?.priority,.7),
+      informationValue:clamp(request?.priority,.7),
+      uncertainty:.85,
+      source:'BIGGJ_MARKET_SCIENCE_DIRECTOR',
+      blocker:'DATA_REQUEST',
+      dataNeeds:[String(request?.variable||'UNKNOWN_VARIABLE')],
+      metadata:{
+        requestId:request?.requestId??null,
+        variable:request?.variable??null,
+        surpriseCount:finite(request?.surpriseCount),
+        maxDivergence:finite(request?.maxDivergence),
+        candidateVariableIsHypothesisNotFact:true
+      }
+    }));
+  }
+  return tasks;
+}
+
 function dedupeTasks(tasks){
   const map=new Map();
   for(const row of tasks){
@@ -383,6 +468,22 @@ function sourceFingerprint(input){
     strategyLeagueFingerprint:input?.strategyLeagueSummary?.fingerprint??null,
     researchDataPlaneSeq:finite(input?.researchDataPlaneSummary?.seq),
     researchGovernanceFingerprint:input?.researchDataGovernanceSummary?.fingerprint??null,
+    marketScienceDirectorFingerprint:input?.marketScienceDirectorSummary?.researchFingerprint??sha256({
+      frontier:input?.marketScienceDirectorSummary?.knowledgeFrontier??null,
+      nextQuestionId:input?.marketScienceDirectorSummary?.nextResearchQuestion?.questionId??null,
+      topAgenda:arr(input?.marketScienceDirectorSummary?.topAgenda).map(x=>({
+        questionId:x?.questionId??null,
+        kind:x?.kind??null,
+        theoryId:x?.theoryId??null,
+        nextExperimentType:x?.nextExperimentType??null,
+        priority:finite(x?.priority,null)
+      })),
+      topDataRequests:arr(input?.marketScienceDirectorSummary?.topDataRequests).map(x=>({
+        requestId:x?.requestId??null,
+        variable:x?.variable??null,
+        priority:finite(x?.priority,null)
+      }))
+    }),
     researchCoverageFingerprint:sha256({
       symbols:finite(input?.researchCoverageSummary?.symbols),
       healthy:finite(input?.researchCoverageSummary?.healthy),
@@ -467,6 +568,7 @@ export function refreshAutonomousResearchTrainingFactory(state,{
   researchDataPlaneSummary=null,
   researchDataGovernanceSummary=null,
   researchCoverageSummary=null,
+  marketScienceDirectorSummary=null,
   historyStats=null,
   asOf=Date.now(),
   reason='PERIODIC_REFRESH',
@@ -488,6 +590,7 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     researchDataPlaneSummary,
     researchDataGovernanceSummary,
     researchCoverageSummary,
+    marketScienceDirectorSummary,
     historyStats
   };
   const fp=sourceFingerprint(input);
@@ -501,7 +604,8 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     ...tasksFromRegistry(modelCandidateRegistrySummary||{}),
     ...tasksFromLearnedChallenger(learnedChallengerSummary||{}),
     ...tasksFromFeatureResearch(featureResearchSummary||{}),
-    ...tasksFromStrategyLeague(strategyLeagueSummary||{})
+    ...tasksFromStrategyLeague(strategyLeagueSummary||{}),
+    ...tasksFromMarketScienceDirector(marketScienceDirectorSummary||{})
   ]);
   const leverage=rankBiggjResearchTasks(rawTasks,{
     asOf:t,

@@ -212,6 +212,11 @@ import {
   biggjEpistemicRuntimeSummary,
   BIGGJ_EPISTEMIC_RUNTIME_VERSION
 } from './biggj-epistemic-runtime.mjs';
+import {
+  buildBiggjMarketScienceDirector,
+  biggjMarketScienceDirectorSummary,
+  BIGGJ_MARKET_SCIENCE_DIRECTOR_VERSION
+} from './biggj-market-science-director.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -7255,6 +7260,7 @@ function biggjAiContextSnapshot(extraContext=null){
       researchCoverage:snapshot?.health?.researchCoverage||null,
       livingResearch:snapshot?.health?.biggjLivingResearch||null,
       epistemicKernel:snapshot?.health?.biggjEpistemicKernel||null,
+      marketScienceDirector:snapshot?.health?.biggjMarketScienceDirector||null,
       marketRadar:snapshot?.health?.marketRadar||null,
       biggjRulebook:snapshot?.health?.biggjRulebook||null,
       biggjSignalLab:snapshot?.health?.biggjSignalLab||null,
@@ -9593,8 +9599,10 @@ function currentOperationalReadiness(){
 function autonomousResearchFactoryInputs(now=Date.now()){
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
+  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
   return {
     livingResearchState:biggjLivingResearchState,
+    marketScienceDirectorSummary:biggjMarketScienceDirectorSummary(marketScienceDirector),
     experimentGovernorSummary:experimentGovernorSummary(experimentGovernorState||{}),
     modelPromotionReviewSummary:modelPromotionReviewLastSummary,
     modelCandidateRegistrySummary:modelCandidateRegistrySummary(modelCandidateRegistry),
@@ -9873,6 +9881,7 @@ async function autonomousOperatorWatcher(){
 function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
+ const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
  const governanceTriage=buildBiggjGovernanceTriage({
   livingResearchState:biggjLivingResearchState,
   modelPromotionReviewSummary:modelPromotionReviewLastSummary,
@@ -9921,6 +9930,10 @@ function missionControlData(){
     healthy:biggjEpistemicHealthy,
     recoveredFromCorrupt:biggjEpistemicRecoveredFromCorrupt,
     file:biggjEpistemicFile
+  },
+  biggjMarketScienceDirector:{
+    ...biggjMarketScienceDirectorSummary(marketScienceDirector),
+    version:BIGGJ_MARKET_SCIENCE_DIRECTOR_VERSION
   },
   autonomousResearchFactory:{
     ...autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
