@@ -42,7 +42,7 @@ function isPassiveDataWait(factorySummary,assessments,tasks){
   if(!needs.length||!tasks.length)return false;
   if(!needs.every(x=>PASSIVE_DATA_NEEDS.has(x)))return false;
   if(!tasks.every(x=>x?.automaticShadowEligible===true&&x?.manualReviewRequired!==true))return false;
-  return assessments.every(x=>['HEALTHY','WARMING_UP'].includes(String(x?.state)));
+  return assessments.every(x=>['HEALTHY','WARMING_UP','BACKPRESSURE'].includes(String(x?.state)));
 }
 
 function finalized(core){
@@ -136,11 +136,20 @@ function taskOwnerAssessment(task,{operations,ownerPolicies,uptimeMs,asOf,policy
     };
   }
   if(freshest.lastError){
+    const signal=String(freshest.lastError);
+    if(signal.startsWith('DEFERRED_')||signal.startsWith('SKIPPED_')){
+      return {
+        taskId:task.taskId,subject:task.subject,handler,
+        state:'BACKPRESSURE',reason:signal,
+        lastOperation:freshest.name,lastAt:freshest.lastAt,ageMs,maxSilentMs,
+        recoveryAction:null
+      };
+    }
     return {
       taskId:task.taskId,subject:task.subject,handler,
       state:'ERROR',reason:'OWNER_LAST_OPERATION_ERROR',
       lastOperation:freshest.name,lastAt:freshest.lastAt,ageMs,maxSilentMs,
-      error:String(freshest.lastError),
+      error:signal,
       recoveryAction:owner.recoveryAction||null
     };
   }
