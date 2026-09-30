@@ -23,10 +23,16 @@ function thesisMemory({
   persistentStaleCount=1,
   falsifiers=['WITNESS_NOT_SATISFIED'],
   eventType='PERSISTENT_STALE_CONFIRMED',
-  observedAt=1000
+  observedAt=1000,
+  symbol='BTCUSDT',
+  decisionAsOf=observedAt-2000,
+  issueKnowledgeAt=observedAt-1000
 }={}){
   return {
     forecastId,
+    symbol,
+    decisionAsOf,
+    issueKnowledgeAt,
     firstPersistentStaleAt:state==='PERSISTENT_STALE'?observedAt:null,
     assumptions:[{
       assumptionId,
@@ -216,19 +222,21 @@ test('new post-hypothesis persistent cases bind as prospective evidence but cann
   assert.equal(next.boundEvidenceIds.length,1);
   assert.equal(skill.evidenceSummary.total,2);
   assert.equal(skill.evidenceSummary.forwardShadow,1);
-  assert.equal(skill.evidenceSummary.independentEpisodes,0);
+  assert.equal(skill.evidenceSummary.independentEpisodes,1);
   const prospective=skill.evidence.find(x=>x.forwardShadow===true);
   assert.ok(prospective);
   assert.equal(prospective.epistemicClass,'INFERRED');
-  assert.equal(prospective.independentEpisodeId,null);
+  assert.ok(prospective.independentEpisodeId);
   assert.equal(prospective.provenance[0].kind,'PROSPECTIVE_PERSISTENT_CASE');
-  assert.equal(prospective.provenance[0].independenceResolved,false);
+  assert.equal(prospective.provenance[0].independenceResolved,true);
+  assert.equal(prospective.provenance[0].statisticalIndependenceProven,false);
+  assert.equal(prospective.provenance[0].crossSymbolAloneNeverCreatesIndependence,true);
 
   const summary=biggjLivingResearchRuntimeSummary(next.state);
   const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
   assert.equal(row.status,'DISCOVERING');
   assert.equal(row.recommendedStatus,'DISCOVERING');
-  assert.equal(row.independentEpisodes,0);
+  assert.equal(row.independentEpisodes,1);
   assert.ok(row.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
 
   const repeated=refreshBiggjLivingResearchRuntime(next.state,{
@@ -238,6 +246,71 @@ test('new post-hypothesis persistent cases bind as prospective evidence but cann
   });
   assert.equal(repeated.changed,false);
   assert.equal(repeated.state.skillTree.nodes.find(x=>x.skillId===skillId).evidenceSummary.total,2);
+});
+
+test('common-cause clustering prevents correlated cases from inflating independent episodes',()=>{
+  const DAY=24*60*60*1000;
+  const createdAt=10*DAY;
+  const initial=createBiggjLivingResearchRuntime({asOf:createdAt-10_000});
+  const created=refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[
+      thesisMemory({forecastId:'F1',observedAt:createdAt-3*60*60*1000}),
+      thesisMemory({forecastId:'F2',observedAt:createdAt-2*60*60*1000}),
+      thesisMemory({forecastId:'F3',observedAt:createdAt-1*60*60*1000})
+    ],
+    asOf:createdAt,
+    reason:'DISCOVERY'
+  });
+  const skillId=created.state.discoveredSkillIds[0];
+
+  const clustered=refreshBiggjLivingResearchRuntime(created.state,{
+    thesisMemories:[
+      thesisMemory({
+        forecastId:'F4',
+        observedAt:createdAt+6*60*60*1000,
+        symbol:'BTCUSDT',
+        falsifiers:['WITNESS_NOT_SATISFIED']
+      }),
+      thesisMemory({
+        forecastId:'F5',
+        observedAt:createdAt+7*60*60*1000,
+        symbol:'ETHUSDT',
+        falsifiers:['WITNESS_EXTERNAL_COUNT_LT_2']
+      })
+    ],
+    asOf:createdAt+2*DAY,
+    reason:'CORRELATED_FORWARD_CASES'
+  });
+  let skill=clustered.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  const forward=skill.evidence.filter(x=>x.forwardShadow===true);
+  assert.equal(forward.length,2);
+  assert.ok(forward[0].independentEpisodeId);
+  assert.equal(forward[0].independentEpisodeId,forward[1].independentEpisodeId);
+  assert.equal(skill.evidenceSummary.independentEpisodes,1);
+  assert.equal(skill.status,'DISCOVERING');
+
+  const separated=refreshBiggjLivingResearchRuntime(clustered.state,{
+    thesisMemories:[
+      thesisMemory({
+        forecastId:'F6',
+        observedAt:createdAt+80*60*60*1000,
+        symbol:'SOLUSDT',
+        falsifiers:['WITNESS_MATERIAL_CONTRADICTION']
+      })
+    ],
+    asOf:createdAt+4*DAY,
+    reason:'SEPARATED_FORWARD_CASE'
+  });
+  skill=separated.state.skillTree.nodes.find(x=>x.skillId===skillId);
+  assert.equal(skill.evidenceSummary.independentEpisodes,2);
+  const summary=biggjLivingResearchRuntimeSummary(separated.state);
+  const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
+  assert.equal(row.recommendedStatus,'LEARNING');
+  assert.equal(row.status,'DISCOVERING','research runtime must not auto-apply the recommendation');
+  assert.ok(summary.conservativeEpisodePartitions>=2);
+  assert.equal(summary.researchEvidence.independentEpisodes,2);
+  assert.equal(summary.automaticPromotion,false);
+  assert.equal(summary.primaryMutationAllowed,false);
 });
 
 test('association milestones bind modelled non-causal evidence without becoming independent validation',()=>{
@@ -384,7 +457,7 @@ test('association evidence can raise research priority but remains explicitly no
 test('evidence binding semantics are versioned and future-dated inputs fail closed',()=>{
   assert.equal(
     BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
-    'TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V1'
+    'TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2'
   );
   const initial=createBiggjLivingResearchRuntime({asOf:1000});
 
