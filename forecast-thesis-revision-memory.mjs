@@ -187,7 +187,7 @@ export function verifyForecastThesisRevisionMemory(value){
   }
 }
 
-export function upgradeForecastThesisRevisionMemory(memory){
+export function upgradeForecastThesisRevisionMemory(memory,{migratedAt=null}={}){
   const v=verifyForecastThesisRevisionMemory(memory);
   if(!v.ok) throw new Error('thesis revision memory invalid: '+v.reasons.join(','));
   if(memory.version===FORECAST_THESIS_REVISION_MEMORY_VERSION) return memory;
@@ -215,6 +215,7 @@ export function upgradeForecastThesisRevisionMemory(memory){
     },
     migration:{
       fromVersion:LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION,
+      migratedAt:migratedAt==null?null:finite(migratedAt,'migratedAt'),
       historicalStabilityBackfilled:false,
       evidenceRewritten:false,
       eventHistoryRewritten:false
@@ -368,7 +369,7 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96,stabil
   const av=verifyForecastThesisRevisionArtifact(artifact);
   if(!av.ok) throw new Error('thesis revision artifact invalid: '+av.reasons.join(','));
 
-  const working=upgradeForecastThesisRevisionMemory(memory);
+  const working=upgradeForecastThesisRevisionMemory(memory,{migratedAt:artifact.observedAt});
   const migrationChanged=working.fingerprint!==memory.fingerprint;
   if(working.forecastId!==artifact.forecastId||working.issuanceId!==artifact.issuanceId){
     throw new Error('thesis revision identity mismatch');
