@@ -71,9 +71,10 @@ export function deriveBiggjExperienceNeeds(snapshot={}){
   const factory=h?.autonomousResearchFactory||{};
   const intel=h?.globalIntel||{};
   const traders=h?.traderWatch||{};
+  const passiveWait=operator?.waitingForData===true&&operator?.operatorNeeded!==true;
 
-  if(Number(coverage?.blocked||0)>0)needs.push({priority:1,label:'Research coverage reparieren',detail:(coverage.blocked||0)+' Märkte/Slots blockiert · '+(coverage.blockedFeatures||0)+' Features betroffen'});
-  if(String(factory?.mode)==='DATA_QUALITY_BLOCKED')needs.push({priority:1,label:'Datenqualität',detail:'Research Factory ist durch Data Governance/Coverage blockiert.'});
+  if(Number(coverage?.blocked||0)>0&&!passiveWait)needs.push({priority:1,label:'Research coverage reparieren',detail:(coverage.blocked||0)+' Märkte/Slots blockiert · '+(coverage.blockedFeatures||0)+' Features betroffen'});
+  if(String(factory?.mode)==='DATA_QUALITY_BLOCKED'&&!passiveWait)needs.push({priority:1,label:'Datenqualität',detail:'Research Factory ist durch Data Governance/Coverage blockiert.'});
   if(String(factory?.mode)==='RESEARCH_STALLED'){
     if(operator?.waitingForData===true){
       const waitingOn=arr(factory?.dataNeeds).slice(0,4).map(x=>clip(x,44)).join(', ');
@@ -95,7 +96,7 @@ export function deriveBiggjExperienceNeeds(snapshot={}){
   const meme=h?.memecoinRadar||{};
   if(meme?.sourceReady!==true)needs.push({priority:2,label:'Memecoin Live Coverage',detail:meme?.lastError?'DEX-Radar eingeschränkt: '+clip(meme.lastError,260):'DexScreener Live-Radar liefert aktuell keine verwertbaren Rows.'});
   else if(meme?.lastError)needs.push({priority:2,label:'Memecoin Source Degraded',detail:'DEX-Radar hat aktuelle Abruffehler: '+clip(meme.lastError,260)});
-  if(Number(coverage?.averageCoverage||1)<.8)needs.push({priority:2,label:'Mehr Live Data',detail:'Research Coverage '+pct(coverage.averageCoverage)+' · Ziel: breitere Point-in-Time-Quellen statt mehr Duplikate.'});
+  if(Number(coverage?.averageCoverage||1)<.8&&!passiveWait)needs.push({priority:2,label:'Mehr Live Data',detail:'Research Coverage '+pct(coverage.averageCoverage)+' · Ziel: breitere Point-in-Time-Quellen statt mehr Duplikate.'});
   if(!needs.length)needs.push({priority:3,label:'Keine harte Lücke',detail:'Aktuell kein zwingender Operator-/Source-Blocker. BIGGJ kann weiter Daten sammeln und validieren.'});
   return needs.sort((a,b)=>a.priority-b.priority||a.label.localeCompare(b.label));
 }
@@ -119,7 +120,7 @@ export function buildBiggjNeedsPayload(snapshot={}){
         'Operator: '+clip(operator.mode||'UNKNOWN',40),
         'Mensch nötig: '+(humanNeeded?'JA · '+clip(operator.humanJobRemaining||'Freigabe/Entscheidung nötig',90):'NEIN · aktuell nichts zu tun'),
         'Research Factory: '+clip(factory.mode||'UNKNOWN',40),
-        'Nur Datensammlung: '+(factory.operatorDataOnly?'JA':'NEIN'),
+        'Nur Datensammlung: '+((factory.operatorDataOnly||operator.waitingForData===true)?'JA':'NEIN'),
         'Automatisiert: '+pct(operator.automationCoverage)
       ].join('\n')),
       safeField('REGEL','Neue Quelle/Manager/Monitor nur dann hinzufügen, wenn sie eine konkrete Coverage-, Freshness-, Independence-, Latency- oder Governance-Lücke schließt.')
