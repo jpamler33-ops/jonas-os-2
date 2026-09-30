@@ -260,7 +260,9 @@ export function buildForecastThesisDeclarations({
     {
       assumptionId:'THESIS_EVIDENCE_ALIGNMENT_ADEQUATE',
       statement:'The pre-outcome evidence alignment is strong enough to support the declared thesis.',
-      evidenceIds:supportIds(thesisEvidenceAdequate,'THESIS_EVIDENCE_STATE'),
+      evidenceIds:thesisEvidenceAdequate
+        ?['THESIS_EVIDENCE_STATE','THESIS_MECHANISM_STATE']
+        :[],
       requiresEvidence:true,
       availableAt:issuedAt
     },
