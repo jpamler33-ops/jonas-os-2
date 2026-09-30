@@ -44,6 +44,7 @@ const COMMANDS=[
   {name:'changes',description:'BIGGJ Revisionen und Änderungen öffnen'},
   {name:'experiments',description:'BIGGJ Research Experimente öffnen'},
   {name:'skills',description:'BIGGJ Skill Tree öffnen'},
+  {name:'reviews',description:'BIGGJ Research Review Queue öffnen'},
   {name:'progress',description:'BIGGJ Lernfortschritt öffnen'},
   {name:'evidence_log',description:'BIGGJ Evidence Ledger öffnen'},
   {name:'decisions',description:'BIGGJ Decision Trace öffnen'},
@@ -361,7 +362,7 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER V5',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**OPERATOR LAYER**','\`/brain\` · Was BIGGJ gerade untersucht','\`/research\` · Research Queue','\`/skills\` · Skill Tree','\`/progress\` · Lernfortschritt','\`/changes\` · Revisionen','\`/decisions\` · Entscheidungsgründe','','**MARKET LAYER**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/portfolio\` · Shadow-Portfolio','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
+function startPayload(){return {embeds:[{title:'BIGGJ // TCX COMMAND CENTER V5',description:['**Research OS für Markt, Forecast, Shadow-Trading und Lernen.**','','**OPERATOR LAYER**','\`/brain\` · Was BIGGJ gerade untersucht','\`/research\` · Research Queue','\`/skills\` · Skill Tree','\`/reviews\` · Manuelle Skill-Reviews','\`/progress\` · Lernfortschritt','\`/changes\` · Revisionen','\`/decisions\` · Entscheidungsgründe','','**MARKET LAYER**','\`/dashboard\` · Mission Control','\`/market BTC\` · Markt','\`/forecast BTC\` · Forecast','\`/superchart BTC\` · SuperChart','\`/portfolio\` · Shadow-Portfolio','','Discord = Command Center · Telegram = Mobile Controller','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
   return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
@@ -1244,7 +1245,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='thesis'){await thesisCommand(interaction);return;}
     if(name==='academy'){await academyCommand(interaction);return;}
     if(name==='lesson'){await lessonCommand(interaction);return;}
-    const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
+    const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}

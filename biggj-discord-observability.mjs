@@ -20,6 +20,7 @@ export const BIGGJ_DISCORD_OBSERVABILITY_LAYOUT=Object.freeze([
   {category:'BIGGJ • PROGRESS',channels:[
     {name:'experiments',topic:'Präregistrierte Research-Protokolle, Validierungsphasen und nächste Tests.'},
     {name:'skill-tree',topic:'BIGGJ Skill Tree: Reifegrade, Dependency-Bottlenecks und Capability-Gaps.'},
+    {name:'review-queue',topic:'Evidenzreife Skill-Transitions, manuelle Reviews, Blocker und Governance.'},
     {name:'progress',topic:'Messbarer Lernfortschritt: Evidence, Episoden, Reifegrad und Research-Momentum.'},
     {name:'evidence-ledger',topic:'Evidence-Qualität, PIT/Audit/Science-Status und Research-Coverage.'},
     {name:'decision-trace',topic:'Nachvollziehbare Systementscheidungen und Begründungen aus explizitem State.'}
@@ -34,6 +35,7 @@ export const BIGGJ_DISCORD_OBSERVABILITY_MARKERS=Object.freeze({
   changes:'BIGGJ_OBSERVABILITY_CHANGES_V1',
   experiments:'BIGGJ_OBSERVABILITY_EXPERIMENTS_V1',
   skills:'BIGGJ_OBSERVABILITY_SKILL_TREE_V1',
+  reviews:'BIGGJ_OBSERVABILITY_REVIEW_QUEUE_V1',
   progress:'BIGGJ_OBSERVABILITY_PROGRESS_V1',
   evidence:'BIGGJ_OBSERVABILITY_EVIDENCE_V1',
   decisions:'BIGGJ_OBSERVABILITY_DECISION_TRACE_V1'
@@ -246,7 +248,12 @@ export function buildBiggjDiscordObservabilitySnapshot({
       open:finite(living?.researchReviews?.open,finite(state?.researchReviewQueue?.ticketCount)),
       blocked:finite(living?.researchReviews?.blocked,finite(state?.researchReviewQueue?.blockedCount)),
       decisions:finite(living?.researchReviews?.decisions,arr(state?.researchReviewDecisions).length),
-      automaticApply:false,
+      automaticApply:state?.researchReviewQueue?.automaticApply===true,
+      execution:String(state?.researchReviewQueue?.execution||'SHADOW_ONLY'),
+      action:String(state?.researchReviewQueue?.action||'ABSTAIN'),
+      canInfluencePrimary:state?.researchReviewQueue?.canInfluencePrimary===true,
+      canExecuteLive:state?.researchReviewQueue?.canExecuteLive===true,
+      builtAt:finite(state?.researchReviewQueue?.builtAt,null),
       tickets:arr(state?.researchReviewQueue?.tickets).slice(0,12).map(x=>({
         ticketId:String(x?.ticketId||'UNKNOWN'),
         skillId:String(x?.skillId||'UNKNOWN'),
@@ -254,7 +261,11 @@ export function buildBiggjDiscordObservabilitySnapshot({
         proposedStatus:String(x?.proposedStatus||'UNKNOWN'),
         evidenceState:String(x?.evidenceState||'UNKNOWN'),
         validationPhase:String(x?.validationPhase||'UNKNOWN'),
-        validationReadinessScore:clamp(x?.validationReadinessScore)
+        validationReadinessScore:clamp(x?.validationReadinessScore),
+        createdAt:finite(x?.createdAt,null),
+        validationChecklist:x?.validationChecklist||{},
+        postRegistrationEvidence:x?.postRegistrationEvidence||{},
+        dependencyGates:x?.dependencyGates||{}
       })),
       blockedItems:arr(state?.researchReviewQueue?.blocked).slice(0,12).map(x=>({
         protocolId:String(x?.protocolId||'UNKNOWN'),
@@ -301,13 +312,22 @@ export function buildBiggjDiscordObservabilitySnapshot({
 }
 
 export function biggjObservabilityNavComponents(){
-  return [{type:1,components:[
-    {type:2,style:1,label:'Brain',custom_id:'dc6:brain:pulse'},
-    {type:2,style:2,label:'Research',custom_id:'dc6:brain:research'},
-    {type:2,style:2,label:'Skills',custom_id:'dc6:brain:skills'},
-    {type:2,style:2,label:'Progress',custom_id:'dc6:brain:progress'},
-    {type:2,style:2,label:'Changes',custom_id:'dc6:brain:changes'}
-  ]}];
+  return [
+    {type:1,components:[
+      {type:2,style:1,label:'Brain',custom_id:'dc6:brain:pulse'},
+      {type:2,style:2,label:'Research',custom_id:'dc6:brain:research'},
+      {type:2,style:2,label:'Skills',custom_id:'dc6:brain:skills'},
+      {type:2,style:2,label:'Progress',custom_id:'dc6:brain:progress'},
+      {type:2,style:2,label:'Changes',custom_id:'dc6:brain:changes'}
+    ]},
+    {type:1,components:[
+      {type:2,style:3,label:'Reviews',custom_id:'dc6:brain:reviews'},
+      {type:2,style:2,label:'Evidence',custom_id:'dc6:brain:evidence'},
+      {type:2,style:2,label:'Decisions',custom_id:'dc6:brain:decisions'},
+      {type:2,style:2,label:'Experiments',custom_id:'dc6:brain:experiments'},
+      {type:2,style:2,label:'Knowledge',custom_id:'dc6:brain:knowledge'}
+    ]}
+  ];
 }
 function payload(title,description,fields,marker,snapshot){
   const safeTitle=clip(title,256);
@@ -354,6 +374,31 @@ function nextExperimentLines(snapshot,limit=6){
     mark(x.currentStatus)+' **'+clip(x.title||x.skillId,65)+'** · '+clip(x.currentStatus,20)+' → '+clip(x.recommendedStatus,20)+
     '\nNEXT · '+clip(x?.nextExperiment?.purpose||x?.nextExperiment?.experimentId||'No implied experiment',150)
   ).join('\n'):'Noch keine discovered skills im Validation Harness.';
+}
+
+function diagnosticLines(value,limit=6){
+  const out=[];
+  const walk=(node,prefix='',depth=0)=>{
+    if(out.length>=limit||depth>2||node==null)return;
+    if(Array.isArray(node)){
+      if(node.every(x=>x==null||['string','number','boolean'].includes(typeof x))){
+        out.push((prefix||'items')+': '+clip(node.join(', '),180));
+        return;
+      }
+      node.slice(0,Math.max(1,limit-out.length)).forEach((x,i)=>walk(x,prefix?prefix+'.'+i:String(i),depth+1));
+      return;
+    }
+    if(typeof node==='object'){
+      for(const [k,v] of Object.entries(node)){
+        if(out.length>=limit)break;
+        walk(v,prefix?prefix+'.'+k:k,depth+1);
+      }
+      return;
+    }
+    out.push((prefix||'value')+': '+clip(node,160));
+  };
+  walk(value);
+  return out.length?out.map(x=>'• '+x).join('\n'):'—';
 }
 
 export function buildBiggjBrainPulsePayload(snapshot={}){
@@ -565,6 +610,51 @@ export function buildBiggjEvidencePayload(snapshot={}){
     snapshot
   );
 }
+export function buildBiggjReviewQueuePayload(snapshot={}){
+  const reviews=snapshot?.researchReviews||{};
+  const tickets=arr(reviews.tickets).slice(0,7);
+  const fields=tickets.map((x,i)=>safeField(
+    '#'+(i+1)+' · '+clip(x.skillId,88),
+    [
+      '**Transition** '+clip(x.fromStatus,20)+' → '+clip(x.proposedStatus,20)+' · readiness '+pct(x.validationReadinessScore),
+      '**Evidence state** '+clip(x.evidenceState,72)+' · phase '+clip(x.validationPhase,52),
+      x.createdAt?'**Ticket** '+when(x.createdAt):'',
+      '**Post-registration evidence**\n'+diagnosticLines(x.postRegistrationEvidence,4),
+      '**Dependency gates**\n'+diagnosticLines(x.dependencyGates,4),
+      '**Validation checklist**\n'+diagnosticLines(x.validationChecklist,4)
+    ].filter(Boolean).join('\n')
+  ));
+  if(!fields.length){
+    fields.push(safeField('OPEN REVIEWS','Aktuell kein Skill-Transition-Ticket evidenzreif. BIGGJ wartet auf weitere valide Evidence statt eine Stufe zu erzwingen.'));
+  }
+  const blocked=arr(reviews.blockedItems).slice(0,7).map(x=>
+    '• **'+clip(x.skillId,52)+'** · '+clip(x.reason,72)+(arr(x.details).length?' · '+clip(arr(x.details).join(', '),140):'')
+  ).join('\n')||'Keine blockierten Review-Protokolle.';
+  const recent=arr(reviews.recentDecisions).slice(0,6).map(x=>
+    '• '+when(x.decidedAt)+' · **'+clip(x.skillId,48)+'** · '+clip(x.decision,24)+
+    (x.fromStatus||x.toStatus?' · '+clip(x.fromStatus,16)+' → '+clip(x.toStatus,16):'')
+  ).join('\n')||'Noch keine Review-Entscheidungen.';
+  fields.push(
+    safeField('BLOCKED',blocked),
+    safeField('RECENT DECISIONS',recent),
+    safeField('GOVERNANCE',[
+      'Open '+fmt(reviews.open)+' · blocked '+fmt(reviews.blocked)+' · decisions '+fmt(reviews.decisions),
+      'Queue built '+when(reviews.builtAt),
+      'Automatic apply '+(reviews.automaticApply?'ON':'OFF'),
+      'Execution '+clip(reviews.execution,30)+' · action '+clip(reviews.action,30),
+      'PRIMARY influence '+(reviews.canInfluencePrimary?'ENABLED':'BLOCKED')+' · live execution '+(reviews.canExecuteLive?'ENABLED':'BLOCKED'),
+      'TRUSTED transitions stay on the separate promotion path.'
+    ].join('\n'))
+  );
+  return payload(
+    'BIGGJ // RESEARCH REVIEW QUEUE',
+    '**Der menschlich prüfbare Übergang zwischen Lernen und höherer Skill-Reife.**\nEin Ticket bedeutet: Evidence erfüllt Review-Kriterien — nicht, dass die vorgeschlagene Stufe automatisch wahr oder freigegeben ist.',
+    fields,
+    BIGGJ_DISCORD_OBSERVABILITY_MARKERS.reviews,
+    snapshot
+  );
+}
+
 export function buildBiggjDecisionTracePayload(snapshot={}){
   const claim=snapshot.claimAssumptionResearch||{};
   const rationale=arr(snapshot.researchQueue).slice(0,5).map(x=>
@@ -603,6 +693,7 @@ export function buildBiggjDiscordObservabilityPayload(view='pulse',snapshot={}){
   if(key==='changes')return buildBiggjChangesPayload(snapshot);
   if(key==='experiments')return buildBiggjExperimentsPayload(snapshot);
   if(key==='skills')return buildBiggjSkillTreePayload(snapshot);
+  if(key==='reviews')return buildBiggjReviewQueuePayload(snapshot);
   if(key==='progress')return buildBiggjProgressPayload(snapshot);
   if(key==='evidence')return buildBiggjEvidencePayload(snapshot);
   if(key==='decisions')return buildBiggjDecisionTracePayload(snapshot);
@@ -618,6 +709,7 @@ export function buildBiggjDiscordObservabilityPanelMap(snapshot={}){
     {channel:'changes',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.changes,payload:buildBiggjChangesPayload(snapshot)},
     {channel:'experiments',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.experiments,payload:buildBiggjExperimentsPayload(snapshot)},
     {channel:'skill-tree',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.skills,payload:buildBiggjSkillTreePayload(snapshot)},
+    {channel:'review-queue',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.reviews,payload:buildBiggjReviewQueuePayload(snapshot)},
     {channel:'progress',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.progress,payload:buildBiggjProgressPayload(snapshot)},
     {channel:'evidence-ledger',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.evidence,payload:buildBiggjEvidencePayload(snapshot)},
     {channel:'decision-trace',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.decisions,payload:buildBiggjDecisionTracePayload(snapshot)}
