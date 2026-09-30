@@ -275,13 +275,19 @@ export function buildBiggjProofFeed(entries=[],{
   asOf=Date.now()
 }={}){
   const target=symbol?String(symbol).toUpperCase():null;
-  const resolved=arr(entries)
-    .filter(x=>x?.status==='RESOLVED'&&x?.resolution)
-    .filter(x=>!target||String(x?.symbol||'').toUpperCase()===target)
-    .filter(x=>finite(x?.resolution?.resolvedAt)!=null&&finite(x?.resolution?.resolvedAt)<=finite(asOf,Date.now()))
-    .sort((a,b)=>finite(b?.resolution?.resolvedAt,0)-finite(a?.resolution?.resolvedAt,0))
-    .slice(0,Math.max(1,Math.min(50,Math.floor(finite(limit,12)))))
-    .map(proofRow);
+  const take=Math.max(1,Math.min(50,Math.floor(finite(limit,12))));
+  const cutoff=finite(asOf,Date.now());
+  const latest=[];
+  for(const row of arr(entries)){
+    const resolvedAt=finite(row?.resolution?.resolvedAt);
+    if(row?.status!=='RESOLVED'||!row?.resolution||resolvedAt==null||resolvedAt>cutoff)continue;
+    if(target&&String(row?.symbol||'').toUpperCase()!==target)continue;
+    let i=0;
+    while(i<latest.length&&finite(latest[i]?.resolution?.resolvedAt,0)>=resolvedAt)i++;
+    latest.splice(i,0,row);
+    if(latest.length>take)latest.pop();
+  }
+  const resolved=latest.map(proofRow);
   const hits=resolved.filter(x=>x.directionalHit).length;
   const misses=resolved.length-hits;
   const core={
@@ -336,7 +342,7 @@ export function renderBiggjProofFeed(feed={}){
   if(!rows.length)lines.push('Noch keine aufgelösten Forecasts im gewählten Scope.');
   for(const row of rows.slice(0,10)){
     lines.push(
-      (row.directionalHit?'✓ HIT':'✕ MISS')+' · '+row.symbol.replace('USDT','/')+' · '+row.horizonId.toUpperCase(),
+      (row.directionalHit?'✓ HIT':'✕ MISS')+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
       'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
       'After   '+directionLabel(row.actualDirection)+' · Return '+signedPct(row.actualReturn)+' · Range '+(row.intervalHit?'HIT':'MISS'),
       'As-of   '+iso(row.issuedAsOf)+' · Resolved '+iso(row.resolvedAt),
