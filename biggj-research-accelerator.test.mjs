@@ -113,3 +113,18 @@ test('full accelerator preserves science and execution guards',()=>{
   assert.equal(a.semantics.accelerateEvidenceUseNotScientificThresholds,true);
   assert.ok(a.accelerationPotential>0);
 });
+
+
+test('runtime wiring uses adaptive cadence and bounded budgets',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  const leverage=await fs.readFile(new URL('./biggj-research-leverage-engine.mjs',import.meta.url),'utf8');
+  assert.match(bot,/TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP \|\| 3/);
+  assert.match(bot,/TCX_SHADOW_COMPETITION_EVAL_MS \|\| 15\*60_000/);
+  assert.match(bot,/effectiveAutoLearnMaxIssuedPerSweep/);
+  assert.match(bot,/effectiveShadowCompetitionHistoryRows/);
+  assert.match(bot,/buildOutcomeDeadlinePlan/);
+  assert.match(bot,/biggjResearchAccelerator/);
+  assert.match(leverage,/batchReuse:\.10/);
+  assert.match(leverage,/basePriority:\.15/);
+});
