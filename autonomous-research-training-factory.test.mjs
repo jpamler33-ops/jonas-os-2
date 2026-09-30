@@ -80,6 +80,39 @@ test('data deficits collapse into an operator data-only state when existing work
   assert.equal(refreshed.state.counters.unowned,0);
 });
 
+test('world-model validation collects independent evidence autonomously instead of requesting human approval',()=>{
+  const state=createAutonomousResearchTrainingFactory({asOf:1000});
+  const refreshed=refreshAutonomousResearchTrainingFactory(state,{
+    livingResearchState:baseLivingResearch(),
+    marketScienceDirectorSummary:{
+      topAgenda:[{
+        questionId:'rq_world_1',
+        kind:'WORLD_MODEL_VALIDATION',
+        worldModelTarget:'LATENT_STATE_CANDIDATE',
+        question:'Does the candidate remain stable out of sample?',
+        nextExperimentType:'TEMPORAL_OUT_OF_SAMPLE',
+        priority:.78,
+        expectedInformationGainProxy:.74,
+        scientificLeverage:.72
+      }],
+      topDataRequests:[]
+    },
+    historyStats:{rows:500,progressAt:1900},
+    asOf:2000
+  });
+  const task=refreshed.state.queue.find(x=>x.source==='BIGGJ_MARKET_SCIENCE_DIRECTOR');
+  assert.ok(task);
+  assert.equal(task.type,'COLLECT_INDEPENDENT_EPISODES');
+  assert.equal(task.autoHandler,'LIVING_RESEARCH_RUNTIME');
+  assert.equal(task.automaticShadowEligible,true);
+  assert.equal(task.manualReviewRequired,false);
+  assert.equal(task.primaryMutationAllowed,false);
+  assert.equal(task.canExecuteLive,false);
+  assert.ok(task.dataNeeds.includes('POINT_IN_TIME_WORLD_MODEL_EVIDENCE'));
+  assert.ok(task.dataNeeds.includes('TEMPORAL_HOLDOUT'));
+  assert.equal(refreshed.state.counters.manual,0);
+});
+
 test('manual research review prevents false claim that operator only needs to collect data',()=>{
   const state=createAutonomousResearchTrainingFactory({asOf:1000});
   const refreshed=refreshAutonomousResearchTrainingFactory(state,{
