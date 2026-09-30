@@ -307,7 +307,8 @@ test('common-cause clustering prevents correlated cases from inflating independe
   const row=summary.researchEvidence.rows.find(x=>x.skillId===skillId);
   assert.equal(row.recommendedStatus,'LEARNING');
   assert.equal(row.status,'DISCOVERING','research runtime must not auto-apply the recommendation');
-  assert.ok(summary.resolvedResearchEpisodes>=2);
+  assert.ok(summary.conservativeEpisodePartitions>=2);
+  assert.equal(summary.researchEvidence.independentEpisodes,2);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.primaryMutationAllowed,false);
 });
