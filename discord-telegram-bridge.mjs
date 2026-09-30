@@ -856,6 +856,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
           if(String(channel.topic||'')!==String(desiredTopic||''))await channel.setTopic(desiredTopic||null,'BIGGJ Discord V7 topic reconciliation');
         }
         channelCache.set(spec.name,channel);
+        channelManagers.observe(spec.name,{
+          exists:true,
+          parentMatches:String(channel.parentId||'')===String(category.id||''),
+          topicMatches:String(channel.topic||'')===String(desiredTopic||'')
+        });
       }
     }
     state.channels=channelCache.size; state.setupStatus='READY'; state.setupError=null;
@@ -879,7 +884,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       return upsertMarked(channel,marker,payload);
     }
   }
-  async function ensureStart(){const c=channelCache.get('start-here');return c?upsertMarked(c,MARKERS.start,startPayload()):null;}
+  async function ensureStart(){
+    const c=channelCache.get('start-here');
+    if(!c){channelManagers.failure('start-here','CHANNEL_NOT_FOUND');return null;}
+    return managed('start-here',()=>upsertMarked(c,MARKERS.start,startPayload()),{detail:'Startpanel bereit'});
+  }
   async function ensureAcademy(){
     const specs=[
       ['academy-start',MARKERS.academyStart,'start'],
@@ -895,7 +904,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     for(const [name,marker,kind] of specs){
       const c=channelCache.get(name);
       if(!c)continue;
-      await upsertMarkedAtBottom(c,marker,academyStaticPayload(kind));
+      await managed(name,()=>upsertMarkedAtBottom(c,marker,academyStaticPayload(kind)),{detail:'Academy-Panel '+kind});
       ready++;
     }
     state.academyPanels=ready;
@@ -903,11 +912,15 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return ready;
   }
 
-  async function refreshTerminal(){const c=channelCache.get('tcx-terminal');if(!c)return null;const m=await upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot()));state.lastRefreshAt=Date.now();return m;}
-  async function refreshSystem(){const c=channelCache.get('system-status');return c?upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())):null;}
-  async function refreshPerformance(){const c=channelCache.get('performance');return c?upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())):null;}
-  async function refreshOverview(){const c=channelCache.get('market-overview');return c?upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())):null;}
-  async function refreshDataHealth(){const c=channelCache.get('data-health');return c?upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())):null;}
+  async function refreshTerminal(){
+    const c=channelCache.get('tcx-terminal');if(!c)return null;
+    const m=await managed('tcx-terminal',async()=>upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot())),{detail:'Mission Control aktualisiert'});
+    state.lastRefreshAt=Date.now();return m;
+  }
+  async function refreshSystem(){const c=channelCache.get('system-status');return c?managed('system-status',async()=>upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())),{detail:'Systemstatus aktualisiert'}):null;}
+  async function refreshPerformance(){const c=channelCache.get('performance');return c?managed('performance',async()=>upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())),{detail:'Performance aktualisiert'}):null;}
+  async function refreshOverview(){const c=channelCache.get('market-overview');return c?managed('market-overview',async()=>upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())),{detail:'Marktübersicht aktualisiert'}):null;}
+  async function refreshDataHealth(){const c=channelCache.get('data-health');return c?managed('data-health',async()=>upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())),{detail:'Datenstatus aktualisiert'}):null;}
   function observabilityDigest(payload){
     const embeds=(payload?.embeds||[]).map(embed=>{
       const copy={...embed};
