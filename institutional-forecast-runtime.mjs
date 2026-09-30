@@ -549,6 +549,7 @@ function createRuntimeState(filePath,config,opts={}){
     trackerArchiveHash:null,
     trackerArchiveRecordCount:0,
     trackerArchiveRevisionCount:0,
+    trackerArchiveThesisRevisionEventCount:0,
     lastTrackerArchiveBytes:null,
     lastTrackerArchiveLogicalBytes:null,
     maxEngineStoreBytes:engineStoreByteLimit(opts.maxEngineStoreBytes),
@@ -738,20 +739,30 @@ export async function openInstitutionalForecastRuntime(filePath,{
       const trackerRecords=intelligenceSnapshot?.tracker?.records;
       if(!Array.isArray(trackerRecords)) throw new Error('forecast tracker archive missing tracker records');
       let restoredRevisionCount=0;
+      let restoredThesisRevisionEventCount=0;
       for(const record of trackerRecords){
         const archived=archiveById.get(record.id);
         if(!archived) throw new Error('forecast tracker archive record missing: '+record.id);
         record.issueState=clone(archived.issueState);
         record.revisions=clone(Array.isArray(archived.revisions)?archived.revisions:[]);
+        record.thesisMemory=clone(archived.thesisMemory??record.thesisMemory??null);
         restoredRevisionCount+=record.revisions.length;
+        restoredThesisRevisionEventCount+=Number(record?.thesisMemory?.eventCount||0);
       }
       if(Number.isFinite(Number(meta.revisionCount))&&restoredRevisionCount!==Number(meta.revisionCount)){
         throw new Error('forecast tracker archive revision count mismatch');
+      }
+      if(
+        Number.isFinite(Number(meta.thesisRevisionEventCount))&&
+        restoredThesisRevisionEventCount!==Number(meta.thesisRevisionEventCount)
+      ){
+        throw new Error('forecast tracker archive thesis revision count mismatch');
       }
       runtime.trackerArchiveSlot=meta.slot;
       runtime.trackerArchiveHash=meta.sha256;
       runtime.trackerArchiveRecordCount=archive.records.length;
       runtime.trackerArchiveRevisionCount=restoredRevisionCount;
+      runtime.trackerArchiveThesisRevisionEventCount=restoredThesisRevisionEventCount;
       runtime.lastTrackerArchiveBytes=archiveStat.size;
       runtime.lastTrackerArchiveLogicalBytes=logical.length;
     }
@@ -866,12 +877,16 @@ function snapshotComponentProfile(payload){
     issueState:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.issueState??null),0),
     transitionAtIssue:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.transitionAtIssue??null),0),
     revisionsBytes:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.revisions??[]),0),
+    thesisMemories:trackerRecords.filter(r=>r?.thesisMemory).length,
+    thesisRevisionEvents:trackerRecords.reduce((s,r)=>s+Number(r?.thesisMemory?.eventCount||0),0),
+    thesisMemoryBytes:trackerRecords.reduce((s,r)=>s+jsonBytes(r?.thesisMemory??null),0),
     metadata:trackerRecords.reduce((s,r)=>{
       const x={...r};
       delete x.report;
       delete x.issueState;
       delete x.transitionAtIssue;
       delete x.revisions;
+      delete x.thesisMemory;
       return s+jsonBytes(x);
     },0)
   };
@@ -932,7 +947,7 @@ function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={
       records:snapshot.tracker.records.map(record=>({
         ...record,
         report:trackerReportForPersistence(record.report),
-        ...(externalizeTrackerArchive?{issueState:null,revisions:[]}:null)
+        ...(externalizeTrackerArchive?{issueState:null,revisions:[],thesisMemory:null}:null)
       }))
     }
   };
@@ -942,7 +957,8 @@ function trackerArchiveRowForPersistence(record){
   return {
     id:record?.id,
     issueState:record?.issueState,
-    revisions:Array.isArray(record?.revisions)?record.revisions:[]
+    revisions:Array.isArray(record?.revisions)?record.revisions:[],
+    thesisMemory:record?.thesisMemory??null
   };
 }
 
@@ -956,7 +972,7 @@ function intelligencePersistenceView(service,{externalizeTrackerArchive=false}={
       records:trackerRows.map(record=>({
         ...record,
         report:trackerReportForPersistence(record?.report),
-        ...(externalizeTrackerArchive?{issueState:null,revisions:[]}:null)
+        ...(externalizeTrackerArchive?{issueState:null,revisions:[],thesisMemory:null}:null)
       }))
     },
     // The save path is synchronous until serialization begins; shallow references
@@ -1145,12 +1161,14 @@ export async function saveInstitutionalForecastRuntime(runtime){
         }
       }
       const revisionCount=trackerRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
+      const thesisRevisionEventCount=trackerRows.reduce((n,row)=>n+Number(row?.thesisMemory?.eventCount||0),0);
       trackerArchiveMeta={
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         slot,
         sha256:archiveHash,
         recordCount:trackerRows.length,
         revisionCount,
+        thesisRevisionEventCount,
         storageBytes:archiveBytes,
         logicalBytes:archiveLogicalBytes
       };
@@ -1264,6 +1282,7 @@ export async function saveInstitutionalForecastRuntime(runtime){
       runtime.trackerArchiveHash=trackerArchiveMeta.sha256;
       runtime.trackerArchiveRecordCount=trackerArchiveMeta.recordCount;
       runtime.trackerArchiveRevisionCount=trackerArchiveMeta.revisionCount;
+      runtime.trackerArchiveThesisRevisionEventCount=trackerArchiveMeta.thesisRevisionEventCount;
       runtime.lastTrackerArchiveBytes=trackerArchiveMeta.storageBytes;
       runtime.lastTrackerArchiveLogicalBytes=trackerArchiveMeta.logicalBytes;
     }
@@ -1780,6 +1799,7 @@ export function institutionalForecastRuntimeSummary(runtime){
       slot:runtime?.trackerArchiveSlot??null,
       recordCount:runtime?.trackerArchiveRecordCount??0,
       revisionCount:runtime?.trackerArchiveRevisionCount??0,
+      thesisRevisionEventCount:runtime?.trackerArchiveThesisRevisionEventCount??0,
       storageBytes:runtime?.lastTrackerArchiveBytes??null,
       logicalBytes:runtime?.lastTrackerArchiveLogicalBytes??null,
       maxLogicalBytes:runtime?.maxTrackerArchiveBytes??null,
@@ -1806,6 +1826,11 @@ export function institutionalForecastRuntimeSummary(runtime){
     claimAssumptionSidecars:(runtime?.issuances??[]).filter(x=>x?.claimAssumptionSidecar).length,
     resolvedClaimAssumptionEligible:(runtime?.journal?.all?.()??[]).filter(x=>x?.status==='RESOLVED').length,
     trackedForecasts:runtime?.intelligence?.all?.().length??0,
+    trackedThesisMemories:(runtime?.intelligence?.all?.()??[]).filter(x=>x?.thesisMemory).length,
+    thesisRevisionEvents:(runtime?.intelligence?.all?.()??[]).reduce((n,x)=>n+Number(x?.thesisMemory?.eventCount||0),0),
+    staleThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
+      (x?.thesisMemory?.assumptions||[]).some(a=>a?.issueSupported===true&&a?.currentSupported===false)
+    ).length,
     probabilityCalibration,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
