@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
 
-test('mission control V2 remains explicitly shadow only',()=>{
+test('market science mission control remains explicitly shadow only',()=>{
   const s=missionControlSnapshot({health:{ok:true}});
-  assert.equal(MISSION_CONTROL_VERSION,'TCX_MISSION_CONTROL_V2');
+  assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V1');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
   const html=renderMissionControlHtml(s);
@@ -19,7 +19,7 @@ test('embedded state cannot inject a script tag',()=>{
   assert.match(html,/"x":"\\u003cscript>"/);
 });
 
-test('mobile command center exposes overview markets research trades and system tabs',()=>{
+test('mobile control plane exposes science world lab decisions trading and system tabs',()=>{
   const s=missionControlSnapshot({
     health:{
       autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false,automationCoverage:1},
@@ -40,7 +40,7 @@ test('mobile command center exposes overview markets research trades and system 
     portfolio:{equityQuote:1000,openPositions:0,closedTrades:0,netPnlQuote:0,positions:[],recentClosed:[]}
   });
   const html=renderMissionControlHtml(s);
-  for(const x of ['data-tab="overview"','data-tab="markets"','data-tab="research"','data-tab="trades"','data-tab="system"','Was BIGGJ braucht','Trader Intelligence']){
+  for(const x of ['data-tab="science"','data-tab="world"','data-tab="lab"','data-tab="decisions"','data-tab="trading"','data-tab="system"','Knowledge Frontier','Epistemic Firewall']){
     assert.match(html,new RegExp(x));
   }
   assert.match(html,/app\.webmanifest/);

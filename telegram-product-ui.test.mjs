@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildMarketViewModel,
+  homeText,
   homeKeyboard,
   marketsKeyboard,
   marketProductKeyboard,
@@ -10,6 +11,19 @@ import {
   parseProductCallback,
   assertTelegramKeyboardSafe
 } from "./telegram-product-ui.mjs";
+
+test("Telegram home establishes BIGGJ science-first identity",()=>{
+  const text=homeText({marketCount:17,systemStatus:"ONLINE"});
+  const kb=homeKeyboard();
+  assert.match(text,/BIGGJ \/\/ MARKET SCIENCE OS/);
+  assert.match(text,/REALITY → SCIENCE → WORLD → LAB → DECISIONS → TRADING/);
+  assert.match(text,/PnL ist kein Wahrheitskriterium/);
+  const callbacks=kb.inline_keyboard.flat().map(x=>x.callback_data);
+  assert.equal(callbacks[0],"home:science");
+  assert.ok(callbacks.includes("home:world"));
+  assert.ok(callbacks.includes("home:lab"));
+  assert.ok(callbacks.indexOf("home:portfolio")>callbacks.indexOf("home:science"));
+});
 
 test("market view hard-locks execution safety",()=>{
   const vm=buildMarketViewModel({
