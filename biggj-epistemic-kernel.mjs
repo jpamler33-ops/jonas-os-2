@@ -95,8 +95,7 @@ function theoryKeyOf(input){
     hypothesis:canonicalText(input?.hypothesis),
     falsifier:canonicalText(input?.falsifier),
     nullHypothesis:canonicalText(input?.nullHypothesis),
-    scope,
-    tags:uniq(input?.tags).map(x=>x.toLowerCase())
+    scope
   });
 }
 function evidencePitState(row,asOf){
@@ -302,7 +301,8 @@ export function appendTheoryEvidence(ledger,theoryId,input,{at=Date.now()}={}){
     notes:txt(input?.notes),
     semantics:{
       empiricalSupportEligible:classification==='OBSERVED'&&kind==='REAL',
-      syntheticCannotCountAsRealEvidence:kind!=='SYNTHETIC'
+      countsAsRealEvidence:classification==='OBSERVED'&&kind==='REAL',
+      syntheticCannotCountAsRealEvidence:true
     }
   };
   const next=finalizeLedger({
