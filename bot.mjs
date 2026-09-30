@@ -10909,6 +10909,12 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   shadowResearchWorkerAdmission:FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
   autoLearnMemoryAdmission:AUTOLEARN_MEMORY_ADMISSION_VERSION,
+  backgroundMemoryControl:{
+    version:BIGGJ_BACKGROUND_MEMORY_CONTROL_VERSION,
+    gcAvailable:typeof globalThis.gc==='function',
+    shadowMemoryRetryMs:shadowCompetitionMemoryRetryMs,
+    policy:'GC_ONLY_BEFORE_BACKGROUND_DEFERRAL'
+  },
   backgroundMemoryLimits:{
     autoLearn:{
       issue:{heapUsedMb:autoLearnHeapHeadroomMb,rssMb:autoLearnRssHeadroomMb,externalMb:autoLearnExternalHeadroomMb},
