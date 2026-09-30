@@ -56,6 +56,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'discord-telegram-bridge.mjs',
   'discord-component-ids.mjs',
   'discord-serial-dedupe-queue.mjs',
+  'biggj-discord-observability.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
