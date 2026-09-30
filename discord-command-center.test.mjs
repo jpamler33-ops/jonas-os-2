@@ -138,6 +138,8 @@ test('BIGGJ V6 academy keeps the current panel at the bottom and lesson actions 
 
 test('BIGGJ V6.1 exposes one-tap user commands',()=>{
   for(const required of [
+    "name:'signal'",
+    "name:'proof'",
     "name:'charts'",
     "name:'news'",
     "name:'world'",
@@ -146,13 +148,13 @@ test('BIGGJ V6.1 exposes one-tap user commands',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'BIGGJ_DISCORD_CHANNEL_UX_V8'
+    'BIGGJ_DISCORD_CHANNEL_UX_V9'
   ]) assert.ok(source.includes(required),required);
 });
 
 test('BIGGJ V8 channel managers cover every Discord surface and supervise themselves',()=>{
   for(const required of [
-    'BIGGJ_DISCORD_CHANNEL_UX_V8',
+    'BIGGJ_DISCORD_CHANNEL_UX_V9',
     'BIGGJ • OPERATIONS',
     'channel-supervisor',
     'channel-improvements',
@@ -161,6 +163,8 @@ test('BIGGJ V8 channel managers cover every Discord surface and supervise themse
     'repairManagerProblem',
     "name:'supervisor'",
     "name:'improvements'",
+    'buildSignalLabDeskPayload',
+    'buildProofFeedDeskPayload',
     'buildForecastDeskPayload',
     'buildAnomalyWatchPayload',
     'buildReplayDeskPayload',
