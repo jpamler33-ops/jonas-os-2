@@ -114,6 +114,32 @@ function verifyTreeShape(tree){
   }
 }
 
+export function verifyBiggjSkillTree(tree){
+  try{
+    const reasons=[];
+    try{ verifyTreeShape(tree); }catch(err){ reasons.push(err instanceof Error?err.message:String(err)); }
+    const expected=sha256(treeCore(tree));
+    if(tree?.fingerprint!==expected) reasons.push('FINGERPRINT_MISMATCH');
+    return {
+      ok:reasons.length===0,
+      reasons,
+      expectedFingerprint:expected,
+      execution:'SHADOW_ONLY',
+      action:'ABSTAIN',
+      canExecuteLive:false
+    };
+  }catch(err){
+    return {
+      ok:false,
+      reasons:['SKILL_TREE_INVALID',err instanceof Error?err.message:String(err)],
+      expectedFingerprint:null,
+      execution:'SHADOW_ONLY',
+      action:'ABSTAIN',
+      canExecuteLive:false
+    };
+  }
+}
+
 function findNodeIndex(tree,skillId){
   return tree.nodes.findIndex(x=>String(x.skillId)===String(skillId));
 }
