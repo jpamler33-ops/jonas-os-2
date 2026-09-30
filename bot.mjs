@@ -113,6 +113,7 @@ import {
 } from './adversarial-stress-lab.mjs';
 import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marketsKeyboard as productMarketsKeyboard, marketProductKeyboard, deepDiveKeyboard, globalIntelKeyboard, renderGlobalIntelFeed, parseProductCallback } from './telegram-product-ui.mjs';
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
+import { createTelegramChatLifecycle, TELEGRAM_CHAT_LIFECYCLE_VERSION } from './telegram-chat-lifecycle.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
 import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
 import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
@@ -293,6 +294,9 @@ const refreshMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_REFRESH_MS || 1
 const telegramApiTimeoutMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_API_TIMEOUT_MS || 12000));
 const telegramLongPollTimeoutMs = Math.max(30000, Number(process.env.TCX_TELEGRAM_LONG_POLL_TIMEOUT_MS || 35000));
 const telegramUpdateTimeoutMs = Math.max(5000, Number(process.env.TCX_TELEGRAM_UPDATE_TIMEOUT_MS || 20000));
+const telegramChatIdleResetMs = Math.max(60_000, Number(process.env.TCX_TELEGRAM_CHAT_IDLE_RESET_MS || 10*60_000));
+const telegramChatResetSweepMs = Math.max(1_000, Math.min(60_000, Number(process.env.TCX_TELEGRAM_CHAT_RESET_SWEEP_MS || 5_000)));
+const telegramChatMaxTrackedUiMessages = Math.max(4, Math.min(100, Number(process.env.TCX_TELEGRAM_CHAT_MAX_UI_MESSAGES || 24)));
 const alertCheckMs = Math.max(10000, Number(process.env.TCX_TELEGRAM_ALERT_CHECK_MS || 15000));
 const researchAlertCheckMs = Math.max(30000, Number(process.env.TCX_RESEARCH_ALERT_CHECK_MS || 60000));
 const researchValidityStaleMs = Math.max(60000, Number(process.env.TCX_RESEARCH_VALIDITY_STALE_MS || 600000));
@@ -468,6 +472,10 @@ function servingMemoryPressure(){
 }
 
 const sessions = new Map();
+const telegramChatLifecycle=createTelegramChatLifecycle({
+  idleMs:telegramChatIdleResetMs,
+  maxTrackedUiMessages:telegramChatMaxTrackedUiMessages
+});
 const witnessCache = new Map();
 const radarCache = new Map();
 const researchAlertContextCache = new Map();
@@ -2688,6 +2696,15 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
   };
 }
 
+function trackTelegramUiMessage(method,body,result){
+  if(!body?.reply_markup) return;
+  if(!['sendMessage','sendPhoto','sendDocument','sendAnimation','sendVideo','editMessageText','editMessageMedia','editMessageCaption'].includes(String(method))) return;
+  const chatId=body?.chat_id??result?.chat?.id;
+  const messageId=result?.message_id??body?.message_id;
+  if(chatId===undefined||chatId===null||isDiscordChatId(chatId)) return;
+  telegramChatLifecycle.recordUiMessage(chatId,messageId);
+}
+
 async function tg(method, body) {
   if(discordBridge?.handlesTelegramCall(method,body)) return discordBridge.telegramCall(method,body);
   const timeoutMs=method==='getUpdates'?telegramLongPollTimeoutMs:telegramApiTimeoutMs;
@@ -2700,9 +2717,13 @@ async function tg(method, body) {
   const data = await res.json().catch(() => ({ ok:false, description:`HTTP ${res.status}` }));
   if (!res.ok || !data.ok) {
     const msg = String(data?.description || `Telegram HTTP ${res.status}`);
-    if ((method === 'editMessageText' || method === 'editMessageMedia') && msg.includes('message is not modified')) return null;
+    if ((method === 'editMessageText' || method === 'editMessageMedia') && msg.includes('message is not modified')) {
+      trackTelegramUiMessage(method,body,null);
+      return null;
+    }
     throw new Error(msg);
   }
+  trackTelegramUiMessage(method,body,data.result);
   return data.result;
 }
 
@@ -2716,6 +2737,7 @@ async function tgMultipart(method, fields, fileField, fileName, fileBuffer, mime
   const res = await fetch(`${telegramApi}/${method}`, { method:"POST", body:form });
   const data = await res.json().catch(() => ({ ok:false, description:`HTTP ${res.status}` }));
   if (!res.ok || !data.ok) throw new Error(String(data?.description || `Telegram HTTP ${res.status}`));
+  trackTelegramUiMessage(method,fields,data.result);
   return data.result;
 }
 
@@ -3258,15 +3280,15 @@ async function showCommandMarkets(chatId,messageId,command){
   });
 }
 
-async function showStart(chatId, messageId) {
+async function showStart(chatId, messageId, {silent=false}={}) {
   sessions.delete(String(chatId));
   const payload = {
     chat_id:chatId,
     text:productHomeText({marketCount:markets.length,systemStatus:'ONLINE'}),
     reply_markup:productHomeKeyboard()
   };
-  if (messageId) await tg('editMessageText', { ...payload, message_id:messageId });
-  else await tg('sendMessage', payload);
+  if (messageId) return tg('editMessageText', { ...payload, message_id:messageId });
+  return tg('sendMessage', {...payload,disable_notification:silent===true});
 }
 
 function homeBackKeyboard(extra=[]) {
@@ -6770,13 +6792,64 @@ async function handleCommand(msg){
   return routeTelegramCommand(msg);
 }
 
+async function deleteTrackedTelegramUi(chatId,messageIds=[]){
+  let deleted=0,failed=0;
+  const ids=[...new Set((messageIds||[]).map(Number).filter(x=>Number.isInteger(x)&&x>0))].reverse();
+  for(const messageId of ids){
+    try{
+      await tg('deleteMessage',{chat_id:chatId,message_id:messageId});
+      deleted++;
+    }catch(err){
+      failed++;
+      const msg=err instanceof Error?err.message:String(err);
+      if(!msg.includes('message to delete not found')&&!msg.includes("message can't be deleted")){
+        console.warn('[TCX_TELEGRAM_IDLE_DELETE_FAILED]',JSON.stringify({chatId:String(chatId),messageId,error:msg}));
+      }
+    }finally{
+      telegramChatLifecycle.forgetUiMessage(chatId,messageId);
+    }
+  }
+  return {deleted,failed};
+}
+
+async function resetTelegramIdleChat(item,{silent=true,reason='IDLE_TIMEOUT'}={}){
+  const chatId=item?.chatId;
+  sessions.delete(String(chatId));
+  const cleanup=await deleteTrackedTelegramUi(chatId,item?.uiMessageIds||[]);
+  telegramChatLifecycle.clearUiMessages(chatId);
+  const home=await showStart(chatId,null,{silent});
+  return {chatId,cleanup,homeMessageId:home?.message_id??null,reason};
+}
+
 async function handle(update) {
   const msg = update?.message;
+  const q = update?.callback_query;
+  const activityChatId=msg?.chat?.id??q?.message?.chat?.id;
+  const discordActivity=String(q?.id||'').startsWith('discordcb:')||isDiscordChatId(activityChatId);
+  if(activityChatId!==undefined&&activityChatId!==null&&!discordActivity&&permitted(activityChatId)){
+    const activity=telegramChatLifecycle.touch(activityChatId);
+    if(activity.hadExpired){
+      await deleteTrackedTelegramUi(activityChatId,activity.expiredUiMessageIds);
+      telegramChatLifecycle.clearUiMessages(activityChatId);
+      sessions.delete(String(activityChatId));
+      if(q?.id){
+        await ack(q.id,'Session nach 10 Min. neu gestartet');
+        await showStart(activityChatId,null,{silent:false});
+        return;
+      }
+      const isCommand=typeof msg?.text==='string'&&msg.text.trim().startsWith('/');
+      if(!isCommand){
+        await showStart(activityChatId,null,{silent:false});
+        return;
+      }
+    }
+  }
+
   if (msg?.chat?.id !== undefined && typeof msg.text === 'string' && msg.text.trim().startsWith('/')) {
     if (await handleCommand(msg)) return;
   }
 
-  const q = update?.callback_query;
+  
   if (!q?.id || q?.message?.chat?.id === undefined || q?.message?.message_id === undefined) return;
   const chatId = q.message.chat.id;
   const messageId = q.message.message_id;
@@ -7252,6 +7325,36 @@ async function poll() {
       telegramLastPollError=err instanceof Error?err.message:String(err);
       console.error('poll error', telegramLastPollError);
       await sleep(1500);
+    }
+  }
+}
+
+async function telegramChatResetWatcher(){
+  while(running){
+    await sleep(telegramChatResetSweepMs);
+    const due=telegramChatLifecycle.claimExpired({limit:50});
+    for(const item of due){
+      try{
+        const reset=await resetTelegramIdleChat(item,{silent:true,reason:'IDLE_TIMEOUT'});
+        telegramChatLifecycle.completeReset(item.chatId,{
+          newHomeMessageId:reset.homeMessageId
+        });
+        console.info('[TCX_TELEGRAM_IDLE_RESET]',JSON.stringify({
+          chatId:String(item.chatId),
+          idleMs:item.idleForMs,
+          deletedUiMessages:reset.cleanup.deleted,
+          deleteFailures:reset.cleanup.failed,
+          homeMessageId:reset.homeMessageId,
+          lifecycle:TELEGRAM_CHAT_LIFECYCLE_VERSION
+        }));
+      }catch(err){
+        telegramChatLifecycle.failReset(item.chatId);
+        console.error('[TCX_TELEGRAM_IDLE_RESET_FAILED]',JSON.stringify({
+          chatId:String(item.chatId),
+          idleMs:item.idleForMs,
+          error:err instanceof Error?err.message:String(err)
+        }));
+      }
     }
   }
 }
@@ -9202,4 +9305,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher()]);
