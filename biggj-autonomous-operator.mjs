@@ -113,11 +113,20 @@ function taskOwnerAssessment(task,{operations,ownerPolicies,uptimeMs,asOf,policy
     };
   }
   if(freshest.lastError){
+    const signal=String(freshest.lastError);
+    if(signal.startsWith('DEFERRED_')||signal.startsWith('SKIPPED_')){
+      return {
+        taskId:task.taskId,subject:task.subject,handler,
+        state:'BACKPRESSURE',reason:signal,
+        lastOperation:freshest.name,lastAt:freshest.lastAt,ageMs,maxSilentMs,
+        recoveryAction:null
+      };
+    }
     return {
       taskId:task.taskId,subject:task.subject,handler,
       state:'ERROR',reason:'OWNER_LAST_OPERATION_ERROR',
       lastOperation:freshest.name,lastAt:freshest.lastAt,ageMs,maxSilentMs,
-      error:String(freshest.lastError),
+      error:signal,
       recoveryAction:owner.recoveryAction||null
     };
   }
@@ -263,7 +272,7 @@ export function refreshBiggjAutonomousOperator(state,{
     finite(factorySummary?.manual)===0&&
     finite(factorySummary?.unowned)===0&&
     finite(factorySummary?.dataOnly)===finite(factorySummary?.automatic)&&
-    assessments.every(x=>['HEALTHY','WARMING_UP'].includes(x.state));
+    assessments.every(x=>['HEALTHY','WARMING_UP','BACKPRESSURE'].includes(x.state));
   if(factoryMode==='RESEARCH_STALLED'&&!waitableDataStall){
     add('RESEARCH_STALLED','RESEARCH_FACTORY','NO_MEASURABLE_RESEARCH_PROGRESS','REFRESH_RESEARCH_STACK');
   }
