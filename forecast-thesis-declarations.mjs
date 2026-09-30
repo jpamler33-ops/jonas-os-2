@@ -276,7 +276,9 @@ export function buildForecastThesisDeclarations({
     {
       assumptionId:'THESIS_DISAGREEMENT_WITHIN_TOLERANCE',
       statement:'Observed cross-source and model disagreement is not large enough to invalidate this thesis.',
-      evidenceIds:supportIds(disagreementWithinTolerance,'THESIS_EVIDENCE_STATE'),
+      evidenceIds:disagreementWithinTolerance
+        ?['THESIS_EVIDENCE_STATE','THESIS_WITNESS_STATE']
+        :[],
       requiresEvidence:true,
       availableAt:issuedAt
     },
@@ -428,6 +430,7 @@ export function buildForecastThesisDeclarations({
       declarationsArePointInTime:true,
       mechanismIsNotCausallyIdentified:causalStatus!=='IDENTIFIED',
       absenceOfSupportIsNotEvidenceOfOppositeDirection:true,
+      assumptionEvidenceListsCoverAllDeclaredSupportInputs:true,
       graphAuditMustNotChangeForecastGate:true,
       noOutcomeInformationUsed:true
     },
