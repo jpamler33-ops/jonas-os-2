@@ -343,3 +343,30 @@ test('stable task identity preserves age while real evidence progress resets sta
   assert.ok(second.queueAgeMs>0);
   assert.equal(second.stagnantCycles,0);
 });
+
+
+test('factory stops claiming data-only when an owned research task is persistently stalled',()=>{
+  let state=createAutonomousResearchTrainingFactory({asOf:1000});
+  for(let i=0;i<9;i++){
+    state=refreshAutonomousResearchTrainingFactory(state,{
+      livingResearchState:baseLivingResearch({
+        revision:10+i,
+        fingerprint:'living-stall-'+i,
+        canonicalResearchQueue:[{
+          skillId:'stalled-skill',
+          nextGate:'FORWARD_SHADOW',
+          priority:.7,
+          uncertainty:.8,
+          validationEvidenceTotal:2,
+          validationIndependentEpisodes:1
+        }]
+      }),
+      historyStats:{rows:100+i,progressAt:1000+i},
+      asOf:2000+i*1000
+    }).state;
+  }
+  assert.equal(state.leverage.stalledTaskCount,1);
+  assert.equal(state.mode,'RESEARCH_STALLED');
+  assert.equal(state.operatorDataOnly,false);
+  assert.equal(state.queue[0].stalled,true);
+});
