@@ -232,6 +232,12 @@ import {
   biggjAutopilotSupervisorSummary,
   BIGGJ_AUTOPILOT_SUPERVISOR_VERSION
 } from './biggj-autopilot-supervisor.mjs';
+import {
+  buildBiggjResearchAccelerator,
+  buildOutcomeDeadlinePlan,
+  biggjResearchAcceleratorSummary,
+  BIGGJ_RESEARCH_ACCELERATOR_VERSION
+} from './biggj-research-accelerator.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -409,7 +415,7 @@ const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_
 const autoLearnHeapHeadroomMb = Math.max(280, Math.min(360, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 320)));
 const autoLearnRssHeadroomMb = Math.max(620, Math.min(820, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 720)));
 const autoLearnExternalHeadroomMb = Math.max(32, Math.min(160, Number(process.env.TCX_AUTOLEARN_EXTERNAL_HEADROOM_MB || 64)));
-const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 1) || 1)));
+const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 3) || 3)));
 const autoLearnInterIssueMs = Math.max(2000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 8000)));
 const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || (autoLearnHeapHeadroomMb-20))));
 const autoLearnResumeRssMb = Math.max(450, Math.min(autoLearnRssHeadroomMb-40, Number(process.env.TCX_AUTOLEARN_RESUME_RSS_MB || 620)));
@@ -431,7 +437,7 @@ const forecastPersistenceExternalHeadroomMb = Math.max(
   Math.min(servingGuardExternalMb,Number(process.env.TCX_FORECAST_PERSIST_EXTERNAL_HEADROOM_MB||servingGuardExternalMb))
 );
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
-const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 60*60_000));
+const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 15*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
 const shadowCompetitionWorkerTimeoutMs = Math.max(60_000, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_TIMEOUT_MS || 8*60_000));
@@ -8944,6 +8950,11 @@ async function autoLearnForecastWatcher() {
     const started=Date.now();
     let issued=0,skipped=0,failed=0,deferred=0;
     let memoryPressure=false;
+    const researchAcceleration=currentResearchAccelerator(Date.now());
+    const effectiveAutoLearnMaxIssuedPerSweep=Math.max(
+      1,
+      Math.min(autoLearnMaxIssuedPerSweep,researchAcceleration.resource.autoLearnIssueBudget)
+    );
     if(autoLearnEnabled&&forecastRuntime.healthy){
       while(running&&activeBackgroundResearchJob) await sleep(250);
       if(!running) break;
@@ -8951,7 +8962,7 @@ async function autoLearnForecastWatcher() {
       try{
       for(const symbol of autoLearnSymbols){
         if(!running) break;
-        if(issued>=autoLearnMaxIssuedPerSweep){ deferred++; break; }
+        if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9102,6 +9113,9 @@ async function autoLearnForecastWatcher() {
         nextSweepMs:autoLearnSweepMs,
         forecastIntervalMs:autoLearnForecastMs,
         maxIssuedPerSweep:autoLearnMaxIssuedPerSweep,
+        effectiveMaxIssuedPerSweep:effectiveAutoLearnMaxIssuedPerSweep,
+        acceleratorMode:researchAcceleration.resource.mode,
+        acceleratorPressure:researchAcceleration.resource.pressure,
         interIssueMs:autoLearnInterIssueMs,
         memory:(()=>{const m=process.memoryUsage();return {
           heapUsedMb:Math.round(m.heapUsed/1024/1024),
@@ -9209,6 +9223,11 @@ async function shadowCompetitionWatcher(){
     const started=Date.now();
     try{
       if(shadowCompetitionEnabled&&shadowCompetitionServingWorkerEnabled&&forecastRuntime.healthy){
+        const researchAcceleration=currentResearchAccelerator(Date.now());
+        const effectiveShadowCompetitionHistoryRows=Math.max(
+          500,
+          Math.min(shadowCompetitionHistoryRows,researchAcceleration.resource.shadowReplayHistoryRows)
+        );
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9241,7 +9260,7 @@ async function shadowCompetitionWatcher(){
         }
         const preflightHistoryProgressAt=forecastRuntime.engine.historyProgressAt(
           Number.POSITIVE_INFINITY,
-          {limit:shadowCompetitionHistoryRows}
+          {limit:effectiveShadowCompetitionHistoryRows}
         );
         if(
           shadowCompetitionLastHistoryProgressAt>0&&
@@ -9289,7 +9308,7 @@ async function shadowCompetitionWatcher(){
           if(freshAdmission.allowed){
             history=forecastRuntime.engine.historySnapshot(
               Number.POSITIVE_INFINITY,
-              {limit:shadowCompetitionHistoryRows}
+              {limit:effectiveShadowCompetitionHistoryRows}
             );
             historyProgressAt=forecastHistoryProgressAt(history);
 
@@ -9437,6 +9456,8 @@ async function shadowCompetitionWatcher(){
           mode:shadowCompetitionWorkerMode,
           historyProgressAt,
           configuredHistoryRows:shadowCompetitionHistoryRows,
+          effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
+          acceleratorMode:researchAcceleration.resource.mode,
           workerRuns:shadowCompetitionWorkerRuns,
           slotWaitMs,
           promotionReview:modelPromotionReviewLastSummary
@@ -9459,7 +9480,11 @@ async function shadowCompetitionWatcher(){
 
 async function forecastOutcomeWatcher() {
   while(running) {
-    await sleep(forecastOutcomeCheckMs);
+    const deadlinePlan=buildOutcomeDeadlinePlan(
+      forecastRuntime?.journal?.pending?.()||[],
+      {now:Date.now(),minPollMs:5_000,maxPollMs:forecastOutcomeCheckMs}
+    );
+    await sleep(deadlinePlan.recommendedDelayMs);
     if(!forecastRuntime.healthy) continue;
 
     const slotWaitStarted=Date.now();
@@ -9565,6 +9590,11 @@ async function forecastOutcomeWatcher() {
           pendingAfter:forecastRuntime.journal.pending().length,
           auditFailures,
           slotWaitMs,
+          deadlineScheduler:{
+            dueNow:deadlinePlan.dueNow,
+            nextDueAt:deadlinePlan.nextDueAt,
+            pollDelayMs:deadlinePlan.recommendedDelayMs
+          },
           postMemory:postAdmission.memory
         }));
         if(postAdmission.allowed){
@@ -9752,6 +9782,35 @@ function currentOperationalReadiness(){
       violations:rulebook.violations.slice(0,12),
       missingCoreFacts:rulebook.counts.missingCoreFacts
     }
+  });
+}
+
+function currentResearchAccelerator(now=Date.now()){
+  const memory=process.memoryUsage();
+  const historyProgressAt=forecastRuntime.engine.historyProgressAt(
+    Number.POSITIVE_INFINITY,
+    {limit:shadowCompetitionHistoryRows}
+  );
+  return buildBiggjResearchAccelerator({
+    factorySummary:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
+    pendingForecasts:forecastRuntime?.journal?.pending?.()||[],
+    memory:{
+      heapUsedMb:Math.round(memory.heapUsed/1024/1024),
+      rssMb:Math.round(memory.rss/1024/1024),
+      externalMb:Math.round(memory.external/1024/1024)
+    },
+    limits:{
+      heapMb:autoLearnHeapHeadroomMb,
+      rssMb:autoLearnRssHeadroomMb,
+      externalMb:autoLearnExternalHeadroomMb
+    },
+    configuredMaxIssuedPerSweep:autoLearnMaxIssuedPerSweep,
+    configuredHistoryRows:shadowCompetitionHistoryRows,
+    historyRows:forecastRuntime.engine.historySize(),
+    historyProgressAt,
+    lastReplayProgressAt:shadowCompetitionLastHistoryProgressAt||null,
+    now,
+    outcomeMaxPollMs:forecastOutcomeCheckMs
   });
 }
 
@@ -10041,6 +10100,7 @@ function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now,worldModelSummary:biggjWorldModelRuntimeState});
+ const researchAccelerator=currentResearchAccelerator(now);
  const governanceTriage=buildBiggjGovernanceTriage({
   livingResearchState:biggjLivingResearchState,
   modelPromotionReviewSummary:modelPromotionReviewLastSummary,
@@ -10109,6 +10169,10 @@ function missionControlData(){
     lastError:autonomousResearchFactoryLastError,
     file:autonomousResearchFactoryFile,
     refreshMs:autonomousResearchFactoryRefreshMs
+  },
+  biggjResearchAccelerator:{
+    ...biggjResearchAcceleratorSummary(researchAccelerator),
+    version:BIGGJ_RESEARCH_ACCELERATOR_VERSION
   },
   autonomousOperator:{
     ...biggjAutonomousOperatorSummary(autonomousOperatorState),
