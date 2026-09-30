@@ -82,6 +82,21 @@ Format:
 
 Corruption of this derived research state must not block forecast serving or create execution authority.
 
+## Research case memory
+
+The living runtime retains a deduplicated case registry independently of the hot ForecastRevisionTracker set.
+
+Persistent cases are keyed by:
+
+- forecastId,
+- assumptionId.
+
+Repeated observations of the same forecast update the same case instead of increasing the independent-case count.
+
+A bounded stability-event registry retains persistence confirmations, recovery failures and recoveries. An observed-forecast registry preserves the denominator used for prevalence metrics.
+
+This prevents hot-to-cold forecast compaction from erasing already-observed research evidence or creating duplicate autonomous research skills.
+
 ## Idempotence
 
 A normalized source fingerprint is built from:
