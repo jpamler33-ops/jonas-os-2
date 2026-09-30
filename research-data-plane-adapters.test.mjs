@@ -205,3 +205,49 @@ test('public market context enters the governed research plane',()=>{
   assert.ok(market.features.some(x=>x.id==='research.marketContext.volumeToCapRatio'&&x.value===.25));
   assert.equal(sentiment.provenance.attributionRequired,true);
 });
+
+
+test('DEX activity and DefiLlama liquidity enter the governed research plane',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'ETHUSDT',
+    ingestedAt:2_000_000,
+    dexActivitySnapshot:{
+      ok:true,
+      capturedAt:1_999_900,
+      source:'DEXSCREENER_PUBLIC_API',
+      epistemic:'PROMOTION_BIASED_DEX_ACTIVITY_CONTEXT_NOT_FORECAST_PROBABILITY',
+      radar:{rows:[
+        {pair:{liquidityUsd:1000,volumeH1:500,buysH1:8,sellsH1:2}},
+        {pair:{liquidityUsd:4000,volumeH1:1500,buysH1:4,sellsH1:6}}
+      ]},
+      metas:{rows:[{liquidity:10000,volume:20000,tokenCount:5}]},
+      errors:[]
+    },
+    defiLiquiditySnapshot:{
+      ok:true,
+      availableAt:1_999_900,
+      chainName:'Ethereum',
+      source:'DEFILLAMA_PUBLIC_API',
+      sourceUrls:['https://api.llama.fi/v2/chains','https://stablecoins.llama.fi/stablecoinchains'],
+      metrics:{
+        totalTvlUsd:1000,
+        chainTvlUsd:600,
+        chainTvlShare:.6,
+        totalStablecoinSupplyUsd:425,
+        chainStablecoinSupplyUsd:300,
+        chainStablecoinToTvlRatio:.5
+      },
+      errors:[],
+      epistemic:'PUBLIC_DEFI_AND_STABLECOIN_LIQUIDITY_CONTEXT_NOT_FORECAST_PROBABILITY'
+    }
+  });
+  assert.deepEqual(rows.map(x=>x.domain),['DEX_ACTIVITY','DEFI_LIQUIDITY']);
+  const dex=rows[0];
+  const defi=rows[1];
+  assert.equal(dex.source,'DEXSCREENER_PUBLIC_API');
+  assert.equal(defi.source,'DEFILLAMA_PUBLIC_API');
+  assert.ok(dex.features.some(x=>x.id==='research.dex.boostedBuySellImbalanceH1'&&x.value===.2));
+  assert.ok(defi.features.some(x=>x.id==='research.defi.chainTvlShare'&&x.value===.6));
+  assert.equal(dex.provenance.promotionBias,true);
+  assert.equal(defi.provenance.chainName,'Ethereum');
+});
