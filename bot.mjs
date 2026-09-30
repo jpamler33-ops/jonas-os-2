@@ -4349,15 +4349,19 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='WORLD'){
     const snap=missionControlData(),world=(snap.biggj||snap.health?.biggjMarketScienceOs||{}).worldModel||{};
     const markets=(world.markets||[]).slice(0,10).map(x=>'• '+String(x.symbol||'UNKNOWN').replace('USDT','/USDT')+' · '+String(x.regime||'UNKNOWN')+' · '+String(x.epistemicClass||'INFERRED'));
+    const latent=world.latentStateDiscovery||{},candidate=latent.researchCandidate||{};
     const text=[
       'BIGGJ // WORLD MODEL','━━━━━━━━━━━━━━━━━━━━','',
       'MARKET STATES  '+Number(world.marketsObserved||0),'',
       ...(markets.length?markets:['Noch keine kanonischen Marktstates.']),'',
-      'LATENT STATE       '+String(world.latentStateDiscovery?.status||'UNKNOWN'),
+      'LATENT STATE       '+String(latent.status||'UNKNOWN'),
+      candidate.status==='RESEARCH_CANDIDATE'?'Research Candidate  '+String(candidate.candidateKey||'UNNAMED'):'Research Candidate  —',
+      candidate.status==='RESEARCH_CANDIDATE'?'Authority           NONE · MODELLED':'',
       'INFORMATION FLOW   '+String(world.informationFlowGraph?.status||'UNKNOWN'),
       'PREDICTABILITY     '+String(world.predictabilityField?.status||'UNKNOWN'),'',
-      'Nicht implementierte Zustände werden nicht erfunden.'
-    ].join('\n');
+      'Hidden State bleibt UNKNOWN, bis OOS + Cross-Regime-Replikation bestehen.',
+      'Association / Lead-Lag ≠ Kausalität.'
+    ].filter(Boolean).join('\n');
     return deliverTelegramTextCard(tg,chatId,messageId,{text:text.slice(0,4096),reply_markup:{inline_keyboard:[[{text:'◉ Science',callback_data:'home:science'},{text:'⌬ Lab',callback_data:'home:lab'}],[{text:'▤ Reality Feed',callback_data:'home:news'},{text:'🏠 BIGGJ',callback_data:'home'}]]}});
   }
   if(section==='LAB'){
