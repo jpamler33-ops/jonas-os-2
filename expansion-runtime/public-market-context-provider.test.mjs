@@ -25,12 +25,19 @@ test('public market context combines sentiment global and DeFi snapshots',async(
       {name:'Bitcoin',tvl:50},
       {name:'Base',tvl:100}
     ]);
+    if(url.includes('/stablecoinchains')) return response([
+      {name:'Ethereum',totalCirculatingUSD:{peggedUSD:600}},
+      {name:'Tron',totalCirculatingUSD:{peggedUSD:250}},
+      {name:'Solana',totalCirculatingUSD:{peggedUSD:100}},
+      {name:'Base',totalCirculatingUSD:{peggedUSD:50}}
+    ]);
     throw new Error('unexpected '+url);
   };
   const p=createPublicMarketContextProvider({
     fetchImpl,
     alternativeBase:'https://alternative.test',
-    defiLlamaBase:'https://llama.test'
+    defiLlamaBase:'https://llama.test',
+    stablecoinBase:'https://stables.test'
   });
   const out=await p.fetchContext();
   assert.equal(out.sentiment.value,69);
@@ -41,6 +48,12 @@ test('public market context combines sentiment global and DeFi snapshots',async(
   assert.equal(out.defi.solanaTvlUsd,250);
   assert.equal(out.defi.bitcoinTvlUsd,50);
   assert.equal(out.defi.top10TvlShare,1);
+  assert.equal(out.stablecoins.totalSupplyUsd,1000);
+  assert.equal(out.stablecoins.ethereumSupplyUsd,600);
+  assert.equal(out.stablecoins.tronSupplyUsd,250);
+  assert.equal(out.stablecoins.solanaSupplyUsd,100);
+  assert.equal(out.stablecoins.baseSupplyUsd,50);
+  assert.equal(out.stablecoins.top5SupplyShare,1);
   assert.equal(out.errors.length,0);
 });
 
@@ -49,12 +62,14 @@ test('context degrades per-source instead of fabricating data',async()=>{
     if(url.includes('/fng/')) return response({},503);
     if(url.includes('/v2/global/')) return response({data:{quotes:{USD:{total_market_cap:10,total_volume_24h:2}}}});
     if(url.includes('/v2/chains')) return response([{name:'Ethereum',tvl:8},{name:'Solana',tvl:2}]);
+    if(url.includes('/stablecoinchains')) return response([{name:'Ethereum',totalCirculatingUSD:{peggedUSD:7}},{name:'Solana',totalCirculatingUSD:{peggedUSD:3}}]);
     throw new Error('unexpected '+url);
   };
   const p=createPublicMarketContextProvider({
     fetchImpl,
     alternativeBase:'https://alternative.test',
-    defiLlamaBase:'https://llama.test'
+    defiLlamaBase:'https://llama.test',
+    stablecoinBase:'https://stables.test'
   });
   const out=await p.fetchContext({force:true});
   assert.equal(out.sentiment,null);
@@ -80,6 +95,15 @@ test('context converts to bounded research features',()=>{
       solanaTvlUsd:250,
       bitcoinTvlUsd:50,
       top10TvlShare:1
+    },
+    stablecoins:{
+      totalSupplyUsd:1000,
+      chainCount:4,
+      ethereumSupplyUsd:600,
+      tronSupplyUsd:250,
+      solanaSupplyUsd:100,
+      baseSupplyUsd:50,
+      top5SupplyShare:1
     }
   });
   const byId=new Map(rows.map(x=>[x.id,x.value]));
@@ -94,13 +118,43 @@ test('context converts to bounded research features',()=>{
   assert.equal(byId.get('research.defi.top10TvlShare'),1);
   assert.ok(byId.get('research.marketContext.totalMarketCapLog')>0);
   assert.ok(byId.get('research.defi.totalTvlLog')>0);
+  assert.equal(byId.get('research.stablecoin.ethereumSupplyShare'),.6);
+  assert.equal(byId.get('research.stablecoin.tronSupplyShare'),.25);
+  assert.equal(byId.get('research.stablecoin.solanaSupplyShare'),.1);
+  assert.equal(byId.get('research.stablecoin.baseSupplyShare'),.05);
+  assert.equal(byId.get('research.stablecoin.top5SupplyShare'),1);
+  assert.equal(byId.get('research.stablecoin.supplyToDefiTvlRatio'),1);
+  assert.ok(byId.get('research.stablecoin.totalSupplyLog')>0);
 });
 
 
 test('null public context metrics remain missing instead of synthetic zeros',()=>{
   const rows=publicMarketContextToExtraFeatures({
     global:{bitcoinDominancePct:null,totalMarketCapUsd:null,totalVolume24hUsd:null,activeCryptocurrencies:null,activeMarkets:null},
-    defi:{totalTvlUsd:null,chainCount:null,ethereumTvlUsd:null,solanaTvlUsd:null,bitcoinTvlUsd:null,top10TvlShare:null}
+    defi:{totalTvlUsd:null,chainCount:null,ethereumTvlUsd:null,solanaTvlUsd:null,bitcoinTvlUsd:null,top10TvlShare:null},
+    stablecoins:{totalSupplyUsd:null,chainCount:null,ethereumSupplyUsd:null,tronSupplyUsd:null,solanaSupplyUsd:null,baseSupplyUsd:null,top5SupplyShare:null}
   });
   assert.deepEqual(rows,[]);
+});
+
+
+test('stablecoin source failure degrades independently without fabricating supply',async()=>{
+  const fetchImpl=async url=>{
+    if(url.includes('/fng/')) return response({data:[{value:'50',timestamp:'1700000000'}]});
+    if(url.includes('/v2/global/')) return response({data:{quotes:{USD:{total_market_cap:10,total_volume_24h:2}}}});
+    if(url.includes('/v2/chains')) return response([{name:'Ethereum',tvl:8},{name:'Solana',tvl:2}]);
+    if(url.includes('/stablecoinchains')) return response({},503);
+    throw new Error('unexpected '+url);
+  };
+  const p=createPublicMarketContextProvider({
+    fetchImpl,
+    alternativeBase:'https://alternative.test',
+    defiLlamaBase:'https://llama.test',
+    stablecoinBase:'https://stables.test'
+  });
+  const out=await p.fetchContext({force:true});
+  assert.equal(out.stablecoins,null);
+  assert.equal(out.defi.totalTvlUsd,10);
+  assert.equal(out.errors.length,1);
+  assert.equal(out.errors[0].source,'stablecoins');
 });
