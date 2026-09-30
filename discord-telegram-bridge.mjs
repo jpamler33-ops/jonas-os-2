@@ -65,6 +65,8 @@ const COMMANDS=[
   {name:'progress',description:'BIGGJ Lernfortschritt öffnen'},
   {name:'evidence_log',description:'BIGGJ Evidence Ledger öffnen'},
   {name:'decisions',description:'BIGGJ Decision Trace öffnen'},
+  {name:'supervisor',description:'Channel-Manager Supervisor öffnen'},
+  {name:'improvements',description:'Channel-Verbesserungsliste öffnen'},
   {name:'setup',description:'TCX Discord Command Center automatisch einrichten'},
   {name:'terminal',description:'TCX Live-Terminal anzeigen'},
   {name:'system',description:'TCX Systemstatus anzeigen'},
@@ -1958,6 +1960,16 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='thesis'){await thesisCommand(interaction);return;}
     if(name==='academy'){await academyCommand(interaction);return;}
     if(name==='lesson'){await lessonCommand(interaction);return;}
+    if(name==='supervisor'){
+      await interaction.deferReply();
+      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health()));
+      return;
+    }
+    if(name==='improvements'){
+      await interaction.deferReply();
+      await interaction.editReply(buildChannelImprovementsPayload(managerSnapshot(),germanTranslator.health()));
+      return;
+    }
     const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
     const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
@@ -2029,6 +2041,28 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return snapshot();
   }
   async function stop(){schedulerStopped=true;for(const timer of timers){clearInterval(timer);clearTimeout(timer);}timers.clear();client.destroy();state.ready=false;}
-  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size,academyPanels:state.academyPanels,observabilityPanels:state.observabilityPanels,experiencePanels:state.experiencePanels,lastExperienceRefreshAt:state.lastExperienceRefreshAt,academyLastRefreshAt:state.academyLastRefreshAt});}
+  function snapshot(){
+    const managers=managerSnapshot();
+    return Object.freeze({
+      version:DISCORD_TELEGRAM_BRIDGE_VERSION,
+      ...state,
+      guildId,
+      applicationId,
+      contexts:contexts.size,
+      channels:channelCache.size,
+      marketPanels:state.marketPanels,
+      tradeCards:tradeCards.size,
+      thesisCards:thesisCards.size,
+      academyPanels:state.academyPanels,
+      observabilityPanels:state.observabilityPanels,
+      experiencePanels:state.experiencePanels,
+      lastExperienceRefreshAt:state.lastExperienceRefreshAt,
+      academyLastRefreshAt:state.academyLastRefreshAt,
+      channelManagerStatus:managers.supervisor.status,
+      channelManagerHealthy:managers.healthy,
+      channelManagerProblems:managers.problems,
+      translation:germanTranslator.health()
+    });
+  }
   return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }
