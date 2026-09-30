@@ -337,11 +337,13 @@ export async function openResearchDataPlane(filePath,{
   };
 }
 
-export function preflightResearchDataPlaneInputs(plane,inputs){
+export function preflightResearchDataPlaneInputs(plane,inputs,{conflictPolicy='THROW'}={}){
   if(!plane?.healthy) throw new Error('Research Data Plane unhealthy: fail closed');
   const novel=[];
+  const conflicts=[];
   let duplicates=0;
   const localSourcePayload=new Map();
+  const policy=String(conflictPolicy||'THROW').toUpperCase();
 
   for(const input of Array.isArray(inputs)?inputs:[]){
     if(!input) continue;
@@ -350,6 +352,16 @@ export function preflightResearchDataPlaneInputs(plane,inputs){
     const priorPayload=plane.sourcePayload.get(sourceKey)||localSourcePayload.get(sourceKey);
     if(priorPayload){
       if(priorPayload!==payloadHash){
+        const conflict=Object.freeze({
+          streamKey:String(input.streamKey||''),
+          domain:String(input.domain||''),
+          source:String(input.source||''),
+          sourceEventId:String(input.sourceEventId||'')
+        });
+        if(policy==='SKIP'){
+          conflicts.push(conflict);
+          continue;
+        }
         throw new Error('SOURCE_EVENT_ID_CONFLICT:'+String(input.sourceEventId));
       }
       duplicates++;
@@ -361,7 +373,8 @@ export function preflightResearchDataPlaneInputs(plane,inputs){
 
   return Object.freeze({
     novel:Object.freeze(novel),
-    duplicates
+    duplicates,
+    conflicts:Object.freeze(conflicts)
   });
 }
 
