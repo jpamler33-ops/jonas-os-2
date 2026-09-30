@@ -326,15 +326,18 @@ function renderResearch(){
 }
 
 function renderTrades(){
-  const p=S.portfolio||{},open=(p.positions||[]).filter(x=>String(x.status||'OPEN').toUpperCase()==='OPEN'),closed=(p.recentClosed||[]).slice(0,12),research=p.researchActivity||{};
+  const p=S.portfolio||{},wallets=p.wallets||{},normal=wallets.normal||{},lab=wallets.lab||{},open=(p.positions||[]).filter(x=>String(x.status||'OPEN').toUpperCase()==='OPEN'),closed=(p.recentClosed||[]).slice(0,12);
+  const labOpen=(lab.active||[]).slice(0,12);
   let html='<section class="view '+(TAB==='trades'?'active':'')+'">';
-  html+=sectionHead('Shadow Portfolio','keine Real-Money-Orders');
-  html+='<div class="metricGrid">'+metric('Equity',MONEY(p.equityQuote),'Shadow Equity')+metric('Net PnL',MONEY(p.netPnlQuote),N(p.closedTrades)+' closed',pnlTone(p.netPnlQuote))+metric('Open',N(p.openPositions),'aktive Shadow-Positionen')+metric('Research',N(research.openPositions||0)+' / '+N(research.closedTrades||0),'open / closed')+'</div>';
-  html+=sectionHead('Offene Trades',open.length+' Positionen');
-  html+='<div class="stack">'+(open.length?open.map(x=>{const pnl=N(x.lastMark?.unrealizedNetPnlQuote??x.unrealizedPnlQuote??x.pnlQuote);return '<div class="panel trade"><div><div class="tradeSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+'</div><div class="tradeSide">'+E(x.side||'—')+' · '+E(x.entryMode||x.strategyId||'SHADOW')+'</div><div class="tradeInfo">Entry '+E(PRICE(x.entryPrice??x.avgEntryPrice))+' · Mark '+E(PRICE(x.lastMark?.price??x.markPrice))+'</div></div><div><div class="tradePnl '+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</div><div class="tradeInfo">unrealized</div></div></div>'}).join(''):empty('Keine offenen Shadow-Positionen.'))+'</div>';
-  html+=sectionHead('Zuletzt geschlossen');
-  html+='<div class="stack">'+(closed.length?closed.map(x=>{const pnl=N(x.netPnlQuote??x.realizedNetPnlQuote??x.pnlQuote);return panel(E(String(x.symbol||'').replace('USDT','/USDT'))+' · '+E(x.side||'—'),'<span class="'+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</span> · '+E(x.exitReason||'closed'),x.closedAt?AGE(x.closedAt)+' alt':'CLOSED')}).join(''):empty('Noch keine kürzlich geschlossenen Trades.'))+'</div>';
-  html+='<div class="safety" style="margin-top:12px"><div class="safetyTitle">Execution Boundary</div><div class="safetyBody">SHADOW_ONLY · canExecute:false · canExecuteLive:false. Diese Oberfläche zeigt Research-/Shadow-Zustände und besitzt keine Live-Order-Autorität.</div></div>';
+  html+=sectionHead('Dual Shadow Wallets','NORMAL + LAB · keine Real-Money-Orders');
+  html+='<div class="metricGrid">'+metric('NORMAL Equity',MONEY(p.equityQuote),N(normal.closedTrades??p.closedTrades)+' closed')+metric('NORMAL PnL',MONEY(normal.netPnlQuote??p.netPnlQuote),'governed',pnlTone(normal.netPnlQuote??p.netPnlQuote))+metric('LAB PnL',MONEY(lab.netPnlQuote),N(lab.closedTrades)+' closed',pnlTone(lab.netPnlQuote))+metric('LAB Debt',MONEY(lab.currentRecoveryDebtQuote),'muss wieder verdient werden',N(lab.currentRecoveryDebtQuote)>0?'warn':'good')+'</div>';
+  html+=sectionHead('NORMAL · offen',open.length+' Positionen');
+  html+='<div class="stack">'+(open.length?open.map(x=>{const pnl=N(x.lastMark?.unrealizedNetPnlQuote??x.unrealizedPnlQuote??x.pnlQuote);return '<div class="panel trade"><div><div class="tradeSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+'</div><div class="tradeSide">NORMAL · '+E(x.side||'—')+'</div><div class="tradeInfo">Entry '+E(PRICE(x.entryPrice??x.avgEntryPrice))+' · Size '+E(MONEY(x.entryQuote))+'</div></div><div><div class="tradePnl '+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</div><div class="tradeInfo">unrealized</div></div></div>'}).join(''):empty('Keine offene NORMAL-Position.'))+'</div>';
+  html+=sectionHead('LAB · offen',labOpen.length+' Positionen · Kapitalfazilität ∞ virtuell');
+  html+='<div class="stack">'+(labOpen.length?labOpen.map(x=>{const pnl=N(x.unrealizedNetPnlQuote);return '<div class="panel trade"><div><div class="tradeSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+'</div><div class="tradeSide">LAB · '+E(x.side||'—')+' · '+E(x.entryMode||'RESEARCH')+'</div><div class="tradeInfo">Size '+E(MONEY(x.entryQuote))+' · '+E(String(x.horizonId||'—').toUpperCase())+'</div></div><div><div class="tradePnl '+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</div><div class="tradeInfo">unrealized</div></div></div>'}).join(''):empty('Keine offene LAB-Position.'))+'</div>';
+  html+=sectionHead('NORMAL · zuletzt geschlossen');
+  html+='<div class="stack">'+(closed.length?closed.map(x=>{const pnl=N(x.netPnlQuote??x.realizedNetPnlQuote??x.pnlQuote);return panel(E(String(x.symbol||'').replace('USDT','/USDT'))+' · '+E(x.side||'—'),'<span class="'+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</span> · '+E(x.exitReason||x.closeReason||'closed'),x.closedAt?AGE(x.closedAt)+' alt':'CLOSED')}).join(''):empty('Noch keine kürzlich geschlossenen NORMAL-Trades.'))+'</div>';
+  html+='<div class="safety" style="margin-top:12px"><div class="safetyTitle">LAB Contract</div><div class="safetyBody">LAB hat kein Kapital-, Drawdown- oder Academy-Limit. Verluste bleiben als Recovery Debt sichtbar. PIT, Data Safety, echte Kosten/Liquidität, Dedupe und die strikte Trennung von NORMAL bleiben Pflicht. SHADOW_ONLY · canExecute:false · canExecuteLive:false.</div></div>';
   return html+'</section>';
 }
 
