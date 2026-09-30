@@ -1,7 +1,7 @@
-import { sha256 } from './institutional-kernel.mjs';
+import { sha256, findAuditRecordIdentity } from './institutional-kernel.mjs';
 
-export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V2';
-export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V2';
+export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V3';
+export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V3';
 export const BIGGJ_SIGNAL_LAB_MODES=Object.freeze(['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO']);
 
 const arr=v=>Array.isArray(v)?v:[];
@@ -317,6 +317,138 @@ function proofCommitment(row){
   });
 }
 
+
+function issuanceIdentityCore(issuance={}){
+  return {
+    version:issuance?.version,
+    symbol:issuance?.symbol,
+    asOf:issuance?.asOf,
+    generatedAt:issuance?.generatedAt,
+    forecastFingerprint:issuance?.forecastFingerprint,
+    scienceFingerprint:issuance?.scienceFingerprint,
+    admissionFingerprint:issuance?.admissionFingerprint,
+    traceId:issuance?.traceId,
+    gate:issuance?.gate,
+    researchDisposition:issuance?.researchDisposition,
+    probabilityDisplayAllowed:issuance?.probabilityDisplayAllowed,
+    executionMode:issuance?.executionMode,
+    action:issuance?.action,
+    canExecute:issuance?.canExecute
+  };
+}
+
+function journalForecastSubset(row={}){
+  return {
+    symbol:String(row?.symbol||'UNKNOWN').toUpperCase(),
+    horizonId:String(row?.horizonId||'UNKNOWN'),
+    horizonMs:finite(row?.horizonMs),
+    asOf:finite(row?.asOf),
+    dueAt:finite(row?.dueAt),
+    startPrice:finite(row?.startPrice),
+    gate:String(row?.gate||'UNKNOWN').toUpperCase(),
+    direction:String(row?.direction||'UNKNOWN').toUpperCase(),
+    probabilities:row?.probabilities??null,
+    expectedReturn:finite(row?.expectedReturn),
+    interval:{q10:finite(row?.interval?.q10),q90:finite(row?.interval?.q90)},
+    operationalConfidence:finite(row?.operationalConfidence)
+  };
+}
+
+function issuanceForecastSubset(issuance,horizon){
+  return {
+    symbol:String(issuance?.symbol||issuance?.forecast?.symbol||'UNKNOWN').toUpperCase(),
+    horizonId:String(horizon?.horizonId||'UNKNOWN'),
+    horizonMs:finite(horizon?.horizonMs),
+    asOf:finite(issuance?.asOf??issuance?.forecast?.asOf),
+    dueAt:finite(issuance?.asOf??issuance?.forecast?.asOf)+finite(horizon?.horizonMs,0),
+    startPrice:finite(issuance?.forecast?.price),
+    gate:String(horizon?.gate||'UNKNOWN').toUpperCase(),
+    direction:String(horizon?.direction||'UNKNOWN').toUpperCase(),
+    probabilities:horizon?.probabilities??null,
+    expectedReturn:finite(horizon?.expectedReturn),
+    interval:{q10:finite(horizon?.interval?.q10),q90:finite(horizon?.interval?.q90)},
+    operationalConfidence:finite(horizon?.diagnostics?.operationalConfidence)
+  };
+}
+
+function verifiedIssuanceBinding(row,issuances=[]){
+  const symbol=String(row?.symbol||'').toUpperCase();
+  const asOf=finite(row?.asOf);
+  const horizonId=String(row?.horizonId||'').toLowerCase();
+  if(!symbol||asOf==null||!horizonId)return null;
+  const candidates=arr(issuances).filter(x=>
+    String(x?.symbol||'').toUpperCase()===symbol&&finite(x?.asOf)===asOf
+  );
+  for(const issuance of candidates){
+    if(!issuance?.issuanceId||issuance.issuanceId!==sha256(issuanceIdentityCore(issuance)))continue;
+    const forecast=issuance?.forecast;
+    if(!forecast?.fingerprint)continue;
+    const {fingerprint,...forecastCore}=forecast;
+    if(fingerprint!==sha256(forecastCore)||issuance.forecastFingerprint!==fingerprint)continue;
+    const horizon=arr(forecast?.horizons).find(x=>String(x?.horizonId||'').toLowerCase()===horizonId);
+    if(!horizon)continue;
+    const expected=issuanceForecastSubset(issuance,horizon);
+    const observed=journalForecastSubset(row);
+    const journalMatches=sha256(expected)===sha256(observed);
+    const commitmentCore={
+      kind:'TCX_BIGGJ_AUDIT_BOUND_FORECAST_HORIZON_V1',
+      issuanceId:issuance.issuanceId,
+      forecastFingerprint:issuance.forecastFingerprint,
+      traceId:issuance.traceId,
+      symbol:issuance.symbol,
+      asOf:issuance.asOf,
+      generatedAt:issuance.generatedAt,
+      horizon
+    };
+    return {
+      issuance,
+      horizon,
+      beforeHash:sha256(commitmentCore),
+      journalMatches,
+      commitmentCore
+    };
+  }
+  return null;
+}
+
+function issuanceAuditBinding(auditLedger,issuance,{cutoff,dueAt}={}){
+  if(!auditLedger||!issuance?.issuanceId)return {
+    auditBacked:false,status:'MISSING',seq:null,recordHash:null,occurredAt:null,preOutcome:false,indexedIdentity:false
+  };
+  const record=findAuditRecordIdentity(auditLedger,{
+    kind:'TCX_INSTITUTIONAL_FORECAST_ISSUED',
+    idField:'issuanceId',
+    id:issuance.issuanceId
+  });
+  if(!record)return {
+    auditBacked:false,status:'MISSING',seq:null,recordHash:null,occurredAt:null,preOutcome:false,indexedIdentity:false
+  };
+  const occurredAt=finite(record?.occurredAt);
+  if(occurredAt==null||occurredAt>finite(cutoff,Date.now()))return {
+    auditBacked:false,status:'FUTURE_OR_INVALID',seq:finite(record?.seq),recordHash:record?.recordHash??null,occurredAt,preOutcome:false,indexedIdentity:record?.indexedIdentity===true
+  };
+  const p=record?.payload||{};
+  const payloadMismatch=Boolean(
+    (p?.issuanceId!=null&&String(p.issuanceId)!==String(issuance.issuanceId))||
+    (p?.forecastFingerprint!=null&&String(p.forecastFingerprint)!==String(issuance.forecastFingerprint))||
+    (p?.symbol!=null&&String(p.symbol).toUpperCase()!==String(issuance.symbol).toUpperCase())||
+    (p?.asOf!=null&&finite(p.asOf)!==finite(issuance.asOf))
+  );
+  const preOutcome=finite(dueAt)!=null&&occurredAt<=finite(dueAt);
+  const recordHash=String(record?.recordHash||'');
+  const hashValid=recordHash.length===64;
+  const auditBacked=!payloadMismatch&&preOutcome&&hashValid;
+  return {
+    auditBacked,
+    status:payloadMismatch?'PAYLOAD_MISMATCH':!preOutcome?'LATE_AUDIT':!hashValid?'RECORD_HASH_INVALID':record?.indexedIdentity===true?'INDEX_IDENTITY':'FULL_PAYLOAD',
+    seq:finite(record?.seq),
+    recordHash:hashValid?recordHash:null,
+    occurredAt,
+    preOutcome,
+    indexedIdentity:record?.indexedIdentity===true
+  };
+}
+
 function learningIncludesResolvedRow(row,learningSummary,cutoff){
   const resolvedAt=finite(row?.resolution?.resolvedAt);
   return Boolean(
@@ -329,11 +461,14 @@ function learningIncludesResolvedRow(row,learningSummary,cutoff){
   );
 }
 
-function proofLifecycleRow(row,{cutoff,learningSummary}={}){
+function proofLifecycleRow(row,{cutoff,learningSummary,issuances=[],auditLedger=null}={}){
   const r=row?.resolution||null;
-  const beforeHash=proofCommitment(row);
   const issuedAsOf=finite(row?.asOf);
   const dueAt=finite(row?.dueAt);
+  const issuanceBinding=verifiedIssuanceBinding(row,issuances);
+  const auditBinding=issuanceAuditBinding(auditLedger,issuanceBinding?.issuance,{cutoff,dueAt});
+  const journalMismatch=issuanceBinding!=null&&issuanceBinding.journalMatches!==true;
+  const beforeHash=issuanceBinding?.beforeHash||proofCommitment(row);
   const resolvedAt=finite(r?.resolvedAt);
   const generated=issuedAsOf!=null&&issuedAsOf<=cutoff;
   const resolved=row?.status==='RESOLVED'&&r&&resolvedAt!=null&&resolvedAt<=cutoff;
@@ -387,9 +522,25 @@ function proofLifecycleRow(row,{cutoff,learningSummary}={}){
     currentStage,
     milestones:freeze({generated,live,matured,reviewed,learned}),
     beforeHash,
+    beforeHashSource:issuanceBinding?'INSTITUTIONAL_ISSUANCE':'JOURNAL_RECONSTRUCTION',
+    proofIntegrity:journalMismatch?'BLOCKED_JOURNAL_ISSUANCE_MISMATCH':auditBinding.auditBacked?'AUDIT_BOUND':issuanceBinding?'ISSUANCE_VERIFIED_AUDIT_UNAVAILABLE':'LEGACY_RECONSTRUCTED',
+    proofBinding:freeze({
+      issuanceId:issuanceBinding?.issuance?.issuanceId??null,
+      forecastFingerprint:issuanceBinding?.issuance?.forecastFingerprint??null,
+      journalMatchesIssuance:issuanceBinding?issuanceBinding.journalMatches:null,
+      auditBacked:auditBinding.auditBacked,
+      auditStatus:auditBinding.status,
+      auditSeq:auditBinding.seq,
+      auditRecordHash:auditBinding.recordHash,
+      auditOccurredAt:auditBinding.occurredAt,
+      auditPreOutcome:auditBinding.preOutcome,
+      auditIndexedIdentity:auditBinding.indexedIdentity
+    }),
     outcomeHash:outcomeCore?sha256(outcomeCore):null,
     learningMeaning:learned?'Included in the current aggregate learning summary; not a promoted skill or production-policy mutation.':null,
-    semantics:'Internal deterministic commitment hash. Not an external timestamp, blockchain proof, or independent attestation.'
+    semantics:issuanceBinding
+      ?'BEFORE hash is derived from a verified immutable institutional issuance. Audit binding is internal hash-chain evidence, not external attestation.'
+      :'Legacy journal reconstruction only. No claim of pre-outcome audit binding.'
   });
 }
 
@@ -398,7 +549,9 @@ export function buildBiggjProofFeed(entries=[],{
   limit=12,
   liveLimit=5,
   asOf=Date.now(),
-  learningSummary=null
+  learningSummary=null,
+  issuances=[],
+  auditLedger=null
 }={}){
   const target=symbol?String(symbol).toUpperCase():null;
   const take=Math.max(1,Math.min(50,Math.floor(finite(limit,12))));
@@ -412,27 +565,33 @@ export function buildBiggjProofFeed(entries=[],{
     if(target&&String(row?.symbol||'').toUpperCase()!==target)return false;
     return true;
   });
-  const lifecycle=scoped.map(row=>proofLifecycleRow(row,{cutoff,learningSummary:effectiveLearningSummary}));
-  const resolved=lifecycle
+  const lifecycle=scoped.map(row=>proofLifecycleRow(row,{cutoff,learningSummary:effectiveLearningSummary,issuances,auditLedger}));
+  const allResolved=lifecycle
     .filter(x=>['MATURED','REVIEWED','LEARNED'].includes(x.currentStage))
-    .sort((a,b)=>finite(b.resolvedAt,0)-finite(a.resolvedAt,0)||String(a.forecastId).localeCompare(String(b.forecastId)))
-    .slice(0,take);
-  const live=lifecycle
+    .sort((a,b)=>finite(b.resolvedAt,0)-finite(a.resolvedAt,0)||String(a.forecastId).localeCompare(String(b.forecastId)));
+  const resolved=allResolved.slice(0,take);
+  const allLive=lifecycle
     .filter(x=>['GENERATED','LIVE','AWAITING_OUTCOME'].includes(x.currentStage))
-    .sort((a,b)=>finite(b.issuedAsOf,0)-finite(a.issuedAsOf,0)||String(a.forecastId).localeCompare(String(b.forecastId)))
-    .slice(0,liveTake);
-  const hits=resolved.filter(x=>x.directionalHit===true).length;
-  const misses=resolved.filter(x=>x.directionalHit===false).length;
+    .sort((a,b)=>finite(b.issuedAsOf,0)-finite(a.issuedAsOf,0)||String(a.forecastId).localeCompare(String(b.forecastId)));
+  const live=allLive.slice(0,liveTake);
+  const hits=allResolved.filter(x=>x.directionalHit===true&&x.proofIntegrity!=='BLOCKED_JOURNAL_ISSUANCE_MISMATCH').length;
+  const misses=allResolved.filter(x=>x.directionalHit===false&&x.proofIntegrity!=='BLOCKED_JOURNAL_ISSUANCE_MISMATCH').length;
   const counts={
     scoped:lifecycle.length,
     generated:lifecycle.filter(x=>x.milestones.generated).length,
     live:lifecycle.filter(x=>x.currentStage==='LIVE').length,
     awaitingOutcome:lifecycle.filter(x=>x.currentStage==='AWAITING_OUTCOME').length,
-    resolved:resolved.length,
+    resolved:allResolved.length,
+    displayedResolved:resolved.length,
+    displayedLive:live.length,
     hits,
     misses,
     reviewed:lifecycle.filter(x=>x.milestones.reviewed).length,
-    learned:lifecycle.filter(x=>x.milestones.learned).length
+    learned:lifecycle.filter(x=>x.milestones.learned).length,
+    auditBacked:lifecycle.filter(x=>x?.proofBinding?.auditBacked===true).length,
+    issuanceVerified:lifecycle.filter(x=>x.beforeHashSource==='INSTITUTIONAL_ISSUANCE').length,
+    legacyReconstructed:lifecycle.filter(x=>x.beforeHashSource==='JOURNAL_RECONSTRUCTION').length,
+    integrityBlocked:lifecycle.filter(x=>x.proofIntegrity==='BLOCKED_JOURNAL_ISSUANCE_MISMATCH').length
   };
   const core={
     version:BIGGJ_PROOF_FEED_VERSION,
@@ -454,10 +613,14 @@ export function buildBiggjProofFeed(entries=[],{
       includesOpenCommitments:true,
       selection:'MOST_RECENT_LIVE_AND_RESOLVED_WITHIN_REQUESTED_SCOPE',
       retrospectiveEditingAllowed:false,
-      probabilityDisplaySuppressed:true
+      probabilityDisplaySuppressed:true,
+      auditBoundWhenAvailable:true,
+      aggregateCountsUseFullScopedSet:true
     },
     semantics:{
       beforeHashCommitsForecastFields:true,
+      auditBoundBeforeHashUsesVerifiedInstitutionalIssuance:true,
+      auditRecordMustPredateForecastDueTime:true,
       liveCommitmentExistsBeforeOutcome:true,
       outcomeHashBindsResolutionToBeforeHash:true,
       hashesAreInternalNotIndependentAttestation:true,
@@ -481,9 +644,18 @@ export function verifyBiggjProofFeed(value){
   if(value?.policy?.includesWins!==true||value?.policy?.includesLosses!==true)reasons.push('SELECTION_BIAS_POLICY_INVALID');
   if(value?.policy?.includesOpenCommitments!==true)reasons.push('OPEN_COMMITMENT_POLICY_INVALID');
   if(value?.policy?.probabilityDisplaySuppressed!==true)reasons.push('PROBABILITY_POLICY_INVALID');
+  if(value?.policy?.aggregateCountsUseFullScopedSet!==true)reasons.push('AGGREGATE_COUNT_POLICY_INVALID');
   for(const row of arr(value?.liveRows)){
     if(row?.outcomeHash!=null)reasons.push('LIVE_OUTCOME_HASH_LEAK');
     if(!['GENERATED','LIVE','AWAITING_OUTCOME'].includes(String(row?.currentStage)))reasons.push('LIVE_STAGE_INVALID');
+  }
+  for(const row of [...arr(value?.liveRows),...arr(value?.rows)]){
+    if(row?.proofBinding?.auditBacked===true){
+      if(row?.beforeHashSource!=='INSTITUTIONAL_ISSUANCE')reasons.push('AUDIT_BINDING_SOURCE_INVALID');
+      if(row?.proofBinding?.auditPreOutcome!==true)reasons.push('AUDIT_BINDING_LATE');
+      if(String(row?.proofBinding?.auditRecordHash||'').length!==64)reasons.push('AUDIT_RECORD_HASH_INVALID');
+      if(row?.proofBinding?.journalMatchesIssuance!==true)reasons.push('AUDIT_JOURNAL_LINK_INVALID');
+    }
   }
   const {fingerprint,...core}=value||{};
   if(fingerprint!==sha256(core))reasons.push('FINGERPRINT_MISMATCH');
@@ -500,6 +672,7 @@ export function renderBiggjProofFeed(feed={}){
     '',
     'Live '+String(feed?.counts?.live||0)+' · Awaiting '+String(feed?.counts?.awaitingOutcome||0)+' · Resolved '+String(feed?.counts?.resolved||0)+' · Learned '+String(feed?.counts?.learned||0),
     'Hits '+String(feed?.counts?.hits||0)+' · Misses '+String(feed?.counts?.misses||0),
+    'Audit-backed '+String(feed?.counts?.auditBacked||0)+' · Issuance-verified '+String(feed?.counts?.issuanceVerified||0)+' · Legacy '+String(feed?.counts?.legacyReconstructed||0)+' · Integrity-blocked '+String(feed?.counts?.integrityBlocked||0),
     ''
   ];
   if(live.length){
@@ -509,6 +682,7 @@ export function renderBiggjProofFeed(feed={}){
         '◐ '+row.currentStage.replaceAll('_',' ')+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
         'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
         'As-of   '+iso(row.issuedAsOf)+' · Due '+iso(row.dueAt),
+        'Proof   '+(row?.proofBinding?.auditBacked?'AUDIT #'+String(row.proofBinding.auditSeq)+' · '+String(row.proofBinding.auditRecordHash).slice(0,12)+'…':row.beforeHashSource==='INSTITUTIONAL_ISSUANCE'?'ISSUANCE VERIFIED · audit '+String(row?.proofBinding?.auditStatus||'unavailable'):'LEGACY · journal reconstruction'),
         'Hash    '+String(row.beforeHash).slice(0,16)+'…',
         ''
       );
@@ -524,6 +698,7 @@ export function renderBiggjProofFeed(feed={}){
       'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
       'After   '+directionLabel(row.actualDirection)+' · Return '+signedPct(row.actualReturn)+' · Range '+(row.intervalHit?'HIT':'MISS'),
       'As-of   '+iso(row.issuedAsOf)+' · Resolved '+iso(row.resolvedAt),
+      'Proof   '+(row.proofIntegrity==='BLOCKED_JOURNAL_ISSUANCE_MISMATCH'?'INTEGRITY BLOCKED':row?.proofBinding?.auditBacked?'AUDIT #'+String(row.proofBinding.auditSeq)+' · pre-outcome':'LEGACY / unaudited'),
       'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash||'').slice(0,12)+'…',
       ''
     );
@@ -531,8 +706,10 @@ export function renderBiggjProofFeed(feed={}){
   lines.push(
     'Lifecycle: GENERATED → LIVE → MATURED → REVIEWED → LEARNED.',
     'LEARNED = im aktuellen Learning-Aggregat enthalten; keine Skill-Promotion und keine PRIMARY-Änderung.',
-    'Feed zeigt Gewinne UND Fehler; keine Cherry-Pick-Policy.',
-    'Hashes sind interne deterministische Commitments, keine unabhängige externe Beglaubigung.',
+    'Feed zeigt Gewinne UND Fehler; Aggregate zählen den vollständigen gewählten Scope, nicht nur die sichtbaren letzten Rows.',
+    'AUDIT = Forecast-Issuance war vor Fälligkeit im internen hash-verketteten Ledger gebunden.',
+    'LEGACY = nur aus gespeichertem Journal rekonstruiert; keine Behauptung eines vorherigen Audit-Commitments.',
+    'Hashes/Audit sind interne Integritätsbelege, keine unabhängige externe Beglaubigung.',
     'Vergangene Treffer beweisen keine zukünftige Profitabilität.',
     'SHADOW_ONLY · REAL ORDERS BLOCKED'
   );
