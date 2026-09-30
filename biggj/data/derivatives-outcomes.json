@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-09-30T08:28:31.521Z",
+  "updatedAt": "2026-09-30T15:53:46.570Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -135,27 +135,62 @@
       },
       "evidenceClassification": "OBSERVED_DERIVED",
       "status": "OPEN",
-      "outcomes": {},
+      "outcomes": {
+        "h1": {
+          "observedAt": "2026-09-30T15:53:46.570Z",
+          "price": 84197.1,
+          "return": 0.01284139464161993,
+          "direction": 1
+        },
+        "h4": {
+          "observedAt": "2026-09-30T15:53:46.570Z",
+          "price": 84197.1,
+          "return": 0.01284139464161993,
+          "direction": 1
+        }
+      },
       "caseId": "4651a9aa16acacde167eb236cf318bfcd246049c103112b6313bab23a9d25fd0"
+    },
+    {
+      "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
+      "openedAt": "2026-09-30T15:53:46.570Z",
+      "entryPrice": 84197.1,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "evidenceFeatures": {
+        "fundingMedian": 0.7758447497975258,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 84197.1
+      },
+      "evidenceGuards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "evidenceClassification": "OBSERVED_DERIVED",
+      "status": "OPEN",
+      "outcomes": {},
+      "caseId": "9cfa5af1441ecb0695a3bc2ac121f20616cffd7efa4bf7f21d70b9b3505e7499"
     }
   ],
   "summary": {
     "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
-    "totalCases": 4,
-    "eligibleCases": 4,
+    "totalCases": 5,
+    "eligibleCases": 5,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 4,
+        "cases": 5,
         "horizons": {
           "h1": {
-            "n": 3,
-            "meanReturn": -0.0015360181161660675,
-            "positiveRate": 0.3333333333333333
+            "n": 4,
+            "meanReturn": 0.0020583350732804317,
+            "positiveRate": 0.5
           },
           "h4": {
-            "n": 3,
-            "meanReturn": -0.002708487108548615,
-            "positiveRate": 0.3333333333333333
+            "n": 4,
+            "meanReturn": 0.0011789833289935214,
+            "positiveRate": 0.5
           },
           "h24": {
             "n": 1,
@@ -175,24 +210,24 @@
       "minN": 30,
       "validationN": 100
     },
-    "eligibleCases": 4,
+    "eligibleCases": 5,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 4,
+        "cases": 5,
         "horizons": {
           "h1": {
-            "n": 3,
-            "meanReturn": -0.0015360181161660675,
-            "hitRate": 0.3333333333333333,
-            "wilsonLower95": 0.061490315276160515,
+            "n": 4,
+            "meanReturn": 0.0020583350732804317,
+            "hitRate": 0.5,
+            "wilsonLower95": 0.15003570882017145,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
           "h4": {
-            "n": 3,
-            "meanReturn": -0.002708487108548615,
-            "hitRate": 0.3333333333333333,
-            "wilsonLower95": 0.061490315276160515,
+            "n": 4,
+            "meanReturn": 0.0011789833289935214,
+            "hitRate": 0.5,
+            "wilsonLower95": 0.15003570882017145,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
