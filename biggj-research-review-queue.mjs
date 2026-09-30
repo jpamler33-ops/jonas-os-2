@@ -8,6 +8,7 @@ import {
   verifyBiggjResearchProtocol,
   evaluateBiggjResearchProtocol
 } from './biggj-research-protocol-compiler.mjs';
+import { evaluateBiggjResearchSkillValidation } from './biggj-research-validation-harness.mjs';
 
 export const BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION='TCX_BIGGJ_RESEARCH_REVIEW_QUEUE_V1';
 
@@ -89,8 +90,13 @@ export function buildBiggjResearchReviewQueue({
       continue;
     }
     const progress=evaluateBiggjSkillProgress(tree,skill.skillId);
+    const validation=evaluateBiggjResearchSkillValidation(tree,skill.skillId);
     const proposedStatus=proposedStatusFor(skill,evaluation,progress);
-    if(!proposedStatus) continue;
+    if(
+      !proposedStatus||
+      validation.manualTransitionReviewEligible!==true||
+      String(validation.recommendedStatus)!==String(proposedStatus)
+    ) continue;
 
     const core={
       version:BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION,
@@ -101,7 +107,11 @@ export function buildBiggjResearchReviewQueue({
       createdAt:t,
       protocolEvaluationFingerprint:evaluation.fingerprint,
       skillEvaluationFingerprint:progress.fingerprint,
+      validationHarnessFingerprint:validation.fingerprint,
       evidenceState:evaluation.state,
+      validationPhase:validation.validationPhase,
+      validationReadinessScore:validation.readinessScore,
+      validationChecklist:clone(validation.checklist),
       postRegistrationEvidence:clone(evaluation.postRegistrationEvidence),
       dependencyGates:clone(progress.dependencyGates),
       reviewPolicy:{
@@ -212,11 +222,19 @@ export function applyBiggjResearchReviewDecision({
   }
 
   const evaluation=evaluateBiggjSkillProgress(tree,ticket.skillId);
+  const validation=evaluateBiggjResearchSkillValidation(tree,ticket.skillId);
   if(String(evaluation.recommendedStatus)!==String(ticket.proposedStatus)){
     throw new Error('review ticket stale: recommendation changed');
   }
   if(evaluation.fingerprint!==ticket.skillEvaluationFingerprint){
     throw new Error('review ticket stale: evaluation changed');
+  }
+  if(
+    validation.manualTransitionReviewEligible!==true||
+    validation.fingerprint!==ticket.validationHarnessFingerprint||
+    String(validation.recommendedStatus)!==String(ticket.proposedStatus)
+  ){
+    throw new Error('review ticket stale: validation harness changed');
   }
 
   const next=applyBiggjSkillStatusTransition(tree,{
