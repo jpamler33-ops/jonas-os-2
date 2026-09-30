@@ -59,6 +59,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-discord-observability.mjs',
   'biggj-experience-center.mjs',
   'biggj-mobile-webapp.mjs',
+  'biggj-public-news-provider.mjs',
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
   'biggj-autonomous-operator.mjs',
