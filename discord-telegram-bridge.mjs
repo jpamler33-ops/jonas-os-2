@@ -12,8 +12,11 @@ import {
   BIGGJ_EXPERIENCE_LAYOUT,
   buildBiggjExperiencePanelMap
 } from './biggj-experience-center.mjs';
+import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
+import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V7';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -62,6 +65,8 @@ const COMMANDS=[
   {name:'progress',description:'BIGGJ Lernfortschritt öffnen'},
   {name:'evidence_log',description:'BIGGJ Evidence Ledger öffnen'},
   {name:'decisions',description:'BIGGJ Decision Trace öffnen'},
+  {name:'supervisor',description:'Channel-Manager Supervisor öffnen'},
+  {name:'improvements',description:'Channel-Verbesserungsliste öffnen'},
   {name:'setup',description:'TCX Discord Command Center automatisch einrichten'},
   {name:'terminal',description:'TCX Live-Terminal anzeigen'},
   {name:'system',description:'TCX Systemstatus anzeigen'},
@@ -108,12 +113,73 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'academy-progress',topic:'Lernfortschritt, Meilensteine und Checkliste.'},
     {name:'academy-questions',topic:'Fragen stellen mit sauberem Analyse-Template.'}
   ]},
+  {category:'BIGGJ • OPERATIONS',channels:[
+    {name:'channel-supervisor',topic:'Meta-Überwachung aller Channel-Manager: Zustand, Freshness, Fehler, Entscheidungen und Auto-Reparaturen.'},
+    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'}
+  ]},
   {category:'TCX • SYSTEM',channels:[
     {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
     {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
     {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'}
   ]}
 ]);
+
+const CHANNEL_PROFILE_GROUPS=Object.freeze({
+  HOME:new Set(['start-here']),
+  LIVE_60:new Set([
+    'tcx-terminal','performance','system-status','data-health',
+    'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
+    'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements'
+  ]),
+  LIVE_90:new Set(['market-overview']),
+  LIVE_120:new Set([
+    'brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
+    'review-queue','learning-timeline','progress','evidence-ledger','decision-trace',
+    'btc','eth','sol','memecoins','global-intel'
+  ]),
+  ACADEMY_120:new Set([
+    'academy-start','academy-roadmap','academy-lessons','academy-chart-training',
+    'academy-challenges','academy-glossary','academy-progress','academy-questions'
+  ]),
+  FEED_120:new Set(['news-feed','world-watch']),
+  TRADE_STREAM:new Set(['live-trades','theses']),
+  EVENT_FEED:new Set(['closed-trades','alerts'])
+});
+
+export function biggjChannelExperienceProfile(name){
+  const key=String(name||'');
+  if(CHANNEL_PROFILE_GROUPS.HOME.has(key))return {mode:'HOME',cadence:'STARTUP + ON DEMAND',cadenceMs:null,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_60.has(key))return {mode:'LIVE PANEL',cadence:'~60s',cadenceMs:60_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_90.has(key))return {mode:'LIVE PANEL',cadence:'~90s',cadenceMs:90_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.LIVE_120.has(key))return {mode:'LIVE PANEL',cadence:'~120s',cadenceMs:120_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.ACADEMY_120.has(key))return {mode:'LEARNING PANEL',cadence:'~120s · kept at bottom',cadenceMs:120_000,requiresContent:true};
+  if(CHANNEL_PROFILE_GROUPS.FEED_120.has(key))return {mode:'DEDUPED LIVE FEED',cadence:'~120s',cadenceMs:120_000,requiresContent:false};
+  if(CHANNEL_PROFILE_GROUPS.TRADE_STREAM.has(key))return {mode:'TRADE STREAM',cadence:'~20–120s',cadenceMs:120_000,requiresContent:false};
+  if(CHANNEL_PROFILE_GROUPS.EVENT_FEED.has(key))return {mode:'EVENT FEED',cadence:'on change',cadenceMs:null,requiresContent:false,eventDriven:true};
+  return null;
+}
+
+function decoratedChannelTopic(spec={}){
+  const base=String(spec?.topic||'').trim();
+  const profile=biggjChannelExperienceProfile(spec?.name);
+  if(!profile)return base;
+  return (base+' · '+profile.mode+' · '+profile.cadence).slice(0,1024);
+}
+
+export function auditBiggjDiscordChannelLayout(){
+  const names=SERVER_LAYOUT.flatMap(section=>section.channels.map(x=>x.name));
+  const duplicates=names.filter((name,index)=>names.indexOf(name)!==index);
+  const missingProfiles=names.filter(name=>!biggjChannelExperienceProfile(name));
+  return Object.freeze({
+    version:BIGGJ_DISCORD_CHANNEL_UX_VERSION,
+    channels:names.length,
+    uniqueChannels:new Set(names).size,
+    duplicateChannels:[...new Set(duplicates)],
+    missingProfiles,
+    complete:duplicates.length===0&&missingProfiles.length===0
+  });
+}
+
 const MARKET_PANELS=Object.freeze([
   {channel:'btc',symbol:'BTCUSDT'},
   {channel:'eth',symbol:'ETHUSDT'},
@@ -134,7 +200,12 @@ const MARKERS=Object.freeze({
   academyChallenges:'BIGGJ_ACADEMY_CHALLENGES_V1',
   academyGlossary:'BIGGJ_ACADEMY_GLOSSARY_V1',
   academyProgress:'BIGGJ_ACADEMY_PROGRESS_V1',
-  academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1'
+  academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1',
+  forecasts:'BIGGJ_CHANNEL_FORECAST_DESK_V7',
+  intelHub:'BIGGJ_CHANNEL_INTEL_HUB_V7',
+  anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
+  replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
+  errors:'BIGGJ_CHANNEL_ERROR_DESK_V7'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -398,7 +469,32 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER V6.1',description:['**Ein Einstiegspunkt für das komplette BIGGJ Research OS.**','','**DESK**','\`/needs\` · Was BIGGJ braucht','\`/learned\` · Learned Playbook','\`/app\` · iPhone Command Center','','**INTELLIGENCE**','\`/news\` · relevante Live-News','\`/world\` · Weltlage','\`/memecoins\` · Live DEX Radar','\`/traders\` · Public Trader Watch','','**TRADING**','\`/cockpit\` · aktive Shadow-Trades','\`/charts\` · One-Tap Chart Desk','\`/superchart BTC\` · direkter Chart','\`/portfolio\` · Shadow-Portfolio','','**BRAIN**','\`/brain\` · aktueller Denk-/Research-State','\`/research\` · nächste Forschungsarbeit','\`/progress\` · Lernfortschritt','','**SHADOW_ONLY · REAL ORDERS BLOCKED**'].join('\n'),footer:{text:MARKERS.start},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
+function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANNEL UX V7',description:[
+  '**Ein Einstiegspunkt für das komplette BIGGJ Research OS — ohne durch alle Channels scrollen zu müssen.**',
+  '',
+  '**TÄGLICH · 90%-PFAD**',
+  '#trade-cockpit · aktive Shadow-Trades',
+  '#chart-desk · Charts, Radar, Forecast, Deep Dive',
+  '#news-feed + #world-watch · Live-Intel auf Deutsch',
+  '#biggj-needs · höchste aktuelle Lücken',
+  '#performance · Ergebnis, Winrate, Drawdown',
+  '',
+  '**WENN DU WISSEN WILLST WARUM**',
+  '#brain-pulse · aktueller Research-State',
+  '#research-queue · nächste Forschungsarbeit',
+  '#evidence-ledger · Belege, Coverage, PIT',
+  '#decision-trace · strukturierte Entscheidungsgründe',
+  '',
+  '**WENN ETWAS NICHT FUNKTIONIERT**',
+  '#channel-supervisor · überwacht jeden Channel-Manager',
+  '#channel-improvements · priorisierte Fix-/Verbesserungsvorschläge',
+  '#errors · technische Fehler',
+  '',
+  '**Shortcuts** · \`/cockpit\` · \`/charts\` · \`/news\` · \`/world\` · \`/needs\` · \`/brain\`',
+  '',
+  '**SHADOW_ONLY · ECHTE ORDERS BLOCKIERT**'
+].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
+
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
   return {embeds:[{title:'TCX // COMMAND CENTER',description:'**SHADOW_ONLY** · REAL ORDERS BLOCKED',fields:[
@@ -471,6 +567,152 @@ export function buildDiscordDataHealthPayload(snapshot={}){
     {name:'Current Runtime Blockers',value:(hard.concat(warnings).slice(0,6).join('\n')||'none').slice(0,1024),inline:false}
   ],footer:{text:MARKERS.data},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
+
+function buildForecastDeskPayload(snapshot={}){
+  const h=snapshot?.health||{};
+  const f=h?.institutionalForecastRuntime||{};
+  return {embeds:[{
+    title:'BIGGJ // FORECAST DESK',
+    description:'**Probabilistische Forecasts, Unsicherheit und Invalidation — kein Kursversprechen.**',
+    fields:[
+      {name:'Forecast-Runtime',value:yesNo(f?.healthy??(f?.status==='HEALTHY')),inline:true},
+      {name:'Status',value:String(f?.status||'—'),inline:true},
+      {name:'Modus',value:'SHADOW_ONLY · Point-in-Time',inline:true},
+      {name:'Arbeitsweg',value:'1. Forecast öffnen · 2. Unsicherheit prüfen · 3. Gegenargumente/Invalidation · 4. Accuracy später gegen Outcome prüfen.',inline:false}
+    ],
+    footer:{text:MARKERS.forecasts},
+    timestamp:new Date().toISOString()
+  }],components:[
+    {type:1,components:[
+      {type:2,style:1,label:'BTC Forecast',custom_id:'dc3:forecast:BTCUSDT'},
+      {type:2,style:1,label:'ETH Forecast',custom_id:'dc3:forecast:ETHUSDT'},
+      {type:2,style:1,label:'SOL Forecast',custom_id:'dc3:forecast:SOLUSDT'}
+    ]},
+    {type:1,components:[
+      {type:2,style:2,label:'BTC Accuracy',custom_id:'dc3:accuracy:BTCUSDT'},
+      {type:2,style:2,label:'Super Radar',custom_id:'dc3:terminal:radar'}
+    ]}
+  ],allowedMentions:{parse:[]}};
+}
+
+function buildAnomalyWatchPayload(snapshot={}){
+  const discovery=snapshot?.discovery||{};
+  const h=snapshot?.health||{};
+  const warnings=Array.isArray(h?.operationalReadiness?.warningReasons)?h.operationalReadiness.warningReasons:[];
+  const candidates=(Array.isArray(discovery?.topCandidates)?discovery.topCandidates:Array.isArray(discovery?.candidates)?discovery.candidates:[])
+    .slice(0,8)
+    .map(x=>'• **'+String(x?.symbol||x?.asset||'UNBEKANNT')+'** · '+String(x?.status||x?.reason||'BEOBACHTEN'))
+    .join('\n')||'Aktuell keine priorisierten Anomalie-Kandidaten im Serving-State.';
+  return {embeds:[{
+    title:'BIGGJ // ANOMALIE-WATCH',
+    description:'**Regimewechsel, ungewöhnliche Marktstruktur und Research-Hinweise.** Ein Signal ist noch kein Trade.',
+    fields:[
+      {name:'Aktuelle Kandidaten',value:candidates.slice(0,1024),inline:false},
+      {name:'Runtime-Warnungen',value:(warnings.slice(0,6).join('\n')||'Keine aktuellen Runtime-Warnungen.').slice(0,1024),inline:false},
+      {name:'Regel',value:'Anomalie → Kontext → Evidenz → Gegenargument → Invalidation. Erst danach darf sie in eine Shadow-These einfließen.',inline:false}
+    ],
+    footer:{text:MARKERS.anomalies},
+    timestamp:new Date().toISOString()
+  }],components:[
+    {type:1,components:[
+      {type:2,style:1,label:'Super Radar',custom_id:'dc3:terminal:radar'},
+      {type:2,style:2,label:'BTC X-Ray',custom_id:'dc3:xray:BTCUSDT'},
+      {type:2,style:2,label:'ETH X-Ray',custom_id:'dc3:xray:ETHUSDT'},
+      {type:2,style:2,label:'SOL X-Ray',custom_id:'dc3:xray:SOLUSDT'}
+    ]}
+  ],allowedMentions:{parse:[]}};
+}
+
+function buildReplayDeskPayload(snapshot={}){
+  const recent=Array.isArray(snapshot?.portfolio?.recentClosed)?snapshot.portfolio.recentClosed:[];
+  const rows=recent.slice(0,8).map(x=>{
+    const pnl=Number(x?.realizedNetPnlQuote??x?.netPnlQuote??x?.pnlQuote);
+    return '• **'+String(x?.symbol||'UNBEKANNT')+'** · '+String(x?.side||'—')+' · '+(Number.isFinite(pnl)?money(pnl):'—')+' · '+String(x?.exitReason||x?.closeReason||'geschlossen');
+  }).join('\n')||'Noch keine abgeschlossenen Shadow-Trades für Replay.';
+  const symbols=[];
+  for(const x of recent){
+    const s=normalizeDiscordSymbol(x?.symbol);
+    if(s&&!symbols.includes(s))symbols.push(s);
+    if(symbols.length>=3)break;
+  }
+  const components=symbols.length?[{type:1,components:symbols.map(s=>({type:2,style:2,label:s.replace('USDT','')+' Replay',custom_id:'dc3:tradereplay:'+s}))}]:[];
+  return {embeds:[{
+    title:'BIGGJ // TRADE-REPLAY DESK',
+    description:'**Vergangene Shadow-Trades Point-in-Time nachprüfen statt Ergebnis-Hindsight.**',
+    fields:[
+      {name:'Letzte Abschlüsse',value:rows.slice(0,1024),inline:false},
+      {name:'Review-Reihenfolge',value:'These beim Entry → damals verfügbare Daten → Invalidation → Ausführung → Exit → Lernpunkt. Gewinn ≠ automatisch gute Entscheidung.',inline:false}
+    ],
+    footer:{text:MARKERS.replay},
+    timestamp:new Date().toISOString()
+  }],components,allowedMentions:{parse:[]}};
+}
+
+function buildErrorDeskPayload(snapshot={},recentErrors=[],translationHealth=null,managerState=null){
+  const h=snapshot?.health||{};
+  const hard=Array.isArray(h?.operationalReadiness?.hardReasons)?h.operationalReadiness.hardReasons:[];
+  const warnings=Array.isArray(h?.operationalReadiness?.warningReasons)?h.operationalReadiness.warningReasons:[];
+  const errors=(Array.isArray(recentErrors)?recentErrors:[]).slice(0,8).map(x=>
+    '• '+new Date(Number(x?.at)||Date.now()).toLocaleTimeString('de-DE',{timeZone:'Europe/Berlin'})+' · **'+String(x?.scope||'SYSTEM')+'** · '+String(x?.message||'UNBEKANNT')
+  ).join('\n')||'Keine aktuellen Discord-/Channel-Manager-Fehler.';
+  return {embeds:[{
+    title:'BIGGJ // FEHLER & DIAGNOSE',
+    description:'**Technische Fehler, Datenwarnungen und Manager-Probleme an einer Stelle.**',
+    fields:[
+      {name:'Letzte Fehler',value:errors.slice(0,1024),inline:false},
+      {name:'Runtime-Blocker',value:(hard.concat(warnings).slice(0,8).join('\n')||'Keine aktuellen Blocker.').slice(0,1024),inline:false},
+      {name:'Channel-Manager',value:managerState?'Probleme '+String(managerState.problems)+' / '+String(managerState.managers)+' · Supervisor '+String(managerState.supervisor?.status||'—'):'—',inline:true},
+      {name:'Deutsch-Übersetzung',value:translationHealth?(translationHealth.ok?'OK':'FEHLER')+' · Erfolge '+String(translationHealth.successes)+' · Fehler '+String(translationHealth.failures):'—',inline:true}
+    ],
+    footer:{text:MARKERS.errors},
+    timestamp:new Date().toISOString()
+  }],components:[{type:1,components:[
+    {type:2,style:2,label:'Datenstatus',custom_id:'dc3:home:data'},
+    {type:2,style:2,label:'Brain Pulse',custom_id:'dc6:brain:pulse'},
+    {type:2,style:2,label:'Entscheidungen',custom_id:'dc6:brain:decisions'}
+  ]}],allowedMentions:{parse:[]}};
+}
+
+function buildChannelSupervisorPayload(managerState={},translationHealth=null){
+  const counts=managerState?.counts||{};
+  const problems=(managerState?.topProblems||[]).slice(0,10).map(x=>
+    '• **#'+String(x.name)+'** · '+String(x.status)+' → '+String(x.decision)+'\n  '+String(x.reason)
+  ).join('\n')||'Alle Channel-Manager melden einen gesunden bzw. erwarteten Zustand.';
+  return {embeds:[{
+    title:'BIGGJ // CHANNEL-MANAGER SUPERVISOR',
+    description:'**Jeder Channel hat einen eigenen Manager. Dieser Supervisor überwacht wiederum alle Manager.**\nManager prüfen Zweck, Freshness, Fehler, Layout und nächsten Handlungsbedarf.',
+    fields:[
+      {name:'Gesamtzustand',value:String(managerState?.supervisor?.status||'—')+' · '+String(managerState?.healthy||0)+' gesund / '+String(managerState?.managers||0)+' Manager',inline:false},
+      {name:'Meta-Supervisor',value:String(managerState?.metaSupervisor?.status||'—')+' · Coverage '+Math.round(Number(managerState?.metaSupervisor?.managerCoverage||0)*100)+'% · Blindspots '+String(managerState?.metaSupervisor?.unprofiledManagers||0),inline:false},
+      {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
+      {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
+      {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
+      {name:'Sicherheitsgrenze',value:'Auto-Reparatur nur für UI/Refresh/Layout. Keine Live-Orders, keine stillen PRIMARY-Policy-Änderungen.',inline:false}
+    ],
+    footer:{text:'BIGGJ_CHANNEL_SUPERVISOR_V1'},
+    timestamp:new Date().toISOString()
+  }],allowedMentions:{parse:[]}};
+}
+
+function buildChannelImprovementsPayload(managerState={},translationHealth=null){
+  const actions=(managerState?.supervisor?.nextActions||[]).slice(0,12).map((x,i)=>
+    '**'+(i+1)+'. #'+String(x.channel)+' · '+String(x.decision)+'**\n'+String(x.suggestion)
+  ).join('\n\n')||'Aktuell keine zwingende Channel-Verbesserung offen.';
+  const translationSuggestion=translationHealth&&!translationHealth.ok
+    ?'\n\n**Übersetzung:** Dienst ist gestört. Deutsche News im Strict-Mode werden lieber zurückgehalten als ungeprüft englisch gepostet.'
+    :'';
+  return {embeds:[{
+    title:'BIGGJ // CHANNEL-VERBESSERUNGEN',
+    description:'**Priorisierte Verbesserungsliste aus den einzelnen Channel-Managern.**'+translationSuggestion,
+    fields:[
+      {name:'Nächste Verbesserungen',value:actions.slice(0,1024),inline:false},
+      {name:'Entscheidungslogik',value:'BROKEN → Layout reparieren · DEGRADED → Ursache isolieren/retry · STALE/EMPTY → Refresh · HEALTHY → nichts ändern.',inline:false}
+    ],
+    footer:{text:'BIGGJ_CHANNEL_IMPROVEMENTS_V1'},
+    timestamp:new Date().toISOString()
+  }],allowedMentions:{parse:[]}};
+}
+
 function closedTradePayload(position={}){
   const pnl=Number(position?.realizedNetPnlQuote),ret=Number(position?.realizedReturnPct);
   const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT');
@@ -629,12 +871,20 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   if(!token||!applicationId||!guildId||typeof handleUpdate!=='function')throw new Error('DISCORD_BRIDGE_CONFIG_INVALID');
   const client=new Client({intents:[GatewayIntentBits.Guilds]});
   const rest=new REST({version:'10'}).setToken(token);
+  const channelManagers=createBiggjChannelManagerRuntime({sections:SERVER_LAYOUT,profileFor:biggjChannelExperienceProfile});
+  const germanTranslator=createGermanTranslationProvider({
+    fetchImpl:globalThis.fetch,
+    timeoutMs:Math.max(2000,Math.min(12000,Number(process.env.TCX_GERMAN_TRANSLATION_TIMEOUT_MS||4500)))
+  });
+  const strictGermanNews=String(process.env.TCX_DISCORD_STRICT_GERMAN_NEWS||'1')!=='0';
   const contexts=new Map();
   const channelCache=new Map();
   const tradeCards=new Map();
   const thesisCards=new Map();
   const observabilityPanelDigests=new Map();
   const experiencePanelDigests=new Map();
+  const corePanelDigests=new Map();
+  const recentErrors=[];
   const closedPosted=new Set();
   const timers=new Set();
   const visualRefreshQueue=createSerialDedupeQueue({maxSize:64});
@@ -651,10 +901,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
+    recentErrors.unshift({at:Date.now(),scope:String(scope),message});
+    if(recentErrors.length>20)recentErrors.length=20;
+    state.recentErrors=recentErrors.length;
     try{
       const detail={
         scope:String(scope),
@@ -665,6 +918,30 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       };
       logger.error('[TCX_DISCORD]',JSON.stringify(detail));
     }catch{}
+  }
+  async function managed(name,fn,{detail=null,rethrow=true}={}){
+    try{
+      const result=await fn();
+      channelManagers.success(name,detail);
+      return result;
+    }catch(err){
+      channelManagers.failure(name,err,detail);
+      fail('channel:'+name,err);
+      if(rethrow)throw err;
+      return null;
+    }
+  }
+  function managerSnapshot(){
+    const snap=channelManagers.snapshot();
+    state.channelManagerProblems=snap.problems;
+    state.channelSupervisorStatus=snap.supervisor.status;
+    state.channelMetaSupervisorStatus=snap.metaSupervisor?.status||'UNKNOWN';
+    state.translationHealth=germanTranslator.health();
+    return snap;
+  }
+
+  function snowflakeTime(id){
+    try{return Number((BigInt(String(id))>>22n)+1420070400000n);}catch{return null;}
   }
   async function channelFor(chatId){const p=parseDiscordChatId(chatId);if(!p)throw new Error('INVALID_DISCORD_CHAT_ID');const c=await client.channels.fetch(p.channelId);if(!c||!c.isTextBased())throw new Error('DISCORD_CHANNEL_NOT_TEXT');return {p,c};}
   async function sendText(chatId,body){
@@ -748,13 +1025,19 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       let category=g.channels.cache.find(c=>c.type===ChannelType.GuildCategory&&c.name===section.category);
       if(!category){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');category=await g.channels.create({name:section.category,type:ChannelType.GuildCategory,reason:'TCX Discord V2 setup'});created.push(section.category);}
       for(const spec of section.channels){
+        const desiredTopic=decoratedChannelTopic(spec);
         let channel=g.channels.cache.find(c=>c.type===ChannelType.GuildText&&c.name===spec.name);
-        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:spec.topic,reason:'BIGGJ Discord V6 setup'});created.push('#'+spec.name);}
+        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:desiredTopic,reason:'BIGGJ Discord V7 channel UX setup'});created.push('#'+spec.name);}
         else if(canManage){
-          if(channel.parentId!==category.id)await channel.setParent(category.id,{lockPermissions:false,reason:'BIGGJ Discord V6 layout reconciliation'});
-          if(String(channel.topic||'')!==String(spec.topic||''))await channel.setTopic(spec.topic||null,'BIGGJ Discord V6 topic reconciliation');
+          if(channel.parentId!==category.id)await channel.setParent(category.id,{lockPermissions:false,reason:'BIGGJ Discord V7 layout reconciliation'});
+          if(String(channel.topic||'')!==String(desiredTopic||''))await channel.setTopic(desiredTopic||null,'BIGGJ Discord V7 topic reconciliation');
         }
         channelCache.set(spec.name,channel);
+        channelManagers.observe(spec.name,{
+          exists:true,
+          parentMatches:String(channel.parentId||'')===String(category.id||''),
+          topicMatches:String(channel.topic||'')===String(desiredTopic||'')
+        });
       }
     }
     state.channels=channelCache.size; state.setupStatus='READY'; state.setupError=null;
@@ -778,7 +1061,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       return upsertMarked(channel,marker,payload);
     }
   }
-  async function ensureStart(){const c=channelCache.get('start-here');return c?upsertMarked(c,MARKERS.start,startPayload()):null;}
+  async function ensureStart(){
+    const c=channelCache.get('start-here');
+    if(!c){channelManagers.failure('start-here','CHANNEL_NOT_FOUND');return null;}
+    return managed('start-here',()=>upsertMarked(c,MARKERS.start,startPayload()),{detail:'Startpanel bereit'});
+  }
   async function ensureAcademy(){
     const specs=[
       ['academy-start',MARKERS.academyStart,'start'],
@@ -794,7 +1081,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     for(const [name,marker,kind] of specs){
       const c=channelCache.get(name);
       if(!c)continue;
-      await upsertMarkedAtBottom(c,marker,academyStaticPayload(kind));
+      await managed(name,()=>upsertMarkedAtBottom(c,marker,academyStaticPayload(kind)),{detail:'Academy-Panel '+kind});
       ready++;
     }
     state.academyPanels=ready;
@@ -802,13 +1089,22 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return ready;
   }
 
-  async function refreshTerminal(){const c=channelCache.get('tcx-terminal');if(!c)return null;const m=await upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot()));state.lastRefreshAt=Date.now();return m;}
-  async function refreshSystem(){const c=channelCache.get('system-status');return c?upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())):null;}
-  async function refreshPerformance(){const c=channelCache.get('performance');return c?upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())):null;}
-  async function refreshOverview(){const c=channelCache.get('market-overview');return c?upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())):null;}
-  async function refreshDataHealth(){const c=channelCache.get('data-health');return c?upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())):null;}
+  async function refreshTerminal(){
+    const c=channelCache.get('tcx-terminal');if(!c)return null;
+    const m=await managed('tcx-terminal',async()=>upsertMarked(c,MARKERS.terminal,buildDiscordTerminalPayload(await safeMissionSnapshot())),{detail:'Mission Control aktualisiert'});
+    state.lastRefreshAt=Date.now();return m;
+  }
+  async function refreshSystem(){const c=channelCache.get('system-status');return c?managed('system-status',async()=>upsertMarked(c,MARKERS.system,buildDiscordSystemPayload(await safeMissionSnapshot())),{detail:'Systemstatus aktualisiert'}):null;}
+  async function refreshPerformance(){const c=channelCache.get('performance');return c?managed('performance',async()=>upsertMarked(c,MARKERS.performance,buildDiscordPerformancePayload(await safeMissionSnapshot())),{detail:'Performance aktualisiert'}):null;}
+  async function refreshOverview(){const c=channelCache.get('market-overview');return c?managed('market-overview',async()=>upsertMarked(c,MARKERS.overview,buildDiscordMarketOverviewPayload(await safeMissionSnapshot())),{detail:'Marktübersicht aktualisiert'}):null;}
+  async function refreshDataHealth(){const c=channelCache.get('data-health');return c?managed('data-health',async()=>upsertMarked(c,MARKERS.data,buildDiscordDataHealthPayload(await safeMissionSnapshot())),{detail:'Datenstatus aktualisiert'}):null;}
   function observabilityDigest(payload){
-    return JSON.stringify({embeds:payload?.embeds||[],components:payload?.components||[]});
+    const embeds=(payload?.embeds||[]).map(embed=>{
+      const copy={...embed};
+      delete copy.timestamp;
+      return copy;
+    });
+    return JSON.stringify({embeds,components:payload?.components||[]});
   }
   async function refreshBiggjObservabilityPanels(){
     const snapshot=await safeMissionSnapshot();
@@ -819,8 +1115,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       const channel=channelCache.get(row.channel);
       if(!channel)continue;
       const digest=observabilityDigest(row.payload);
-      if(observabilityPanelDigests.get(row.channel)===digest){count++;continue;}
-      await upsertMarked(channel,row.marker,row.payload);
+      if(observabilityPanelDigests.get(row.channel)===digest){channelManagers.success(row.channel,'Observability unverändert und aktuell');count++;continue;}
+      await managed(row.channel,()=>upsertMarked(channel,row.marker,row.payload),{detail:'Observability-Panel aktualisiert'});
       observabilityPanelDigests.set(row.channel,digest);
       count++;
     }
@@ -841,8 +1137,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       const channel=channelCache.get(row.channel);
       if(!channel)continue;
       const digest=observabilityDigest(row.payload);
-      if(experiencePanelDigests.get(row.channel)===digest){count++;continue;}
-      await upsertMarked(channel,row.marker,row.payload);
+      if(experiencePanelDigests.get(row.channel)===digest){channelManagers.success(row.channel,'Experience-Panel unverändert und aktuell');count++;continue;}
+      await managed(row.channel,()=>upsertMarked(channel,row.marker,row.payload),{detail:'Experience-Panel aktualisiert'});
       experiencePanelDigests.set(row.channel,digest);
       count++;
     }
@@ -854,30 +1150,36 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const raw=String(event?.id||event?.url||[event?.title,event?.availableAt].join('|')||'event');
     return Buffer.from(raw).toString('base64url').slice(0,72);
   }
-  function newsEventPayload(event,{world=false}={}){
+  function newsEventPayload(event,{world=false,translatedTitle=null,translationSourceLanguage='unknown'}={}){
     const verified=event?.verified===true||Number(event?.independentConfirmation||0)>=.45;
-    const source=String(event?.source||'PUBLIC_NEWS');
-    const family=String(event?.family||event?.eventFamily||'OTHER');
-    const status=String(event?.status||'WATCH');
+    const source=String(event?.source||'ÖFFENTLICHE_NEWS');
+    const familyRaw=String(event?.family||event?.eventFamily||'OTHER').toUpperCase();
+    const statusRaw=String(event?.status||'WATCH').toUpperCase();
+    const familyMap={CRYPTO:'KRYPTO',GEOPOLITICS:'GEOPOLITIK',MACRO:'MAKRO',TECHNOLOGY:'TECHNOLOGIE',CORPORATE:'UNTERNEHMEN',COMMODITIES:'ROHSTOFFE',OTHER:'SONSTIGES'};
+    const statusMap={HIGH_IMPACT:'HOHE RELEVANZ',DEVELOPING:'ENTWICKLUNG',WATCH:'BEOBACHTEN'};
+    const marketMap={AWAITING_MARKET_DATA:'WARTE AUF MARKTDATEN',NONE:'KEINE'};
     const assets=(Array.isArray(event?.affectedAssets)?event.affectedAssets:[]).slice(0,8);
     const rawUrl=String(event?.url||'').trim();
     const url=/^https?:\/\//i.test(rawUrl)?rawUrl:undefined;
     const observedAt=Number(event?.availableAt||event?.timestamp||Date.now());
     const key=newsEventKey(event);
-    const title=(world?'WORLD // ':'NEWS // ')+String(event?.title||event?.headline||'Event').slice(0,230);
+    const headline=String(translatedTitle||event?.title||event?.headline||'Ereignis').slice(0,220);
+    const title=(world?'WELTLAGE // ':'NEWS // ')+headline;
+    const epistemic=verified?'VERIFIZIERT / KORROBORIERT':'ENTDECKUNG · NOCH NICHT UNABHÄNGIG VERIFIZIERT';
     return {
       embeds:[{
         title,
         ...(url?{url}:{}),
         description:[
-          '**'+status.replaceAll('_',' ')+'** · '+family.replaceAll('_',' '),
-          verified?'✓ independently corroborated/verified in current state':'◐ discovered · not independently verified',
-          assets.length?'Affected: '+assets.join(' · '):'Affected markets: not established'
+          '**'+(statusMap[statusRaw]||statusRaw.replaceAll('_',' '))+'** · '+(familyMap[familyRaw]||familyRaw.replaceAll('_',' ')),
+          verified?'✓ unabhängig bestätigt/verifiziert':'◐ entdeckt · noch nicht unabhängig verifiziert',
+          assets.length?'Betroffene Märkte: '+assets.join(' · '):'Betroffene Märkte: noch nicht belastbar bestimmt'
         ].join('\n').slice(0,4096),
         fields:[
-          {name:'Source',value:source.slice(0,1024),inline:true},
-          {name:'Market reaction',value:String(event?.marketStatus||'AWAITING_MARKET_DATA').replaceAll('_',' ').slice(0,1024),inline:true},
-          {name:'Epistemic',value:String(event?.epistemic||'PUBLIC_EVENT').replaceAll('_',' ').slice(0,1024),inline:false}
+          {name:'Quelle',value:source.slice(0,1024),inline:true},
+          {name:'Marktreaktion',value:(marketMap[String(event?.marketStatus||'').toUpperCase()]||String(event?.marketStatus||'WARTE AUF MARKTDATEN').replaceAll('_',' ')).slice(0,1024),inline:true},
+          {name:'Evidenzstatus',value:epistemic.slice(0,1024),inline:false},
+          {name:'Übersetzung',value:translationSourceLanguage==='de'?'Original bereits Deutsch':'Automatisch ins Deutsche übersetzt',inline:false}
         ],
         footer:{text:'BIGGJ_NEWS_EVENT:'+key+' · '+(verified?'VERIFIED/CORROBORATED':'DISCOVERY_ONLY')},
         timestamp:new Date(Number.isFinite(observedAt)?observedAt:Date.now()).toISOString()
@@ -905,29 +1207,45 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         }
       }
     }
-    let posted=0;
+    let posted=0,translationFailures=0,translated=0;
     for(const event of rows){
       const key=newsEventKey(event);
       if(seen.has(key))continue;
-      await c.send(newsEventPayload(event,{world}));
+      const rawTitle=String(event?.title||event?.headline||'Ereignis');
+      const translation=await germanTranslator.translate(rawTitle);
+      if(!translation.ok){
+        translationFailures++;
+        if(strictGermanNews)continue;
+      }
+      const germanTitle=translation.ok?translation.text:rawTitle;
+      if(translation.ok&&translation.sourceLanguage!=='de')translated++;
+      await c.send(newsEventPayload(event,{
+        world,
+        translatedTitle:germanTitle,
+        translationSourceLanguage:translation.ok?translation.sourceLanguage:'unknown'
+      }));
       seen.add(key);
       posted++;
       if(posted>=12)break;
     }
+    const detail='News '+posted+' gepostet · übersetzt '+translated+' · Übersetzungsfehler '+translationFailures;
+    if(translationFailures>0&&strictGermanNews)channelManagers.failure(channelName,'GERMAN_TRANSLATION_FAILED_'+translationFailures,detail);
+    else channelManagers.success(channelName,detail);
+    try{logger.info?.('[BIGGJ_GERMAN_NEWS] '+JSON.stringify({channel:channelName,posted,translated,translationFailures,strictGermanNews,translation:germanTranslator.health()}));}catch{}
     return posted;
   }
   async function refreshNewsFeed(){
     try{return await syncNewsChannel('news-feed',{world:false});}
-    catch(err){fail('news-feed',err);return 0;}
+    catch(err){channelManagers.failure('news-feed',err);fail('news-feed',err);return 0;}
   }
   async function refreshWorldWatch(){
     try{return await syncNewsChannel('world-watch',{world:true});}
-    catch(err){fail('world-watch',err);return 0;}
+    catch(err){channelManagers.failure('world-watch',err);fail('world-watch',err);return 0;}
   }
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
-    if(c)try{return await refreshCorePanel(c,'home:memecoins',{components:[]});}catch(err){fail('memecoin-lab',err);}
-    return null;
+    if(!c)return null;
+    return managed('memecoins',()=>refreshCorePanel(c,'home:memecoins',{components:[]}),{detail:'Memecoin-Radar aktualisiert',rethrow:false});
   }
   async function experienceCommand(interaction,channelName){
     await interaction.deferReply();
@@ -1011,10 +1329,128 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return renderCoreIntoMessage(channel,msg,callbackData,{forcePhoto:Boolean(msg.attachments?.size),components});
   }
   async function refreshMarketPanels(){
-    let count=0; for(const panel of MARKET_PANELS){const c=channelCache.get(panel.channel);if(!c)continue;try{await refreshCorePanel(c,'refresh:'+panel.symbol);count++;}catch(err){fail('market-panel:'+panel.symbol,err);}}
+    let count=0;
+    for(const panel of MARKET_PANELS){
+      const c=channelCache.get(panel.channel);if(!c)continue;
+      const out=await managed(panel.channel,()=>refreshCorePanel(c,'refresh:'+panel.symbol),{detail:panel.symbol+' Marktpanel',rethrow:false});
+      if(out)count++;
+    }
     state.marketPanels=count; state.lastMarketRefreshAt=Date.now(); return count;
   }
-  async function refreshGlobalIntel(){const c=channelCache.get('global-intel');if(c)try{await refreshCorePanel(c,'home:news');}catch(err){fail('global-intel',err);}}
+  async function refreshGlobalIntel(){
+    const c=channelCache.get('global-intel');if(!c)return null;
+    return managed('global-intel',()=>refreshCorePanel(c,'home:news'),{detail:'Legacy Global Intel aktualisiert',rethrow:false});
+  }
+
+  async function refreshStableManagedPanel(name,marker,payload){
+    const channel=channelCache.get(name);
+    if(!channel){channelManagers.failure(name,'CHANNEL_NOT_FOUND');return null;}
+    const digest=observabilityDigest(payload);
+    if(corePanelDigests.get(name)===digest){
+      channelManagers.success(name,'Panel unverändert und aktuell');
+      return findMarked(channel,marker);
+    }
+    const msg=await managed(name,()=>upsertMarked(channel,marker,payload),{detail:'Managed Panel aktualisiert',rethrow:false});
+    if(msg)corePanelDigests.set(name,digest);
+    return msg;
+  }
+
+  async function refreshForecastDesk(){
+    return refreshStableManagedPanel('forecasts',MARKERS.forecasts,buildForecastDeskPayload(await safeMissionSnapshot()));
+  }
+  async function refreshAnomalyDesk(){
+    return refreshStableManagedPanel('anomalies',MARKERS.anomalies,buildAnomalyWatchPayload(await safeMissionSnapshot()));
+  }
+  async function refreshReplayDesk(){
+    return refreshStableManagedPanel('trade-replay',MARKERS.replay,buildReplayDeskPayload(await safeMissionSnapshot()));
+  }
+  async function refreshErrorDesk(){
+    return refreshStableManagedPanel('errors',MARKERS.errors,buildErrorDeskPayload(
+      await safeMissionSnapshot(),
+      recentErrors,
+      germanTranslator.health(),
+      managerSnapshot()
+    ));
+  }
+  async function refreshAuxiliaryDesks(){
+    const out=await Promise.allSettled([refreshForecastDesk(),refreshAnomalyDesk(),refreshReplayDesk(),refreshErrorDesk()]);
+    return out.filter(x=>x.status==='fulfilled').length;
+  }
+  function managerRepairGroup(name){
+    if(BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'OBSERVABILITY';
+    if(BIGGJ_EXPERIENCE_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'EXPERIENCE';
+    if(name.startsWith('academy-'))return 'ACADEMY';
+    if(['btc','eth','sol'].includes(name))return 'MARKETS';
+    if(['live-trades','theses','closed-trades'].includes(name))return 'TRADES';
+    return name;
+  }
+
+  async function repairManagerProblem(problem){
+    const name=String(problem?.name||'');
+    if(!name||['channel-supervisor','channel-improvements'].includes(name))return false;
+    if(problem?.decision==='REPAIR_LAYOUT'){
+      await ensureLayout();
+      return true;
+    }
+    const group=managerRepairGroup(name);
+    if(group==='OBSERVABILITY'){await refreshBiggjObservabilityPanels();return true;}
+    if(group==='EXPERIENCE'){await refreshExperiencePanels();return true;}
+    if(group==='ACADEMY'){await ensureAcademy();return true;}
+    if(group==='MARKETS'){await refreshMarketPanels();return true;}
+    if(group==='TRADES'){await syncTradeCards();return true;}
+    if(name==='start-here'){await ensureStart();return true;}
+    if(name==='tcx-terminal'){await refreshTerminal();return true;}
+    if(name==='market-overview'){await refreshOverview();return true;}
+    if(name==='performance'){await refreshPerformance();return true;}
+    if(name==='system-status'){await refreshSystem();return true;}
+    if(name==='data-health'){await refreshDataHealth();return true;}
+    if(name==='global-intel'){await refreshGlobalIntel();return true;}
+    if(name==='news-feed'){await refreshNewsFeed();return true;}
+    if(name==='world-watch'){await refreshWorldWatch();return true;}
+    if(name==='memecoins'){await refreshMemecoinLab();return true;}
+    if(name==='forecasts'){await refreshForecastDesk();return true;}
+    if(name==='anomalies'){await refreshAnomalyDesk();return true;}
+    if(name==='trade-replay'){await refreshReplayDesk();return true;}
+    if(name==='errors'){await refreshErrorDesk();return true;}
+    return false;
+  }
+
+  async function refreshChannelSupervisor({autoRepair=true}={}){
+    channelManagers.success('channel-supervisor','Supervisor-Zyklus gestartet');
+    channelManagers.success('channel-improvements','Verbesserungsanalyse gestartet');
+    let before=managerSnapshot();
+    const repaired=[];
+    if(autoRepair){
+      const groups=new Set();
+      for(const problem of before.topProblems||[]){
+        if(repaired.length>=4)break;
+        const group=managerRepairGroup(problem.name);
+        if(groups.has(group)||['channel-supervisor','channel-improvements'].includes(problem.name))continue;
+        groups.add(group);
+        try{
+          if(await repairManagerProblem(problem))repaired.push({channel:problem.name,decision:problem.decision});
+        }catch(err){
+          channelManagers.failure(problem.name,err,'Auto-Reparatur fehlgeschlagen');
+          fail('channel-supervisor:'+problem.name,err);
+        }
+      }
+    }
+    const after=managerSnapshot();
+    const translation=germanTranslator.health();
+    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation));
+    await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation));
+    const finalState=managerSnapshot();
+    try{logger.info?.('[BIGGJ_CHANNEL_SUPERVISOR] '+JSON.stringify({
+      status:finalState.supervisor.status,
+      managers:finalState.managers,
+      healthy:finalState.healthy,
+      problems:finalState.problems,
+      repaired,
+      translation:translation.ok?'OK':'DEGRADED'
+    }));}catch{}
+    return finalState;
+  }
+
   async function dispatchReadCommand(channelName,text){
     const c=channelCache.get(channelName); if(!c)return false; const chatId=fakeChatId(guildId,c.id,'panel');
     await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
@@ -1037,8 +1473,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const previous=lastHealthDigest;lastHealthDigest=digest;
     const c=channelCache.get('alerts');if(!c)return;
     const now=JSON.parse(digest),before=JSON.parse(previous);
-    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>k+': '+(before[k]?'OK':'CHECK')+' → '+(now[k]?'OK':'CHECK'));
-    await c.send({embeds:[{title:'TCX // STATUS CHANGE',description:(changes.join('\n')||'System state changed').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}});
+    const labels={ready:'Runtime',fabric:'Marktdaten',oms:'Shadow OMS',forecast:'Forecast',telegram:'Telegram'};
+    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>(labels[k]||k)+': '+(before[k]?'OK':'PRÜFEN')+' → '+(now[k]?'OK':'PRÜFEN'));
+    await managed('alerts',()=>c.send({embeds:[{title:'TCX // STATUSÄNDERUNG',description:(changes.join('\n')||'Systemzustand hat sich geändert.').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}}),{detail:'Statusänderung gepostet',rethrow:false});
     state.lastAlertAt=Date.now();
   }
   function cachedMessage(channel,messageId){
@@ -1305,6 +1742,13 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     }
     state.tradeCards=tradeCards.size;
     state.lastTradeSyncStats={...syncStats};
+    channelManagers.success('live-trades','Trade-Sync '+positions.length+' Positionen');
+    channelManagers.success('theses','Thesis-Sync '+positions.length+' Positionen');
+    channelManagers.success('closed-trades','Closed-Trade Feed überwacht');
+    }catch(err){
+      channelManagers.failure('live-trades',err,'Trade-Sync fehlgeschlagen');
+      channelManagers.failure('theses',err,'Trade-Sync fehlgeschlagen');
+      throw err;
     }finally{
       state.lastTradeSyncAt=Date.now();
       state.lastTradeSyncDurationMs=Math.max(0,state.lastTradeSyncAt-syncStartedAt);
@@ -1353,14 +1797,33 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshNewsFeed,120000);
     addTimer(refreshWorldWatch,120000);
     addTimer(refreshMemecoinLab,120000);
+    addTimer(refreshAuxiliaryDesks,60000);
+    addTimer(()=>refreshChannelSupervisor({autoRepair:true}),60000);
     addSerialTimer(syncTradeCards,tradeSyncIntervalMs);
     addSerialTimer(drainVisualRefreshQueue,250);
     addTimer(syncHealthAlerts,30000);
     addTimer(maybeDailyReport,60000);
   }
   async function bootstrapV2(){
-    try{const setup=await ensureLayout();await ensureStart();await ensureAcademy();await Promise.allSettled([refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),syncTradeCards(),syncHealthAlerts()]);startSchedulers();return setup;}
-    catch(err){state.setupStatus='NEEDS_PERMISSION';state.setupError=err instanceof Error?err.message:String(err);fail('setup',err);return {ok:false,error:state.setupError};}
+    try{
+      const setup=await ensureLayout();
+      await ensureStart();
+      await ensureAcademy();
+      await Promise.allSettled([
+        refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),
+        refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
+        refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),syncTradeCards(),syncHealthAlerts()
+      ]);
+      await refreshAuxiliaryDesks();
+      await refreshChannelSupervisor({autoRepair:true});
+      startSchedulers();
+      return setup;
+    }catch(err){
+      state.setupStatus='NEEDS_PERMISSION';
+      state.setupError=err instanceof Error?err.message:String(err);
+      fail('setup',err);
+      return {ok:false,error:state.setupError};
+    }
   }
   async function setupCommand(interaction){
     await interaction.deferReply({ephemeral:true});
@@ -1368,7 +1831,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const result=await bootstrapV2();
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
-    await interaction.editReply('BIGGJ Discord V6 eingerichtet: '+result.channels+' Channels · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    const managers=managerSnapshot();
+    await interaction.editReply('BIGGJ Discord V7 eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
   }
   async function thesisCommand(interaction){
     const symbol=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
@@ -1431,6 +1895,16 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='thesis'){await thesisCommand(interaction);return;}
     if(name==='academy'){await academyCommand(interaction);return;}
     if(name==='lesson'){await lessonCommand(interaction);return;}
+    if(name==='supervisor'){
+      await interaction.deferReply();
+      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health()));
+      return;
+    }
+    if(name==='improvements'){
+      await interaction.deferReply();
+      await interaction.editReply(buildChannelImprovementsPayload(managerSnapshot(),germanTranslator.health()));
+      return;
+    }
     const operatorViews={brain:'pulse',knowledge:'knowledge',research:'research',hypotheses:'hypotheses',changes:'changes',experiments:'experiments',skills:'skills',reviews:'reviews',timeline:'timeline',progress:'progress',evidence_log:'evidence',decisions:'decisions'};
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
     const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
@@ -1502,6 +1976,30 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return snapshot();
   }
   async function stop(){schedulerStopped=true;for(const timer of timers){clearInterval(timer);clearTimeout(timer);}timers.clear();client.destroy();state.ready=false;}
-  function snapshot(){return Object.freeze({version:DISCORD_TELEGRAM_BRIDGE_VERSION,...state,guildId:guildId,applicationId:applicationId,contexts:contexts.size,channels:channelCache.size,marketPanels:state.marketPanels,tradeCards:tradeCards.size,thesisCards:thesisCards.size,academyPanels:state.academyPanels,observabilityPanels:state.observabilityPanels,experiencePanels:state.experiencePanels,lastExperienceRefreshAt:state.lastExperienceRefreshAt,academyLastRefreshAt:state.academyLastRefreshAt});}
+  function snapshot(){
+    const managers=managerSnapshot();
+    return Object.freeze({
+      version:DISCORD_TELEGRAM_BRIDGE_VERSION,
+      ...state,
+      guildId,
+      applicationId,
+      contexts:contexts.size,
+      channels:channelCache.size,
+      marketPanels:state.marketPanels,
+      tradeCards:tradeCards.size,
+      thesisCards:thesisCards.size,
+      academyPanels:state.academyPanels,
+      observabilityPanels:state.observabilityPanels,
+      experiencePanels:state.experiencePanels,
+      lastExperienceRefreshAt:state.lastExperienceRefreshAt,
+      academyLastRefreshAt:state.academyLastRefreshAt,
+      channelManagerStatus:managers.supervisor.status,
+      channelManagerMetaStatus:managers.metaSupervisor?.status||'UNKNOWN',
+      channelManagerCoverage:managers.metaSupervisor?.managerCoverage??null,
+      channelManagerHealthy:managers.healthy,
+      channelManagerProblems:managers.problems,
+      translation:germanTranslator.health()
+    });
+  }
   return Object.freeze({start,stop,snapshot,telegramCall,telegramMultipart,handlesTelegramCall,setup:bootstrapV2,isChatId:function(v){return isDiscordChatId(v,guildId);}});
 }
