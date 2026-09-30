@@ -1,5 +1,5 @@
 
-export const BIGGJ_MOBILE_WEBAPP_VERSION='BIGGJ_MOBILE_COMMAND_CENTER_V2';
+export const BIGGJ_MOBILE_WEBAPP_VERSION='BIGGJ_MOBILE_COMMAND_CENTER_V3';
 
 const jsonForScript=value=>JSON.stringify(value??{}).replace(/</g,'\\u003c');
 
@@ -24,7 +24,7 @@ export function biggjAppIconSvg(){
 }
 
 export function biggjServiceWorker(){
-  return `const CACHE='biggj-v2';const SHELL=['/mission-control','/app.webmanifest','/biggj-icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{})));self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;if(u.pathname==='/mission-control.json'){e.respondWith(fetch(e.request,{cache:'no-store'}).catch(()=>caches.match('/mission-control')));return;}e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request)));});`;
+  return `const CACHE='biggj-v3';const SHELL=['/mission-control','/app.webmanifest','/biggj-icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{})));self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;if(['/mission-control.json','/signal-lab.json','/proof-feed.json'].includes(u.pathname)){e.respondWith(fetch(e.request,{cache:'no-store'}).catch(()=>caches.match('/mission-control')));return;}e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request)));});`;
 }
 
 export function renderBiggjMobileApp(snapshot={}){
@@ -112,9 +112,10 @@ button{font:inherit;color:inherit}
 .empty{padding:20px;border:1px dashed #26364a;background:rgba(9,14,21,.35);border-radius:18px;text-align:center;color:#637287;font-size:11px;line-height:1.5}
 .safety{border:1px solid rgba(94,242,214,.18);background:linear-gradient(145deg,rgba(94,242,214,.055),rgba(109,124,255,.03));border-radius:18px;padding:14px}.safetyTitle{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}.safetyBody{font-size:10px;line-height:1.55;color:#93a2b4;margin-top:6px}
 .systemRow{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid rgba(38,54,74,.55)}.systemRow:last-child{border-bottom:0}.systemName{font-size:11px;color:var(--soft)}.systemValue{font-size:10px;font-weight:800;color:var(--muted)}
-.bottomNav{position:fixed;z-index:50;left:50%;bottom:max(8px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(calc(100% - 18px),720px);display:grid;grid-template-columns:repeat(5,1fr);gap:3px;padding:6px;border:1px solid rgba(38,54,74,.9);border-radius:23px;background:rgba(8,12,18,.88);box-shadow:0 22px 70px rgba(0,0,0,.55);backdrop-filter:blur(24px) saturate(140%)}
+.bottomNav{position:fixed;z-index:50;left:50%;bottom:max(8px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(calc(100% - 18px),720px);display:grid;grid-template-columns:repeat(6,1fr);gap:3px;padding:6px;border:1px solid rgba(38,54,74,.9);border-radius:23px;background:rgba(8,12,18,.88);box-shadow:0 22px 70px rgba(0,0,0,.55);backdrop-filter:blur(24px) saturate(140%)}
 .bottomNav button{border:0;background:transparent;min-width:0;height:54px;border-radius:16px;color:#5f6d80;padding:6px 2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:8px;font-weight:780;letter-spacing:.03em}
 .bottomNav button svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.8;fill:none}.bottomNav button.active{background:linear-gradient(145deg,#131d2b,#0d141e);color:var(--text);box-shadow:inset 0 0 0 1px rgba(94,242,214,.10)}.bottomNav button.active svg{stroke:var(--cyan)}
+.signalSelectors{display:flex;flex-direction:column;gap:8px;margin-top:12px}.selectorRow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}.selectorRow::-webkit-scrollbar{display:none}.selectorBtn{flex:0 0 auto;border:1px solid var(--line);background:#0b111a;border-radius:11px;padding:8px 10px;font-size:9px;font-weight:800;color:#718096}.selectorBtn.active{border-color:rgba(94,242,214,.34);background:rgba(94,242,214,.08);color:var(--cyan)}.proofHash{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#75869b;font-size:9px}.proofStage{font-size:9px;font-weight:850;letter-spacing:.08em}.signalState{font-size:34px;font-weight:920;letter-spacing:-.05em;line-height:1}.signalBias{font-size:13px;color:var(--soft);margin-top:8px}.signalGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
 .installCard{margin-top:9px;border:1px solid var(--line);background:#0a1018;border-radius:18px;padding:14px}.installCard b{font-size:11px}.installCard p{margin:6px 0 0;color:#78879a;font-size:10px;line-height:1.5}
 .loadingLine{height:2px;position:fixed;left:0;top:0;width:0;background:linear-gradient(90deg,var(--cyan),var(--blue));z-index:100;transition:width .25s,opacity .25s}.loadingLine.on{width:72%;opacity:1}.loadingLine.done{width:100%;opacity:0}
 @media(min-width:700px){.shell{padding-left:22px;padding-right:22px}.metricGrid{grid-template-columns:repeat(4,minmax(0,1fr))}.marketRail{grid-auto-columns:minmax(190px,24%)}.twoCol{display:grid;grid-template-columns:1.15fr .85fr;gap:10px}.hero{padding:23px}.heroMode{font-size:38px}}
@@ -144,6 +145,7 @@ button{font:inherit;color:inherit}
 <nav class="bottomNav" id="nav" aria-label="BIGGJ Navigation">
   <button data-tab="overview" class="active" aria-label="Übersicht"><svg viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Übersicht</span></button>
   <button data-tab="markets" aria-label="Märkte"><svg viewBox="0 0 24 24"><path d="M4 18 9 12l4 3 7-9"/><path d="M17 6h3v3"/></svg><span>Märkte</span></button>
+  <button data-tab="signals" aria-label="Signale"><svg viewBox="0 0 24 24"><path d="M4 17 9 12l3 3 8-9"/><path d="M16 6h4v4"/></svg><span>Signale</span></button>
   <button data-tab="research" aria-label="Research"><svg viewBox="0 0 24 24"><path d="M9 4h6M10 4v5l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V4"/><path d="M8 15h8"/></svg><span>Research</span></button>
   <button data-tab="trades" aria-label="Trades"><svg viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7"/><path d="M3 19h18"/></svg><span>Trades</span></button>
   <button data-tab="system" aria-label="System"><svg viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg><span>System</span></button>
@@ -154,6 +156,17 @@ let S=__BIGGJ_BOOT__;
 let TAB='overview';
 let refreshing=false;
 let lastGoodAt=Date.now();
+let SIGNAL={
+  symbol:'BTCUSDT',
+  horizon:'1h',
+  mode:'FULL',
+  lab:null,
+  proof:(S.health||{}).biggjProofFeed||null,
+  loading:false,
+  error:null,
+  lastFetchedAt:0,
+  lastKey:null
+};
 
 const root=document.getElementById('root');
 const nav=document.getElementById('nav');
@@ -179,6 +192,36 @@ function metric(label,value,hint='',tone=''){return '<div class="metric"><div cl
 function panel(title,body='',meta='',extra=''){return '<div class="panel '+extra+'"><div class="rowTop"><div class="rowTitle">'+title+'</div>'+(meta?'<div class="rowMeta">'+E(meta)+'</div>':'')+'</div>'+(body?'<div class="rowBody">'+body+'</div>':'')+'</div>'}
 function empty(text){return '<div class="empty">'+E(text)+'</div>'}
 function pnlTone(v){const n=Number(v);return Number.isFinite(n)?(n>0?'good':n<0?'bad':''):''}
+const SPCT=v=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+(Number(v)*100).toFixed(2)+'%':'—';
+const DIR=v=>{const x=String(v||'UNKNOWN').toUpperCase();return x==='UP'?'↗ UP':x==='DOWN'?'↘ DOWN':/FLAT|SIDEWAYS|NEUTRAL/.test(x)?'→ SIDEWAYS':'—'};
+function selectorRow(values,current,attr,label=x=>x){
+  return '<div class="selectorRow">'+values.map(x=>'<button class="selectorBtn '+(String(current)===String(x)?'active':'')+'" '+attr+'="'+E(x)+'">'+E(label(x))+'</button>').join('')+'</div>';
+}
+async function loadSignalLab(force=false){
+  const key=[SIGNAL.symbol,SIGNAL.horizon,SIGNAL.mode].join('|');
+  if(SIGNAL.loading)return;
+  if(!force&&SIGNAL.lastKey===key&&Date.now()-SIGNAL.lastFetchedAt<30000)return;
+  SIGNAL.loading=true;SIGNAL.error=null;render();
+  try{
+    const qs=new URLSearchParams({symbol:SIGNAL.symbol,horizon:SIGNAL.horizon,mode:SIGNAL.mode});
+    const proofQs=new URLSearchParams({symbol:SIGNAL.symbol});
+    const [lr,pr]=await Promise.all([
+      fetch('/signal-lab.json?'+qs.toString(),{cache:'no-store'}),
+      fetch('/proof-feed.json?'+proofQs.toString(),{cache:'no-store'})
+    ]);
+    if(!lr.ok)throw new Error('Signal HTTP '+lr.status);
+    if(!pr.ok)throw new Error('Proof HTTP '+pr.status);
+    SIGNAL.lab=await lr.json();
+    SIGNAL.proof=await pr.json();
+    SIGNAL.lastFetchedAt=Date.now();
+    SIGNAL.lastKey=key;
+  }catch(err){
+    SIGNAL.error=String(err?.message||err||'SIGNAL_LAB_UNAVAILABLE');
+  }finally{
+    SIGNAL.loading=false;
+    render();
+  }
+}
 
 function operatorCopy(op,factory){
   const mode=String(op?.mode||'UNKNOWN');
@@ -233,6 +276,32 @@ function renderMarkets(){
   html+='<div class="stack">'+(coins.length?coins.map(x=>{const p=x.pair||{},chg=N(p.priceChangeH1);return panel(E(p.symbol||p.name||'TOKEN')+' <span class="'+pnlTone(chg)+'">· '+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>','Preis $'+E(PRICE(p.priceUsd))+' · Liquidity $'+Math.round(N(p.liquidityUsd)).toLocaleString('de-DE')+' · Buys/Sells '+N(p.buysH1)+'/'+N(p.sellsH1),x.chainId||'DEX')}).join(''):empty('Dex-Radar hat aktuell keine verwertbaren Token-Rows.'))+'</div>';
   html+=sectionHead('Trader Intelligence');
   html+=panel(tw.sourceReady?'<span class="good">PIT-Quelle verbunden</span>':'<span class="warn">Performance-Quelle fehlt</span>',tw.sourceReady?'Öffentliche Point-in-Time Trader-Evidence ist verfügbar.':E(tw.nextNeed||'Keine belastbare öffentliche realisierte PnL-Quelle verbunden.'),tw.privacy||'PUBLIC_DATA_ONLY');
+  return html+'</section>';
+}
+
+function renderSignals(){
+  const lab=SIGNAL.lab||{},proof=SIGNAL.proof||(S.health||{}).biggjProofFeed||{},p=lab.probability||{},f=lab.forecast||{},d=lab.diagnostics||{};
+  const state=SIGNAL.loading&&!SIGNAL.lab?'LOADING':String(lab.state||'SELECT');
+  const confidence=p.displayAllowed===true&&Number.isFinite(Number(p.calibrated))?P(p.calibrated):'SUPPRESSED';
+  const live=(proof.liveRows||[]).slice(0,5);
+  const resolved=(proof.rows||[]).slice(0,8);
+  let html='<section class="view '+(TAB==='signals'?'active':'')+'">';
+  html+='<div class="hero"><div class="heroGrid"><div><div class="overline">Canonical Signal Lab</div><div class="signalState '+cls(state)+'">'+E(statusDE(state))+'</div><div class="signalBias">'+E(String(SIGNAL.symbol).replace('USDT','/USDT'))+' · '+E(SIGNAL.horizon.toUpperCase())+' · '+E(SIGNAL.mode)+' · '+E(DIR(lab.bias))+'</div><div class="heroCopy">Eine einfache Oberfläche vor derselben PIT-/Calibration-/Science-Pipeline. Mode-Lenses filtern Evidence; sie berechnen keinen zweiten Forecast.</div></div><div class="orb"><svg viewBox="0 0 24 24" fill="none"><path d="M4 17 9 12l3 3 8-9M16 6h4v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>';
+  html+='<div class="signalSelectors">'+selectorRow(['BTCUSDT','ETHUSDT','SOLUSDT'],SIGNAL.symbol,'data-signal-symbol',x=>x.replace('USDT',''))+selectorRow(['5m','15m','1h','4h'],SIGNAL.horizon,'data-signal-horizon',x=>x.toUpperCase())+selectorRow(['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'],SIGNAL.mode,'data-signal-mode',x=>x==='STRUCTURE'?'STRUCT':x==='LIQUIDITY'?'LIQ':x)+'</div>';
+  html+='<div class="heroFooter"><div class="badge">Confidence <b>'+E(confidence)+'</b></div><div class="badge">Forecast <b>'+E(lab.forecastGate||'—')+'</b></div><div class="badge">Risk <b>'+E(d.riskStatus||'—')+'</b></div></div></div>';
+  if(SIGNAL.error)html+='<div class="refreshError show" style="margin-top:10px">'+E(SIGNAL.error)+' · letzter gültiger Signal-State bleibt sichtbar.</div>';
+  html+=sectionHead('Signal','gleicher Forecast-Kern');
+  html+='<div class="metricGrid">'+metric('Bias',DIR(lab.bias),'canonical direction',cls(lab.state))+metric('Confidence',confidence,p.displayAllowed?'kalibriert':'Zahl bewusst unterdrückt',p.displayAllowed?'good':'warn')+metric('Expected',SPCT(f.expectedReturn),'Range '+SPCT(f.intervalQ10)+' → '+SPCT(f.intervalQ90))+metric('Evidence',d.evidenceScore==null?'—':Math.round(N(d.evidenceScore)*100)+'/100','diagnostic, keine Wahrscheinlichkeit')+'</div>';
+  html+=sectionHead('Warum / Dagegen');
+  const supports=(lab.supportReasons||[]).slice(0,5),counters=(lab.counterReasons||[]).slice(0,5);
+  html+='<div class="twoCol">'+panel('Dafür',supports.length?supports.map(x=>'• '+E(x)).join('<br>'):'Keine zusätzliche Support-Evidenz freigegeben.')+panel('Dagegen',counters.length?counters.map(x=>'• '+E(x)).join('<br>'):'Keine zusätzliche Gegen-Evidenz im kompakten View.')+'</div>';
+  html+=sectionHead('Proof Pipeline',(proof.counts?.resolved||0)+' resolved');
+  html+='<div class="metricGrid">'+metric('Live',N(proof.counts?.live),N(proof.counts?.awaitingOutcome)+' awaiting')+metric('Committed',N(proof.counts?.committed),N(proof.counts?.legacy)+' legacy',N(proof.counts?.invalid)>0?'warn':'good')+metric('Hit / Miss',N(proof.counts?.hits)+' / '+N(proof.counts?.misses),'beide werden gezeigt')+metric('Learned',N(proof.counts?.learned),'im Learning-Aggregat, keine Promotion')+'</div>';
+  html+=sectionHead('Live Commitments');
+  html+='<div class="stack">'+(live.length?live.map(x=>panel('<span class="proofStage '+(x.commitmentState==='VERIFIED'?'good':'warn')+'">'+E(x.currentStage)+'</span> · '+E(String(x.symbol||'').replace('USDT','/USDT'))+' · '+E(String(x.horizonId||'').toUpperCase()),'Before '+E(DIR(x.predictedDirection))+' · Expected '+E(SPCT(x.expectedReturn))+' · Range '+E(SPCT(x.intervalQ10))+' → '+E(SPCT(x.intervalQ90))+(x.beforeHash?'<br><span class="proofHash">'+E(String(x.beforeHash).slice(0,20))+'…</span>':''),x.commitmentState==='VERIFIED'?'LOCKED':'LEGACY')).join(''):empty('Keine offenen Forecast-Commitments für diesen Markt.'))+'</div>';
+  html+=sectionHead('Resolved Proofs');
+  html+='<div class="stack">'+(resolved.length?resolved.map(x=>panel('<span class="'+(x.directionalHit?'good':'bad')+'">'+(x.directionalHit?'HIT':'MISS')+'</span> · '+E(String(x.horizonId||'').toUpperCase()),'Before '+E(DIR(x.predictedDirection))+' '+E(SPCT(x.expectedReturn))+' → After '+E(DIR(x.actualDirection))+' '+E(SPCT(x.actualReturn))+' · Range '+(x.intervalHit?'HIT':'MISS')+(x.beforeHash&&x.outcomeHash?'<br><span class="proofHash">'+E(String(x.beforeHash).slice(0,12))+'… → '+E(String(x.outcomeHash).slice(0,12))+'…</span>':''),x.currentStage||'RESOLVED')).join(''):empty('Noch keine aufgelösten Proofs für diesen Markt.'))+'</div>';
+  html+='<div class="safety" style="margin-top:12px"><div class="safetyTitle">Proof & Execution Boundary</div><div class="safetyBody">Forecast-Time-Hashes sind interne deterministische Commitments, keine externe Beglaubigung. Treffer und Fehler bleiben sichtbar. WATCH ist keine Order-Autorisierung. SHADOW_ONLY · ABSTAIN · canExecuteLive:false.</div></div>';
   return html+'</section>';
 }
 
@@ -297,7 +366,7 @@ function renderSystem(){
 
 function render(){
   buildStatusStrip();
-  root.innerHTML=renderOverview()+renderMarkets()+renderResearch()+renderTrades()+renderSystem();
+  root.innerHTML=renderOverview()+renderMarkets()+renderSignals()+renderResearch()+renderTrades()+renderSystem();
   const gen=N(S.generatedAt||lastGoodAt,lastGoodAt);
   const age=Date.now()-gen;
   const badge=document.getElementById('syncBadge');
@@ -314,6 +383,7 @@ async function refresh(){
     const r=await fetch('/mission-control.json',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     S=await r.json();lastGoodAt=Date.now();errorBox.classList.remove('show');render();
+    if(TAB==='signals')loadSignalLab(false);
   }catch(err){
     errorBox.classList.add('show');render();
   }finally{
@@ -325,8 +395,14 @@ nav.addEventListener('click',e=>{
   TAB=b.dataset.tab;
   for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x===b);
   render();window.scrollTo({top:0,behavior:'smooth'});
+  if(TAB==='signals')loadSignalLab(false);
 });
-document.getElementById('refreshBtn').addEventListener('click',refresh);
+root.addEventListener('click',e=>{
+  const symbol=e.target.closest('[data-signal-symbol]');if(symbol){SIGNAL.symbol=symbol.getAttribute('data-signal-symbol');SIGNAL.lab=null;SIGNAL.proof=null;render();loadSignalLab(true);return;}
+  const horizon=e.target.closest('[data-signal-horizon]');if(horizon){SIGNAL.horizon=horizon.getAttribute('data-signal-horizon');SIGNAL.lab=null;render();loadSignalLab(true);return;}
+  const mode=e.target.closest('[data-signal-mode]');if(mode){SIGNAL.mode=mode.getAttribute('data-signal-mode');SIGNAL.lab=null;render();loadSignalLab(true);return;}
+});
+document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='signals')loadSignalLab(true)});
 window.addEventListener('online',()=>{render();refresh()});
 window.addEventListener('offline',render);
 render();
