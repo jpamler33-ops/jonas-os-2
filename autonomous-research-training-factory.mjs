@@ -3,6 +3,7 @@ import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 
 import { sha256 } from './institutional-kernel.mjs';
+import { rankBiggjResearchTasks, BIGGJ_RESEARCH_LEVERAGE_ENGINE_VERSION } from './biggj-research-leverage-engine.mjs';
 
 export const AUTONOMOUS_RESEARCH_TRAINING_FACTORY_VERSION='TCX_AUTONOMOUS_RESEARCH_TRAINING_FACTORY_V1';
 
@@ -89,7 +90,15 @@ function task({
     canExecuteLive:false,
     metadata:clone(metadata||{})
   };
-  return Object.freeze({...core,taskId:stableTaskId(core)});
+  return Object.freeze({
+    ...core,
+    taskId:stableTaskId({
+      type:core.type,
+      subject:core.subject,
+      source:core.source,
+      blocker:core.blocker
+    })
+  });
 }
 
 function taskForGate(row){
@@ -106,6 +115,11 @@ function taskForGate(row){
       capabilityId:row?.capabilityId??null,
       rootId:row?.rootId??null,
       nextGate:gate,
+      status:row?.status??null,
+      directUnlocks:finite(row?.directUnlocks),
+      transitiveUnlocks:finite(row?.transitiveUnlocks),
+      testingDependencyReady:row?.testingDependencyReady===true,
+      testingBlockers:arr(row?.testingBlockers).map(String).slice(0,12),
       validationEvidenceTotal:finite(row?.validationEvidenceTotal),
       validationIndependentEpisodes:finite(row?.validationIndependentEpisodes)
     }
@@ -160,7 +174,8 @@ function tasksFromLivingResearch(state){
         proposedStatus:ticket?.proposedStatus??null,
         evidenceState:ticket?.evidenceState??null,
         validationPhase:ticket?.validationPhase??null,
-        validationReadinessScore:clamp(ticket?.validationReadinessScore)
+        validationReadinessScore:clamp(ticket?.validationReadinessScore),
+        createdAt:finite(ticket?.createdAt,null)
       }
     }));
   }
@@ -336,6 +351,10 @@ function sourceFingerprint(input){
     strategyLeagueFingerprint:input?.strategyLeagueSummary?.fingerprint??null,
     researchDataPlaneSeq:finite(input?.researchDataPlaneSummary?.seq),
     researchGovernanceFingerprint:input?.researchDataGovernanceSummary?.fingerprint??null,
+    researchCoverageGeneratedAt:finite(input?.researchCoverageSummary?.generatedAt,null),
+    researchCoverageAverage:finite(input?.researchCoverageSummary?.averageCoverage,null),
+    researchCoverageBlocked:finite(input?.researchCoverageSummary?.blocked,null),
+    researchCoverageInsufficient:finite(input?.researchCoverageSummary?.insufficient,null),
     historyRows:finite(input?.historyStats?.rows),
     historyProgressAt:finite(input?.historyStats?.progressAt)
   };
@@ -354,6 +373,16 @@ export function createAutonomousResearchTrainingFactory({asOf=Date.now()}={}){
     operatorDataOnly:false,
     queue:[],
     dataNeeds:[],
+    taskMemory:{},
+    researchBundles:[],
+    leverage:{
+      version:BIGGJ_RESEARCH_LEVERAGE_ENGINE_VERSION,
+      leverCount:10,
+      stalledTaskCount:0,
+      batchOpportunityCount:0,
+      topTasks:[],
+      topBundles:[]
+    },
     counters:{automatic:0,manual:0,dataOnly:0},
     lastReason:'INITIALIZED',
     policy:clone(DEFAULT_AUTONOMOUS_RESEARCH_FACTORY_POLICY),
@@ -379,6 +408,8 @@ export function verifyAutonomousResearchTrainingFactory(state){
   if(state?.safety?.automaticSkillTransition!==false)reasons.push('AUTOMATIC_SKILL_TRANSITION_MUST_BE_FALSE');
   if(!Array.isArray(state?.queue))reasons.push('QUEUE_INVALID');
   if(!Array.isArray(state?.dataNeeds))reasons.push('DATA_NEEDS_INVALID');
+  if(state?.taskMemory!=null&&(typeof state.taskMemory!=='object'||Array.isArray(state.taskMemory)))reasons.push('TASK_MEMORY_INVALID');
+  if(state?.researchBundles!=null&&!Array.isArray(state.researchBundles))reasons.push('RESEARCH_BUNDLES_INVALID');
   const {fingerprint,...core}=state||{};
   if(fingerprint!==sha256(core))reasons.push('FINGERPRINT_MISMATCH');
   return {ok:reasons.length===0,reasons};
@@ -393,6 +424,7 @@ export function refreshAutonomousResearchTrainingFactory(state,{
   strategyLeagueSummary=null,
   researchDataPlaneSummary=null,
   researchDataGovernanceSummary=null,
+  researchCoverageSummary=null,
   historyStats=null,
   asOf=Date.now(),
   reason='PERIODIC_REFRESH',
@@ -412,6 +444,7 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     strategyLeagueSummary,
     researchDataPlaneSummary,
     researchDataGovernanceSummary,
+    researchCoverageSummary,
     historyStats
   };
   const fp=sourceFingerprint(input);
@@ -419,14 +452,22 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     return Object.freeze({changed:false,state:base,reasons:['SOURCE_STATE_UNCHANGED']});
   }
 
-  const tasks=applyBudget(dedupeTasks([
+  const rawTasks=dedupeTasks([
     ...tasksFromLivingResearch(livingResearchState),
     ...tasksFromExperimentGovernor(experimentGovernorSummary||{}),
     ...tasksFromRegistry(modelCandidateRegistrySummary||{}),
     ...tasksFromLearnedChallenger(learnedChallengerSummary||{}),
     ...tasksFromFeatureResearch(featureResearchSummary||{}),
     ...tasksFromStrategyLeague(strategyLeagueSummary||{})
-  ]),effectivePolicy);
+  ]);
+  const leverage=rankBiggjResearchTasks(rawTasks,{
+    asOf:t,
+    taskMemory:base.taskMemory||{},
+    livingResearchState,
+    researchCoverageSummary,
+    researchDataGovernanceSummary
+  });
+  const tasks=applyBudget(leverage.tasks,effectivePolicy);
 
   const manual=tasks.filter(x=>x.manualReviewRequired);
   const automatic=tasks.filter(x=>x.automaticShadowEligible);
@@ -457,6 +498,8 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     automatic:automatic.length,
     manual:manual.length,
     dataNeeds:dataNeeds.slice(0,12),
+    stalledTasks:finite(leverage?.summary?.stalledTaskCount),
+    topTask:leverage?.summary?.topTasks?.[0]?.taskId??null,
     sourceFingerprint:fp
   });
 
@@ -470,6 +513,9 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     operatorDataOnly,
     queue:tasks,
     dataNeeds,
+    taskMemory:clone(leverage.taskMemory),
+    researchBundles:clone(leverage.bundles),
+    leverage:clone(leverage.summary),
     counters:{
       automatic:automatic.length,
       manual:manual.length,
@@ -484,6 +530,9 @@ export function refreshAutonomousResearchTrainingFactory(state,{
       governorGeneration:finite(experimentGovernorSummary?.generationNumber),
       modelRegistrySeq:finite(modelCandidateRegistrySummary?.seq),
       researchDataPlaneSeq:finite(researchDataPlaneSummary?.seq),
+      researchCoverageAverage:finite(researchCoverageSummary?.averageCoverage,null),
+      researchCoverageBlocked:finite(researchCoverageSummary?.blocked,null),
+      researchCoverageInsufficient:finite(researchCoverageSummary?.insufficient,null),
       historyRows:finite(historyStats?.rows),
       historyProgressAt:finite(historyStats?.progressAt)
     },
@@ -523,11 +572,27 @@ export function autonomousResearchTrainingFactorySummary(state){
     dataOnly:finite(state?.counters?.dataOnly),
     unowned:finite(state?.counters?.unowned),
     dataNeeds:arr(state?.dataNeeds).slice(0,20),
+    leverage:{
+      version:state?.leverage?.version??BIGGJ_RESEARCH_LEVERAGE_ENGINE_VERSION,
+      leverCount:finite(state?.leverage?.leverCount,10),
+      stalledTaskCount:finite(state?.leverage?.stalledTaskCount),
+      batchOpportunityCount:finite(state?.leverage?.batchOpportunityCount),
+      dataState:state?.leverage?.dataState??null,
+      topBundles:arr(state?.leverage?.topBundles).slice(0,8),
+      topTasks:arr(state?.leverage?.topTasks).slice(0,8)
+    },
+    researchBundles:arr(state?.researchBundles).slice(0,8),
     nextTasks:queue.slice(0,8).map(x=>({
       taskId:x.taskId,
       type:x.type,
       subject:x.subject,
       priority:x.priority,
+      effectivePriority:finite(x.effectivePriority,x.priority),
+      estimatedResearchCost:finite(x.estimatedResearchCost,null),
+      topLevers:arr(x.topLevers).slice(0,3),
+      stagnantCycles:finite(x.stagnantCycles),
+      queueAgeMs:finite(x.queueAgeMs),
+      stalled:x.stalled===true,
       reason:x.reason,
       autoHandler:x.autoHandler,
       automaticShadowEligible:x.automaticShadowEligible,
