@@ -528,9 +528,10 @@ const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
 const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.TCX_GLOBAL_NEWS_REFRESH_MS||120_000)));
+const globalNewsTimeoutMs=Math.max(8000,Math.min(30_000,Number(process.env.TCX_GLOBAL_NEWS_TIMEOUT_MS||18_000)));
 const biggjPublicNewsProvider=createBiggjPublicNewsProvider({
   fetchImpl:globalThis.fetch,
-  timeoutMs:Math.max(4000,researchProviderTimeoutMs),
+  timeoutMs:globalNewsTimeoutMs,
   cacheTtlMs:Math.min(globalNewsRefreshMs,120_000)
 });
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
@@ -3861,6 +3862,8 @@ async function refreshPublicExperienceIntel(reason='periodic'){
     newsEvents:globalIntelEvents.length,
     newsSource:globalIntelLastSource,
     newsError:globalIntelLastError,
+    newsRecoveries:newsResult.status==='fulfilled'?(newsResult.value?.recoveries||[]):[],
+    newsTimeoutMs:globalNewsTimeoutMs,
     memecoins:memecoinExperienceSnapshot?.rows?.length||0,
     metas:memecoinExperienceSnapshot?.metas?.length||0,
     memecoinError:memecoinExperienceLastError,
