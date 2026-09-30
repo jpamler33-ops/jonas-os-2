@@ -203,3 +203,7 @@ test('BIGGJ V7 exposes the canonical rulebook as a managed Discord surface',()=>
 test('BIGGJ trade cards expose primary lane and virtual size explicitly',()=>{
   for(const required of ['tradeLaneLabel','virtualTradeSize','VIRTUAL SIZE','Nur abgeschlossene PRIMARY Shadow-Trades']) assert.ok(source.includes(required),required);
 });
+
+test('BIGGJ Discord exposes isolated NORMAL and LAB wallet economics',()=>{
+  for(const required of ['DUAL WALLET PERFORMANCE','NORMAL PnL','LAB PnL','LAB Recovery Debt','∞ VIRTUAL','LAB bleibt getrennt']) assert.ok(source.includes(required),required);
+});
