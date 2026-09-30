@@ -391,7 +391,11 @@ export function observeAssumptionStability(prior,{
         next.firstRecoveryAt=prior.firstRecoveryAt??at;
         if(prior.state!=='RECOVERING'){
           type='RECOVERY_STARTED';
-          details={supportedObservationCount:1,recoveryDurationMs:0};
+          details={
+            recoveryOriginState:next.recoveryOriginState,
+            supportedObservationCount:1,
+            recoveryDurationMs:0
+          };
         }
       }
     }else{
