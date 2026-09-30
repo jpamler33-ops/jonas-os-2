@@ -67,6 +67,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'claim-assumption-graph.mjs',
   'forecast-claim-assumption-sidecar.mjs',
   'claim-assumption-research-evaluator.mjs',
+  'forecast-thesis-declarations.mjs',
   'institutional-forecast-issuance.mjs',
   'institutional-forecast-runtime.mjs',
   'model-promotion-ladder.mjs',
