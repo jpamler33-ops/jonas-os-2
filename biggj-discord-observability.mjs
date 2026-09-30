@@ -171,6 +171,7 @@ export function buildBiggjDiscordObservabilitySnapshot({
   claimAssumptionResearch=null,
   researchCoverage=null,
   discovery=null,
+  autonomousResearchFactory=null,
   asOf=Date.now()
 }={}){
   const state=livingResearchState||{};
@@ -295,6 +296,26 @@ export function buildBiggjDiscordObservabilitySnapshot({
     },
     researchCoverage:researchCoverage||{},
     discovery:discovery||{},
+    autonomousResearchFactory:{
+      mode:String(autonomousResearchFactory?.mode||'UNINITIALIZED'),
+      operatorDataOnly:autonomousResearchFactory?.operatorDataOnly===true,
+      healthy:autonomousResearchFactory?.healthy!==false,
+      revision:finite(autonomousResearchFactory?.revision),
+      automatic:finite(autonomousResearchFactory?.automatic),
+      manual:finite(autonomousResearchFactory?.manual),
+      dataOnly:finite(autonomousResearchFactory?.dataOnly),
+      unowned:finite(autonomousResearchFactory?.unowned),
+      dataNeeds:arr(autonomousResearchFactory?.dataNeeds).map(String).slice(0,16),
+      nextTasks:arr(autonomousResearchFactory?.nextTasks).slice(0,8).map(x=>({
+        type:String(x?.type||'UNKNOWN'),
+        subject:String(x?.subject||'UNKNOWN'),
+        reason:String(x?.reason||'UNKNOWN'),
+        autoHandler:x?.autoHandler==null?null:String(x.autoHandler),
+        automaticShadowEligible:x?.automaticShadowEligible===true,
+        manualReviewRequired:x?.manualReviewRequired===true,
+        dataNeeds:arr(x?.dataNeeds).map(String).slice(0,8)
+      }))
+    },
     semantics:{
       visibleReasoningIsStructuredStateNotHiddenChainOfThought:true,
       readinessScoresAreDiagnosticsNotProbabilities:true,
@@ -420,6 +441,7 @@ export function buildBiggjBrainPulsePayload(snapshot={}){
         'Trusted '+fmt(snapshot.trustedSkills)+' · Validated '+fmt(snapshot?.skillCounts?.VALIDATED)+' · Testing '+fmt(snapshot?.skillCounts?.TESTING),
         'Research-required '+fmt(snapshot.researchRequired)+' · Persistent cases '+fmt(snapshot.persistentCases),
         'Manual review tickets '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked),
+        'Learning factory '+clip(snapshot?.autonomousResearchFactory?.mode,38)+' · data-only '+(snapshot?.autonomousResearchFactory?.operatorDataOnly?'YES':'NO'),
         'Observed forecasts '+fmt(snapshot.observedForecasts)
       ].join('\n'))
     ],
@@ -573,6 +595,13 @@ export function buildBiggjProgressPayload(snapshot={}){
       safeField('MANUAL REVIEW QUEUE',[
         'Open '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked)+' · decisions '+fmt(snapshot?.researchReviews?.decisions),
         'Automatic apply OFF · explicit operator approval required'
+      ].join('\n')),
+      safeField('AUTONOMOUS LEARNING LOOP',[
+        'Mode '+clip(snapshot?.autonomousResearchFactory?.mode,48),
+        'Operator data-only '+(snapshot?.autonomousResearchFactory?.operatorDataOnly?'YES':'NO'),
+        'Automatic '+fmt(snapshot?.autonomousResearchFactory?.automatic)+' · manual '+fmt(snapshot?.autonomousResearchFactory?.manual)+' · unowned '+fmt(snapshot?.autonomousResearchFactory?.unowned),
+        'Needs '+(arr(snapshot?.autonomousResearchFactory?.dataNeeds).slice(0,6).join(', ')||'none'),
+        ...arr(snapshot?.autonomousResearchFactory?.nextTasks).slice(0,4).map(x=>'• '+clip(x.type,44)+' · '+clip(x.subject,48)+' → '+clip(x.autoHandler||'MANUAL',52))
       ].join('\n')),
       safeField('NEXT HIGH-LEVERAGE WORK',queueLines(snapshot,5))
     ],
