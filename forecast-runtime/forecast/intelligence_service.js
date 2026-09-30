@@ -37,7 +37,7 @@ export class ForecastIntelligenceService {
         return { forecastId, report };
     }
     observe(input) {
-        const before = new Map(this.tracker.all().map(r => [r.id, { status: r.status, revisions: r.revisions.length }]));
+        const before = new Map(this.tracker.stateIndex().map(r => [r.id, { status: r.status, revisions: r.revisionCount }]));
         const changed = this.tracker.observe(input);
         for (const record of changed) {
             const prior = before.get(record.id);
@@ -107,6 +107,7 @@ export class ForecastIntelligenceService {
     }
     get(forecastId) { return this.tracker.get(forecastId); }
     all() { return this.tracker.all(); }
+    thesisMemories() { return this.tracker.thesisMemories(); }
     auditTrail(limit = this.maxAuditEvents) {
         const n = Math.max(0, Math.floor(limit));
         return structuredClone(n ? this.audit.slice(-n) : []);
@@ -121,7 +122,7 @@ export class ForecastIntelligenceService {
         this.sequence = Math.max(0, Math.floor(snapshot.sequence));
         this.audit = structuredClone(snapshot.audit).slice(-this.maxAuditEvents);
         this.emit('STATE_RESTORED', restoredAt, '*', undefined, {
-            records: this.tracker.all().length,
+            records: this.tracker.stateIndex().length,
             priorAuditEvents: snapshot.audit.length,
         });
     }
