@@ -58,7 +58,20 @@ function blankEvidence(){
     chronologicalStable:0,
     costStressPassed:0,
     concentrationPassed:0,
-    winnerRemovalPassed:0
+    winnerRemovalPassed:0,
+    validationTotal:0,
+    validationForwardShadow:0,
+    validationIndependentEpisodes:0,
+    validationPositive:0,
+    validationNegative:0,
+    validationNeutral:0,
+    validationPitSafe:0,
+    validationAuditReady:0,
+    validationSciencePassed:0,
+    validationChronologicalStable:0,
+    validationCostStressPassed:0,
+    validationConcentrationPassed:0,
+    validationWinnerRemovalPassed:0
   };
 }
 
@@ -144,9 +157,21 @@ function findNodeIndex(tree,skillId){
   return tree.nodes.findIndex(x=>String(x.skillId)===String(skillId));
 }
 
+function evidenceIsValidationEligible(e){
+  if(e?.validationEligible===true) return true;
+  if(e?.validationEligible===false) return false;
+  const contextKinds=new Set([
+    'DISCOVERY_COHORT',
+    'PROSPECTIVE_PERSISTENT_CASE',
+    'PERSISTENCE_FILTERED_ASSOCIATION'
+  ]);
+  return !(e?.provenance||[]).some(x=>contextKinds.has(String(x?.kind||'')));
+}
+
 function evidenceSummary(rows){
   const s=blankEvidence();
   const episodes=new Set();
+  const validationEpisodes=new Set();
   for(const e of rows||[]){
     s.total++;
     const cls=String(e.epistemicClass||'').toUpperCase();
@@ -167,8 +192,25 @@ function evidenceSummary(rows){
     if(e.costStressPassed===true)s.costStressPassed++;
     if(e.concentrationPassed===true)s.concentrationPassed++;
     if(e.winnerRemovalPassed===true)s.winnerRemovalPassed++;
+
+    if(evidenceIsValidationEligible(e)){
+      s.validationTotal++;
+      if(e.forwardShadow===true)s.validationForwardShadow++;
+      if(e.independentEpisodeId)validationEpisodes.add(String(e.independentEpisodeId));
+      if(outcome==='POSITIVE')s.validationPositive++;
+      else if(outcome==='NEGATIVE')s.validationNegative++;
+      else s.validationNeutral++;
+      if(e.pointInTime===true&&e.futureLeakage!==true)s.validationPitSafe++;
+      if(e.auditReady===true)s.validationAuditReady++;
+      if(e.scientificGuardsPassed===true)s.validationSciencePassed++;
+      if(e.chronologicalStable===true)s.validationChronologicalStable++;
+      if(e.costStressPassed===true)s.validationCostStressPassed++;
+      if(e.concentrationPassed===true)s.validationConcentrationPassed++;
+      if(e.winnerRemovalPassed===true)s.validationWinnerRemovalPassed++;
+    }
   }
   s.independentEpisodes=episodes.size;
+  s.validationIndependentEpisodes=validationEpisodes.size;
   return s;
 }
 
