@@ -412,7 +412,7 @@ const claimAssumptionEvalMs = Math.max(5*60_000, Number(process.env.TCX_CLAIM_AS
 const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
-const autoLearnHeapHeadroomMb = Math.max(280, Math.min(360, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 320)));
+const autoLearnHeapHeadroomMb = Math.max(280, Math.min(380, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 350)));
 const autoLearnRssHeadroomMb = Math.max(620, Math.min(820, Number(process.env.TCX_AUTOLEARN_RSS_HEADROOM_MB || 720)));
 const autoLearnExternalHeadroomMb = Math.max(32, Math.min(160, Number(process.env.TCX_AUTOLEARN_EXTERNAL_HEADROOM_MB || 64)));
 const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 3) || 3)));
@@ -9219,6 +9219,19 @@ async function syncExperimentGovernor({evaluate=false}={}){
   return experimentGovernorState;
 }
 
+function pendingForecastOutcomeRows(){
+  return (forecastRuntime?.journal?.entries||[])
+    .filter(x=>x?.status==='PENDING')
+    .map(x=>({
+      id:String(x?.id||''),
+      symbol:String(x?.symbol||''),
+      horizonId:String(x?.horizonId||''),
+      status:'PENDING',
+      asOf:Number(x?.asOf||0),
+      dueAt:Number(x?.dueAt||0)
+    }));
+}
+
 async function shadowCompetitionWatcher(){
   while(running){
     const started=Date.now();
@@ -9231,13 +9244,23 @@ async function shadowCompetitionWatcher(){
         );
         const replayWindowRatio=Math.max(.25,Math.min(1,effectiveShadowCompetitionHistoryRows/shadowCompetitionHistoryRows));
         const adaptiveShadowAutoHeapMb=Math.min(
-          290,
-          shadowCompetitionAutoHeapMb+Math.round((1-replayWindowRatio)*50)
+          345,
+          shadowCompetitionAutoHeapMb+Math.round((1-replayWindowRatio)*145)
         );
         const adaptiveShadowAutoRssMb=Math.min(
-          700,
-          shadowCompetitionAutoRssMb+Math.round((1-replayWindowRatio)*120)
+          720,
+          shadowCompetitionAutoRssMb+Math.round((1-replayWindowRatio)*140)
         );
+        const adaptiveShadowHardHeapMb=Math.min(
+          370,
+          Math.max(300,adaptiveShadowAutoHeapMb+25)
+        );
+        const effectiveShadowWorkerHeapMb=
+          researchAcceleration.resource.mode==='MEMORY_PROTECT'
+            ?128
+            :researchAcceleration.resource.mode==='CAUTIOUS'
+              ?Math.min(144,shadowCompetitionWorkerHeapMb)
+              :shadowCompetitionWorkerHeapMb;
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9250,7 +9273,7 @@ async function shadowCompetitionWatcher(){
           autoHeapMb:adaptiveShadowAutoHeapMb,
           autoRssMb:adaptiveShadowAutoRssMb,
           autoExternalMb:shadowCompetitionAutoExternalMb,
-          hardHeapMb:300,
+          hardHeapMb:adaptiveShadowHardHeapMb,
           hardRssMb:900,
           hardExternalMb:shadowCompetitionHardExternalMb
         });
@@ -9310,7 +9333,7 @@ async function shadowCompetitionWatcher(){
             autoHeapMb:adaptiveShadowAutoHeapMb,
             autoRssMb:adaptiveShadowAutoRssMb,
             autoExternalMb:shadowCompetitionAutoExternalMb,
-            hardHeapMb:300,
+            hardHeapMb:adaptiveShadowHardHeapMb,
             hardRssMb:900,
             hardExternalMb:shadowCompetitionHardExternalMb
           });
@@ -9331,7 +9354,7 @@ async function shadowCompetitionWatcher(){
               autoHeapMb:adaptiveShadowAutoHeapMb,
               autoRssMb:adaptiveShadowAutoRssMb,
               autoExternalMb:shadowCompetitionAutoExternalMb,
-              hardHeapMb:300,
+              hardHeapMb:adaptiveShadowHardHeapMb,
               hardRssMb:900,
               hardExternalMb:shadowCompetitionHardExternalMb
             });
@@ -9359,7 +9382,7 @@ async function shadowCompetitionWatcher(){
                 now:Date.now()
               },{
                 timeoutMs:shadowCompetitionWorkerTimeoutMs,
-                maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+                maxOldGenerationSizeMb:effectiveShadowWorkerHeapMb
               });
             }
           }
@@ -9470,6 +9493,8 @@ async function shadowCompetitionWatcher(){
           acceleratorMode:researchAcceleration.resource.mode,
           adaptiveAutoHeapMb:adaptiveShadowAutoHeapMb,
           adaptiveAutoRssMb:adaptiveShadowAutoRssMb,
+          adaptiveHardHeapMb:adaptiveShadowHardHeapMb,
+          effectiveWorkerHeapMb:effectiveShadowWorkerHeapMb,
           workerRuns:shadowCompetitionWorkerRuns,
           slotWaitMs,
           promotionReview:modelPromotionReviewLastSummary
@@ -9493,7 +9518,7 @@ async function shadowCompetitionWatcher(){
 async function forecastOutcomeWatcher() {
   while(running) {
     const deadlinePlan=buildOutcomeDeadlinePlan(
-      forecastRuntime?.journal?.pending?.()||[],
+      pendingForecastOutcomeRows(),
       {now:Date.now(),minPollMs:5_000,maxPollMs:forecastOutcomeCheckMs}
     );
     const memoryBackoffMs=Math.max(0,forecastOutcomeMemoryBackoffUntil-Date.now());
@@ -9539,7 +9564,7 @@ async function forecastOutcomeWatcher() {
       }
 
       forecastOutcomeMemoryBackoffUntil=0;
-      const pending=forecastRuntime.journal.pending();
+      const pending=pendingForecastOutcomeRows();
       if(!pending.length) continue;
 
       const symbols=[...new Set(pending.map(x=>String(x.symbol)).filter(Boolean))];
@@ -9602,7 +9627,7 @@ async function forecastOutcomeWatcher() {
           resolved:resolvedCount,
           observedSymbols,
           pendingBefore:pending.length,
-          pendingAfter:forecastRuntime.journal.pending().length,
+          pendingAfter:pendingForecastOutcomeRows().length,
           auditFailures,
           slotWaitMs,
           deadlineScheduler:{
@@ -9808,7 +9833,7 @@ function currentResearchAccelerator(now=Date.now()){
   );
   return buildBiggjResearchAccelerator({
     factorySummary:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
-    pendingForecasts:forecastRuntime?.journal?.pending?.()||[],
+    pendingForecasts:pendingForecastOutcomeRows(),
     memory:{
       heapUsedMb:Math.round(memory.heapUsed/1024/1024),
       rssMb:Math.round(memory.rss/1024/1024),
@@ -10854,7 +10879,8 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     },
     shadowWorker:{
       auto:{heapUsedMb:shadowCompetitionAutoHeapMb,rssMb:shadowCompetitionAutoRssMb,externalMb:shadowCompetitionAutoExternalMb},
-      hard:{heapUsedMb:300,rssMb:900,externalMb:shadowCompetitionHardExternalMb}
+      hard:{heapUsedMb:300,rssMb:900,externalMb:shadowCompetitionHardExternalMb},
+      adaptiveReducedReplayWindow:{maxAutoHeapMb:345,maxHardHeapMb:370,minWorkerHeapMb:128}
     },
     forecastPersistence:{
       heapUsedMb:forecastPersistenceHeapHeadroomMb,
