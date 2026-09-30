@@ -1279,6 +1279,7 @@ const marketFabricMaintenanceMs = Math.max(60000, Number(process.env.TCX_MARKET_
 let auditAppendQueue = Promise.resolve();
 let researchDataPlaneAppendQueue=Promise.resolve();
 let activeBackgroundResearchJob=null;
+let forecastOutcomeMemoryBackoffUntil=0;
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
   marketMaxAgeMs:institutionalMarketMaxAgeMs,
@@ -9228,6 +9229,15 @@ async function shadowCompetitionWatcher(){
           500,
           Math.min(shadowCompetitionHistoryRows,researchAcceleration.resource.shadowReplayHistoryRows)
         );
+        const replayWindowRatio=Math.max(.25,Math.min(1,effectiveShadowCompetitionHistoryRows/shadowCompetitionHistoryRows));
+        const adaptiveShadowAutoHeapMb=Math.min(
+          290,
+          shadowCompetitionAutoHeapMb+Math.round((1-replayWindowRatio)*50)
+        );
+        const adaptiveShadowAutoRssMb=Math.min(
+          700,
+          shadowCompetitionAutoRssMb+Math.round((1-replayWindowRatio)*120)
+        );
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9237,8 +9247,8 @@ async function shadowCompetitionWatcher(){
           heapUsedMb,
           rssMb,
           externalMb,
-          autoHeapMb:shadowCompetitionAutoHeapMb,
-          autoRssMb:shadowCompetitionAutoRssMb,
+          autoHeapMb:adaptiveShadowAutoHeapMb,
+          autoRssMb:adaptiveShadowAutoRssMb,
           autoExternalMb:shadowCompetitionAutoExternalMb,
           hardHeapMb:300,
           hardRssMb:900,
@@ -9297,8 +9307,8 @@ async function shadowCompetitionWatcher(){
             heapUsedMb:Math.round(freshMemory.heapUsed/1024/1024),
             rssMb:Math.round(freshMemory.rss/1024/1024),
             externalMb:Math.round(freshMemory.external/1024/1024),
-            autoHeapMb:shadowCompetitionAutoHeapMb,
-            autoRssMb:shadowCompetitionAutoRssMb,
+            autoHeapMb:adaptiveShadowAutoHeapMb,
+            autoRssMb:adaptiveShadowAutoRssMb,
             autoExternalMb:shadowCompetitionAutoExternalMb,
             hardHeapMb:300,
             hardRssMb:900,
@@ -9318,8 +9328,8 @@ async function shadowCompetitionWatcher(){
               heapUsedMb:Math.round(payloadMemory.heapUsed/1024/1024),
               rssMb:Math.round(payloadMemory.rss/1024/1024),
               externalMb:Math.round(payloadMemory.external/1024/1024),
-              autoHeapMb:shadowCompetitionAutoHeapMb,
-              autoRssMb:shadowCompetitionAutoRssMb,
+              autoHeapMb:adaptiveShadowAutoHeapMb,
+              autoRssMb:adaptiveShadowAutoRssMb,
               autoExternalMb:shadowCompetitionAutoExternalMb,
               hardHeapMb:300,
               hardRssMb:900,
@@ -9458,6 +9468,8 @@ async function shadowCompetitionWatcher(){
           configuredHistoryRows:shadowCompetitionHistoryRows,
           effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
           acceleratorMode:researchAcceleration.resource.mode,
+          adaptiveAutoHeapMb:adaptiveShadowAutoHeapMb,
+          adaptiveAutoRssMb:adaptiveShadowAutoRssMb,
           workerRuns:shadowCompetitionWorkerRuns,
           slotWaitMs,
           promotionReview:modelPromotionReviewLastSummary
@@ -9484,7 +9496,8 @@ async function forecastOutcomeWatcher() {
       forecastRuntime?.journal?.pending?.()||[],
       {now:Date.now(),minPollMs:5_000,maxPollMs:forecastOutcomeCheckMs}
     );
-    await sleep(deadlinePlan.recommendedDelayMs);
+    const memoryBackoffMs=Math.max(0,forecastOutcomeMemoryBackoffUntil-Date.now());
+    await sleep(Math.max(deadlinePlan.recommendedDelayMs,memoryBackoffMs));
     if(!forecastRuntime.healthy) continue;
 
     const slotWaitStarted=Date.now();
@@ -9501,14 +9514,15 @@ async function forecastOutcomeWatcher() {
         heapUsedMb:Math.round(beforeMemory.heapUsed/1024/1024),
         rssMb:Math.round(beforeMemory.rss/1024/1024),
         externalMb:Math.round(beforeMemory.external/1024/1024),
-        issueHeapMb:autoLearnHeapHeadroomMb,
-        issueRssMb:autoLearnRssHeadroomMb,
-        issueExternalMb:autoLearnExternalHeadroomMb,
+        issueHeapMb:forecastPersistenceHeapHeadroomMb,
+        issueRssMb:forecastPersistenceRssHeadroomMb,
+        issueExternalMb:forecastPersistenceExternalHeadroomMb,
         resumeHeapMb:autoLearnResumeHeapMb,
         resumeRssMb:autoLearnResumeRssMb,
         resumeExternalMb:autoLearnResumeExternalMb
       });
       if(!admission.allowed){
+        forecastOutcomeMemoryBackoffUntil=Date.now()+30_000;
         console.warn('forecast outcome watch deferred for memory headroom',JSON.stringify({
           slotWaitMs,
           ...admission.memory,
@@ -9524,6 +9538,7 @@ async function forecastOutcomeWatcher() {
         continue;
       }
 
+      forecastOutcomeMemoryBackoffUntil=0;
       const pending=forecastRuntime.journal.pending();
       if(!pending.length) continue;
 
