@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V1';
+export const RESEARCH_FEATURE_CATALOG_VERSION='TCX_RESEARCH_FEATURE_CATALOG_V2';
 
 const defs=[];
 
@@ -114,6 +114,25 @@ define('research.dex.trendingVolumeLiquidityRatio','DEX_CONTEXT',{unit:'RATIO',m
 define('research.dex.trendingTopLiquidityShare','DEX_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Largest trending meta liquidity share'});
 define('research.dex.trendingH1MedianPct','DEX_CONTEXT',{unit:'PERCENT',min:-100,max:1000000,description:'Median one-hour market-cap change across trending DEX metas'});
 define('research.dex.trendingH24MedianPct','DEX_CONTEXT',{unit:'PERCENT',min:-100,max:1000000,description:'Median 24-hour market-cap change across trending DEX metas'});
+
+define('research.stablecoin.totalSupplyLog','STABLECOIN_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate stablecoin supply observed across DefiLlama chains'});
+define('research.stablecoin.chainCountLog','STABLECOIN_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p chains with observable stablecoin supply'});
+define('research.stablecoin.ethereumSupplyShare','STABLECOIN_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Ethereum share of observed stablecoin supply'});
+define('research.stablecoin.tronSupplyShare','STABLECOIN_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Tron share of observed stablecoin supply'});
+define('research.stablecoin.solanaSupplyShare','STABLECOIN_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Solana share of observed stablecoin supply'});
+define('research.stablecoin.baseSupplyShare','STABLECOIN_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Base share of observed stablecoin supply'});
+define('research.stablecoin.top5SupplyShare','STABLECOIN_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Top five chains share of observed stablecoin supply'});
+define('research.stablecoin.supplyToDefiTvlRatio','STABLECOIN_CONTEXT',{unit:'RATIO',min:0,max:1000,description:'Observed aggregate stablecoin supply divided by observed aggregate DeFi TVL'});
+
+define('research.dex.promotionPairCountLog','DEX_PROMOTION_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p DEX Screener boosted-token pairs with observable market pairs'});
+define('research.dex.promotionChainDiversityLog','DEX_PROMOTION_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p distinct chains represented by DEX Screener boosted-token radar'});
+define('research.dex.promotionLiquidityLog','DEX_PROMOTION_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate liquidity across DEX Screener promoted-token radar pairs'});
+define('research.dex.promotionVolumeH1Log','DEX_PROMOTION_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p aggregate one-hour volume across DEX Screener promoted-token radar pairs'});
+define('research.dex.promotionBuySellImbalanceH1','DEX_PROMOTION_CONTEXT',{unit:'SIGNED_SHARE',min:-1,max:1,description:'One-hour buy/sell transaction imbalance across observed promoted-token radar pairs'});
+define('research.dex.promotionBoostAmountLog','DEX_PROMOTION_CONTEXT',{unit:'LOG_INDEX',min:0,description:'log1p aggregate current DEX Screener boost amount units; promotion signal, not USD'});
+define('research.dex.promotionTotalBoostAmountLog','DEX_PROMOTION_CONTEXT',{unit:'LOG_INDEX',min:0,description:'log1p aggregate cumulative DEX Screener boost amount units; promotion signal, not USD'});
+define('research.dex.promotionH1MedianPct','DEX_PROMOTION_CONTEXT',{unit:'PERCENT',min:-100,max:1000000,description:'Median one-hour price change across promoted-token radar pairs'});
+define('research.dex.promotionTopLiquidityShare','DEX_PROMOTION_CONTEXT',{unit:'SHARE',min:0,max:1,description:'Largest pair share of observed promoted-token radar liquidity'});
 
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
