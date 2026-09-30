@@ -1747,7 +1747,11 @@ export function latestInstitutionalForecast(runtime,symbol){
 }
 
 export function institutionalForecastRuntimeSummary(runtime){
-  const probabilityCalibration=runtime?.journal?.all?evaluateProbabilityCalibrationGate(runtime.journal.all()):null;
+  const journalRows=runtime?.journal?.all?.()??[];
+  const trackerIndex=runtime?.intelligence?.stateIndex?.()??[];
+  const thesisMemories=runtime?.intelligence?.thesisMemories?.()??[];
+  const probabilityCalibration=runtime?.journal?.all?evaluateProbabilityCalibrationGate(journalRows):null;
+  return {
   return {
     version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
     healthy:runtime?.healthy===true,
@@ -1820,31 +1824,31 @@ export function institutionalForecastRuntimeSummary(runtime){
     },
     snapshotProfile:runtime?.lastSnapshotProfile??null,
     historyCases:runtime?.engine?.historySize?.()??0,
-    journalEntries:runtime?.journal?.all?.().length??0,
-    pendingOutcomes:runtime?.journal?.pending?.().length??0,
+    journalEntries:journalRows.length,
+    pendingOutcomes:journalRows.filter(x=>x?.status==='PENDING').length,
     issuedForecasts:runtime?.issuances?.length??0,
     claimAssumptionSidecars:(runtime?.issuances??[]).filter(x=>x?.claimAssumptionSidecar).length,
-    resolvedClaimAssumptionEligible:(runtime?.journal?.all?.()??[]).filter(x=>x?.status==='RESOLVED').length,
-    trackedForecasts:runtime?.intelligence?.all?.().length??0,
-    trackedThesisMemories:(runtime?.intelligence?.all?.()??[]).filter(x=>x?.thesisMemory).length,
-    thesisRevisionEvents:(runtime?.intelligence?.all?.()??[]).reduce((n,x)=>n+Number(x?.thesisMemory?.eventCount||0),0),
-    staleThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
-      (x?.thesisMemory?.assumptions||[]).some(a=>a?.issueSupported===true&&a?.currentSupported===false)
+    resolvedClaimAssumptionEligible:journalRows.filter(x=>x?.status==='RESOLVED').length,
+    trackedForecasts:trackerIndex.length,
+    trackedThesisMemories:thesisMemories.length,
+    thesisRevisionEvents:thesisMemories.reduce((n,x)=>n+Number(x?.eventCount||0),0),
+    staleThesisForecasts:thesisMemories.filter(x=>
+      (x?.assumptions||[]).some(a=>a?.issueSupported===true&&a?.currentSupported===false)
     ).length,
-    transientFlickerThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
-      (x?.thesisMemory?.assumptions||[]).some(a=>a?.stability?.state==='TRANSIENT_FLICKER')
+    transientFlickerThesisForecasts:thesisMemories.filter(x=>
+      (x?.assumptions||[]).some(a=>a?.stability?.state==='TRANSIENT_FLICKER')
     ).length,
-    persistentStaleThesisForecasts:(runtime?.intelligence?.all?.()??[]).filter(x=>
-      (x?.thesisMemory?.assumptions||[]).some(a=>
+    persistentStaleThesisForecasts:thesisMemories.filter(x=>
+      (x?.assumptions||[]).some(a=>
         a?.stability?.state==='PERSISTENT_STALE'||a?.stability?.state==='RECOVERING'
       )
     ).length,
-    thesisStabilityEvents:(runtime?.intelligence?.all?.()??[]).reduce((n,x)=>
-      n+Number(x?.thesisMemory?.stabilityEventCount||0),0
+    thesisStabilityEvents:thesisMemories.reduce((n,x)=>
+      n+Number(x?.stabilityEventCount||0),0
     ),
     probabilityCalibration,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
     canExecute:false
   };
-}
+};
