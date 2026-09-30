@@ -656,9 +656,6 @@ export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
       }else if(t.type==='ISSUE_SUPPORT_ESTABLISHMENT_FAILED'){
         transient.delete(id);
         persistent.delete(id);
-      }else if(t.type==='PERSISTENT_STALE_RECOVERED'){
-        transient.delete(id);
-        persistent.delete(id);
       }else if(t.type==='RECOVERY_FAILED'){
         transient.delete(id);
         persistent.add(id);
