@@ -11,17 +11,22 @@ function baseTree(){
 test('outcome supervisor distinguishes research activity from validation evidence',()=>{
   let tree=baseTree();
   const root=tree.nodes.find(x=>x.kind!=='ROOT');
-  if(!root){
-    // canonical tree may begin with roots only; this test focuses on invariant behavior.
-    const out=buildBiggjOutcomeSupervisor({livingResearchState:{skillTree:tree,researchReviewQueue:{ticketCount:0,blockedCount:0}},asOf:2_000});
-    assert.equal(verifyBiggjOutcomeSupervisor(out).ok,true);
-    assert.equal(out.safety.canExecuteLive,false);
-    return;
-  }
-  tree=recordBiggjSkillEvidence(tree,root.skillId,{
-    evidenceId:'e1',observedAt:1_500,statement:'research context',outcome:'NEUTRAL',
-    pointInTime:true,futureLeakage:false,auditReady:false,scientificGuardsPassed:false,
-    forwardShadow:false,validationEligible:false,provenance:[{kind:'TEST'}]
+  assert.ok(root);
+  tree=recordBiggjSkillEvidence(tree,{
+    skillId:root.skillId,
+    epistemicClass:'OBSERVED',
+    asOf:1_500,
+    availableAt:1_400,
+    sourceId:'TEST_SOURCE',
+    statement:'research context',
+    outcome:'NEUTRAL',
+    pointInTime:true,
+    futureLeakage:false,
+    auditReady:false,
+    scientificGuardsPassed:false,
+    forwardShadow:false,
+    validationEligible:false,
+    provenance:[{kind:'TEST'}]
   });
   const out=buildBiggjOutcomeSupervisor({
     livingResearchState:{skillTree:tree,researchReviewQueue:{ticketCount:0,blockedCount:0}},
