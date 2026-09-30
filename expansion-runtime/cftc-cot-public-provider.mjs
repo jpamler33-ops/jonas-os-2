@@ -47,6 +47,7 @@ function normalizeRow(row,{symbol,contract,capturedAt}){
   const reportDate=parseDateMs(row?.report_date_as_yyyy_mm_dd);
   const openInterest=finite(row?.open_interest_all);
   if(!row?.id||reportDate==null||openInterest==null||openInterest<0) return null;
+  if(reportDate>Number(capturedAt)+5000) return null;
   const levLong=finite(row?.lev_money_positions_long);
   const levShort=finite(row?.lev_money_positions_short);
   const amLong=finite(row?.asset_mgr_positions_long);
