@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const source=readFileSync(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
 const observabilitySource=readFileSync(new URL('./biggj-discord-observability.mjs',import.meta.url),'utf8');
 const experienceSource=readFileSync(new URL('./biggj-experience-center.mjs',import.meta.url),'utf8');
+const scienceSource=readFileSync(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
 
 test('BIGGJ Discord V11 is release-bound, science-first and interactive',()=>{
   assert.ok(source.includes('BIGGJ_DISCORD_MARKET_SCIENCE_V7'));
@@ -179,7 +180,7 @@ test('BIGGJ V8 channel managers cover every Discord surface and supervise themse
     'buildAnomalyWatchPayload',
     'buildReplayDeskPayload',
     'buildErrorDeskPayload'
-  ]) assert.ok(source.includes(required),required);
+  ]) assert.ok(source.includes(required)||scienceSource.includes(required),required);
 });
 
 test('BIGGJ V7 incoming news is German-first and strict on translation failure',()=>{
