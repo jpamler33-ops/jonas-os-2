@@ -540,14 +540,19 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96,stabil
 export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
   const mv=verifyForecastThesisRevisionMemory(memory);
   if(!mv.ok) throw new Error('thesis revision memory invalid: '+mv.reasons.join(','));
+  const working=upgradeForecastThesisRevisionMemory(memory);
   const maturity=finite(maturedAt,'maturedAt');
-  const events=(memory.events||[])
+  const events=(working.events||[])
     .filter(x=>Number(x.observedAt)<=maturity)
     .sort((a,b)=>Number(a.observedAt)-Number(b.observedAt)||String(a.eventId).localeCompare(String(b.eventId)));
 
   const stale=new Set();
   const everStale=new Set();
+  const transient=new Set();
+  const persistent=new Set();
+  const everPersistent=new Set();
   let firstStaleAt=null;
+  let firstPersistentStaleAt=null;
   let firstWatchAt=null;
   let firstInvalidatedAt=null;
 
@@ -561,6 +566,30 @@ export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
         stale.delete(t.assumptionId);
       }
     }
+    for(const t of event.stabilityTransitions||[]){
+      const id=String(t.assumptionId||'');
+      if(!id) continue;
+      if(t.type==='TRANSIENT_FLICKER_STARTED'){
+        transient.add(id);
+      }else if(t.type==='FLICKER_CLEARED'){
+        transient.delete(id);
+      }else if(t.type==='PERSISTENT_STALE_CONFIRMED'){
+        transient.delete(id);
+        persistent.add(id);
+        everPersistent.add(id);
+        if(firstPersistentStaleAt==null) firstPersistentStaleAt=Number(event.observedAt);
+      }else if(t.type==='RECOVERY_STARTED'){
+        transient.delete(id);
+        persistent.add(id);
+      }else if(t.type==='PERSISTENT_STALE_RECOVERED'){
+        transient.delete(id);
+        persistent.delete(id);
+      }else if(t.type==='RECOVERY_FAILED'){
+        transient.delete(id);
+        persistent.add(id);
+        everPersistent.add(id);
+      }
+    }
     const status=String(event.forecastAssessmentTransition?.to||'UNKNOWN').toUpperCase();
     if(status==='WATCH'&&firstWatchAt==null) firstWatchAt=Number(event.observedAt);
     if(status==='INVALIDATED'&&firstInvalidatedAt==null) firstInvalidatedAt=Number(event.observedAt);
@@ -568,22 +597,36 @@ export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
 
   const warningTimes=[firstStaleAt,firstWatchAt,firstInvalidatedAt].filter(Number.isFinite);
   const firstWarningAt=warningTimes.length?Math.min(...warningTimes):null;
+  const structuralWarningTimes=[firstPersistentStaleAt,firstWatchAt,firstInvalidatedAt].filter(Number.isFinite);
+  const firstStructuralWarningAt=structuralWarningTimes.length?Math.min(...structuralWarningTimes):null;
+
   return deepFreeze({
     version:FORECAST_THESIS_REVISION_MEMORY_VERSION,
-    forecastId:memory.forecastId,
+    stabilityVersion:FORECAST_ASSUMPTION_STABILITY_VERSION,
+    forecastId:working.forecastId,
     maturedAt:maturity,
     eventsBeforeMaturity:events.length,
     staleAssumptionIdsAtMaturity:[...stale].sort(),
     everStaleAssumptionIdsBeforeMaturity:[...everStale].sort(),
+    transientFlickerAssumptionIdsAtMaturity:[...transient].sort(),
+    persistentStaleAssumptionIdsAtMaturity:[...persistent].sort(),
+    everPersistentStaleAssumptionIdsBeforeMaturity:[...everPersistent].sort(),
     firstStaleAt,
+    firstPersistentStaleAt,
     firstWatchAt,
     firstForecastInvalidatedAt:firstInvalidatedAt,
     firstWarningAt,
     warningAvailableBeforeMaturity:firstWarningAt!=null&&firstWarningAt<=maturity,
     warningLeadMs:firstWarningAt==null?null:Math.max(0,maturity-firstWarningAt),
+    firstStructuralWarningAt,
+    structuralWarningAvailableBeforeMaturity:firstStructuralWarningAt!=null&&firstStructuralWarningAt<=maturity,
+    structuralWarningLeadMs:firstStructuralWarningAt==null?null:Math.max(0,maturity-firstStructuralWarningAt),
     forecastInvalidatedBeforeMaturity:firstInvalidatedAt!=null,
     semantics:{
       preOutcomeOnly:true,
+      rawSupportLossAndPersistentStalenessAreSeparate:true,
+      transientFlickerIsNotStructuralStaleness:true,
+      persistentStaleRequiresHysteresis:true,
       warningIsNotProofForecastWouldFail:true,
       leadTimeIsDescriptiveNotCounterfactualCausation:true
     },
@@ -596,18 +639,30 @@ export function forecastThesisPreOutcomeRevisionState(memory,{maturedAt}={}){
 
 export function forecastThesisRevisionMemorySummary(memory){
   const v=verifyForecastThesisRevisionMemory(memory);
+  const working=v.ok?upgradeForecastThesisRevisionMemory(memory):memory;
   return deepFreeze({
-    version:FORECAST_THESIS_REVISION_MEMORY_VERSION,
-    forecastId:memory?.forecastId??null,
+    version:working?.version??FORECAST_THESIS_REVISION_MEMORY_VERSION,
+    stabilityVersion:FORECAST_ASSUMPTION_STABILITY_VERSION,
+    forecastId:working?.forecastId??null,
     integrity:v.ok?'VALID':'INVALID',
-    assumptionCount:Array.isArray(memory?.assumptions)?memory.assumptions.length:0,
-    eventCount:Number(memory?.eventCount||0),
-    firstWatchAt:memory?.firstWatchAt??null,
-    firstStaleAt:memory?.firstStaleAt??null,
-    firstForecastInvalidatedAt:memory?.firstForecastInvalidatedAt??null,
-    lastForecastAssessmentStatus:memory?.lastForecastAssessmentStatus??'UNKNOWN',
-    currentStaleAssumptionIds:(memory?.assumptions||[])
+    assumptionCount:Array.isArray(working?.assumptions)?working.assumptions.length:0,
+    eventCount:Number(working?.eventCount||0),
+    stabilityEventCount:Number(working?.stabilityEventCount||0),
+    firstWatchAt:working?.firstWatchAt??null,
+    firstStaleAt:working?.firstStaleAt??null,
+    firstPersistentStaleAt:working?.firstPersistentStaleAt??null,
+    firstForecastInvalidatedAt:working?.firstForecastInvalidatedAt??null,
+    lastForecastAssessmentStatus:working?.lastForecastAssessmentStatus??'UNKNOWN',
+    currentStaleAssumptionIds:(working?.assumptions||[])
       .filter(x=>x.issueSupported===true&&x.currentSupported===false)
+      .map(x=>x.assumptionId)
+      .sort(),
+    currentTransientFlickerAssumptionIds:(working?.assumptions||[])
+      .filter(x=>x?.stability?.state==='TRANSIENT_FLICKER')
+      .map(x=>x.assumptionId)
+      .sort(),
+    currentPersistentStaleAssumptionIds:(working?.assumptions||[])
+      .filter(x=>x?.stability?.state==='PERSISTENT_STALE'||x?.stability?.state==='RECOVERING')
       .map(x=>x.assumptionId)
       .sort(),
     execution:'SHADOW_ONLY',
