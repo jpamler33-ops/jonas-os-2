@@ -81,6 +81,74 @@ function modeStats(rows=[]){
   return byMode;
 }
 
+function clamp(v,a=0,b=1){return Math.max(a,Math.min(b,Number(v)));}
+
+function labLaneKey({symbol='',horizonId='',direction='',side=''}={}){
+  const dir=String(direction||'').toUpperCase()||(
+    String(side||'').toUpperCase()==='LONG'?'UP':
+    String(side||'').toUpperCase()==='SHORT'?'DOWN':'UNKNOWN'
+  );
+  return [String(symbol||'').toUpperCase(),String(horizonId||'').toUpperCase(),dir].join('|');
+}
+
+export function buildLabWalletLearningModel(ledger,{asOf=Date.now(),priorStrength=12}={}){
+  const rows=(Array.isArray(ledger?.positions)?ledger.positions:[]).filter(p=>
+    p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED'&&
+    modeOf(p)===LAB_UNCONSTRAINED_ENTRY_MODE&&
+    finite(p.realizedReturnPct)!=null&&finite(p.realizedNetPnlQuote)!=null
+  );
+  const groups=new Map();
+  for(const p of rows){
+    const key=labLaneKey(p);
+    const g=groups.get(key)||{key,symbol:String(p.symbol||'').toUpperCase(),horizonId:String(p.horizonId||''),direction:String(p.side||'').toUpperCase()==='LONG'?'UP':'DOWN',n:0,wins:0,grossProfit:0,grossLoss:0,returnSum:0,pnlSum:0};
+    const pnl=finite(p.realizedNetPnlQuote,0),ret=finite(p.realizedReturnPct,0);
+    g.n++;g.returnSum+=ret;g.pnlSum+=pnl;
+    if(pnl>0){g.wins++;g.grossProfit+=pnl;}
+    else if(pnl<0)g.grossLoss+=Math.abs(pnl);
+    groups.set(key,g);
+  }
+  const prior=Math.max(2,Number(priorStrength)||12);
+  const byLane={};
+  for(const [key,g] of groups){
+    const rawMean=g.n?g.returnSum/g.n:0;
+    const shrink=g.n/(g.n+prior);
+    const shrunkMeanReturn=rawMean*shrink;
+    const posteriorWinRate=(g.wins+prior*.5)/(g.n+prior);
+    const profitFactor=g.grossLoss>EPS?g.grossProfit/g.grossLoss:null;
+    const state=g.n<8?'UNPROVEN':shrunkMeanReturn>0&&Number(profitFactor||0)>1?'PROMISING':shrunkMeanReturn<0&&profitFactor!=null&&profitFactor<1?'WEAK':'MIXED';
+    byLane[key]=freeze({
+      key,symbol:g.symbol,horizonId:g.horizonId,direction:g.direction,
+      samples:g.n,wins:g.wins,rawWinRate:g.n?g.wins/g.n:null,
+      posteriorWinRate,meanReturn:rawMean,shrunkMeanReturn,
+      realizedPnlQuote:g.pnlSum,profitFactor,state
+    });
+  }
+  const global=pnlStats(rows);
+  const core={
+    version:SHADOW_DUAL_WALLET_VERSION,
+    asOf:Number(asOf),
+    samples:rows.length,
+    lanes:Object.keys(byLane).length,
+    byLane,
+    global:{
+      closedTrades:global.closedTrades,
+      wins:global.wins,
+      losses:global.losses,
+      winRate:global.winRate,
+      realizedPnlQuote:global.realizedPnlQuote,
+      profitFactor:global.profitFactor,
+      expectancyQuote:global.expectancyQuote
+    },
+    purpose:'LAB_ONLY_POINT_IN_TIME_OUTCOME_MEMORY',
+    primaryMutationAllowed:false,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false,
+    canExecuteLive:false
+  };
+  return freeze({...core,fingerprint:sha256(core)});
+}
+
 function activeRows(rows=[]){
   return rows.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30).map(p=>({
     positionId:String(p?.positionId||''),
@@ -170,7 +238,8 @@ export function deriveUnconstrainedLabWalletCandidate(issuance,{
   now=Date.now(),
   maxAgeMs=30*60_000,
   notionalQuote=500,
-  existingDecisionKeys=[]
+  existingDecisionKeys=[],
+  learningModel=null
 }={}){
   const at=Number(now);
   const blocked=safeIssuance(issuance,{now:at,maxAgeMs:Math.max(60_000,Number(maxAgeMs)||30*60_000)});
@@ -200,9 +269,19 @@ export function deriveUnconstrainedLabWalletCandidate(issuance,{
         generatedAt:Number(issuance.generatedAt)
       };
       const labDecisionKey='lab_'+sha256(core).slice(0,28);
+      const laneKey=labLaneKey({symbol:issuance.symbol,horizonId:h?.horizonId,direction});
+      const learned=learningModel?.byLane?.[laneKey]||null;
+      const samples=Math.max(0,Number(learned?.samples)||0);
+      const forecastComponent=clamp(Math.abs(expectedReturn)/.02);
+      const empiricalComponent=learned
+        ?clamp(.5+Number(learned.shrunkMeanReturn||0)/.02)
+        :.5;
+      const noveltyComponent=1/Math.sqrt(1+samples);
+      const selectionScore=.55*forecastComponent+.30*empiricalComponent+.15*noveltyComponent;
       return {
-        h,direction,horizonMs,expectedReturn,labDecisionKey,
-        score:Math.abs(expectedReturn)
+        h,direction,horizonMs,expectedReturn,labDecisionKey,laneKey,learned,
+        score:selectionScore,
+        scoreComponents:{forecast:forecastComponent,empirical:empiricalComponent,novelty:noveltyComponent}
       };
     })
     .filter(Boolean)
@@ -236,6 +315,13 @@ export function deriveUnconstrainedLabWalletCandidate(issuance,{
     expectedReturn:best.expectedReturn,
     notionalQuote:Math.max(1,Number(notionalQuote)||500),
     labDecisionKey:best.labDecisionKey,
+    labLaneKey:best.laneKey,
+    labSelectionScore:best.score,
+    labSelectionComponents:best.scoreComponents,
+    labLearningState:String(best.learned?.state||'UNPROVEN'),
+    labLearningSamples:Number(best.learned?.samples||0),
+    labHistoricalShrunkMeanReturn:finite(best.learned?.shrunkMeanReturn),
+    labHistoricalProfitFactor:finite(best.learned?.profitFactor),
     issuanceId:String(issuance.issuanceId||''),
     forecastFingerprint:String(issuance.forecastFingerprint||''),
     generatedAt:Number(issuance.generatedAt),
