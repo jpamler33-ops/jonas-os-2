@@ -107,6 +107,21 @@ test('trade cockpit remains shadow-only',()=>{
   assert.match(text,/canExecuteLive:false/);
 });
 
+
+
+test('trade cockpit emits unique Discord custom ids when multiple positions share a symbol',()=>{
+  const x=snapshot();
+  x.portfolio.positions=[
+    {...x.portfolio.positions[0],positionId:'p1'},
+    {...x.portfolio.positions[0],positionId:'p2',side:'SHORT'}
+  ];
+  x.portfolio.openPositions=2;
+  const p=buildBiggjTradeCockpitPayload(x);
+  const ids=(p.components||[]).flatMap(row=>(row.components||[]).map(button=>button.custom_id));
+  assert.equal(ids.length,3);
+  assert.equal(new Set(ids).size,ids.length);
+});
+
 test('experience panel map has unique channel ownership',()=>{
   const rows=buildBiggjExperiencePanelMap(snapshot(),{mobileUrl:'https://example.invalid/mission-control'});
   assert.equal(new Set(rows.map(x=>x.channel)).size,rows.length);
