@@ -75,6 +75,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'biggj-skill-dependency-graph.mjs',
   'biggj-skill-tree.mjs',
   'biggj-living-research-runtime.mjs',
+  'biggj-research-episode-resolver.mjs',
   'tcx-research-os-contract.mjs',
   'institutional-forecast-issuance.mjs',
   'institutional-forecast-runtime.mjs',
