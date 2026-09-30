@@ -345,10 +345,14 @@ export function createOfficialPrimaryResearchProvider({
     const krIncidents=Array.isArray(kStatus?.incidents)?kStatus.incidents:[];
     const severity=rows=>rows.reduce((m,x)=>Math.max(m,impactCode(x?.impact)),0);
 
-    const ok=Boolean(cbStatus||kStatus||cbRows.length||krRows.length);
+    const coinbaseObserved=Boolean(cbStatus||cbRows.length);
+    const krakenObserved=Boolean(kStatus||krRows.length);
+    const venueSourceCount=Number(coinbaseObserved)+Number(krakenObserved);
+    const ok=venueSourceCount>0;
     return Object.freeze({
       ok,
       source:'COINBASE_KRAKEN_PUBLIC_CONTEXT',
+      venueSourceCount,
       capturedAt,
       availableAt:capturedAt,
       coinbase:Object.freeze({
