@@ -1,4 +1,4 @@
-export const PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION='TCX_PUBLIC_MARKET_CONTEXT_V2';
+export const PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION='TCX_PUBLIC_MARKET_CONTEXT_V3';
 
 function finite(v){
   if(v==null||v==='') return null;
@@ -17,11 +17,26 @@ function share(part,total){
   const p=finite(part),t=finite(total);
   return p!=null&&t!=null&&t>0?Math.max(0,Math.min(1,p/t)):null;
 }
+function stablecoinUsd(row){
+  const direct=finite(row?.totalCirculatingUSD);
+  if(direct!=null&&direct>=0) return direct;
+  const raw=row?.totalCirculatingUSD;
+  if(raw&&typeof raw==='object'){
+    const values=Object.values(raw).map(finite).filter(v=>v!=null&&v>=0);
+    if(values.length) return values.reduce((a,b)=>a+b,0);
+  }
+  for(const candidate of [row?.stablecoinsMcap,row?.stablecoinMcap,row?.mcap,row?.total]){
+    const n=finite(candidate);
+    if(n!=null&&n>=0) return n;
+  }
+  return null;
+}
 
 export function publicMarketContextToExtraFeatures(context){
   const s=context?.sentiment||null;
   const g=context?.global||null;
   const d=context?.defi||null;
+  const st=context?.stablecoins||null;
   const rows=[];
   const add=(id,value)=>{
     const n=finite(value);
@@ -49,6 +64,17 @@ export function publicMarketContextToExtraFeatures(context){
     add('research.defi.bitcoinTvlShare',share(d.bitcoinTvlUsd,d.totalTvlUsd));
     add('research.defi.top10TvlShare',d.top10TvlShare);
   }
+  if(st){
+    add('research.stablecoin.totalSupplyLog',log1pNonNegative(st.totalSupplyUsd));
+    add('research.stablecoin.chainCountLog',log1pNonNegative(st.chainCount));
+    add('research.stablecoin.ethereumSupplyShare',share(st.ethereumSupplyUsd,st.totalSupplyUsd));
+    add('research.stablecoin.tronSupplyShare',share(st.tronSupplyUsd,st.totalSupplyUsd));
+    add('research.stablecoin.solanaSupplyShare',share(st.solanaSupplyUsd,st.totalSupplyUsd));
+    add('research.stablecoin.baseSupplyShare',share(st.baseSupplyUsd,st.totalSupplyUsd));
+    add('research.stablecoin.top5SupplyShare',st.top5SupplyShare);
+    add('research.stablecoin.supplyToDefiTvlRatio',
+      finite(st.totalSupplyUsd)!=null&&finite(d?.totalTvlUsd)>0?Number(st.totalSupplyUsd)/Number(d.totalTvlUsd):null);
+  }
   return rows;
 }
 
@@ -56,12 +82,14 @@ export function createPublicMarketContextProvider({
   fetchImpl=globalThis.fetch,
   alternativeBase='https://api.alternative.me',
   defiLlamaBase='https://api.llama.fi',
+  stablecoinBase='https://stablecoins.llama.fi',
   timeoutMs=8000,
   cacheTtlMs=300000
 }={}){
   if(typeof fetchImpl!=='function') throw new Error('fetch implementation required');
   const altBase=String(alternativeBase).replace(/\/+$/,'');
   const llamaBase=String(defiLlamaBase).replace(/\/+$/,'');
+  const stableBase=String(stablecoinBase).replace(/\/+$/,'');
   const cache=new Map();
 
   async function fetchJson(base,path,errorPrefix){
@@ -154,11 +182,38 @@ export function createPublicMarketContextProvider({
     },{force});
   }
 
+  async function fetchStablecoins({force=false}={}){
+    return cached('stablecoin-chains',async()=>{
+      const body=await fetchJson(stableBase,'/stablecoinchains','DEFILLAMA_STABLECOINS');
+      const rows=(Array.isArray(body)?body:[]).map(x=>({
+        name:text(x?.name),
+        supplyUsd:stablecoinUsd(x)
+      })).filter(x=>x.name&&x.supplyUsd!=null&&x.supplyUsd>=0);
+      if(!rows.length) throw new Error('DEFILLAMA_STABLECOIN_SUPPLY_MISSING');
+      const totalSupplyUsd=rows.reduce((sum,x)=>sum+x.supplyUsd,0);
+      const byName=new Map(rows.map(x=>[x.name.toLowerCase(),x.supplyUsd]));
+      const top5SupplyUsd=rows.slice().sort((a,b)=>b.supplyUsd-a.supplyUsd).slice(0,5).reduce((sum,x)=>sum+x.supplyUsd,0);
+      return Object.freeze({
+        totalSupplyUsd,
+        chainCount:rows.length,
+        ethereumSupplyUsd:byName.get('ethereum')??null,
+        tronSupplyUsd:byName.get('tron')??null,
+        solanaSupplyUsd:byName.get('solana')??null,
+        baseSupplyUsd:byName.get('base')??null,
+        top5SupplyShare:totalSupplyUsd>0?top5SupplyUsd/totalSupplyUsd:null,
+        source:'DefiLlama Stablecoins Public API',
+        endpoint:'/stablecoinchains',
+        epistemic:'CURRENT_STABLECOIN_SUPPLY_SNAPSHOT_NOT_FLOW_OR_FORECAST'
+      });
+    },{force});
+  }
+
   async function fetchContext({force=false}={}){
-    const [sentiment,global,defi]=await Promise.allSettled([
+    const [sentiment,global,defi,stablecoins]=await Promise.allSettled([
       fetchFearGreed({force}),
       fetchGlobal({force}),
-      fetchDefi({force})
+      fetchDefi({force}),
+      fetchStablecoins({force})
     ]);
     return Object.freeze({
       version:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
@@ -166,10 +221,12 @@ export function createPublicMarketContextProvider({
       sentiment:sentiment.status==='fulfilled'?sentiment.value:null,
       global:global.status==='fulfilled'?global.value:null,
       defi:defi.status==='fulfilled'?defi.value:null,
+      stablecoins:stablecoins.status==='fulfilled'?stablecoins.value:null,
       errors:Object.freeze([
         ...(sentiment.status==='rejected'?[{source:'fear-greed',error:sentiment.reason instanceof Error?sentiment.reason.message:String(sentiment.reason)}]:[]),
         ...(global.status==='rejected'?[{source:'global',error:global.reason instanceof Error?global.reason.message:String(global.reason)}]:[]),
-        ...(defi.status==='rejected'?[{source:'defi',error:defi.reason instanceof Error?defi.reason.message:String(defi.reason)}]:[])
+        ...(defi.status==='rejected'?[{source:'defi',error:defi.reason instanceof Error?defi.reason.message:String(defi.reason)}]:[]),
+        ...(stablecoins.status==='rejected'?[{source:'stablecoins',error:stablecoins.reason instanceof Error?stablecoins.reason.message:String(stablecoins.reason)}]:[])
       ])
     });
   }
@@ -179,6 +236,7 @@ export function createPublicMarketContextProvider({
     fetchFearGreed,
     fetchGlobal,
     fetchDefi,
+    fetchStablecoins,
     fetchContext
   });
 }
