@@ -291,7 +291,7 @@ function renderSystem(){
   html+=sectionHead('Safety Contract');
   html+='<div class="safety"><div class="safetyTitle">Unveränderliche Grenze</div><div class="safetyBody">SHADOW_ONLY · ABSTAIN ist vollwertig · canExecute:false · canExecuteLive:false · keine automatische Trading-Policy-Mutation · keine automatische Promotion · keine stille PRIMARY-Mutation.</div></div>';
   html+='<div class="installCard"><b>Als iPhone-App installieren</b><p>Safari → Teilen → <strong>Zum Home-Bildschirm</strong>. BIGGJ startet danach im Standalone-Modus und nutzt diese Oberfläche als Command Center.</p></div>';
-  html+='<div class="installCard"><b>Legacy Diagnose</b><p>Die alte technische Mission-Control-Ansicht bleibt unter <strong>/mission-control/legacy</strong> verfügbar. Die Standard-URL zeigt jetzt die neue BIGGJ-App.</p></div>';
+  html+='<div class="installCard"><b>Live Diagnose</b><p>Alle Ansichten lesen denselben kanonischen <strong>/mission-control.json</strong>-Snapshot. Bei einem Sync-Fehler bleibt der letzte gültige Stand sichtbar und wird als stale/offline markiert.</p></div>';
   return html+'</section>';
 }
 
