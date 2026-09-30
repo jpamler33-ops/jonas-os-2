@@ -78,6 +78,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'biggj-living-research-runtime.mjs',
   'biggj-research-validation-harness.mjs',
   'biggj-research-protocol-compiler.mjs',
+  'biggj-research-review-queue.mjs',
   'biggj-research-episode-resolver.mjs',
   'tcx-research-os-contract.mjs',
   'institutional-forecast-issuance.mjs',
