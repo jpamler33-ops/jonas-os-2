@@ -797,9 +797,22 @@ export function verifyBiggjLivingResearchRuntime(value){
     if(value?.researchProtocols!=null&&!Array.isArray(value.researchProtocols)){
       reasons.push('RESEARCH_PROTOCOLS_INVALID');
     }else{
+      const protocolIds=new Set();
+      const protocolSkillVersions=new Set();
       for(const protocol of value?.researchProtocols||[]){
         const pv=verifyBiggjResearchProtocol(protocol);
         if(!pv.ok) reasons.push('RESEARCH_PROTOCOL_INVALID:'+String(protocol?.protocolId||'UNKNOWN'));
+        if(protocolIds.has(protocol?.protocolId)) reasons.push('RESEARCH_PROTOCOL_ID_DUPLICATE:'+String(protocol?.protocolId||'UNKNOWN'));
+        protocolIds.add(protocol?.protocolId);
+        const key=String(protocol?.version||'UNKNOWN')+':'+String(protocol?.skillId||'UNKNOWN');
+        if(protocolSkillVersions.has(key)) reasons.push('RESEARCH_PROTOCOL_SKILL_VERSION_DUPLICATE:'+key);
+        protocolSkillVersions.add(key);
+        if(!(value?.skillTree?.nodes||[]).some(x=>x.skillId===protocol?.skillId)){
+          reasons.push('RESEARCH_PROTOCOL_SKILL_MISSING:'+String(protocol?.skillId||'UNKNOWN'));
+        }
+        if(Number.isFinite(Number(value?.updatedAt))&&Number(protocol?.registeredAt)>Number(value.updatedAt)){
+          reasons.push('RESEARCH_PROTOCOL_FUTURE_REGISTRATION:'+String(protocol?.protocolId||'UNKNOWN'));
+        }
       }
     }
     const tv=verifyBiggjSkillTree(value?.skillTree);
