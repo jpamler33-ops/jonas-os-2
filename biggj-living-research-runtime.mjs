@@ -13,9 +13,14 @@ import {
   verifyBiggjSkillTree
 } from './biggj-skill-tree.mjs';
 import { canonicalSkillLeverage } from './biggj-skill-dependency-graph.mjs';
+import {
+  resolveBiggjResearchEpisodes,
+  researchEpisodeAssignment,
+  BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION
+} from './biggj-research-episode-resolver.mjs';
 
 export const BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION='TCX_BIGGJ_LIVING_RESEARCH_RUNTIME_V1';
-export const BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION='TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V1';
+export const BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION='TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2';
 
 const deepFreeze=value=>{
   if(value&&typeof value==='object'&&!Object.isFrozen(value)){
@@ -121,6 +126,9 @@ function normalizeMemories(thesisMemories){
     .filter(Boolean)
     .map(memory=>({
       forecastId:String(memory?.forecastId||'UNKNOWN'),
+      symbol:String(memory?.symbol||'UNKNOWN').toUpperCase(),
+      decisionAsOf:finite(memory?.decisionAsOf),
+      issueKnowledgeAt:finite(memory?.issueKnowledgeAt),
       firstPersistentStaleAt:finite(memory?.firstPersistentStaleAt),
       assumptions:(memory?.assumptions||[]).map(a=>({
         assumptionId:String(a?.assumptionId||'UNKNOWN'),
@@ -192,6 +200,9 @@ function mergePersistentCaseRegistry(existing,memories,{observedAt,maxRows=10_00
         caseId:'persistent-case:'+sha256({forecastId:memory.forecastId,assumptionId:row.assumptionId}).slice(0,24),
         forecastId:memory.forecastId,
         assumptionId:row.assumptionId,
+        symbol:String(prior?.symbol||memory.symbol||'UNKNOWN').toUpperCase(),
+        decisionAsOf:finite(prior?.decisionAsOf,memory.decisionAsOf),
+        issueKnowledgeAt:finite(prior?.issueKnowledgeAt,memory.issueKnowledgeAt),
         firstPersistentStaleAt:firstAt.length?Math.min(...firstAt):null,
         persistentStaleCount:Math.max(Number(prior?.persistentStaleCount||0),Number(st.persistentStaleCount||0),1),
         transientFlickerCount:Math.max(Number(prior?.transientFlickerCount||0),Number(st.transientFlickerCount||0)),
@@ -395,6 +406,9 @@ function compactSource(memories,report){
     researchEvidenceBindingVersion:BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
     memories:memories.map(m=>({
       forecastId:m.forecastId,
+      symbol:m.symbol,
+      decisionAsOf:m.decisionAsOf,
+      issueKnowledgeAt:m.issueKnowledgeAt,
       firstPersistentStaleAt:m.firstPersistentStaleAt,
       assumptions:m.assumptions.map(a=>({
         assumptionId:a.assumptionId,
@@ -692,6 +706,8 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     invariants:{
       pointInTime:true,
       researchOnlyAutonomousDiscovery:true,
+      conservativeResearchEpisodeResolution:true,
+      crossSymbolAloneNeverCreatesIndependence:true,
       automaticPromotion:false,
       automaticKill:false,
       automaticExperimentLaunch:false,
