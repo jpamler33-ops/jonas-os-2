@@ -245,3 +245,23 @@ test('registry accounts for multiple registered candidates and league reads nest
   assert.equal(league.metadata.open,3);
   assert.equal(league.metadata.closed,20);
 });
+
+
+test('terminal feature experiments do not create phantom work',()=>{
+  const state=createAutonomousResearchTrainingFactory({asOf:1000});
+  const refreshed=refreshAutonomousResearchTrainingFactory(state,{
+    livingResearchState:baseLivingResearch(),
+    featureResearchSummary:{
+      status:'COMPLETE_SUPPORTED_FEATURES',
+      fingerprint:'fr-complete',
+      experiments:[
+        {id:'f1',status:'SUPPORTED'},
+        {id:'f2',status:'REJECTED'}
+      ]
+    },
+    asOf:2000
+  });
+  assert.equal(refreshed.state.queue.some(x=>x.type==='CONTINUE_FEATURE_RESEARCH'),false);
+  assert.equal(refreshed.state.mode,'IDLE_MONITORING');
+  assert.equal(refreshed.state.operatorDataOnly,true);
+});
