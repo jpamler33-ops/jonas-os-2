@@ -205,3 +205,14 @@ test('previously empty operational channels now have live builders',async()=>{
     'channel-improvements'
   ]) assert.ok(source.includes(required),required);
 });
+
+
+test('German news translation is bounded and concurrent so Discord startup cannot scan the full backlog serially',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/TCX_DISCORD_NEWS_TRANSLATION_CONCURRENCY\|\|4/);
+  assert.match(source,/TCX_DISCORD_NEWS_TRANSLATION_ATTEMPT_LIMIT\|\|18/);
+  assert.match(source,/mapWithConcurrency\(candidates,newsTranslationConcurrency/);
+  assert.match(source,/slice\(0,newsTranslationAttemptLimit\)/);
+  assert.match(source,/posted===0&&candidates\.length>0&&translationFailures>0&&strictGermanNews/);
+});
