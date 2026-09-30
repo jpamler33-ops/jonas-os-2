@@ -8,6 +8,7 @@ import {
   proposeBiggjChildSkill,
   recordBiggjSkillEvidence,
   evaluateBiggjSkillProgress,
+  advanceBiggjResearchLifecycleStep,
   buildBiggjResearchQueue,
   biggjSkillTreeSnapshot,
   verifyBiggjSkillTree
@@ -678,6 +679,40 @@ function bindResearchEvidence(tree,{
   };
 }
 
+function advanceLivingResearchLifecycle(tree,{asOf}={}){
+  let next=tree;
+  const transitions=[];
+  const reviewRequired=[];
+  const skillIds=(next?.nodes||[])
+    .filter(x=>
+      x?.kind==='DISCOVERED_SKILL'&&
+      x?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1'
+    )
+    .map(x=>String(x.skillId))
+    .sort();
+
+  for(const skillId of skillIds){
+    const step=advanceBiggjResearchLifecycleStep(next,{skillId,asOf});
+    if(step.changed){
+      next=step.tree;
+      transitions.push(structuredClone(step.transition));
+    }else if(step.reviewRequired){
+      reviewRequired.push({
+        skillId,
+        currentStatus:step.currentStatus,
+        recommendedStatus:step.recommendedStatus,
+        reason:step.reason,
+        evaluationFingerprint:step.evaluationFingerprint??null
+      });
+    }
+  }
+  return {
+    tree:next,
+    transitions,
+    reviewRequired
+  };
+}
+
 function livingResearchEvidenceSummary(tree){
   const rows=(tree?.nodes||[])
     .filter(x=>x?.kind==='DISCOVERED_SKILL'&&x?.discoveredBy==='ASSUMPTION_PERSISTENCE_RUNTIME_V1')
@@ -721,6 +756,8 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     persistentCaseRegistry:[],
     stabilityEventRegistry:[],
     researchEpisodeResolution:[],
+    researchLifecycleTransitions:[],
+    reviewRequiredSkillIds:[],
     assumptionSignals:[],
     agenda:[],
     discoveredSkillIds:[],
@@ -731,6 +768,8 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
       researchOnlyAutonomousDiscovery:true,
       conservativeResearchEpisodeResolution:true,
       crossSymbolAloneNeverCreatesIndependence:true,
+      automaticResearchStageAdvance:true,
+      maxAutomaticResearchStage:'TESTING',
       automaticPromotion:false,
       automaticKill:false,
       automaticExperimentLaunch:false,
@@ -784,12 +823,44 @@ export function refreshBiggjLivingResearchRuntime(state,{
   assertLivingResearchPointInTime(memories,claimAssumptionReport,t);
   const sourceFingerprint=sha256(compactSource(memories,claimAssumptionReport));
   if(sourceFingerprint===state.sourceFingerprint){
+    const lifecycle=advanceLivingResearchLifecycle(state.skillTree,{asOf:t});
+    if(!lifecycle.transitions.length){
+      return deepFreeze({
+        changed:false,
+        state,
+        discoveredSkillIds:[],
+        boundEvidenceIds:[],
+        researchLifecycleTransitions:[],
+        reviewRequiredSkills:lifecycle.reviewRequired,
+        reasons:['SOURCE_STATE_UNCHANGED']
+      });
+    }
+    const transitionLog=[
+      ...(state.researchLifecycleTransitions||[]),
+      ...lifecycle.transitions
+    ].slice(-256);
+    const core={
+      ...coreOf(state),
+      updatedAt:t,
+      revision:Number(state.revision||0)+1,
+      skillTree:lifecycle.tree,
+      researchLifecycleTransitions:transitionLog,
+      reviewRequiredSkillIds:uniq(lifecycle.reviewRequired.map(x=>x.skillId)),
+      canonicalResearchQueue:buildBiggjResearchQueue(lifecycle.tree,{limit:20}).queue,
+      lastRefreshReason:'RESEARCH_LIFECYCLE_ADVANCE',
+      execution:'SHADOW_ONLY',
+      action:'ABSTAIN',
+      canInfluencePrimary:false,
+      canExecuteLive:false
+    };
     return deepFreeze({
-      changed:false,
-      state,
+      changed:true,
+      state:finalized(core),
       discoveredSkillIds:[],
       boundEvidenceIds:[],
-      reasons:['SOURCE_STATE_UNCHANGED']
+      researchLifecycleTransitions:lifecycle.transitions,
+      reviewRequiredSkills:lifecycle.reviewRequired,
+      reasons:['RESEARCH_LIFECYCLE_ADVANCED_WITHOUT_NEW_SOURCE']
     });
   }
 
@@ -861,6 +932,9 @@ export function refreshBiggjLivingResearchRuntime(state,{
     }
   }
 
+  const lifecycle=advanceLivingResearchLifecycle(tree,{asOf:t});
+  tree=lifecycle.tree;
+
   const agenda=signals
     .filter(x=>x.status!=='DORMANT')
     .map(x=>({
@@ -881,6 +955,11 @@ export function refreshBiggjLivingResearchRuntime(state,{
     persistentCaseRegistry,
     stabilityEventRegistry,
     researchEpisodeResolution,
+    researchLifecycleTransitions:[
+      ...(state.researchLifecycleTransitions||[]),
+      ...lifecycle.transitions
+    ].slice(-256),
+    reviewRequiredSkillIds:uniq(lifecycle.reviewRequired.map(x=>x.skillId)),
     assumptionSignals:signals,
     agenda,
     discoveredSkillIds:uniq([...(state.discoveredSkillIds||[]),...discovered]),
@@ -896,6 +975,8 @@ export function refreshBiggjLivingResearchRuntime(state,{
     state:finalized(core),
     discoveredSkillIds:discovered,
     boundEvidenceIds:uniq(boundEvidenceIds),
+    researchLifecycleTransitions:lifecycle.transitions,
+    reviewRequiredSkills:lifecycle.reviewRequired,
     reasons:[]
   });
 }
@@ -987,6 +1068,15 @@ export function biggjLivingResearchRuntimeSummary(value){
     unresolvedResearchCases:(value?.researchEpisodeResolution||[])
       .reduce((n,x)=>n+Number(x?.counts?.unresolvedCases||0),0),
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
+    researchLifecycleTransitions:(value?.researchLifecycleTransitions||[]).length,
+    reviewRequiredSkills:(value?.reviewRequiredSkillIds||[]).length,
+    researchLifecycle:{
+      automaticStageAdvance:true,
+      maximumAutomaticStatus:'TESTING',
+      explicitReviewRequiredBeyondTesting:true,
+      automaticValidated:false,
+      automaticTrusted:false
+    },
     researchEvidence:verifyBiggjSkillTree(value?.skillTree).ok
       ?livingResearchEvidenceSummary(value.skillTree)
       :null,
