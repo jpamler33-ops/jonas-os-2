@@ -9324,7 +9324,7 @@ async function shadowCompetitionWatcher(){
           console.warn('shadow competition deferred for memory headroom',JSON.stringify({
             mode:shadowCompetitionWorkerMode,
             reason:admission.reason,
-            heapUsedMb,rssMb,externalMb,
+            ...admission.memory,
             historyRows:forecastRuntime.engine.historySize(),
             limits:admission.limits
           }));
@@ -9388,6 +9388,13 @@ async function shadowCompetitionWatcher(){
 
             const payloadMemory=process.memoryUsage();
             payloadAdmission=currentShadowCompetitionAdmission(resourcePlan,'ON',payloadMemory);
+            if(!payloadAdmission.allowed){
+              payloadAdmission=retryAdmissionAfterBackgroundGc(
+                'SHADOW_REPLAY_POST_SNAPSHOT',
+                payloadAdmission,
+                ()=>currentShadowCompetitionAdmission(resourcePlan,'ON')
+              ).admission;
+            }
             shadowCompetitionWorkerLastDecision={
               ...payloadAdmission,
               at:Date.now(),
