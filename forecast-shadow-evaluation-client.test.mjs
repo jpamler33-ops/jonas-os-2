@@ -7,6 +7,7 @@ import {
   AUTOLEARN_MEMORY_ADMISSION_VERSION,
   evaluateShadowWorkerAdmission,
   evaluateAutoLearnMemoryAdmission,
+  shadowWorkerRetryDelayMs,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced
 } from './forecast-shadow-evaluation-client.mjs';
@@ -70,6 +71,26 @@ test('adaptive shadow worker admission requires real serving headroom',()=>{
   assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2');
 });
 
+
+test('shadow worker memory retry uses short bounded exponential backoff without weakening admission',()=>{
+  const normal=evaluateShadowWorkerAdmission({mode:'AUTO',heapUsedMb:200,rssMb:400,externalMb:4});
+  const adaptive=evaluateShadowWorkerAdmission({mode:'AUTO',heapUsedMb:270,rssMb:500,externalMb:4});
+  const hard=evaluateShadowWorkerAdmission({mode:'AUTO',heapUsedMb:310,rssMb:500,externalMb:4});
+  const disabled=evaluateShadowWorkerAdmission({mode:'OFF',heapUsedMb:100,rssMb:200,externalMb:4});
+
+  assert.equal(shadowWorkerRetryDelayMs(normal,{normalDelayMs:3_600_000}),3_600_000);
+  assert.equal(shadowWorkerRetryDelayMs(adaptive,{deferralStreak:1}),60_000);
+  assert.equal(shadowWorkerRetryDelayMs(adaptive,{deferralStreak:2}),120_000);
+  assert.equal(shadowWorkerRetryDelayMs(adaptive,{deferralStreak:4}),300_000);
+  assert.equal(shadowWorkerRetryDelayMs(adaptive,{deferralStreak:20}),300_000);
+  assert.equal(shadowWorkerRetryDelayMs(hard,{deferralStreak:1}),180_000);
+  assert.equal(shadowWorkerRetryDelayMs(hard,{deferralStreak:3}),600_000);
+  assert.equal(shadowWorkerRetryDelayMs(disabled,{normalDelayMs:900_000}),900_000);
+
+  assert.equal(adaptive.allowed,false);
+  assert.equal(hard.allowed,false);
+  assert.equal(disabled.allowed,false);
+});
 
 test('autolearn admission blocks external-memory pressure even when heap and rss look safe',()=>{
   const r=evaluateAutoLearnMemoryAdmission({
