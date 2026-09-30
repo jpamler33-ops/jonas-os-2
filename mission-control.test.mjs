@@ -50,11 +50,14 @@ test('mobile command center exposes overview markets research trades and system 
 
 test('mission snapshot feeds only primary positions into primary Discord trade streams',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
-  assert.ok(source.includes("const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'])"));
+  assert.ok(source.includes("const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION',LAB_UNCONSTRAINED_ENTRY_MODE])"));
   assert.ok(source.includes("const primaryShadowPositions=allShadowPositions.filter"));
   assert.ok(source.includes("const openPositions=primaryShadowPositions.filter"));
   assert.ok(source.includes("const recentClosed=primaryShadowPositions.filter"));
   assert.ok(source.includes("TCX_COVERAGE_CURRICULUM_NOTIONAL || 5"));
   assert.ok(source.includes("TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 25"));
   assert.ok(source.includes("TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 200"));
+  assert.ok(source.includes("shadowDualWalletSummary(shadowPortfolioLedger"));
+  assert.ok(source.includes("wallets,positions:openPositions,recentClosed"));
+  assert.ok(source.includes("TCX_LAB_WALLET_UNIT_NOTIONAL_QUOTE || 500"));
 });
