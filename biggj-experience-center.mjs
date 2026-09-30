@@ -78,9 +78,11 @@ export function deriveBiggjExperienceNeeds(snapshot={}){
   if(operator?.operatorNeeded===true)needs.push({priority:1,label:'Operator-Eskalation',detail:operator.humanJobRemaining||'Explizite Freigabe/Entscheidung nötig.'});
   if(traders?.sourceReady!==true)needs.push({priority:2,label:'Trader Intelligence Source',detail:'Für belastbare Profit-Trader-Rankings fehlt noch eine öffentliche, PIT-fähige Performance-/Wallet-Quelle.'});
   if(intel?.sourceReady!==true)needs.push({priority:2,label:'Live News Coverage',detail:intel?.lastError?'News-Discovery eingeschränkt: '+clip(intel.lastError,260):'Kein aktiver öffentlicher Live-News-Feed im Serving-State.'});
+  else if(intel?.lastError)needs.push({priority:2,label:'News Source Degraded',detail:'Mindestens ein News-Abruf ist eingeschränkt: '+clip(intel.lastError,260)});
   else if(finite(intel?.eventCount)===0)needs.push({priority:2,label:'News Event Coverage',detail:'Live-News-Quelle ist erreichbar, liefert aktuell aber keine relevanten Events.'});
   const meme=h?.memecoinRadar||{};
   if(meme?.sourceReady!==true)needs.push({priority:2,label:'Memecoin Live Coverage',detail:meme?.lastError?'DEX-Radar eingeschränkt: '+clip(meme.lastError,260):'DexScreener Live-Radar liefert aktuell keine verwertbaren Rows.'});
+  else if(meme?.lastError)needs.push({priority:2,label:'Memecoin Source Degraded',detail:'DEX-Radar hat aktuelle Abruffehler: '+clip(meme.lastError,260)});
   if(Number(coverage?.averageCoverage||1)<.8)needs.push({priority:2,label:'Mehr Live Data',detail:'Research Coverage '+pct(coverage.averageCoverage)+' · Ziel: breitere Point-in-Time-Quellen statt mehr Duplikate.'});
   if(!needs.length)needs.push({priority:3,label:'Keine harte Lücke',detail:'Aktuell kein zwingender Operator-/Source-Blocker. BIGGJ kann weiter Daten sammeln und validieren.'});
   return needs.sort((a,b)=>a.priority-b.priority||a.label.localeCompare(b.label));
@@ -177,19 +179,30 @@ export function buildBiggjTradeCockpitPayload(snapshot={}){
     const mark=x?.lastMark||{};
     const pnl=mark?.unrealizedNetPnlQuote??x?.unrealizedPnlQuote??x?.pnlQuote;
     const health=x?.thesisHealth??x?.metadata?.thesisHealth;
+    const current=mark?.price??mark?.markPrice??x?.currentPrice;
+    const stop=x?.stopPrice??x?.levels?.stopPrice??x?.metadata?.stopPrice;
+    const target=x?.takeProfitPrice??x?.targetPrice??x?.levels?.takeProfitPrice??x?.metadata?.takeProfitPrice;
     return [
-      '**'+clip(x.symbol,18)+' · '+clip(x.side,8)+'**',
-      'Entry '+clip(x.entryPrice??x.avgEntryPrice,30)+' · PnL '+money(pnl),
+      '**'+clip(x.symbol,18)+' · '+clip(x.side,8)+'** · '+clip(x.status||'OPEN',12),
+      'Entry '+clip(x.entryPrice??x.avgEntryPrice,24)+(current!=null?' · Mark '+clip(current,24):'')+' · PnL '+money(pnl),
       Number.isFinite(Number(health))?'Thesis '+pct(health):'Thesis —',
-      'Mode '+clip(x.entryMode||x.strategyId||'STANDARD',36)
+      'Stop '+clip(stop,22)+' · Target '+clip(target,22)+' · '+clip(x.entryMode||x.strategyId||'STANDARD',32)
     ].join('\n');
   }).join('\n\n'):'Keine offenen Shadow-Positionen.';
   const recent=arr(p.recentClosed).slice(0,5).map(x=>
     '• '+clip(x.symbol,16)+' · '+clip(x.side,8)+' · '+money(x?.netPnlQuote??x?.pnlQuote)+' · '+clip(x?.exitReason||'closed',42)
   ).join('\n')||'Keine kürzlich geschlossenen Shadow-Trades.';
+  const components=open.slice(0,2).map(x=>{
+    const symbol=String(x?.symbol||'').toUpperCase();
+    return {type:1,components:[
+      {type:2,style:1,label:clip(symbol.replace('USDT','')+' Chart',24),custom_id:'dc3:superchart:'+symbol+':PRO:5m'},
+      {type:2,style:2,label:'Living Thesis',custom_id:'dc4:thesis:'+symbol},
+      {type:2,style:2,label:'Warum?',custom_id:'dc3:why:'+symbol}
+    ]};
+  });
   return payload(
     'BIGGJ // TRADE COCKPIT',
-    '**Ein Screen für aktive Shadow-Trades.** Keine Tabellenwand: Position → Thesis → PnL → nächster Kontext.',
+    '**Ein Screen für aktive Shadow-Trades.** Position → Live-Chart → Thesis → Risiko → Ergebnis. Nur Buttons für Trades, die gerade offen sind.',
     [
       safeField('OPEN NOW',rows),
       safeField('RECENTLY CLOSED',recent),
@@ -200,7 +213,8 @@ export function buildBiggjTradeCockpitPayload(snapshot={}){
       ].join('\n')),
       safeField('MODE','SHADOW_ONLY · canExecuteLive:false · ABSTAIN is valid')
     ],
-    BIGGJ_EXPERIENCE_MARKERS.cockpit
+    BIGGJ_EXPERIENCE_MARKERS.cockpit,
+    components
   );
 }
 
