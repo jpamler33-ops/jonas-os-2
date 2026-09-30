@@ -8,6 +8,7 @@ import {
   buildBiggjLearnedPayload,
   buildBiggjTraderWatchPayload,
   buildBiggjTradeCockpitPayload,
+  buildBiggjChartDeskPayload,
   buildBiggjExperiencePanelMap
 } from './biggj-experience-center.mjs';
 
@@ -29,7 +30,8 @@ function snapshot(){
         blocked:1,
         blockedFeatures:3
       },
-      globalIntel:{eventCount:4},
+      globalIntel:{eventCount:4,sourceReady:true,source:'GDELT DOC 2.1',lastError:null},
+      memecoinRadar:{sourceReady:true,rows:[{pair:{symbol:'MEME'}}],metas:[]},
       traderWatch:{
         sourceReady:false,
         nextNeed:'public PIT trader performance source',
@@ -69,7 +71,7 @@ function snapshot(){
 
 test('experience layout exposes requested operator and intelligence surfaces',()=>{
   const channels=BIGGJ_EXPERIENCE_LAYOUT.flatMap(x=>x.channels.map(c=>c.name));
-  for(const name of ['biggj-needs','learned-playbook','mobile-app','news-feed','world-watch','trader-watch','trade-cockpit']){
+  for(const name of ['biggj-needs','learned-playbook','mobile-app','news-feed','world-watch','trader-watch','trade-cockpit','chart-desk']){
     assert.ok(channels.includes(name),name);
   }
 });
@@ -110,4 +112,25 @@ test('experience panel map has unique channel ownership',()=>{
   assert.equal(new Set(rows.map(x=>x.channel)).size,rows.length);
   assert.ok(rows.some(x=>x.channel==='mobile-app'));
   assert.ok(rows.every(x=>x.marker&&x.payload));
+});
+
+
+test('chart desk exposes one-tap charts without execution authority',()=>{
+  const p=buildBiggjChartDeskPayload(snapshot());
+  const text=JSON.stringify(p);
+  assert.match(text,/CHART DESK/);
+  assert.match(text,/dc3:superchart:BTCUSDT:PRO:5m/);
+  assert.match(text,/dc3:terminal:radar/);
+  assert.match(text,/keine garantierte Kursbahn/i);
+});
+
+test('needs detects missing live intelligence sources explicitly',()=>{
+  const x=snapshot();
+  x.health.globalIntel={eventCount:0,sourceReady:false,lastError:'NEWS_SOURCE_DOWN'};
+  x.health.memecoinRadar={sourceReady:false,lastError:'DEX_SOURCE_DOWN'};
+  const text=JSON.stringify(buildBiggjNeedsPayload(x));
+  assert.match(text,/Live News Coverage/);
+  assert.match(text,/NEWS_SOURCE_DOWN/);
+  assert.match(text,/Memecoin Live Coverage/);
+  assert.match(text,/DEX_SOURCE_DOWN/);
 });
