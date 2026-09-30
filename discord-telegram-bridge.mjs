@@ -489,32 +489,33 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANNEL UX V7',description:[
-  '**Ein Einstiegspunkt für das komplette BIGGJ Research OS — ohne durch alle Channels scrollen zu müssen.**',
+function startPayload(){return {embeds:[{title:'BIGGJ // MARKET SCIENCE OS · DISCORD V11',description:[
+  '**BIGGJ ist jetzt Science-first.** Trading ist nur eine nachgelagerte Anwendung.',
   '',
-  '**TÄGLICH · 90%-PFAD**',
-  '#trade-cockpit · aktive Shadow-Trades',
-  '#chart-desk · Charts, Radar, Forecast, Deep Dive',
-  '#news-feed + #world-watch · Live-Intel auf Deutsch',
-  '#biggj-needs · höchste aktuelle Lücken',
-  '#performance · Ergebnis, Winrate, Drawdown',
+  '**DEIN 90%-PFAD**',
+  '#science-home · aktueller Wissensstand + nächste Forschungsfrage',
+  '#world-model · globale Market States, Topology, Forecastability',
+  '#science-lab · Experimente, Widersprüche, Missing Variables',
+  '#autopilot-supervisor · zeigt nur, ob du wirklich etwas tun musst',
   '',
-  '**WENN DU WISSEN WILLST WARUM**',
-  '#brain-pulse · aktueller Research-State',
-  '#research-queue · nächste Forschungsarbeit',
-  '#evidence-ledger · Belege, Coverage, PIT',
-  '#decision-trace · strukturierte Entscheidungsgründe',
+  '**DANACH ERST APPLICATIONS**',
+  '#decision-intelligence · TCX/RIFT + Forecast Proof',
+  '#signal-lab + #proof-feed · Decision Tools',
+  '#trade-cockpit + #live-trades · Shadow Trading',
   '',
-  '**WENN ETWAS NICHT FUNKTIONIERT**',
-  '#channel-supervisor · überwacht jeden Channel-Manager',
-  '#channel-improvements · priorisierte Fix-/Verbesserungsvorschläge',
-  '#rulebook · feste Soll-/Nicht-Soll-Regeln und erkannte Verstöße',
-  '#errors · technische Fehler',
+  '**REALITY & EVIDENCE**',
+  '#news-feed + #world-watch · Live-Reality Feed',
+  '#research-queue + #evidence-ledger · wissenschaftliche Arbeit',
   '',
-  '**Shortcuts** · \`/cockpit\` · \`/charts\` · \`/news\` · \`/world\` · \`/needs\` · \`/brain\`',
+  '**NUR WENN ETWAS KAPUTT IST**',
+  '#alerts · echte Exception/Recovery',
+  '#channel-supervisor · Discord-Selbstreparatur',
+  '#errors · technische Diagnose',
   '',
-  '**SHADOW_ONLY · ECHTE ORDERS BLOCKIERT**'
-].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
+  '**Shortcuts** · /science · /worldmodel · /lab · /autopilot · /decision_intel',
+  '',
+  '**SHADOW_ONLY · UNKNOWN IST GÜLTIG · ECHTE ORDERS BLOCKIERT**'
+].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:buildBiggjDiscordMarketSciencePayload('science',{}).components,allowedMentions:{parse:[]}};}
 
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
