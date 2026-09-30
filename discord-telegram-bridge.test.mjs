@@ -152,5 +152,31 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/GEOPOLITICS/);
   assert.match(source,/COMMODITIES/);
   assert.match(source,/DISCOVERY_ONLY/);
+  assert.match(source,/noch nicht unabhängig verifiziert/);
   assert.match(source,/posted>=12|posted>=12/);
+});
+
+test('channel manager supervisor is wired across all declared channels',async()=>{
+  const mod=await import('./discord-telegram-bridge.mjs');
+  const audit=mod.auditBiggjDiscordChannelLayout();
+  assert.equal(audit.duplicateChannels.length,0);
+  assert.equal(audit.missingProfiles.length,0);
+  assert.equal(audit.complete,true);
+  assert.ok(audit.channels>=49);
+  assert.equal(mod.biggjChannelExperienceProfile('news-feed').mode,'DEDUPED LIVE FEED');
+  assert.equal(mod.biggjChannelExperienceProfile('alerts').eventDriven,true);
+});
+
+test('previously empty operational channels now have live builders',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  for(const required of [
+    'buildForecastDeskPayload',
+    'buildAnomalyWatchPayload',
+    'buildReplayDeskPayload',
+    'buildErrorDeskPayload',
+    'refreshAuxiliaryDesks',
+    'channel-supervisor',
+    'channel-improvements'
+  ]) assert.ok(source.includes(required),required);
 });
