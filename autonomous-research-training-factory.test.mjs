@@ -265,3 +265,81 @@ test('terminal feature experiments do not create phantom work',()=>{
   assert.equal(refreshed.state.mode,'IDLE_MONITORING');
   assert.equal(refreshed.state.operatorDataOnly,true);
 });
+
+
+test('factory exposes all ten leverage factors and shared data bundles',()=>{
+  const initial=createAutonomousResearchTrainingFactory({asOf:1000});
+  const state=refreshAutonomousResearchTrainingFactory(initial,{
+    livingResearchState:baseLivingResearch({
+      canonicalResearchQueue:[
+        {skillId:'a',nextGate:'FORWARD_SHADOW',priority:.7,uncertainty:.8,directUnlocks:2,transitiveUnlocks:4},
+        {skillId:'b',nextGate:'FORWARD_SHADOW',priority:.6,uncertainty:.7,directUnlocks:0,transitiveUnlocks:0}
+      ]
+    }),
+    researchCoverageSummary:{symbols:2,averageCoverage:.8,healthy:2,blocked:0,insufficient:0},
+    asOf:2000
+  }).state;
+  const summary=autonomousResearchTrainingFactorySummary(state);
+  assert.equal(summary.leverage.leverCount,10);
+  assert.ok(summary.leverage.batchOpportunityCount>=1);
+  assert.ok(summary.researchBundles.some(x=>x.dataNeed==='FORWARD_SHADOW_OBSERVATIONS'&&x.taskCount===2));
+  assert.ok(summary.nextTasks.every(x=>Number.isFinite(x.effectivePriority)));
+  assert.ok(summary.nextTasks.every(x=>Array.isArray(x.topLevers)&&x.topLevers.length>0));
+});
+
+test('coverage generatedAt alone cannot create artificial factory revisions',()=>{
+  const initial=createAutonomousResearchTrainingFactory({asOf:1000});
+  const common={
+    livingResearchState:baseLivingResearch({
+      canonicalResearchQueue:[{skillId:'x',nextGate:'FORWARD_SHADOW',priority:.5,uncertainty:.5}]
+    }),
+    researchCoverageSummary:{
+      symbols:3,healthy:2,degraded:1,blocked:0,insufficient:0,
+      averageCoverage:.8,blockedFeatures:0,degradedFeatures:1,
+      topBlockedSources:[],topBlockedFeatures:[],worstSymbols:[]
+    },
+    historyStats:{rows:10,progressAt:900}
+  };
+  const a=refreshAutonomousResearchTrainingFactory(initial,{
+    ...common,
+    researchCoverageSummary:{...common.researchCoverageSummary,generatedAt:2000},
+    asOf:2000
+  }).state;
+  const b=refreshAutonomousResearchTrainingFactory(a,{
+    ...common,
+    researchCoverageSummary:{...common.researchCoverageSummary,generatedAt:999999},
+    asOf:3000
+  });
+  assert.equal(b.changed,false);
+  assert.equal(b.state.revision,a.revision);
+});
+
+test('stable task identity preserves age while real evidence progress resets stagnation',()=>{
+  const initial=createAutonomousResearchTrainingFactory({asOf:1000});
+  const a=refreshAutonomousResearchTrainingFactory(initial,{
+    livingResearchState:baseLivingResearch({
+      fingerprint:'living-a',
+      canonicalResearchQueue:[{
+        skillId:'stable-skill',nextGate:'FORWARD_SHADOW',priority:.7,uncertainty:.8,
+        validationEvidenceTotal:2,validationIndependentEpisodes:1
+      }]
+    }),
+    asOf:2000
+  }).state;
+  const first=a.queue[0];
+  const b=refreshAutonomousResearchTrainingFactory(a,{
+    livingResearchState:baseLivingResearch({
+      revision:8,
+      fingerprint:'living-b',
+      canonicalResearchQueue:[{
+        skillId:'stable-skill',nextGate:'FORWARD_SHADOW',priority:.7,uncertainty:.7,
+        validationEvidenceTotal:5,validationIndependentEpisodes:2
+      }]
+    }),
+    asOf:4000
+  }).state;
+  const second=b.queue[0];
+  assert.equal(first.taskId,second.taskId);
+  assert.ok(second.queueAgeMs>0);
+  assert.equal(second.stagnantCycles,0);
+});
