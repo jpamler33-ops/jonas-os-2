@@ -107,16 +107,70 @@ function labelBox(buf,w,h,x,y,text,fg,bg,scale=2){
   fillRect(buf,w,h,x-3,y-3,tw+6,th+6,bg);
   drawText(buf,w,h,x,y,text,fg,scale);
 }
-function priceScale(candles,analysis,forecastOverlay=null,tradeOverlay=null){
-  let min=Math.min(...candles.map(c=>c.l)),max=Math.max(...candles.map(c=>c.h));
-  const values=[analysis?.support,analysis?.resistance,analysis?.ema20,analysis?.ema50,forecastOverlay?.anchorPrice,tradeOverlay?.entryPrice,tradeOverlay?.stopPrice,tradeOverlay?.takeProfitPrice,tradeOverlay?.currentPrice];
-  for(const h of forecastOverlay?.horizons||[]) values.push(h?.lowerPrice,h?.medianPrice,h?.upperPrice);
-  for(const s of forecastOverlay?.scenarios||[]) for(const p of s?.points||[]) values.push(p?.targetPrice);
-  for(const v of values){
-    if(Number.isFinite(Number(v))){min=Math.min(min,Number(v));max=Math.max(max,Number(v));}
+function quantile(sorted,q){
+  if(!sorted.length)return null;
+  const pos=(sorted.length-1)*Math.max(0,Math.min(1,Number(q)));
+  const lo=Math.floor(pos),hi=Math.ceil(pos);
+  if(lo===hi)return sorted[lo];
+  const w=pos-lo;
+  return sorted[lo]*(1-w)+sorted[hi]*w;
+}
+function finitePositive(v){
+  const n=Number(v);
+  return Number.isFinite(n)&&n>0?n:null;
+}
+export function derivePriceScale(candles,analysis={},forecastOverlay=null,tradeOverlay=null){
+  const candlePrices=[];
+  for(const candle of candles||[]){
+    for(const key of ['o','h','l','c']){
+      const n=finitePositive(candle?.[key]);
+      if(n!=null)candlePrices.push(n);
+    }
   }
-  const pad=Math.max((max-min)*0.07,Math.abs(max)*0.0005,1e-9);
-  return {min:min-pad,max:max+pad};
+  if(!candlePrices.length)throw new Error('NO_FINITE_CANDLE_PRICES');
+  const sorted=[...candlePrices].sort((a,b)=>a-b);
+  const center=quantile(sorted,.5);
+  const q05=quantile(sorted,.05),q95=quantile(sorted,.95);
+  const robustSpan=Math.max((q95??center)-(q05??center),Math.abs(center)*.002,1e-9);
+  // Replay charts should survive a stale/broken overlay or one malformed wick.
+  // The guard is intentionally broad (35% or 8 robust spans) so legitimate
+  // crypto volatility remains visible while impossible scale anchors are ignored.
+  const guardRadius=Math.max(robustSpan*8,Math.abs(center)*.35);
+  const guardMin=Math.max(1e-12,center-guardRadius);
+  const guardMax=center+guardRadius;
+  const acceptedCandles=candlePrices.filter(v=>v>=guardMin&&v<=guardMax);
+  const base=acceptedCandles.length>=Math.min(8,candlePrices.length)?acceptedCandles:candlePrices;
+  let min=Math.min(...base),max=Math.max(...base);
+  const candidates=[
+    ['SUPPORT',analysis?.support],['RESISTANCE',analysis?.resistance],['EMA20',analysis?.ema20],['EMA50',analysis?.ema50],
+    ['FORECAST_ANCHOR',forecastOverlay?.anchorPrice],['TRADE_ENTRY',tradeOverlay?.entryPrice],['TRADE_STOP',tradeOverlay?.stopPrice],
+    ['TRADE_TARGET',tradeOverlay?.takeProfitPrice],['TRADE_CURRENT',tradeOverlay?.currentPrice]
+  ];
+  for(const [i,h] of (forecastOverlay?.horizons||[]).entries()){
+    candidates.push(['FORECAST_LOWER_'+i,h?.lowerPrice],['FORECAST_MEDIAN_'+i,h?.medianPrice],['FORECAST_UPPER_'+i,h?.upperPrice]);
+  }
+  for(const [si,s] of (forecastOverlay?.scenarios||[]).entries()){
+    for(const [pi,p] of (s?.points||[]).entries())candidates.push(['SCENARIO_'+si+'_'+pi,p?.targetPrice]);
+  }
+  const ignoredExternal=[];
+  for(const [source,v] of candidates){
+    const n=finitePositive(v);
+    if(n==null)continue;
+    if(n<guardMin||n>guardMax){ignoredExternal.push({source,value:n});continue;}
+    min=Math.min(min,n);max=Math.max(max,n);
+  }
+  const span=Math.max(max-min,Math.abs(center)*.0005,1e-9);
+  const pad=Math.max(span*.07,Math.abs(center)*.0005,1e-9);
+  return {
+    min:min-pad,max:max+pad,center,guardMin,guardMax,
+    ignoredExternalCount:ignoredExternal.length,
+    ignoredCandleCount:candlePrices.length-base.length,
+    ignoredExternal
+  };
+}
+function priceVisible(v,scale){
+  const n=finitePositive(v);
+  return n!=null&&n>=scale.guardMin&&n<=scale.guardMax;
 }
 function emaSeries(candles,period){
   if(!candles.length)return[];
@@ -171,8 +225,12 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
   const candlePlotW=overlayActive?plotW*0.74:plotW;
   const futureStart=left+candlePlotW;
   const futureEnd=width-right;
-  const scale=priceScale(candles,analysis||{},forecastOverlay,tradeOverlay);
-  const yOf=p=>priceTop+(scale.max-p)/(scale.max-scale.min)*plotH;
+  const scale=derivePriceScale(candles,analysis||{},forecastOverlay,tradeOverlay);
+  const yOf=p=>{
+    const n=finitePositive(p);
+    const bounded=n==null?scale.center:Math.max(scale.min,Math.min(scale.max,n));
+    return priceTop+(scale.max-bounded)/(scale.max-scale.min)*plotH;
+  };
   const step=candlePlotW/candles.length,bodyW=Math.max(2,Math.floor(step*0.58));
   const zonePct=0.0012;
 
@@ -181,31 +239,31 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     const side=String(tradeOverlay.side||'').toUpperCase();
     const status=String(tradeOverlay.status||'OPEN').toUpperCase();
     const tradeEntryC=color('#4ea1ff'),tradeStopC=color('#ff5c5c'),tradeTpC=color('#20c997'),tradeCurrentC=color('#ffd166');
-    if(Number.isFinite(entry)){
+    if(Number.isFinite(entry)&&priceVisible(entry,scale)){
       const y=yOf(entry);
       line(buf,width,height,left,y,width-right,y,tradeEntryC);
       labelBox(buf,width,height,left+8,Math.max(priceTop+4,Math.min(priceBottom-14,y-7)),'ENTRY',tradeEntryC,panel,1);
     }
-    if(Number.isFinite(stop)){
+    if(Number.isFinite(stop)&&priceVisible(stop,scale)){
       const y=yOf(stop);
       line(buf,width,height,left,y,width-right,y,tradeStopC);
       labelBox(buf,width,height,left+72,Math.max(priceTop+4,Math.min(priceBottom-14,y-7)),'SL',tradeStopC,panel,1);
     }
-    if(Number.isFinite(tp)){
+    if(Number.isFinite(tp)&&priceVisible(tp,scale)){
       const y=yOf(tp);
       line(buf,width,height,left,y,width-right,y,tradeTpC);
       labelBox(buf,width,height,left+104,Math.max(priceTop+4,Math.min(priceBottom-14,y-7)),'TP',tradeTpC,panel,1);
     }
-    if(Number.isFinite(current)){
+    if(Number.isFinite(current)&&priceVisible(current,scale)){
       const y=yOf(current);
       line(buf,width,height,left+candlePlotW*.84,y,width-right,y,tradeCurrentC);
       labelBox(buf,width,height,Math.max(left,width-right-94),Math.max(priceTop+4,Math.min(priceBottom-14,y-7)),'NOW',tradeCurrentC,panel,1);
     }
-    if(Number.isFinite(entry)&&Number.isFinite(stop)){
+    if(Number.isFinite(entry)&&Number.isFinite(stop)&&priceVisible(entry,scale)&&priceVisible(stop,scale)){
       const y1=yOf(entry),y2=yOf(stop);
       fillRect(buf,width,height,left,Math.min(y1,y2),candlePlotW,Math.max(2,Math.abs(y2-y1)),color('#ff5c5c',18),true);
     }
-    if(Number.isFinite(entry)&&Number.isFinite(tp)){
+    if(Number.isFinite(entry)&&Number.isFinite(tp)&&priceVisible(entry,scale)&&priceVisible(tp,scale)){
       const y1=yOf(entry),y2=yOf(tp);
       fillRect(buf,width,height,left,Math.min(y1,y2),candlePlotW,Math.max(2,Math.abs(y2-y1)),color('#20c997',16),true);
     }
@@ -217,13 +275,13 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     if(Number.isFinite(rr)) labelBox(buf,width,height,left+112,priceTop+26,'RR '+rr.toFixed(2),tradeTpC,color('#161f2b'),1);
   }
 
-  if(Number.isFinite(analysis?.support)){
+  if(priceVisible(analysis?.support,scale)){
     const y1=yOf(analysis.support*(1+zonePct)),y2=yOf(analysis.support*(1-zonePct));
     fillRect(buf,width,height,left,Math.min(y1,y2),plotW,Math.max(3,Math.abs(y2-y1)),zoneSupport,true);
     line(buf,width,height,left,yOf(analysis.support),width-right,yOf(analysis.support),supportC);
     labelBox(buf,width,height,left+6,Math.max(priceTop+4,yOf(analysis.support)-14),'SUP',supportC,panel,2);
   }
-  if(Number.isFinite(analysis?.resistance)){
+  if(priceVisible(analysis?.resistance,scale)){
     const y1=yOf(analysis.resistance*(1+zonePct)),y2=yOf(analysis.resistance*(1-zonePct));
     fillRect(buf,width,height,left,Math.min(y1,y2),plotW,Math.max(3,Math.abs(y2-y1)),zoneResistance,true);
     line(buf,width,height,left,yOf(analysis.resistance),width-right,yOf(analysis.resistance),resistanceC);
@@ -316,7 +374,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
       const h=hs[i];
       const x=xFuture(h.horizonMs);
       const lo=Number(h.lowerPrice),hi=Number(h.upperPrice);
-      if(Number.isFinite(lo)&&Number.isFinite(hi)){
+      if(Number.isFinite(lo)&&Number.isFinite(hi)&&priceVisible(lo,scale)&&priceVisible(hi,scale)){
         const y1=yOf(Math.max(lo,hi)),y2=yOf(Math.min(lo,hi));
         const prevX=i===0?futureStart:xFuture(hs[i-1].horizonMs);
         fillRect(buf,width,height,prevX,Math.min(y1,y2),Math.max(2,x-prevX),Math.max(2,Math.abs(y2-y1)),forecastBandC,true);
@@ -328,10 +386,10 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
 
     const scenarioColor=id=>id==='UPSIDE_PATH'?forecastUpC:id==='DOWNSIDE_PATH'?forecastDownC:forecastBaseC;
     for(const s of forecastOverlay?.scenarios||[]){
-      const pts=(s?.points||[]).filter(p=>Number.isFinite(Number(p?.targetPrice))&&Number.isFinite(Number(p?.horizonMs))).sort((a,b)=>Number(a.horizonMs)-Number(b.horizonMs));
+      const pts=(s?.points||[]).filter(p=>Number.isFinite(Number(p?.targetPrice))&&priceVisible(p?.targetPrice,scale)&&Number.isFinite(Number(p?.horizonMs))).sort((a,b)=>Number(a.horizonMs)-Number(b.horizonMs));
       if(!pts.length)continue;
       const fg=scenarioColor(String(s.id||''));
-      let px=futureStart,py=Number.isFinite(anchorPrice)?yOf(anchorPrice):yOf(candles.at(-1)?.c);
+      let px=futureStart,py=Number.isFinite(anchorPrice)&&priceVisible(anchorPrice,scale)?yOf(anchorPrice):yOf(candles.at(-1)?.c);
       for(const p of pts){
         const x=xFuture(p.horizonMs),y=yOf(Number(p.targetPrice));
         line(buf,width,height,px,py,x,y,fg);
@@ -346,7 +404,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
   if(tradeReplay){
     const marks=[['ENTRY',Number(tradeReplay.entryAt),Number(tradeReplay.entryPrice),supportC],['EXIT',Number(tradeReplay.exitAt),Number(tradeReplay.exitPrice),resistanceC]];
     for(const [label,at,price,fg] of marks){
-      if(!Number.isFinite(at)||!Number.isFinite(price))continue;
+      if(!Number.isFinite(at)||!Number.isFinite(price)||!priceVisible(price,scale))continue;
       const idx=candles.findIndex(x=>Number(x.openTime)<=at&&at<=Number(x.closeTime));
       if(idx<0)continue;
       const x=left+(idx+0.5)*step,y=yOf(price);
