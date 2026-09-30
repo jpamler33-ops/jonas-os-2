@@ -20,16 +20,16 @@ export function biggjWebManifest(){
 }
 
 export function biggjAppIconSvg(){
-  return \`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#5ef2d6"/><stop offset="1" stop-color="#6d7cff"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="#05070a"/><rect x="38" y="38" width="436" height="436" rx="94" fill="#0b1018" stroke="#202c3d" stroke-width="6"/><path d="M119 352V160h113c66 0 108 31 108 83 0 27-12 49-34 63 31 13 47 37 47 70 0 62-47 96-126 96H119zm76-116h28c25 0 37-10 37-29 0-18-12-27-37-27h-28v56zm0 94h35c29 0 43-12 43-34 0-21-14-32-43-32h-35v66z" fill="#f4f7fb"/><circle cx="384" cy="141" r="27" fill="url(#g)"/><path d="M356 390h63" stroke="url(#g)" stroke-width="16" stroke-linecap="round"/></svg>\`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#5ef2d6"/><stop offset="1" stop-color="#6d7cff"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="#05070a"/><rect x="38" y="38" width="436" height="436" rx="94" fill="#0b1018" stroke="#202c3d" stroke-width="6"/><path d="M119 352V160h113c66 0 108 31 108 83 0 27-12 49-34 63 31 13 47 37 47 70 0 62-47 96-126 96H119zm76-116h28c25 0 37-10 37-29 0-18-12-27-37-27h-28v56zm0 94h35c29 0 43-12 43-34 0-21-14-32-43-32h-35v66z" fill="#f4f7fb"/><circle cx="384" cy="141" r="27" fill="url(#g)"/><path d="M356 390h63" stroke="url(#g)" stroke-width="16" stroke-linecap="round"/></svg>`;
 }
 
 export function biggjServiceWorker(){
-  return \`const CACHE='biggj-v2';const SHELL=['/mission-control','/app.webmanifest','/biggj-icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{})));self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;if(u.pathname==='/mission-control.json'){e.respondWith(fetch(e.request,{cache:'no-store'}).catch(()=>caches.match('/mission-control')));return;}e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request)));});\`;
+  return `const CACHE='biggj-v2';const SHELL=['/mission-control','/app.webmanifest','/biggj-icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{})));self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;if(u.pathname==='/mission-control.json'){e.respondWith(fetch(e.request,{cache:'no-store'}).catch(()=>caches.match('/mission-control')));return;}e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request)));});`;
 }
 
 export function renderBiggjMobileApp(snapshot={}){
   const boot=jsonForScript(snapshot);
-  const html=\`<!doctype html>
+  const html=`<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
@@ -334,6 +334,6 @@ setInterval(refresh,10000);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script>
 </body>
-</html>\`;
+</html>`;
   return html.replace('__BIGGJ_BOOT__',boot);
 }
