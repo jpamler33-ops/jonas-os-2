@@ -253,6 +253,21 @@ export function observeAssumptionStability(prior,{
   const supported=assumption.currentSupported===true;
   const families=assumptionEvidenceFamilies(assumption);
   const falsifiers=explicitAssumptionFalsifiers(assumption).slice(0,cfg.maxFalsifierCodes);
+
+  if(supported&&prior.state==='SUPPORTED_STABLE'){
+    return deepFreeze({changed:false,stateChanged:false,stability:prior,event:null,reasons:['STABLE_SUPPORT_UNCHANGED']});
+  }
+  if(!supported&&prior.state==='ISSUE_UNSUPPORTED'&&prior.hasEstablishedSupport!==true){
+    return deepFreeze({changed:false,stateChanged:false,stability:prior,event:null,reasons:['ISSUE_UNSUPPORTED_UNCHANGED']});
+  }
+  if(
+    !supported&&
+    prior.state==='PERSISTENT_STALE'&&
+    JSON.stringify(uniq(prior.currentEvidenceFamilies))===JSON.stringify(families)&&
+    JSON.stringify(uniq(prior.currentFalsifierCodes))===JSON.stringify(falsifiers)
+  ){
+    return deepFreeze({changed:false,stateChanged:false,stability:prior,event:null,reasons:['PERSISTENT_STALE_UNCHANGED']});
+  }
   const previousFalsifiers=uniq(prior.currentFalsifierCodes);
   const repeatedFalsifiers=falsifiers.filter(x=>previousFalsifiers.includes(x));
 
