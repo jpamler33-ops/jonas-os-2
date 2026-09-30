@@ -64,6 +64,22 @@ export function newsResearchSnapshotKey(snapshot){
   ].join('\u0000');
 }
 
+export function filterPreviouslyObservedNewsSnapshots(plane,snapshots=[]){
+  const sourcePayload=plane?.sourcePayload;
+  const rows=(Array.isArray(snapshots)?snapshots:[]).filter(Boolean);
+  if(!sourcePayload||typeof sourcePayload.has!=='function'){
+    return Object.freeze({candidates:Object.freeze(rows),previouslyObserved:0});
+  }
+  const candidates=[];
+  let previouslyObserved=0;
+  for(const snapshot of rows){
+    const key=newsResearchSnapshotKey(snapshot);
+    if(key&&sourcePayload.has(key)) previouslyObserved++;
+    else candidates.push(snapshot);
+  }
+  return Object.freeze({candidates:Object.freeze(candidates),previouslyObserved});
+}
+
 export function newsEventToResearchSnapshot(event,{
   symbol,
   ingestedAt=Date.now(),
