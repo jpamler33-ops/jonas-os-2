@@ -149,3 +149,47 @@ test('needs detects missing live intelligence sources explicitly',()=>{
   assert.match(text,/Memecoin Live Coverage/);
   assert.match(text,/DEX_SOURCE_DOWN/);
 });
+
+
+test('needs panel treats passive data waiting as waiting, not a deadlock',()=>{
+  const x=snapshot();
+  x.health.autonomousOperator={
+    mode:'WAITING_FOR_DATA',
+    operatorNeeded:false,
+    humanJobRemaining:'EXCEPTIONS_ONLY',
+    waitingForData:true,
+    automationCoverage:1
+  };
+  x.health.autonomousResearchFactory={
+    mode:'RESEARCH_STALLED',
+    operatorDataOnly:false,
+    dataNeeds:['FORWARD_SHADOW_OBSERVATIONS','REGIME_DIVERSITY']
+  };
+  const p=buildBiggjNeedsPayload(x);
+  const text=JSON.stringify(p);
+  assert.match(text,/Research wartet auf Daten/);
+  assert.doesNotMatch(text,/Research Deadlock/);
+  assert.match(text,/Mensch nötig: NEIN/);
+  assert.match(text,/aktuell nichts zu tun/);
+  assert.match(text,/Automatisiert: 100%/);
+});
+
+test('needs panel still surfaces a real stalled research deadlock when not passively waiting',()=>{
+  const x=snapshot();
+  x.health.autonomousOperator={
+    mode:'AUTO_MONITORING',
+    operatorNeeded:false,
+    humanJobRemaining:'EXCEPTIONS_ONLY',
+    waitingForData:false,
+    automationCoverage:1
+  };
+  x.health.autonomousResearchFactory={
+    mode:'RESEARCH_STALLED',
+    operatorDataOnly:false,
+    dataNeeds:[]
+  };
+  const p=buildBiggjNeedsPayload(x);
+  const text=JSON.stringify(p);
+  assert.match(text,/Research Deadlock/);
+  assert.match(text,/trotz verfügbarer Inputs/);
+});
