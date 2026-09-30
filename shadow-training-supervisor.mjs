@@ -181,7 +181,7 @@ export function evaluateShadowTrainingSupervisor(ledger,academy,{
   const positions=(ledger?.positions||[])
     .filter(p=>
       p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&p.status==='CLOSED'&&
-      !['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())
+      !['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(String(p.entryMode||'STANDARD').toUpperCase())
     )
     .sort((a,b)=>Number(a.closedAt||0)-Number(b.closedAt||0));
   const n=Math.max(20,Math.floor(Number(rollingTrades)||100));
@@ -262,8 +262,8 @@ export function evaluateShadowTrainingSupervisor(ledger,academy,{
   return freeze({...core,fingerprint:sha256(core)});
 }
 
-export function supervisedShadowBudget(supervisor,{academyNotionalQuote=100}={}){
-  const base=Math.max(1,finite(academyNotionalQuote,100));
+export function supervisedShadowBudget(supervisor,{academyNotionalQuote=200}={}){
+  const base=Math.max(1,finite(academyNotionalQuote,200));
   const mult=clamp(finite(supervisor?.risk?.multiplier,.25),.25,1);
   const notionalQuote=Math.max(1,base*mult);
   const core={

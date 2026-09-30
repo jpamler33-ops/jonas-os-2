@@ -106,7 +106,7 @@ const SERVER_LAYOUT=Object.freeze([
   ]},
   {category:'TCX • SHADOW',channels:[
     {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades mit kompakter Thesis, Risiko, PnL und Live-Chart-Thread. Keine echten Orders.'},
-    {name:'closed-trades',topic:'Abgeschlossene Shadow-Trades mit Ergebnis und Exit-Grund.'},
+    {name:'closed-trades',topic:'Nur abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
     {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
     {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen mit Point-in-Time Kontext.'}
   ]},
@@ -815,6 +815,14 @@ function tradeContextLabel(position={}){
   if(strategy&&strategy!=='UNKNOWN') return strategy;
   return mode==='STANDARD'?'PRIMARY_UNCLASSIFIED':'UNCLASSIFIED';
 }
+function tradeLaneLabel(position={}){
+  const mode=String(position?.entryMode||'STANDARD').trim().toUpperCase();
+  return ['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(mode)?'RESEARCH':'PRIMARY';
+}
+function virtualTradeSize(position={}){
+  const n=Number(position?.entryQuote??position?.notionalQuote);
+  return Number.isFinite(n)?money(n):'—';
+}
 function closedTradePayload(position={}){
   const pnl=Number(position?.realizedNetPnlQuote),ret=Number(position?.realizedReturnPct);
   const symbol=String(position?.symbol||'UNKNOWN').replace('USDT','/USDT');
@@ -822,9 +830,10 @@ function closedTradePayload(position={}){
   const result=Number.isFinite(pnl)?(pnl>0?'WIN':pnl<0?'LOSS':'FLAT'):'CLOSED';
   return {embeds:[{
     title:'BIGGJ // TRADE REVIEW · '+symbol,
-    description:'**'+side+' · '+result+' · SHADOW_ONLY**',
+    description:'**'+side+' · '+result+' · '+tradeLaneLabel(position)+' · SHADOW_ONLY**',
     fields:[
       {name:'RESULT',value:(Number.isFinite(pnl)?money(pnl):'—')+' · '+(Number.isFinite(ret)?percent(ret):'—'),inline:false},
+      {name:'VIRTUAL SIZE',value:virtualTradeSize(position),inline:true},
       {name:'ENTRY → EXIT',value:String(position?.entryPrice??'—')+' → '+String(position?.exitPrice??position?.lastMark?.price??'—'),inline:false},
       {name:'WHY CLOSED',value:String(position?.closeReason||position?.exitReason||'UNKNOWN'),inline:true},
       {name:'SETUP / LANE',value:tradeContextLabel(position),inline:true},
@@ -843,9 +852,10 @@ function shadowTradePayload(position={}){
   const thesis=position?.thesisHealth??position?.metadata?.thesisHealth;
   return {embeds:[{
     title:'BIGGJ // LIVE TRADE · '+symbol,
-    description:'**'+side+' · OPEN · SHADOW_ONLY**\n'+tradeContextLabel(position)+(tradeContextLabel(position)===String(position?.entryMode||'STANDARD').toUpperCase()?'':' · '+String(position?.entryMode||'STANDARD')),
+    description:'**'+side+' · OPEN · '+tradeLaneLabel(position)+' · SHADOW_ONLY**\n'+tradeContextLabel(position)+(tradeContextLabel(position)===String(position?.entryMode||'STANDARD').toUpperCase()?'':' · '+String(position?.entryMode||'STANDARD')),
     fields:[
       {name:'LIVE PnL',value:(Number.isFinite(pnl)?money(pnl):'—')+' · '+(Number.isFinite(ret)?percent(ret):'—'),inline:false},
+      {name:'VIRTUAL SIZE',value:virtualTradeSize(position),inline:true},
       {name:'ENTRY',value:String(position?.entryPrice??'—'),inline:true},
       {name:'STOP',value:String(stop??'—'),inline:true},
       {name:'TARGET',value:String(target??'—'),inline:true},

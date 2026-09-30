@@ -69,7 +69,7 @@ function coveragePriority(calibrationStatus,horizonGate,horizonMs){
 
 export function deriveCoverageCurriculumCandidates(issuance,{
   now=Date.now(),
-  notionalQuote=2,
+  notionalQuote=5,
   horizons=DEFAULT_COVERAGE_HORIZONS,
   existingCoverageKeys=[],
   assetClass='CORE'
@@ -167,7 +167,7 @@ export function deriveCoverageCurriculumCandidates(issuance,{
     candidates.push(freeze({
       ...core,
       decisionKey:sha256(core),
-      notionalQuote:Math.max(1,Number(notionalQuote)||2),
+      notionalQuote:Math.max(1,Number(notionalQuote)||5),
       entryMode:'COVERAGE_PROBE',
       role:'COVERAGE_PROBE_ENTRY',
       horizonOnlyExit:true,

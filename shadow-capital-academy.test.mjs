@@ -84,6 +84,19 @@ test('memecoin sizing is smaller than core sizing',()=>{
   assert.equal(meme.canExecuteLive,false);
 });
 
+test('qualified primary simulation sizing is stage-aware and bounded to the 100-500 USDT lane before risk throttles',()=>{
+  const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
+  const a=evaluateShadowCapitalAcademy(l,{asOf:Date.UTC(2026,8,27,12),timeZone:'Europe/Berlin'});
+  const bootcamp=academyTradeBudget(a,{assetClass:'CORE',baseNotionalQuote:200,equityQuote:10000});
+  assert.equal(bootcamp.notionalQuote,200);
+  const advanced=academyTradeBudget({
+    riskPolicy:{notionalMultiplier:2.5,memeMultiplier:.65,maxSinglePositionPct:.05}
+  },{assetClass:'CORE',baseNotionalQuote:200,equityQuote:10000});
+  assert.equal(advanced.notionalQuote,500);
+  assert.equal(bootcamp.canExecuteLive,false);
+  assert.equal(advanced.canExecuteLive,false);
+});
+
 test('loss streak triggers one hour cooldown',()=>{
   const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
   const base=Date.UTC(2026,8,27,8);
@@ -95,6 +108,19 @@ test('loss streak triggers one hour cooldown',()=>{
   assert.equal(a.guard.lossPauseUntil,last+60*60_000);
 });
 
+
+test('EXPLORATION trades cannot advance academy progression',()=>{
+  const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});
+  l.positions=Array.from({length:25},(_,i)=>({
+    ...pos(i,{pnl:2}),
+    entryMode:'EXPLORATION',
+    exploration:true
+  }));
+  const a=evaluateShadowCapitalAcademy(l,{asOf:Date.UTC(2026,8,5,12),timeZone:'Europe/Berlin'});
+  assert.equal(a.metrics.closedTrades,0);
+  assert.equal(a.achievedLevel,-1);
+  assert.equal(a.activeStage,'BOOTCAMP');
+});
 
 test('ABSTAIN probes cannot advance academy progression',()=>{
   const l=createEmptyShadowPortfolioLedger({initialEquityQuote:10000});

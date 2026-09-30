@@ -5,7 +5,7 @@ const freeze=v=>{if(v&&typeof v==='object'&&!Object.isFrozen(v)){Object.freeze(v
 const dir=s=>String(s||'').toUpperCase()==='SELL'?-1:1;
 export function evaluatePortfolioRiskBrain(ledger,candidate,{equityQuote=10000,maxGrossExposurePct=.60,maxDirectionalExposurePct=.40,maxSameAssetDirectionPct=.30,maxCorrelatedPositions=4,correlationModel=null}={}){
  const equity=Math.max(1,finite(equityQuote,ledger?.initialEquityQuote||10000));
- const open=(ledger?.positions||[]).filter(p=>p?.status==='OPEN'&&!['COVERAGE_PROBE','ABSTAIN_PROBE','CHALLENGER'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
+ const open=(ledger?.positions||[]).filter(p=>p?.status==='OPEN'&&!['COVERAGE_PROBE','ABSTAIN_PROBE','CHALLENGER','EXPLORATION'].includes(String(p.entryMode||'STANDARD').toUpperCase()));
  const rows=open.map(p=>{const exposure=Math.max(0,finite(p.leveragedExposureQuote,p.entryQuote||p.notionalQuote||0));return{symbol:String(p.symbol||''),side:String(p.side||'').toUpperCase(),assetClass:String(p.assetClass||p.strategyMeta?.assetClass||'CORE').toUpperCase(),exposure};});
  const proposed=Math.max(0,finite(candidate.exposureQuote,candidate.notionalQuote||0)),side=String(candidate.side||'').toUpperCase(),assetClass=String(candidate.assetClass||'CORE').toUpperCase();
  const gross=rows.reduce((s,x)=>s+x.exposure,0),sameDirection=rows.filter(x=>dir(x.side)===dir(side)).reduce((s,x)=>s+x.exposure,0),sameAssetDirection=rows.filter(x=>x.assetClass===assetClass&&dir(x.side)===dir(side)).reduce((s,x)=>s+x.exposure,0);

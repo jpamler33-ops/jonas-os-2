@@ -65,27 +65,27 @@ function allPass(criteria){ return criteria.every(x=>x.pass); }
 const STAGES=Object.freeze([
   Object.freeze({
     id:'BOOTCAMP',label:'Bootcamp',level:0,
-    risk:{notionalMultiplier:.50,memeMultiplier:.40,maxOpenTotal:4,maxOpenPerSymbol:1,maxOpenMemecoin:1,maxSinglePositionPct:.005,maxExposurePct:.03,dailyLossLimitPct:.010,lossStreakPause:4}
+    risk:{notionalMultiplier:1.00,memeMultiplier:.40,maxOpenTotal:4,maxOpenPerSymbol:1,maxOpenMemecoin:1,maxSinglePositionPct:.020,maxExposurePct:.03,dailyLossLimitPct:.010,lossStreakPause:4}
   }),
   Object.freeze({
     id:'DISCIPLINE',label:'Disziplin',level:1,
-    risk:{notionalMultiplier:.75,memeMultiplier:.45,maxOpenTotal:6,maxOpenPerSymbol:1,maxOpenMemecoin:1,maxSinglePositionPct:.0075,maxExposurePct:.05,dailyLossLimitPct:.0125,lossStreakPause:4}
+    risk:{notionalMultiplier:1.50,memeMultiplier:.45,maxOpenTotal:6,maxOpenPerSymbol:1,maxOpenMemecoin:1,maxSinglePositionPct:.030,maxExposurePct:.05,dailyLossLimitPct:.0125,lossStreakPause:4}
   }),
   Object.freeze({
     id:'CONSISTENCY',label:'Konsistenz',level:2,
-    risk:{notionalMultiplier:1.00,memeMultiplier:.50,maxOpenTotal:8,maxOpenPerSymbol:2,maxOpenMemecoin:2,maxSinglePositionPct:.010,maxExposurePct:.07,dailyLossLimitPct:.015,lossStreakPause:5}
+    risk:{notionalMultiplier:2.00,memeMultiplier:.50,maxOpenTotal:8,maxOpenPerSymbol:2,maxOpenMemecoin:2,maxSinglePositionPct:.040,maxExposurePct:.07,dailyLossLimitPct:.015,lossStreakPause:5}
   }),
   Object.freeze({
     id:'MULTI_MARKET',label:'Multi-Market',level:3,
-    risk:{notionalMultiplier:1.10,memeMultiplier:.55,maxOpenTotal:12,maxOpenPerSymbol:2,maxOpenMemecoin:3,maxSinglePositionPct:.0125,maxExposurePct:.09,dailyLossLimitPct:.0175,lossStreakPause:5}
+    risk:{notionalMultiplier:2.50,memeMultiplier:.55,maxOpenTotal:12,maxOpenPerSymbol:2,maxOpenMemecoin:3,maxSinglePositionPct:.050,maxExposurePct:.09,dailyLossLimitPct:.0175,lossStreakPause:5}
   }),
   Object.freeze({
     id:'STRESS_TEST',label:'Stress-Test',level:4,
-    risk:{notionalMultiplier:1.25,memeMultiplier:.60,maxOpenTotal:16,maxOpenPerSymbol:3,maxOpenMemecoin:4,maxSinglePositionPct:.015,maxExposurePct:.12,dailyLossLimitPct:.020,lossStreakPause:6}
+    risk:{notionalMultiplier:2.50,memeMultiplier:.60,maxOpenTotal:16,maxOpenPerSymbol:3,maxOpenMemecoin:4,maxSinglePositionPct:.050,maxExposurePct:.12,dailyLossLimitPct:.020,lossStreakPause:6}
   }),
   Object.freeze({
     id:'CAPITAL_READY_SIM',label:'Capital-Ready Simulation',level:5,
-    risk:{notionalMultiplier:1.50,memeMultiplier:.65,maxOpenTotal:20,maxOpenPerSymbol:3,maxOpenMemecoin:5,maxSinglePositionPct:.020,maxExposurePct:.15,dailyLossLimitPct:.0225,lossStreakPause:6}
+    risk:{notionalMultiplier:2.50,memeMultiplier:.65,maxOpenTotal:20,maxOpenPerSymbol:3,maxOpenMemecoin:5,maxSinglePositionPct:.050,maxExposurePct:.15,dailyLossLimitPct:.0225,lossStreakPause:6}
   })
 ]);
 
@@ -146,7 +146,7 @@ export function evaluateShadowCapitalAcademy(ledger,{asOf=Date.now(),timeZone='E
   const summary=shadowPortfolioSummary(ledger,{asOf});
   const positions=(ledger?.positions||[]).filter(p=>
     p&&p.execution==='SHADOW_ONLY'&&p.canExecuteLive===false&&
-    !['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE'].includes(String(p.entryMode||'STANDARD').toUpperCase())
+    !['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(String(p.entryMode||'STANDARD').toUpperCase())
   );
   const closed=positions.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const open=positions.filter(p=>p.status==='OPEN');
@@ -277,10 +277,10 @@ export function evaluateShadowCapitalAcademy(ledger,{asOf=Date.now(),timeZone='E
   return freeze({...core,fingerprint:sha256(core)});
 }
 
-export function academyTradeBudget(academy,{assetClass='CORE',baseNotionalQuote=100,equityQuote=null}={}){
+export function academyTradeBudget(academy,{assetClass='CORE',baseNotionalQuote=200,equityQuote=null}={}){
   const policy=academy?.riskPolicy||STAGES[0].risk;
   const equity=Math.max(1,finite(equityQuote,10000));
-  const base=Math.max(1,finite(baseNotionalQuote,100));
+  const base=Math.max(1,finite(baseNotionalQuote,200));
   const cls=String(assetClass||'CORE').toUpperCase();
   const classMult=cls==='MEME'?Number(policy.memeMultiplier||.4):1;
   const stageSized=base*Number(policy.notionalMultiplier||.5)*classMult;

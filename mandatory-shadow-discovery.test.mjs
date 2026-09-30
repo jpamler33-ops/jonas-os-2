@@ -36,6 +36,15 @@ test('mandatory discovery produces a bounded shadow learning candidate',()=>{
   assert.ok(d.learning.learningValue>0);
 });
 
+test('discovery default uses a medium 25 USDT virtual notional',()=>{
+  const model=buildShadowTradeQualityModel({positions:[]},{asOf:2000});
+  const d=deriveMandatoryShadowDiscovery(issuance(),model,{now:2000,assetClass:'CORE'});
+  assert.equal(d.eligible,true);
+  assert.equal(d.notionalQuote,25);
+  assert.equal(d.entryMode,'EXPLORATION');
+  assert.equal(d.canExecuteLive,false);
+});
+
 test('discovery refuses unsafe data even though search is mandatory',()=>{
   const model=buildShadowTradeQualityModel({positions:[]},{asOf:2000});
   const d=deriveMandatoryShadowDiscovery(issuance({trace:{safety:{state:'DEGRADED'}}}),model,{now:2000});

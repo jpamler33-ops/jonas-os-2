@@ -436,7 +436,7 @@ const shadowMakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_MAKER_FEE_BP
 const shadowTakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_TAKER_FEE_BPS || 10));
 const shadowHiddenQueueBufferPct = Math.max(0, Math.min(2, Number(process.env.TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT || 0.15)));
 const autoShadowTradingEnabled = String(process.env.TCX_AUTO_SHADOW_TRADING_ENABLED || '1') !== '0';
-const autoShadowNotionalQuote = Math.max(1, Number(process.env.TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 100));
+const autoShadowNotionalQuote = Math.max(1, Number(process.env.TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 200));
 const autoShadowCooldownMs = Math.max(60_000, Number(process.env.TCX_AUTO_SHADOW_COOLDOWN_MS || 5*60_000));
 const autoShadowMaxPerSymbolPerDay = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_PER_SYMBOL_DAY || 12) || 12));
 const autoShadowMaxOpenPerSymbol = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_OPEN_PER_SYMBOL || 3) || 3));
@@ -448,12 +448,12 @@ const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHAD
 const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
 const mandatoryShadowDiscoveryEnabled = String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
-const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 12));
+const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 25));
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
 const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
 const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
 const coverageCurriculumEnabled = String(process.env.TCX_COVERAGE_CURRICULUM_ENABLED || '1') !== '0';
-const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 2));
+const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 5));
 const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
 const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
 const forecastJournalMaxEntries = Math.max(1000, Math.min(3000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 1500) || 1500)));
@@ -5288,19 +5288,20 @@ async function showShadowPortfolio(chatId,messageId=null){
   'Profit Factor '+(x.profitFactor==null?'—':fmt(x.profitFactor,2))+'   ·   Offen '+x.openPositions,'',
   'AKTIVE HAUPTPOSITIONEN'
  ];
- if(x.active.length)for(const p of x.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.side+' · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene Hauptposition.');
+ if(x.active.length)for(const p of x.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.side+' · virtuell '+fmt(p.entryQuote,0)+' USDT · PnL '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene Hauptposition.');
  lines.push(
   '',
-  'RESEARCH ACTIVITY · NICHT IN PRIMARY PnL',
+  'RESEARCH / PROBES · NICHT IN PRIMARY PERFORMANCE',
   'Offen '+research.openPositions+'   ·   Abgeschlossen '+research.closedTrades,
   'Research PnL '+money(research.netPnlQuote),
-  'Coverage '+(research.byMode.COVERAGE_PROBE?.open||0)+' offen / '+(research.byMode.COVERAGE_PROBE?.closed||0)+' fertig',
+  'Coverage '+(research.byMode.COVERAGE_PROBE?.open||0)+' offen / '+(research.byMode.COVERAGE_PROBE?.closed||0)+' fertig · '+fmt(coverageCurriculumNotional,0)+' USDT Probe',
+  'Discovery '+(research.byMode.EXPLORATION?.open||0)+' offen / '+(research.byMode.EXPLORATION?.closed||0)+' fertig · '+fmt(mandatoryShadowDiscoveryNotional,0)+' USDT Basis',
   'ABSTAIN '+(research.byMode.ABSTAIN_PROBE?.open||0)+' offen / '+(research.byMode.ABSTAIN_PROBE?.closed||0)+' fertig',
   'Challenger '+(research.byMode.CHALLENGER?.open||0)+' offen / '+(research.byMode.CHALLENGER?.closed||0)+' fertig',
   '',
   'AKTIVE RESEARCH-TRADES'
  );
- if(research.active.length)for(const p of research.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.entryMode+' · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offenen Research-Trades.');
+ if(research.active.length)for(const p of research.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.entryMode+' · virtuell '+fmt(p.entryQuote,0)+' USDT · PnL '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offenen Research-Trades.');
  lines.push('','TRADE LOOP','Entry → Position → Exit → Attribution → Learning','','SHADOW ONLY · REAL ORDERS BLOCKED');
  const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Performance',callback_data:'home:stats_day'}],[{text:'🎯 Signale',callback_data:'home:radar'},{text:'🔎 Kein Trade?',callback_data:'cmdrun:why_not_trade'}],[{text:'🧠 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
 }
@@ -9931,8 +9932,10 @@ function missionControlData(){
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
- const openPositions=allShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
- const recentClosed=allShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
+ const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION']);
+ const primaryShadowPositions=allShadowPositions.filter(p=>!researchShadowModes.has(String(p?.entryMode||'STANDARD').toUpperCase()));
+ const openPositions=primaryShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
+ const recentClosed=primaryShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
  const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now,runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:portfolio.openPositions,openDiscoveryPositions:countOpenDiscoveryPositions(allShadowPositions)}});
  health.biggjObservability=buildBiggjDiscordObservabilitySnapshot({
   livingResearchState:biggjLivingResearchState,

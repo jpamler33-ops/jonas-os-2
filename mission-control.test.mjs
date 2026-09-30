@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
 
 test('mission control V2 remains explicitly shadow only',()=>{
@@ -45,4 +46,15 @@ test('mobile command center exposes overview markets research trades and system 
   assert.match(html,/app\.webmanifest/);
   assert.match(html,/serviceWorker/);
   assert.match(html,/SHADOW_ONLY/);
+});
+
+test('mission snapshot feeds only primary positions into primary Discord trade streams',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'])"));
+  assert.ok(source.includes("const primaryShadowPositions=allShadowPositions.filter"));
+  assert.ok(source.includes("const openPositions=primaryShadowPositions.filter"));
+  assert.ok(source.includes("const recentClosed=primaryShadowPositions.filter"));
+  assert.ok(source.includes("TCX_COVERAGE_CURRICULUM_NOTIONAL || 5"));
+  assert.ok(source.includes("TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 25"));
+  assert.ok(source.includes("TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 200"));
 });

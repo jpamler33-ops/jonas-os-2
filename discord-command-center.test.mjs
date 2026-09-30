@@ -199,3 +199,7 @@ test('BIGGJ V7 exposes the canonical rulebook as a managed Discord surface',()=>
     "addTimer(refreshRulebookPanel,60000)"
   ]) assert.ok(source.includes(required),required);
 });
+
+test('BIGGJ trade cards expose primary lane and virtual size explicitly',()=>{
+  for(const required of ['tradeLaneLabel','virtualTradeSize','VIRTUAL SIZE','Nur abgeschlossene PRIMARY Shadow-Trades']) assert.ok(source.includes(required),required);
+});
