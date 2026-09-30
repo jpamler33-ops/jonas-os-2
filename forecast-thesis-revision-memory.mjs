@@ -134,8 +134,10 @@ export function createInitialForecastThesisRevisionMemory({
     lastForecastAssessmentStatus:'ISSUED',
     firstWatchAt:null,
     firstStaleAt:null,
+    firstPersistentStaleAt:null,
     firstForecastInvalidatedAt:null,
     eventCount:0,
+    stabilityEventCount:0,
     events:[],
     semantics:{
       immutableIssueState:true,
@@ -157,7 +159,10 @@ export function createInitialForecastThesisRevisionMemory({
 export function verifyForecastThesisRevisionMemory(value){
   try{
     const reasons=[];
-    if(value?.version!==FORECAST_THESIS_REVISION_MEMORY_VERSION) reasons.push('VERSION_INVALID');
+    const version=String(value?.version||'');
+    if(![LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION,FORECAST_THESIS_REVISION_MEMORY_VERSION].includes(version)){
+      reasons.push('VERSION_INVALID');
+    }
     if(value?.execution!=='SHADOW_ONLY'||value?.action!=='ABSTAIN'||value?.canInfluencePrimary!==false||value?.canExecuteLive!==false){
       reasons.push('SAFETY_INVARIANT_INVALID');
     }
@@ -167,12 +172,55 @@ export function verifyForecastThesisRevisionMemory(value){
     if(Number(value?.issueKnowledgeAt)<Number(value?.decisionAsOf)) reasons.push('ISSUE_TIME_ORDER_INVALID');
     if(!Array.isArray(value?.assumptions)) reasons.push('ASSUMPTIONS_INVALID');
     if(!Array.isArray(value?.events)) reasons.push('EVENTS_INVALID');
+    if(version===FORECAST_THESIS_REVISION_MEMORY_VERSION&&Array.isArray(value?.assumptions)){
+      for(const row of value.assumptions){
+        const sv=verifyAssumptionStability(row?.stability);
+        if(!sv.ok) reasons.push('STABILITY_INVALID:'+String(row?.assumptionId||'UNKNOWN'));
+        if(row?.stability?.assumptionId!==row?.assumptionId) reasons.push('STABILITY_ID_MISMATCH:'+String(row?.assumptionId||'UNKNOWN'));
+      }
+    }
     const expected=sha256(coreOf(value));
     if(value?.fingerprint!==expected) reasons.push('FINGERPRINT_MISMATCH');
     return {ok:reasons.length===0,reasons,expectedFingerprint:expected};
   }catch(err){
     return {ok:false,reasons:['THESIS_REVISION_MEMORY_INVALID',err instanceof Error?err.message:String(err)]};
   }
+}
+
+export function upgradeForecastThesisRevisionMemory(memory){
+  const v=verifyForecastThesisRevisionMemory(memory);
+  if(!v.ok) throw new Error('thesis revision memory invalid: '+v.reasons.join(','));
+  if(memory.version===FORECAST_THESIS_REVISION_MEMORY_VERSION) return memory;
+
+  const assumptions=(memory.assumptions||[]).map(row=>({
+    ...clone(row),
+    stability:createInitialAssumptionStability({
+      assumptionId:row.assumptionId,
+      issueSupported:row.issueSupported===true,
+      issueEvidenceIds:row.issueEvidenceIds,
+      legacy:true
+    })
+  }));
+  const core={
+    ...coreOf(memory),
+    version:FORECAST_THESIS_REVISION_MEMORY_VERSION,
+    assumptions,
+    firstPersistentStaleAt:null,
+    stabilityEventCount:0,
+    semantics:{
+      ...(memory.semantics||{}),
+      persistentStaleRequiresHysteresis:true,
+      transientFlickerIsNotStructuralStaleness:true,
+      stabilityHistoryBeforeMigrationIsUnknown:true
+    },
+    migration:{
+      fromVersion:LEGACY_FORECAST_THESIS_REVISION_MEMORY_VERSION,
+      historicalStabilityBackfilled:false,
+      evidenceRewritten:false,
+      eventHistoryRewritten:false
+    }
+  };
+  return finalized(core);
 }
 
 export function createForecastThesisRevisionArtifact({
