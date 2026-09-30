@@ -140,3 +140,19 @@ test('runtime separates lightweight outcome resolution from heavy AutoLearn memo
   assert.match(bot,/adaptiveShadowAutoRssMb/);
   assert.match(bot,/effectiveShadowCompetitionHistoryRows/);
 });
+
+
+test('runtime throughput tuning uses lightweight pending rows and bounded adaptive replay memory',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(bot,/TCX_AUTOLEARN_HEAP_HEADROOM_MB \|\| 350/);
+  assert.match(bot,/function pendingForecastOutcomeRows\(\)/);
+  assert.match(bot,/pendingForecasts:pendingForecastOutcomeRows\(\)/);
+  assert.match(bot,/const pending=pendingForecastOutcomeRows\(\)/);
+  assert.match(bot,/adaptiveShadowHardHeapMb/);
+  assert.match(bot,/effectiveShadowWorkerHeapMb/);
+  assert.match(bot,/maxOldGenerationSizeMb:effectiveShadowWorkerHeapMb/);
+  assert.match(bot,/maxAutoHeapMb:345/);
+  assert.match(bot,/maxHardHeapMb:370/);
+  assert.match(bot,/minWorkerHeapMb:128/);
+});
