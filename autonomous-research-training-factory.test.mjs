@@ -106,7 +106,7 @@ test('manual research review prevents false claim that operator only needs to co
   assert.equal(refreshed.state.queue[0].automaticShadowEligible,false);
 });
 
-test('experiment governor is converted into autonomous shadow work but promotion stays manual',()=>{
+test('statistical promotion-review readiness is prepared autonomously before human escalation',()=>{
   const state=createAutonomousResearchTrainingFactory({asOf:1000});
   const refreshed=refreshAutonomousResearchTrainingFactory(state,{
     livingResearchState:baseLivingResearch(),
@@ -127,13 +127,12 @@ test('experiment governor is converted into autonomous shadow work but promotion
   });
   const types=refreshed.state.queue.map(x=>x.type);
   assert.ok(types.includes('CONTINUE_MODEL_COMPETITION'));
-  assert.ok(types.includes('MODEL_PROMOTION_REVIEW'));
-  assert.equal(refreshed.state.mode,'MANUAL_REVIEW_REQUIRED');
-  const competition=refreshed.state.queue.find(x=>x.type==='CONTINUE_MODEL_COMPETITION');
-  const promotion=refreshed.state.queue.find(x=>x.type==='MODEL_PROMOTION_REVIEW');
-  assert.equal(competition.automaticShadowEligible,true);
-  assert.equal(promotion.automaticShadowEligible,false);
-  assert.equal(promotion.manualReviewRequired,true);
+  assert.ok(types.includes('PREPARE_MODEL_PROMOTION_REVIEW'));
+  assert.equal(types.includes('MODEL_PROMOTION_REVIEW'),false);
+  assert.equal(refreshed.state.counters.manual,0);
+  const review=refreshed.state.queue.find(x=>x.type==='PREPARE_MODEL_PROMOTION_REVIEW');
+  assert.equal(review.autoHandler,'MODEL_PROMOTION_REVIEW_SERVICE');
+  assert.equal(review.automaticShadowEligible,true);
 });
 
 test('chronological and robustness deficits become owned automatic research tasks',()=>{
@@ -369,4 +368,61 @@ test('factory stops claiming data-only when an owned research task is persistent
   assert.equal(state.mode,'RESEARCH_STALLED');
   assert.equal(state.operatorDataOnly,false);
   assert.equal(state.queue[0].stalled,true);
+});
+
+
+test('HOLD and REJECT model decisions do not create human approval tasks',()=>{
+  for(const decision of ['HOLD_CANDIDATE','REJECT_CANDIDATE']){
+    const state=createAutonomousResearchTrainingFactory({asOf:1000});
+    const refreshed=refreshAutonomousResearchTrainingFactory(state,{
+      livingResearchState:baseLivingResearch(),
+      experimentGovernorSummary:{
+        status:'ACTIVE',
+        generationId:'gen-3',
+        generationNumber:3,
+        counts:{},
+        promotionReviewRequired:[{candidateId:'candidate-9',blueprintId:'bp-9'}]
+      },
+      modelPromotionReviewSummary:{
+        generationId:'gen-3',
+        at:1900,
+        decisions:[{candidateId:'candidate-9',ok:true,decision,nextAction:'AUTO',missingProofs:[]}]
+      },
+      asOf:2000
+    });
+    assert.equal(refreshed.state.queue.some(x=>x.type==='MODEL_PROMOTION_REVIEW'),false);
+    assert.equal(refreshed.state.queue.some(x=>x.type==='PREPARE_MODEL_PROMOTION_REVIEW'),false);
+    assert.equal(refreshed.state.counters.manual,0);
+  }
+});
+
+test('only PROMOTE_CANDIDATE produces explicit human model approval',()=>{
+  const state=createAutonomousResearchTrainingFactory({asOf:1000});
+  const refreshed=refreshAutonomousResearchTrainingFactory(state,{
+    livingResearchState:baseLivingResearch(),
+    experimentGovernorSummary:{
+      status:'ACTIVE',
+      generationId:'gen-3',
+      generationNumber:3,
+      counts:{},
+      promotionReviewRequired:[{candidateId:'candidate-9',blueprintId:'bp-9'}]
+    },
+    modelPromotionReviewSummary:{
+      generationId:'gen-3',
+      at:1900,
+      decisions:[{
+        candidateId:'candidate-9',
+        ok:true,
+        decision:'PROMOTE_CANDIDATE',
+        nextAction:'EXPLICIT_PROMOTION_RECORD_REVIEW_REQUIRED',
+        missingProofs:[]
+      }]
+    },
+    asOf:2000
+  });
+  const review=refreshed.state.queue.find(x=>x.type==='MODEL_PROMOTION_REVIEW');
+  assert.ok(review);
+  assert.equal(review.manualReviewRequired,true);
+  assert.equal(review.automaticShadowEligible,false);
+  assert.equal(refreshed.state.mode,'MANUAL_REVIEW_REQUIRED');
 });
