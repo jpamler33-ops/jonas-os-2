@@ -153,6 +153,109 @@ function normalizeMemories(thesisMemories){
     .sort((a,b)=>a.forecastId.localeCompare(b.forecastId));
 }
 
+function persistentCaseKey(forecastId,assumptionId){
+  return String(forecastId)+'|'+String(assumptionId);
+}
+
+function mergeObservedForecastIds(existing,memories,{maxRows=20_000}={}){
+  const ids=new Set((existing||[]).map(String).filter(Boolean));
+  for(const memory of memories) ids.add(String(memory.forecastId));
+  return [...ids].sort().slice(-Math.max(1000,Math.floor(Number(maxRows)||20_000)));
+}
+
+function mergePersistentCaseRegistry(existing,memories,{observedAt,maxRows=10_000}={}){
+  const map=new Map((existing||[]).map(row=>[
+    persistentCaseKey(row.forecastId,row.assumptionId),
+    structuredClone(row)
+  ]));
+  const t=finite(observedAt,0);
+  for(const memory of memories){
+    for(const row of memory.assumptions){
+      const st=row.stability;
+      const historicallyPersistent=
+        st.firstPersistentStaleAt!=null||
+        st.persistentStaleCount>0||
+        st.state==='PERSISTENT_STALE'||
+        st.state==='RECOVERING';
+      if(!historicallyPersistent) continue;
+      const key=persistentCaseKey(memory.forecastId,row.assumptionId);
+      const prior=map.get(key);
+      const firstAt=[
+        finite(prior?.firstPersistentStaleAt),
+        finite(st.firstPersistentStaleAt),
+        finite(memory.firstPersistentStaleAt)
+      ].filter(x=>x!=null);
+      map.set(key,{
+        caseId:'persistent-case:'+sha256({forecastId:memory.forecastId,assumptionId:row.assumptionId}).slice(0,24),
+        forecastId:memory.forecastId,
+        assumptionId:row.assumptionId,
+        firstPersistentStaleAt:firstAt.length?Math.min(...firstAt):null,
+        persistentStaleCount:Math.max(Number(prior?.persistentStaleCount||0),Number(st.persistentStaleCount||0),1),
+        transientFlickerCount:Math.max(Number(prior?.transientFlickerCount||0),Number(st.transientFlickerCount||0)),
+        recoveryCount:Math.max(Number(prior?.recoveryCount||0),Number(st.recoveryCount||0)),
+        relapseCount:Math.max(Number(prior?.relapseCount||0),Number(st.relapseCount||0)),
+        falsifierCodes:uniq([
+          ...(prior?.falsifierCodes||[]),
+          ...st.currentFalsifierCodes,
+          ...st.repeatedFalsifierCodes
+        ]),
+        lastKnownState:st.state,
+        firstSeenByLivingResearchAt:finite(prior?.firstSeenByLivingResearchAt,t),
+        lastSeenByLivingResearchAt:Math.max(Number(prior?.lastSeenByLivingResearchAt||0),t)
+      });
+    }
+  }
+  return [...map.values()]
+    .sort((a,b)=>
+      Number(a.firstPersistentStaleAt??Infinity)-Number(b.firstPersistentStaleAt??Infinity)||
+      a.forecastId.localeCompare(b.forecastId)||
+      a.assumptionId.localeCompare(b.assumptionId)
+    )
+    .slice(-Math.max(1000,Math.floor(Number(maxRows)||10_000)));
+}
+
+function mergeStabilityEventRegistry(existing,memories,{maxRows=20_000}={}){
+  const map=new Map((existing||[]).map(row=>[String(row.registryEventId),structuredClone(row)]));
+  for(const memory of memories){
+    for(const event of memory.stabilityEvents){
+      if(![
+        'PERSISTENT_STALE_CONFIRMED',
+        'RECOVERY_FAILED',
+        'PERSISTENT_STALE_RECOVERED',
+        'ISSUE_UNSUPPORTED_SUPPORT_ESTABLISHED',
+        'ISSUE_SUPPORT_ESTABLISHMENT_FAILED'
+      ].includes(event.type)) continue;
+      const registryEventId=event.eventId||
+        'stability-event:'+sha256({
+          forecastId:memory.forecastId,
+          assumptionId:event.assumptionId,
+          type:event.type,
+          observedAt:event.observedAt,
+          repeatedFalsifierCodes:event.repeatedFalsifierCodes,
+          falsifierCodes:event.falsifierCodes
+        }).slice(0,24);
+      if(map.has(registryEventId)) continue;
+      map.set(registryEventId,{
+        registryEventId,
+        forecastId:memory.forecastId,
+        assumptionId:event.assumptionId,
+        type:event.type,
+        observedAt:event.observedAt,
+        repeatedFalsifierCodes:[...event.repeatedFalsifierCodes],
+        falsifierCodes:[...event.falsifierCodes]
+      });
+    }
+  }
+  return [...map.values()]
+    .sort((a,b)=>
+      Number(a.observedAt||0)-Number(b.observedAt||0)||
+      a.forecastId.localeCompare(b.forecastId)||
+      a.assumptionId.localeCompare(b.assumptionId)||
+      a.type.localeCompare(b.type)
+    )
+    .slice(-Math.max(1000,Math.floor(Number(maxRows)||20_000)));
+}
+
 function associationFor(report,assumptionId){
   const row=(report?.byPreOutcomeStaleAssumption||[]).find(x=>String(x?.assumptionId)===String(assumptionId));
   const p=row?.persistenceFiltered||null;
@@ -167,7 +270,11 @@ function associationFor(report,assumptionId){
   };
 }
 
-function collectSignalFor(template,memories,report){
+function collectSignalFor(template,memories,report,{
+  persistentCaseRegistry=[],
+  stabilityEventRegistry=[],
+  observedForecastIds=[]
+}={}){
   let currentPersistentForecasts=0;
   let currentTransientForecasts=0;
   let everPersistentForecasts=0;
@@ -184,21 +291,27 @@ function collectSignalFor(template,memories,report){
     const st=row.stability;
     if(st.state==='PERSISTENT_STALE'||st.state==='RECOVERING') currentPersistentForecasts++;
     if(st.state==='TRANSIENT_FLICKER') currentTransientForecasts++;
-    if(st.firstPersistentStaleAt!=null||st.persistentStaleCount>0){
-      everPersistentForecasts++;
-      forecastIds.add(memory.forecastId);
-    }
     maxUnsupportedDurationMs=Math.max(maxUnsupportedDurationMs,st.currentUnsupportedDurationMs||0);
     for(const code of [...st.currentFalsifierCodes,...st.repeatedFalsifierCodes]){
       falsifierCounts.set(code,(falsifierCounts.get(code)||0)+1);
     }
-    for(const event of memory.stabilityEvents.filter(x=>x.assumptionId===template.assumptionId)){
-      if(event.type==='PERSISTENT_STALE_CONFIRMED') persistentConfirmations++;
-      if(event.type==='RECOVERY_FAILED') recoveryFailures++;
-      if(event.type==='PERSISTENT_STALE_RECOVERED') recoveries++;
-      for(const code of [...event.repeatedFalsifierCodes,...event.falsifierCodes]){
-        falsifierCounts.set(code,(falsifierCounts.get(code)||0)+1);
-      }
+  }
+
+  const historicalCases=persistentCaseRegistry.filter(x=>x.assumptionId===template.assumptionId);
+  everPersistentForecasts=historicalCases.length;
+  for(const row of historicalCases){
+    forecastIds.add(row.forecastId);
+    for(const code of row.falsifierCodes||[]){
+      falsifierCounts.set(code,(falsifierCounts.get(code)||0)+1);
+    }
+  }
+  const historicalEvents=stabilityEventRegistry.filter(x=>x.assumptionId===template.assumptionId);
+  for(const event of historicalEvents){
+    if(event.type==='PERSISTENT_STALE_CONFIRMED') persistentConfirmations++;
+    if(event.type==='RECOVERY_FAILED') recoveryFailures++;
+    if(event.type==='PERSISTENT_STALE_RECOVERED') recoveries++;
+    for(const code of [...(event.repeatedFalsifierCodes||[]),...(event.falsifierCodes||[])]){
+      falsifierCounts.set(code,(falsifierCounts.get(code)||0)+1);
     }
   }
 
@@ -209,7 +322,7 @@ function collectSignalFor(template,memories,report){
   const leverageCandidates=[template.primaryCapabilityId,...template.supportingCapabilityIds]
     .map(id=>canonicalSkillLeverage(id));
   const leverage=leverageCandidates.reduce((m,x)=>Math.max(m,x.score),0);
-  const prevalence=memories.length?everPersistentForecasts/memories.length:0;
+  const prevalence=observedForecastIds.length?everPersistentForecasts/observedForecastIds.length:0;
   const persistenceStrength=clamp(everPersistentForecasts/5);
   const recurrenceStrength=clamp((persistentConfirmations+recoveryFailures)/8);
   const falsifierDiversity=clamp(falsifiers.length/4);
@@ -313,6 +426,9 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     revision:0,
     sourceFingerprint:null,
     skillTree,
+    observedForecastIds:[],
+    persistentCaseRegistry:[],
+    stabilityEventRegistry:[],
     assumptionSignals:[],
     agenda:[],
     discoveredSkillIds:[],
@@ -346,6 +462,9 @@ export function verifyBiggjLivingResearchRuntime(value){
     if(value?.invariants?.automaticPromotion!==false||value?.invariants?.automaticKill!==false||value?.invariants?.primaryMutationAllowed!==false){
       reasons.push('GOVERNANCE_INVARIANT_INVALID');
     }
+    if(!Array.isArray(value?.observedForecastIds)) reasons.push('OBSERVED_FORECAST_IDS_INVALID');
+    if(!Array.isArray(value?.persistentCaseRegistry)) reasons.push('PERSISTENT_CASE_REGISTRY_INVALID');
+    if(!Array.isArray(value?.stabilityEventRegistry)) reasons.push('STABILITY_EVENT_REGISTRY_INVALID');
     const tv=verifyBiggjSkillTree(value?.skillTree);
     if(!tv.ok) reasons.push('SKILL_TREE_INVALID:'+tv.reasons.join('|'));
     const expected=sha256(coreOf(value));
@@ -384,8 +503,16 @@ export function refreshBiggjLivingResearchRuntime(state,{
     tree=reconcileBiggjSkillTreeWithCapabilityMap(tree,{asOf:t});
   }
 
+  const observedForecastIds=mergeObservedForecastIds(state.observedForecastIds,memories);
+  const persistentCaseRegistry=mergePersistentCaseRegistry(state.persistentCaseRegistry,memories,{observedAt:t});
+  const stabilityEventRegistry=mergeStabilityEventRegistry(state.stabilityEventRegistry,memories);
+
   const signals=ASSUMPTION_RESEARCH_TEMPLATES
-    .map(template=>collectSignalFor(template,memories,claimAssumptionReport))
+    .map(template=>collectSignalFor(template,memories,claimAssumptionReport,{
+      persistentCaseRegistry,
+      stabilityEventRegistry,
+      observedForecastIds
+    }))
     .sort((a,b)=>b.priority-a.priority||a.assumptionId.localeCompare(b.assumptionId));
 
   const discovered=[];
@@ -429,6 +556,9 @@ export function refreshBiggjLivingResearchRuntime(state,{
     revision:Number(state.revision||0)+1,
     sourceFingerprint,
     skillTree:tree,
+    observedForecastIds,
+    persistentCaseRegistry,
+    stabilityEventRegistry,
     assumptionSignals:signals,
     agenda,
     discoveredSkillIds:uniq([...(state.discoveredSkillIds||[]),...discovered]),
@@ -525,6 +655,9 @@ export function biggjLivingResearchRuntimeSummary(value){
       distinctPersistentForecasts:x.distinctPersistentForecasts,
       topFalsifier:x.falsifiers?.[0]?.code??null
     })),
+    observedForecasts:(value?.observedForecastIds||[]).length,
+    retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
+    retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
