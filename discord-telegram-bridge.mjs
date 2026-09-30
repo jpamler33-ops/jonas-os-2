@@ -973,30 +973,36 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const raw=String(event?.id||event?.url||[event?.title,event?.availableAt].join('|')||'event');
     return Buffer.from(raw).toString('base64url').slice(0,72);
   }
-  function newsEventPayload(event,{world=false}={}){
+  function newsEventPayload(event,{world=false,translatedTitle=null,translationSourceLanguage='unknown'}={}){
     const verified=event?.verified===true||Number(event?.independentConfirmation||0)>=.45;
-    const source=String(event?.source||'PUBLIC_NEWS');
-    const family=String(event?.family||event?.eventFamily||'OTHER');
-    const status=String(event?.status||'WATCH');
+    const source=String(event?.source||'ÖFFENTLICHE_NEWS');
+    const familyRaw=String(event?.family||event?.eventFamily||'OTHER').toUpperCase();
+    const statusRaw=String(event?.status||'WATCH').toUpperCase();
+    const familyMap={CRYPTO:'KRYPTO',GEOPOLITICS:'GEOPOLITIK',MACRO:'MAKRO',TECHNOLOGY:'TECHNOLOGIE',CORPORATE:'UNTERNEHMEN',COMMODITIES:'ROHSTOFFE',OTHER:'SONSTIGES'};
+    const statusMap={HIGH_IMPACT:'HOHE RELEVANZ',DEVELOPING:'ENTWICKLUNG',WATCH:'BEOBACHTEN'};
+    const marketMap={AWAITING_MARKET_DATA:'WARTE AUF MARKTDATEN',NONE:'KEINE'};
     const assets=(Array.isArray(event?.affectedAssets)?event.affectedAssets:[]).slice(0,8);
     const rawUrl=String(event?.url||'').trim();
     const url=/^https?:\/\//i.test(rawUrl)?rawUrl:undefined;
     const observedAt=Number(event?.availableAt||event?.timestamp||Date.now());
     const key=newsEventKey(event);
-    const title=(world?'WORLD // ':'NEWS // ')+String(event?.title||event?.headline||'Event').slice(0,230);
+    const headline=String(translatedTitle||event?.title||event?.headline||'Ereignis').slice(0,220);
+    const title=(world?'WELTLAGE // ':'NEWS // ')+headline;
+    const epistemic=verified?'VERIFIZIERT / KORROBORIERT':'ENTDECKUNG · NOCH NICHT UNABHÄNGIG VERIFIZIERT';
     return {
       embeds:[{
         title,
         ...(url?{url}:{}),
         description:[
-          '**'+status.replaceAll('_',' ')+'** · '+family.replaceAll('_',' '),
-          verified?'✓ independently corroborated/verified in current state':'◐ discovered · not independently verified',
-          assets.length?'Affected: '+assets.join(' · '):'Affected markets: not established'
+          '**'+(statusMap[statusRaw]||statusRaw.replaceAll('_',' '))+'** · '+(familyMap[familyRaw]||familyRaw.replaceAll('_',' ')),
+          verified?'✓ unabhängig bestätigt/verifiziert':'◐ entdeckt · noch nicht unabhängig verifiziert',
+          assets.length?'Betroffene Märkte: '+assets.join(' · '):'Betroffene Märkte: noch nicht belastbar bestimmt'
         ].join('\n').slice(0,4096),
         fields:[
-          {name:'Source',value:source.slice(0,1024),inline:true},
-          {name:'Market reaction',value:String(event?.marketStatus||'AWAITING_MARKET_DATA').replaceAll('_',' ').slice(0,1024),inline:true},
-          {name:'Epistemic',value:String(event?.epistemic||'PUBLIC_EVENT').replaceAll('_',' ').slice(0,1024),inline:false}
+          {name:'Quelle',value:source.slice(0,1024),inline:true},
+          {name:'Marktreaktion',value:(marketMap[String(event?.marketStatus||'').toUpperCase()]||String(event?.marketStatus||'WARTE AUF MARKTDATEN').replaceAll('_',' ')).slice(0,1024),inline:true},
+          {name:'Evidenzstatus',value:epistemic.slice(0,1024),inline:false},
+          {name:'Übersetzung',value:translationSourceLanguage==='de'?'Original bereits Deutsch':'Automatisch ins Deutsche übersetzt',inline:false}
         ],
         footer:{text:'BIGGJ_NEWS_EVENT:'+key+' · '+(verified?'VERIFIED/CORROBORATED':'DISCOVERY_ONLY')},
         timestamp:new Date(Number.isFinite(observedAt)?observedAt:Date.now()).toISOString()
@@ -1024,24 +1030,38 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         }
       }
     }
-    let posted=0;
+    let posted=0,translationFailures=0,translated=0;
     for(const event of rows){
       const key=newsEventKey(event);
       if(seen.has(key))continue;
-      await c.send(newsEventPayload(event,{world}));
+      const rawTitle=String(event?.title||event?.headline||'Ereignis');
+      const translation=await germanTranslator.translate(rawTitle);
+      if(!translation.ok){
+        translationFailures++;
+        if(strictGermanNews)continue;
+      }
+      const germanTitle=translation.ok?translation.text:rawTitle;
+      if(translation.ok&&translation.sourceLanguage!=='de')translated++;
+      await c.send(newsEventPayload(event,{
+        world,
+        translatedTitle:germanTitle,
+        translationSourceLanguage:translation.ok?translation.sourceLanguage:'unknown'
+      }));
       seen.add(key);
       posted++;
       if(posted>=12)break;
     }
+    const detail='News '+posted+' gepostet · übersetzt '+translated+' · Übersetzungsfehler '+translationFailures;
+    if(translationFailures>0&&strictGermanNews)channelManagers.failure(channelName,'GERMAN_TRANSLATION_FAILED_'+translationFailures,detail);
+    else channelManagers.success(channelName,detail);
+    try{logger.info?.('[BIGGJ_GERMAN_NEWS] '+JSON.stringify({channel:channelName,posted,translated,translationFailures,strictGermanNews,translation:germanTranslator.health()}));}catch{}
     return posted;
   }
   async function refreshNewsFeed(){
-    try{return await syncNewsChannel('news-feed',{world:false});}
-    catch(err){fail('news-feed',err);return 0;}
+    return managed('news-feed',()=>syncNewsChannel('news-feed',{world:false}),{detail:'Deutscher Live-News-Feed',rethrow:false});
   }
   async function refreshWorldWatch(){
-    try{return await syncNewsChannel('world-watch',{world:true});}
-    catch(err){fail('world-watch',err);return 0;}
+    return managed('world-watch',()=>syncNewsChannel('world-watch',{world:true}),{detail:'Deutsche Weltlage',rethrow:false});
   }
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
