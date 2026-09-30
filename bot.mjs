@@ -124,6 +124,7 @@ import { createReadCommandHandlers, TELEGRAM_READ_COMMANDS_VERSION } from './tel
 import { createMutationCommandHandlers, TELEGRAM_MUTATION_COMMANDS_VERSION } from './telegram-mutation-command-handlers.mjs';
 import { createTelegramUpdateDispatcher, TELEGRAM_UPDATE_DISPATCHER_VERSION } from './telegram-update-dispatcher.mjs';
 import { createDiscordTelegramBridge, isDiscordChatId } from './discord-telegram-bridge.mjs';
+import { buildBiggjDiscordObservabilitySnapshot } from './biggj-discord-observability.mjs';
 import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
@@ -8926,6 +8927,13 @@ function missionControlData(){
  const openPositions=allShadowPositions.filter(p=>p?.status==='OPEN').sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,30);
  const recentClosed=allShadowPositions.filter(p=>p?.status==='CLOSED').sort((a,b)=>Number(b?.closedAt||0)-Number(a?.closedAt||0)).slice(0,30);
  const discovery=summarizeTradeDiscovery(tradeDiscoveryDiagnostics,{now,runtime:{omsStatus:shadowOmsHealthy?'HEALTHY':'ERROR',omsFilled:health.shadowOms.filled,omsActive:health.shadowOms.active,openStandardPositions:portfolio.openPositions,openDiscoveryPositions:countOpenDiscoveryPositions(allShadowPositions)}});
+ health.biggjObservability=buildBiggjDiscordObservabilitySnapshot({
+  livingResearchState:biggjLivingResearchState,
+  claimAssumptionResearch:health.claimAssumptionResearch,
+  researchCoverage,
+  discovery,
+  asOf:now
+ });
  return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
