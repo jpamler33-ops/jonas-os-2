@@ -12,7 +12,7 @@ import {
 
 test('BIGGJ mobile app is installable as a standalone PWA',()=>{
   const manifest=JSON.parse(biggjWebManifest());
-  assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_MOBILE_COMMAND_CENTER_V3');
+  assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_MARKET_SCIENCE_APP_V1');
   assert.equal(manifest.start_url,'/mission-control');
   assert.equal(manifest.scope,'/');
   assert.equal(manifest.display,'standalone');
@@ -25,7 +25,7 @@ test('mobile app renders six primary tabs and iPhone install metadata',()=>{
     health:{autonomousOperator:{mode:'HANDS_OFF'}},
     portfolio:{}
   });
-  for(const tab of ['overview','markets','signals','research','trades','system']){
+  for(const tab of ['science','world','lab','decisions','trading','system']){
     assert.match(html,new RegExp('data-tab="'+tab+'"'));
   }
   assert.match(html,/apple-mobile-web-app-capable/);
@@ -58,32 +58,33 @@ test('service worker and icon remain local first-party assets',()=>{
 });
 
 
-test('mobile intel separates world, general news, memecoins and trader source truth',()=>{
+test('world model keeps reality feed separate from inferred state and refuses fabricated latent layers',()=>{
   const html=renderBiggjMobileApp({
     generatedAt:1_800_000_000_000,
-    health:{
-      autonomousOperator:{mode:'HANDS_OFF'},
-      marketRadar:{rows:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12}]},
-      globalIntel:{source:'GDELT DOC 2.1',recent:[
-        {title:'Ceasefire update',family:'GEOPOLITICS',status:'DEVELOPING',verified:false,availableAt:1_800_000_000_000},
-        {title:'Bitcoin update',family:'CRYPTO',status:'WATCH',verified:false,availableAt:1_800_000_000_000}
-      ]},
-      memecoinRadar:{source:'DEXSCREENER_PUBLIC_API',rows:[
-        {chainId:'solana',pair:{symbol:'MEME',priceUsd:.01,liquidityUsd:100000,priceChangeH1:3,buysH1:20,sellsH1:10}}
-      ],metas:[{name:'AI memes',tokenCount:5,volume:1000,liquidity:500}]},
-      traderWatch:{sourceReady:false,nextNeed:'PIT public performance feed'}
+    biggj:{
+      science:{frontier:{total:2,evidence:10,experiments:1,surprises:1,robust:0,broken:0},director:{topAgenda:[],topDataRequests:[]}},
+      worldModel:{
+        marketsObserved:1,
+        markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',epistemicClass:'INFERRED',witnessAgreement:.8,support:12,score:.8}],
+        regimeDistribution:[{regime:'TREND',count:1}],
+        latestIntelligence:[{title:'Ceasefire update',family:'GEOPOLITICS',status:'DEVELOPING',verified:false,availableAt:1_800_000_000_000}],
+        latentStateDiscovery:{status:'NOT_YET_IMPLEMENTED',reason:'do not fabricate'},
+        informationFlowGraph:{status:'NOT_YET_IMPLEMENTED',reason:'not promoted'},
+        predictabilityField:{status:'NOT_YET_IMPLEMENTED',reason:'not promoted'}
+      },
+      laboratory:{agenda:[],dataRequests:[]}
     },
+    health:{operationalReadiness:{ready:true},researchCoverage:{averageCoverage:1,blocked:0}},
     portfolio:{}
   });
-  assert.match(html,/Live Intelligence/);
-  assert.match(html,/Memecoin Radar/);
-  assert.match(html,/Trader Intelligence/);
+  assert.match(html,/WORLD MODEL/);
+  assert.match(html,/Reality Feed/);
+  assert.match(html,/INFERRED/);
+  assert.match(html,/NOT_YET_IMPLEMENTED/);
   assert.match(html,/nicht unabhängig bestätigt/);
-  assert.match(html,/Market Radar/);
 });
 
-
-test('V3 renders BIGGJ command-center hierarchy and live states',()=>{
+test('V4 renders BIGGJ market-science hierarchy and live states',()=>{
   const html=renderBiggjMobileApp({
     generatedAt:1_800_000_000_000,
     health:{
@@ -96,24 +97,24 @@ test('V3 renders BIGGJ command-center hierarchy and live states',()=>{
     },
     portfolio:{netPnlQuote:12.5,openPositions:1,closedTrades:3,positions:[]}
   });
-  assert.match(html,/BIGGJ <span/);
-  assert.match(html,/>\/\/<\/span> TCX/);
-  assert.match(html,/System posture/);
-  assert.match(html,/WARTET AUF DATEN/);
-  assert.match(html,/Living Research/);
-  assert.match(html,/Market Radar/);
-  assert.match(html,/Execution Boundary/);
+  assert.match(html,/Autonomous Market Science OS/);
+  assert.match(html,/MARKET<br><span class="cyan">SCIENCE/);
+  assert.match(html,/Knowledge Frontier/);
+  assert.match(html,/WORLD MODEL/);
+  assert.match(html,/SCIENTIFIC LABORATORY/);
+  assert.match(html,/Trading Application/);
+  assert.match(html,/Epistemic Firewall/);
   assert.match(html,/Live Diagnose/);
 });
 
-test('canonical mission-control renderer delegates to the V2 mobile app',async()=>{
+test('canonical mission-control renderer delegates to the market-science mobile app',async()=>{
   const source=await readFile(new URL('./mission-control.mjs',import.meta.url),'utf8');
   assert.match(source,/import \{ renderBiggjMobileApp \} from '\.\/biggj-mobile-webapp\.mjs'/);
   assert.match(source,/return renderBiggjMobileApp\(snapshot\)/);
 });
 
 
-test('canonical route serves mobile V3 and legacy route keeps technical dashboard',async()=>{
+test('canonical route serves market-science mobile app and legacy route keeps technical dashboard',async()=>{
   const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.match(source,/renderBiggjMobileApp\(snapshot\)/);
   assert.match(source,/req\.url === '\/mission-control\/legacy'/);
@@ -130,12 +131,12 @@ test('mobile Signal Lab uses canonical no-store APIs and never renders raw proba
     },
     portfolio:{}
   });
-  assert.match(html,/data-tab="signals"/);
+  assert.match(html,/data-tab="decisions"/);
   assert.match(html,/\/signal-lab\.json/);
   assert.match(html,/\/proof-feed\.json/);
   assert.match(html,/p\.displayAllowed===true/);
   assert.match(html,/SUPPRESSED/);
-  assert.match(html,/Mode-Lenses filtern Evidence/);
+  assert.match(html,/TCX konsumiert den validierten Science-/);
   assert.match(html,/Forecast-Time-Hashes/);
 });
 
