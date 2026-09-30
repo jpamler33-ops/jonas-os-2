@@ -57,6 +57,15 @@ function progress(position,asOf){
   const opened=finite(position.openedAt),h=Math.max(1,finite(position.horizonMs,1));
   return opened==null?null:clamp((Number(asOf)-opened)/h,0,2);
 }
+function tradeContextLabel(position={}){
+  const setup=String(position?.setupType||'').trim().toUpperCase();
+  if(setup&&setup!=='UNKNOWN') return setup;
+  const mode=String(position?.entryMode||'').trim().toUpperCase();
+  if(mode&&mode!=='UNKNOWN'&&mode!=='STANDARD') return mode;
+  const strategy=String(position?.strategyId||'').trim().toUpperCase();
+  if(strategy&&strategy!=='UNKNOWN') return strategy;
+  return mode==='STANDARD'?'PRIMARY_UNCLASSIFIED':'UNCLASSIFIED';
+}
 function tradeLevels(position={}){
   const entry=finite(position.entryPrice);
   if(!(entry>0)) return null;
@@ -127,7 +136,7 @@ export function buildBiggjTradeThesis(position,{asOf=Date.now()}={}){
     status:String(position.status||'UNKNOWN').toUpperCase(),
     openedAt:finite(position.openedAt),
     horizonId:String(position.horizonId||''),
-    setupType:String(position.setupType||'UNKNOWN'),
+    setupType:tradeContextLabel(position),
     setupScore:finite(position.setupScore),
     entryMode:String(position.entryMode||'STANDARD'),
     admissionGate:String(position.admissionGate||'UNKNOWN'),

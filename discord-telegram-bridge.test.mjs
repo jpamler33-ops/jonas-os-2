@@ -238,3 +238,13 @@ test('channel operations expose manager domain director and meta supervision lay
   assert.match(source,/Meta-Supervisor/);
   assert.match(source,/finalState\.operationsDirector/);
 });
+
+
+test('trade cards preserve research lane instead of rendering UNKNOWN setup',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/function tradeContextLabel/);
+  assert.match(source,/mode&&mode!==['"]UNKNOWN['"]&&mode!==['"]STANDARD['"]/);
+  assert.match(source,/SETUP \/ LANE/);
+  assert.match(source,/PRIMARY_UNCLASSIFIED/);
+});

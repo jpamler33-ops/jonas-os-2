@@ -63,3 +63,16 @@ test('thesis text exposes ghost paths and trade DNA without live-execution claim
   assert.match(text,/WHY NOW/);
   assert.match(text,/REAL ORDERS BLOCKED/);
 });
+
+
+test('coverage probe thesis uses research lane instead of UNKNOWN setup',()=>{
+  const t=buildBiggjTradeThesis({...position,setupType:'UNKNOWN',entryMode:'COVERAGE_PROBE',admissionGate:'ABSTAIN'},{asOf:position.openedAt});
+  assert.equal(t.setupType,'COVERAGE_PROBE');
+  assert.equal(t.entryMode,'COVERAGE_PROBE');
+  assert.notEqual(t.setupType,'UNKNOWN');
+});
+
+test('primary trade without stored setup is explicit UNCLASSIFIED instead of fabricated setup',()=>{
+  const t=buildBiggjTradeThesis({...position,setupType:'UNKNOWN',entryMode:'STANDARD',strategyId:''},{asOf:position.openedAt});
+  assert.equal(t.setupType,'PRIMARY_UNCLASSIFIED');
+});
