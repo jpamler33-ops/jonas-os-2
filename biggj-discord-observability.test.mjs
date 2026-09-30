@@ -53,12 +53,16 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
 
   const channels=BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.flatMap(section=>section.channels.map(x=>x.name));
   assert.deepEqual(channels,[
-    'brain-pulse','knowledge','research-queue','hypotheses','changes',
+    'executive-state','brain-pulse','knowledge','research-queue','hypotheses','changes',
     'experiments','skill-tree','review-queue','learning-timeline','progress','evidence-ledger','decision-trace'
   ]);
 
+  assert.equal(snapshot.outcomeSupervisor.safety.execution,'SHADOW_ONLY');
+  assert.equal(snapshot.outcomeSupervisor.safety.canExecuteLive,false);
+  assert.equal(snapshot.outcomeSupervisor.executive.machineActivityIsNotOutcome,true);
+
   const panels=buildBiggjDiscordObservabilityPanelMap(snapshot);
-  assert.equal(panels.length,12);
+  assert.equal(panels.length,13);
   assert.deepEqual(panels.map(x=>x.channel),channels);
   for(const panel of panels)assertDiscordPayload(panel.payload);
 });
@@ -66,7 +70,7 @@ test('BIGGJ observability stays research-only and exposes the complete operator 
 test('every BIGGJ operator view remains within Discord embed/component limits',()=>{
   const state=createBiggjLivingResearchRuntime({asOf:1_800_000_000_000});
   const snapshot=buildBiggjDiscordObservabilitySnapshot({livingResearchState:state,asOf:1_800_000_000_000});
-  for(const view of ['pulse','knowledge','research','hypotheses','changes','experiments','skills','reviews','timeline','progress','evidence','decisions']){
+  for(const view of ['executive','pulse','knowledge','research','hypotheses','changes','experiments','skills','reviews','timeline','progress','evidence','decisions']){
     const payload=buildBiggjDiscordObservabilityPayload(view,snapshot);
     assertDiscordPayload(payload);
     assert.match(payload.embeds[0].footer.text,/structured state, not hidden chain-of-thought/);
@@ -97,9 +101,10 @@ test('review queue is visible but remains manual-only and non-executable',()=>{
   assert.match(payload.embeds[0].title,/RESEARCH REVIEW QUEUE/);
   assert.match(payload.embeds[0].fields.map(x=>x.value).join('\n'),/Automatic apply OFF/);
   assert.match(payload.embeds[0].fields.map(x=>x.value).join('\n'),/PRIMARY influence BLOCKED/);
-  assert.equal(payload.components.length,2);
+  assert.equal(payload.components.length,3);
   assert.equal(payload.components[0].components.length,5);
   assert.equal(payload.components[1].components.length,5);
+  assert.equal(payload.components[2].components.length,1);
 });
 
 
@@ -123,4 +128,28 @@ test('learning timeline is PIT-bounded and separates activity from quality',()=>
   assertDiscordPayload(payload);
   assert.match(payload.embeds[0].title,/LEARNING TIMELINE/);
   assert.match(payload.embeds[0].description,/Aktivität ist nicht automatisch Fortschritt/);
+});
+
+
+test('executive state separates technical activity from research outcomes',()=>{
+  const state=createBiggjLivingResearchRuntime({asOf:1_800_000_000_000});
+  const snapshot=buildBiggjDiscordObservabilitySnapshot({
+    livingResearchState:state,
+    autonomousResearchFactory:{
+      nextTasks:[{
+        taskId:'stalled-1',type:'COLLECT_FORWARD_DATA',subject:'EVIDENCE_INDEPENDENCE',
+        stalled:true,stagnantCycles:7,queueAgeMs:3_600_000,
+        effectivePriority:.9,reason:'MORE_FORWARD_POINT_IN_TIME_EVIDENCE_REQUIRED',
+        autoHandler:'AUTOLEARN_AND_COVERAGE_CURRICULUM'
+      }]
+    },
+    asOf:1_800_000_000_000
+  });
+  assert.equal(snapshot.outcomeSupervisor.status,'ACTION_REQUIRED');
+  assert.equal(snapshot.outcomeSupervisor.outcomeHealth.stalledResearchTasks,1);
+  const payload=buildBiggjDiscordObservabilityPayload('executive',snapshot);
+  assertDiscordPayload(payload);
+  assert.match(payload.embeds[0].title,/EXECUTIVE STATE/);
+  assert.match(payload.embeds[0].description,/technische Aktivität/);
+  assert.match(payload.embeds[0].fields.map(x=>x.value).join('\n'),/Machine activity/);
 });
