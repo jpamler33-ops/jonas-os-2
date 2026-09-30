@@ -5,9 +5,12 @@ import { readFileSync } from 'node:fs';
 const source=readFileSync(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
 const observabilitySource=readFileSync(new URL('./biggj-discord-observability.mjs',import.meta.url),'utf8');
 const experienceSource=readFileSync(new URL('./biggj-experience-center.mjs',import.meta.url),'utf8');
+const scienceSource=readFileSync(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
 
-test('BIGGJ Discord V6 is release-bound and interactive',()=>{
-  assert.ok(source.includes('BIGGJ_DISCORD_COMMAND_CENTER_V6'));
+test('BIGGJ Discord V11 is release-bound, science-first and interactive',()=>{
+  assert.ok(source.includes('BIGGJ_DISCORD_MARKET_SCIENCE_V7'));
+  assert.ok(source.includes('BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST'));
+  assert.ok(source.includes('BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT'));
   assert.ok(source.includes('dc3:market-select'));
   assert.ok(source.includes('dc4:thesis:'));
   assert.ok(source.includes('commandCenterComponents'));
@@ -110,7 +113,11 @@ test('BIGGJ V6 exposes the unified user experience surfaces',()=>{
     'refreshMemecoinLab',
     'upsertMarkedAtBottom'
   ]) assert.ok(source.includes(required)||experienceSource.includes(required),required);
-  assert.ok(source.includes("BIGGJ_DISCORD_COMMAND_CENTER_V6"));
+  assert.ok(source.includes("BIGGJ_DISCORD_MARKET_SCIENCE_V7"));
+  assert.ok(source.includes("science-home"));
+  assert.ok(source.includes("world-model"));
+  assert.ok(source.includes("science-lab"));
+  assert.ok(source.includes("autopilot-supervisor"));
 });
 
 
@@ -151,14 +158,15 @@ test('BIGGJ V6.1 exposes one-tap user commands',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'BIGGJ_DISCORD_CHANNEL_UX_V10'
+    'BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST'
   ]) assert.ok(source.includes(required),required);
 });
 
 test('BIGGJ V8 channel managers cover every Discord surface and supervise themselves',()=>{
   for(const required of [
-    'BIGGJ_DISCORD_CHANNEL_UX_V10',
+    'BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST',
     'BIGGJ • OPERATIONS',
+    'BIGGJ • CONTROL ROOM',
     'channel-supervisor',
     'channel-improvements',
     'createBiggjChannelManagerRuntime',
@@ -172,7 +180,7 @@ test('BIGGJ V8 channel managers cover every Discord surface and supervise themse
     'buildAnomalyWatchPayload',
     'buildReplayDeskPayload',
     'buildErrorDeskPayload'
-  ]) assert.ok(source.includes(required),required);
+  ]) assert.ok(source.includes(required)||scienceSource.includes(required),required);
 });
 
 test('BIGGJ V7 incoming news is German-first and strict on translation failure',()=>{
@@ -190,7 +198,7 @@ test('BIGGJ V7 incoming news is German-first and strict on translation failure',
 test('BIGGJ V7 exposes the canonical rulebook as a managed Discord surface',()=>{
   for(const required of [
     "name:'rulebook'",
-    "category:'BIGGJ • OPERATIONS'",
+    "category:'BIGGJ • SYSTEM'",
     "{name:'rulebook',topic:",
     "rulebook:'BIGGJ_RULEBOOK_PANEL_V1'",
     'buildRulebookPayload',
@@ -201,5 +209,5 @@ test('BIGGJ V7 exposes the canonical rulebook as a managed Discord surface',()=>
 });
 
 test('BIGGJ trade cards expose primary lane and virtual size explicitly',()=>{
-  for(const required of ['tradeLaneLabel','virtualTradeSize','VIRTUAL SIZE','Nur abgeschlossene PRIMARY Shadow-Trades']) assert.ok(source.includes(required),required);
+  for(const required of ['tradeLaneLabel','virtualTradeSize','VIRTUAL SIZE','Abgeschlossene PRIMARY Shadow-Trades']) assert.ok(source.includes(required),required);
 });

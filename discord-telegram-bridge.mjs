@@ -12,12 +12,17 @@ import {
   BIGGJ_EXPERIENCE_LAYOUT,
   buildBiggjExperiencePanelMap
 } from './biggj-experience-center.mjs';
+import {
+  BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT,
+  buildBiggjDiscordMarketSciencePanelMap,
+  buildBiggjDiscordMarketSciencePayload
+} from './biggj-discord-market-science.mjs';
 import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
 import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 import { renderBiggjProofFeed } from './biggj-signal-lab.mjs';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V10';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_MARKET_SCIENCE_V7';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -47,6 +52,11 @@ const COMMANDS=[
   {name:'memory',description:'Episode Memory für einen Markt',options:[symbolOption()]},
   {name:'evidence',description:'Evidence-Diagnostik für einen Markt',options:[symbolOption()]},
   {name:'validity',description:'Research-Validity für einen Markt',options:[symbolOption()]},
+  {name:'science',description:'BIGGJ Market Science Home öffnen'},
+  {name:'worldmodel',description:'BIGGJ World Model öffnen'},
+  {name:'lab',description:'BIGGJ Scientific Lab öffnen'},
+  {name:'decision_intel',description:'BIGGJ Decision Intelligence öffnen'},
+  {name:'autopilot',description:'BIGGJ Autopilot Supervisor öffnen'},
   {name:'executive',description:'BIGGJ Executive State öffnen'},
   {name:'brain',description:'BIGGJ Brain Pulse öffnen'},
   {name:'knowledge',description:'BIGGJ Wissens- und Capability-Map öffnen'},
@@ -82,32 +92,29 @@ const COMMANDS=[
 
 
 const SERVER_LAYOUT=Object.freeze([
-  {category:'TCX • CONTROL',channels:[
-    {name:'start-here',topic:'Startpunkt, Befehle und Sicherheitsstatus von TCX.'},
-    {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'},
-    {name:'signal-lab',topic:'3-Klick Signal Lab: Markt → Horizont → klare Bias-/ABSTAIN-Ausgabe mit Calibration-Gate.'},
-    {name:'proof-feed',topic:'Forecast BEFORE → LIVE commitment → Outcome AFTER → Learning. Zeigt offene Commitments, Treffer und Fehler ohne Cherry-Picking.'}
-  ]},
+  ...BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT,
   ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT,
   ...BIGGJ_EXPERIENCE_LAYOUT,
-  {category:'TCX • MARKETS',channels:[
-    {name:'market-overview',topic:'Übersicht der wichtigsten beobachteten Märkte.'},
-    {name:'btc',topic:'BTC/USDT Live-Marktpanel von TCX.'},
-    {name:'eth',topic:'ETH/USDT Live-Marktpanel von TCX.'},
-    {name:'sol',topic:'SOL/USDT Live-Marktpanel von TCX.'},
-    {name:'memecoins',topic:'Memecoin Intelligence Lab: Live DEX Trends, Liquidität, Risikoindikatoren, Datenlücken und Research. SHADOW_ONLY.'}
+  {category:'BIGGJ • MARKET INPUTS',channels:[
+    {name:'market-overview',topic:'Beobachtete Märkte als Reality/World-Model Input; keine autonome Trade-Empfehlung.'},
+    {name:'btc',topic:'BTC/USDT Live-Marktpanel als Downstream-Marktansicht.'},
+    {name:'eth',topic:'ETH/USDT Live-Marktpanel als Downstream-Marktansicht.'},
+    {name:'sol',topic:'SOL/USDT Live-Marktpanel als Downstream-Marktansicht.'},
+    {name:'memecoins',topic:'Memecoin Reality/Research Input: DEX Trends, Liquidität, Risikoindikatoren und Datenlücken. SHADOW_ONLY.'}
   ]},
-  {category:'TCX • INTELLIGENCE',channels:[
-    {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
-    {name:'global-intel',topic:'Legacy Global-Intel Oberfläche; neue Nutzerflächen sind #news-feed und #world-watch.'},
-    {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'},
-    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'},
-    {name:'theses',topic:'BIGGJ Living Theses, Ghost Paths und Trade DNA für aktive Shadow-Trades.'}
+  {category:'BIGGJ • DECISION APPLICATIONS',channels:[
+    {name:'tcx-terminal',topic:'Legacy/technical TCX Mission Control. TCX ist Decision Application, nicht BIGGJs Identität.'},
+    {name:'signal-lab',topic:'Downstream Signal Lab: Markt → Horizont → Bias/ABSTAIN mit Calibration-Gate.'},
+    {name:'proof-feed',topic:'Forecast BEFORE → commitment → Outcome AFTER → Learning ohne Cherry-Picking.'},
+    {name:'forecasts',topic:'Probabilistische Forecasts und Invalidation als Downstream Decision Intelligence.'},
+    {name:'anomalies',topic:'Anomalien und Regimewechsel als Research-/Decision-Hinweise.'},
+    {name:'global-intel',topic:'Legacy Global-Intel Oberfläche; kanonische Reality-Flächen sind #news-feed und #world-watch.'},
+    {name:'theses',topic:'Living Theses und Trade DNA für aktive Shadow-Trades; keine wissenschaftliche Autorität.'}
   ]},
-  {category:'TCX • SHADOW',channels:[
-    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades mit kompakter Thesis, Risiko, PnL und Live-Chart-Thread. Keine echten Orders.'},
-    {name:'closed-trades',topic:'Nur abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
-    {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
+  {category:'BIGGJ • SHADOW TRADING',channels:[
+    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades. Trading ist Downstream Application; keine echten Orders.'},
+    {name:'closed-trades',topic:'Abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
+    {name:'performance',topic:'Shadow-Performance als Application-Metrik; PnL darf keine Theorie promoten.'},
     {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen mit Point-in-Time Kontext.'}
   ]},
   {category:'BIGGJ • TRADING ACADEMY',channels:[
@@ -121,20 +128,22 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'academy-questions',topic:'Fragen stellen mit sauberem Analyse-Template.'}
   ]},
   {category:'BIGGJ • OPERATIONS',channels:[
+    {name:'alerts',topic:'Nur relevante Zustandsänderungen und echte Ausnahmen; keine normale passive Wartezeit als Alarm.'},
     {name:'channel-supervisor',topic:'Meta-Überwachung aller Channel-Manager: Zustand, Freshness, Fehler, Entscheidungen und Auto-Reparaturen.'},
-    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'},
-    {name:'rulebook',topic:'Kanonisches BIGGJ Rulebook: Soll, Nicht-Soll, HARD-Regeln, Runtime-Verstöße und Coverage.'}
+    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'}
   ]},
-  {category:'TCX • SYSTEM',channels:[
-    {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
+  {category:'BIGGJ • SYSTEM',channels:[
+    {name:'system-status',topic:'Runtime-, Science-, Daten- und Sicherheitsstatus.'},
     {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
-    {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'}
+    {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'},
+    {name:'rulebook',topic:'Kanonisches BIGGJ Rulebook: Soll, Nicht-Soll, HARD-Regeln, Runtime-Verstöße und Coverage.'}
   ]}
 ]);
 
 const CHANNEL_PROFILE_GROUPS=Object.freeze({
   HOME:new Set(['start-here']),
   LIVE_60:new Set([
+    'science-home','world-model','science-lab','decision-intelligence','autopilot-supervisor',
     'tcx-terminal','signal-lab','proof-feed','performance','system-status','data-health',
     'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
     'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements','rulebook'
@@ -480,32 +489,33 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // COMMAND CENTER · CHANNEL UX V7',description:[
-  '**Ein Einstiegspunkt für das komplette BIGGJ Research OS — ohne durch alle Channels scrollen zu müssen.**',
+function startPayload(){return {embeds:[{title:'BIGGJ // MARKET SCIENCE OS · DISCORD V11',description:[
+  '**BIGGJ ist jetzt Science-first.** Trading ist nur eine nachgelagerte Anwendung.',
   '',
-  '**TÄGLICH · 90%-PFAD**',
-  '#trade-cockpit · aktive Shadow-Trades',
-  '#chart-desk · Charts, Radar, Forecast, Deep Dive',
-  '#news-feed + #world-watch · Live-Intel auf Deutsch',
-  '#biggj-needs · höchste aktuelle Lücken',
-  '#performance · Ergebnis, Winrate, Drawdown',
+  '**DEIN 90%-PFAD**',
+  '#science-home · aktueller Wissensstand + nächste Forschungsfrage',
+  '#world-model · globale Market States, Topology, Forecastability',
+  '#science-lab · Experimente, Widersprüche, Missing Variables',
+  '#autopilot-supervisor · zeigt nur, ob du wirklich etwas tun musst',
   '',
-  '**WENN DU WISSEN WILLST WARUM**',
-  '#brain-pulse · aktueller Research-State',
-  '#research-queue · nächste Forschungsarbeit',
-  '#evidence-ledger · Belege, Coverage, PIT',
-  '#decision-trace · strukturierte Entscheidungsgründe',
+  '**DANACH ERST APPLICATIONS**',
+  '#decision-intelligence · TCX/RIFT + Forecast Proof',
+  '#signal-lab + #proof-feed · Decision Tools',
+  '#trade-cockpit + #live-trades · Shadow Trading',
   '',
-  '**WENN ETWAS NICHT FUNKTIONIERT**',
-  '#channel-supervisor · überwacht jeden Channel-Manager',
-  '#channel-improvements · priorisierte Fix-/Verbesserungsvorschläge',
-  '#rulebook · feste Soll-/Nicht-Soll-Regeln und erkannte Verstöße',
-  '#errors · technische Fehler',
+  '**REALITY & EVIDENCE**',
+  '#news-feed + #world-watch · Live-Reality Feed',
+  '#research-queue + #evidence-ledger · wissenschaftliche Arbeit',
   '',
-  '**Shortcuts** · \`/cockpit\` · \`/charts\` · \`/news\` · \`/world\` · \`/needs\` · \`/brain\`',
+  '**NUR WENN ETWAS KAPUTT IST**',
+  '#alerts · echte Exception/Recovery',
+  '#channel-supervisor · Discord-Selbstreparatur',
+  '#errors · technische Diagnose',
   '',
-  '**SHADOW_ONLY · ECHTE ORDERS BLOCKIERT**'
-].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:[...commandCenterComponents(),...biggjObservabilityNavComponents()].slice(0,5),allowedMentions:{parse:[]}};}
+  '**Shortcuts** · /science · /worldmodel · /lab · /autopilot · /decision_intel',
+  '',
+  '**SHADOW_ONLY · UNKNOWN IST GÜLTIG · ECHTE ORDERS BLOCKIERT**'
+].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:buildBiggjDiscordMarketSciencePayload('science',{}).components,allowedMentions:{parse:[]}};}
 
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
@@ -1003,6 +1013,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   const thesisCards=new Map();
   const observabilityPanelDigests=new Map();
   const experiencePanelDigests=new Map();
+  const marketSciencePanelDigests=new Map();
   const corePanelDigests=new Map();
   const recentErrors=[];
   const closedPosted=new Set();
@@ -1021,7 +1032,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,newsTranslationConcurrency,newsTranslationAttemptLimit,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',channelMetaSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,newsTranslationConcurrency,newsTranslationAttemptLimit,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,v7:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,marketSciencePanels:0,lastMarketScienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
@@ -1244,6 +1255,22 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     state.lastObservabilityRefreshAt=Date.now();
     return count;
   }
+  async function refreshMarketSciencePanels(){
+    const snapshot=await safeMissionSnapshot();
+    let count=0;
+    for(const row of buildBiggjDiscordMarketSciencePanelMap(snapshot)){
+      const channel=channelCache.get(row.channel);
+      if(!channel)continue;
+      const digest=observabilityDigest(row.payload);
+      if(marketSciencePanelDigests.get(row.channel)===digest){channelManagers.success(row.channel,'Market-Science Panel unverändert und aktuell');count++;continue;}
+      await managed(row.channel,()=>upsertMarked(channel,row.marker,row.payload),{detail:'Market-Science Panel aktualisiert'});
+      marketSciencePanelDigests.set(row.channel,digest);
+      count++;
+    }
+    state.marketSciencePanels=count;
+    state.lastMarketScienceRefreshAt=Date.now();
+    return count;
+  }
   function publicMobileUrl(){
     const explicit=String(process.env.TCX_PUBLIC_DASHBOARD_URL||'').trim();
     if(explicit)return explicit;
@@ -1423,6 +1450,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(!row){await interaction.editReply('BIGGJ Experience Panel ist gerade nicht verfügbar.');return;}
     await interaction.editReply(row.payload);
   }
+  async function marketScienceCommand(interaction,view){
+    const component=typeof interaction.isButton==='function'&&interaction.isButton();
+    if(component)await interaction.deferUpdate();else await interaction.deferReply();
+    const snapshot=await safeMissionSnapshot();
+    await interaction.editReply(buildBiggjDiscordMarketSciencePayload(view,snapshot));
+  }
   async function operatorCommand(interaction,view){
     const component=typeof interaction.isButton==='function'&&interaction.isButton();
     if(component)await interaction.deferUpdate();else await interaction.deferReply();
@@ -1555,6 +1588,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     return out.filter(x=>x.status==='fulfilled').length;
   }
   function managerRepairGroup(name){
+    if(BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'MARKET_SCIENCE';
     if(BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'OBSERVABILITY';
     if(BIGGJ_EXPERIENCE_LAYOUT.some(s=>s.channels.some(x=>x.name===name)))return 'EXPERIENCE';
     if(name.startsWith('academy-'))return 'ACADEMY';
@@ -1571,6 +1605,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       return true;
     }
     const group=managerRepairGroup(name);
+    if(group==='MARKET_SCIENCE'){if(name==='start-here')await ensureStart();else await refreshMarketSciencePanels();return true;}
     if(group==='OBSERVABILITY'){await refreshBiggjObservabilityPanels();return true;}
     if(group==='EXPERIENCE'){await refreshExperiencePanels();return true;}
     if(group==='ACADEMY'){await ensureAcademy();return true;}
@@ -1646,14 +1681,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     await handleUpdate({update_id:'discord:auto-command:'+Date.now(),message:{message_id:'auto:'+Date.now(),chat:{id:chatId},from:{id:client.user?.id||'system',username:client.user?.username||'TCX'},text:String(text)}}); return true;
   }
   function healthDigest(snapshot={}){
-    const h=snapshot?.health||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{};
+    const a=snapshot?.health?.biggjAutopilotSupervisor||{};
     return JSON.stringify({
-      ready:r?.ready===true,
-      fabric:h?.marketDataFabric?.healthy===true,
-      oms:h?.shadowOms?.healthy===true,
-      forecast:f?.healthy===true||f?.status==='HEALTHY',
-      telegram:!h?.telegramPolling?.lastPollError,
-      rulebook:String(h?.biggjRulebook?.runtime?.state||'UNKNOWN').toUpperCase()==='PASS'
+      state:String(a?.state||'UNKNOWN'),
+      humanActionRequired:a?.humanActionRequired===true,
+      criticalCount:Array.isArray(a?.critical)?a.critical.length:0
     });
   }
   async function syncHealthAlerts(){
@@ -1664,9 +1696,15 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const previous=lastHealthDigest;lastHealthDigest=digest;
     const c=channelCache.get('alerts');if(!c)return;
     const now=JSON.parse(digest),before=JSON.parse(previous);
-    const labels={ready:'Runtime',fabric:'Marktdaten',oms:'Shadow OMS',forecast:'Forecast',telegram:'Telegram',rulebook:'Rulebook'};
-    const changes=Object.keys(now).filter(k=>now[k]!==before[k]).map(k=>(labels[k]||k)+': '+(before[k]?'OK':'PRÜFEN')+' → '+(now[k]?'OK':'PRÜFEN'));
-    await managed('alerts',()=>c.send({embeds:[{title:'TCX // STATUSÄNDERUNG',description:(changes.join('\n')||'Systemzustand hat sich geändert.').slice(0,1800),footer:{text:'TCX_DISCORD_V3_ALERT'},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}}),{detail:'Statusänderung gepostet',rethrow:false});
+    const enteredCritical=now.humanActionRequired===true&&before.humanActionRequired!==true;
+    const recovered=now.humanActionRequired!==true&&before.humanActionRequired===true;
+    if(!enteredCritical&&!recovered)return;
+    const a=snapshot?.health?.biggjAutopilotSupervisor||{};
+    const title=enteredCritical?'BIGGJ // AUTOPILOT EXCEPTION':'BIGGJ // AUTOPILOT RECOVERED';
+    const description=enteredCritical
+      ?['**Menschliche Aktion erforderlich.**',(a.critical||[]).join('\n')||'Unbekannte kritische Ausnahme.',a.recommendation||''].filter(Boolean).join('\n\n')
+      :'**BIGGJ kann wieder autonom weiterlaufen.**\nKeine menschliche Aktion erforderlich.';
+    await managed('alerts',()=>c.send({embeds:[{title,description:description.slice(0,1800),footer:{text:'BIGGJ_AUTOPILOT_ALERT_V1'},timestamp:new Date().toISOString()}],components:buildBiggjDiscordMarketSciencePayload('autopilot',snapshot).components,allowedMentions:{parse:[]}}),{detail:'Autopilot-Exception/Recovery gepostet',rethrow:false});
     state.lastAlertAt=Date.now();
   }
   function cachedMessage(channel,messageId){
@@ -1980,6 +2018,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshPerformance,60000);
     addTimer(refreshOverview,90000);
     addTimer(refreshDataHealth,60000);
+    addTimer(refreshMarketSciencePanels,60000);
     addTimer(refreshBiggjObservabilityPanels,120000);
     addTimer(refreshExperiencePanels,60000);
     addTimer(ensureAcademy,120000);
@@ -2003,7 +2042,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       await ensureAcademy();
       await Promise.allSettled([
         refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),
-        refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
+        refreshMarketSciencePanels(),refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
         refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),refreshRulebookPanel(),syncTradeCards(),syncHealthAlerts()
       ]);
       await refreshAuxiliaryDesks();
@@ -2024,7 +2063,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
     const managers=managerSnapshot();
-    await interaction.editReply('BIGGJ Discord V10 eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    await interaction.editReply('BIGGJ Discord V11 Science Control Room eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.marketSciencePanels+state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
   }
   async function thesisCommand(interaction){
     const symbol=normalizeDiscordSymbol(interaction.options?.getString('symbol'));
@@ -2078,7 +2117,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
 
   async function onCommand(interaction){
-    if(String(interaction.guildId)!==guildId){await interaction.reply({content:'Dieser TCX-Bot ist für einen anderen Server konfiguriert.',ephemeral:true});return;}
+    if(String(interaction.guildId)!==guildId){await interaction.reply({content:'Dieser BIGGJ-Bot ist für einen anderen Server konfiguriert.',ephemeral:true});return;}
     const name=String(interaction.commandName||'').toLowerCase();
     if(name==='setup'){await setupCommand(interaction);return;}
     if(name==='start'){await startCommand(interaction);return;}
@@ -2087,6 +2126,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='thesis'){await thesisCommand(interaction);return;}
     if(name==='academy'){await academyCommand(interaction);return;}
     if(name==='lesson'){await lessonCommand(interaction);return;}
+    const scienceViews={science:'science',worldmodel:'world',lab:'lab',decision_intel:'decisions',autopilot:'autopilot'};
+    if(scienceViews[name]){await marketScienceCommand(interaction,scienceViews[name]);return;}
     if(name==='supervisor'){
       await interaction.deferReply();
       const mission=await safeMissionSnapshot();
@@ -2112,7 +2153,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(liveSurfaceCallbacks[name]){await runCoreCallback(interaction,liveSurfaceCallbacks[name]);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
-    const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter TCX-Befehl.',ephemeral:true});return;}
+    const text=commandText(interaction); if(!text){await interaction.reply({content:'Unbekannter BIGGJ-Befehl.',ephemeral:true});return;}
     await interaction.deferReply();
     const chatId=fakeChatId(interaction.guildId,interaction.channelId,interaction.user.id); const ctx={interaction:interaction,responded:false}; contexts.set(chatId,ctx);
     try{await handleUpdate({update_id:'discord:'+interaction.id,message:{message_id:interaction.id,chat:{id:chatId},from:{id:interaction.user.id,username:interaction.user.username},text:text}});if(!ctx.responded)await interaction.editReply('TCX hat keine Ausgabe erzeugt.');}
@@ -2122,6 +2163,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function onButton(interaction){
     if(String(interaction.guildId)!==guildId)return;
     const customId=decodeDiscordCallbackCustomId(interaction.customId);
+    if(customId.startsWith('dc7:science:')){
+      const view=String(customId.split(':')[2]||'science');
+      await marketScienceCommand(interaction,view);
+      return;
+    }
     if(customId.startsWith('dc6:brain:')){
       const view=String(customId.split(':')[2]||'pulse');
       await operatorCommand(interaction,view);
@@ -2188,6 +2234,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       tradeCards:tradeCards.size,
       thesisCards:thesisCards.size,
       academyPanels:state.academyPanels,
+      marketSciencePanels:state.marketSciencePanels,
+      lastMarketScienceRefreshAt:state.lastMarketScienceRefreshAt,
       observabilityPanels:state.observabilityPanels,
       experiencePanels:state.experiencePanels,
       lastExperienceRefreshAt:state.lastExperienceRefreshAt,
