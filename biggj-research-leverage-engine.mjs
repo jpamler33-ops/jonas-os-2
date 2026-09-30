@@ -46,7 +46,7 @@ const COST_BY_TYPE=Object.freeze({
 });
 
 const WEIGHTS=Object.freeze({
-  basePriority:.20,
+  basePriority:.15,
   uncertaintyGain:.10,
   informationGain:.12,
   dependencyUnlock:.12,
@@ -55,7 +55,7 @@ const WEIGHTS=Object.freeze({
   queueAge:.07,
   stagnationPressure:.05,
   dataReadiness:.08,
-  batchReuse:.05,
+  batchReuse:.10,
   costEfficiency:.05
 });
 

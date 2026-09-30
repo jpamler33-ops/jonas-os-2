@@ -72,6 +72,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-rulebook.mjs',
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
+  'biggj-research-accelerator.mjs',
   'biggj-autonomous-operator.mjs',
   'biggj-governance-triage.mjs',
   'runtime-release-registry.mjs',

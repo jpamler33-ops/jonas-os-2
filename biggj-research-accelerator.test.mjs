@@ -1,0 +1,130 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  BIGGJ_RESEARCH_ACCELERATOR_VERSION,
+  buildOutcomeDeadlinePlan,
+  buildResearchResourceBudget,
+  buildResearchBundlePlan,
+  buildHistoricalReplayPlan,
+  buildBiggjResearchAccelerator
+} from './biggj-research-accelerator.mjs';
+
+const T0=Date.UTC(2026,8,30,22,0,0);
+
+test('outcome scheduler wakes near the next due forecast instead of fixed polling',()=>{
+  const p=buildOutcomeDeadlinePlan([
+    {id:'a',symbol:'BTCUSDT',horizonId:'5m',status:'PENDING',asOf:T0-300_000,dueAt:T0+12_000},
+    {id:'b',symbol:'ETHUSDT',horizonId:'15m',status:'PENDING',asOf:T0-300_000,dueAt:T0+70_000}
+  ],{now:T0,minPollMs:5_000,maxPollMs:60_000});
+  assert.equal(p.nextDueAt,T0+12_000);
+  assert.equal(p.recommendedDelayMs,12_000);
+  assert.equal(p.semantics.deadlineSchedulingDoesNotCreateFutureEvidence,true);
+});
+
+test('due forecasts trigger fast but bounded polling',()=>{
+  const p=buildOutcomeDeadlinePlan([
+    {id:'a',symbol:'BTCUSDT',status:'PENDING',dueAt:T0-1}
+  ],{now:T0,minPollMs:5_000,maxPollMs:60_000});
+  assert.equal(p.dueNow,1);
+  assert.equal(p.recommendedDelayMs,5_000);
+  assert.deepEqual(p.dueSymbols,['BTCUSDT']);
+});
+
+test('resource budget accelerates only when headroom exists',()=>{
+  const fast=buildResearchResourceBudget({
+    memory:{heapUsedMb:100,rssMb:300,externalMb:10},
+    limits:{heapMb:320,rssMb:720,externalMb:64},
+    configuredMaxIssuedPerSweep:3,
+    configuredHistoryRows:1200
+  });
+  assert.equal(fast.mode,'ACCELERATED');
+  assert.equal(fast.autoLearnIssueBudget,3);
+  assert.equal(fast.shadowReplayHistoryRows,1200);
+
+  const pressured=buildResearchResourceBudget({
+    memory:{heapUsedMb:330,rssMb:820,externalMb:70},
+    limits:{heapMb:320,rssMb:720,externalMb:64},
+    configuredMaxIssuedPerSweep:3,
+    configuredHistoryRows:1200
+  });
+  assert.equal(pressured.mode,'MEMORY_PROTECT');
+  assert.equal(pressured.autoLearnIssueBudget,1);
+  assert.equal(pressured.shadowReplayHistoryRows,500);
+});
+
+test('bundle plan exposes fan-out without pretending observations are independent',()=>{
+  const p=buildResearchBundlePlan({
+    leverage:{topBundles:[
+      {dataNeed:'POINT_IN_TIME_FORWARD_OBSERVATIONS',taskCount:5,taskIds:['a','b','c','d','e'],subjects:['x','y'],reuseScore:1}
+    ]},
+    nextTasks:[
+      {taskId:'a',stalled:true},
+      {taskId:'b',stalled:true},
+      {taskId:'c',stalled:false}
+    ]
+  });
+  assert.equal(p.bundleCount,1);
+  assert.equal(p.topBundles[0].estimatedFanOut,5);
+  assert.equal(p.topBundles[0].stalledTaskCount,2);
+  assert.equal(p.stalledFusionCandidates,1);
+  assert.equal(p.semantics.fanOutNeverDuplicatesOneObservationIntoIndependentEpisodes,true);
+});
+
+test('historical replay runs only on new PIT history and never becomes prospective evidence',()=>{
+  const p=buildHistoricalReplayPlan({
+    historyRows:900,
+    historyProgressAt:T0,
+    lastReplayProgressAt:T0-60_000,
+    resourceBudget:{shadowReplayHistoryRows:650}
+  });
+  assert.equal(p.shouldRun,true);
+  assert.equal(p.replayWindowRows,650);
+  assert.equal(p.semantics.replayDoesNotCountAsProspectiveEvidence,true);
+
+  const stale=buildHistoricalReplayPlan({
+    historyRows:900,
+    historyProgressAt:T0,
+    lastReplayProgressAt:T0,
+    resourceBudget:{shadowReplayHistoryRows:650}
+  });
+  assert.equal(stale.shouldRun,false);
+});
+
+test('full accelerator preserves science and execution guards',()=>{
+  const a=buildBiggjResearchAccelerator({
+    factorySummary:{
+      leverage:{topBundles:[{dataNeed:'X',taskCount:4,taskIds:['a','b','c','d'],reuseScore:.75}]},
+      nextTasks:[]
+    },
+    pendingForecasts:[{id:'p',symbol:'BTCUSDT',status:'PENDING',dueAt:T0+10_000}],
+    memory:{heapUsedMb:120,rssMb:350,externalMb:12},
+    limits:{heapMb:320,rssMb:720,externalMb:64},
+    configuredMaxIssuedPerSweep:3,
+    configuredHistoryRows:1200,
+    historyRows:800,
+    historyProgressAt:T0,
+    lastReplayProgressAt:T0-1,
+    now:T0
+  });
+  assert.equal(a.version,BIGGJ_RESEARCH_ACCELERATOR_VERSION);
+  assert.equal(a.execution,'SHADOW_ONLY');
+  assert.equal(a.canExecuteLive,false);
+  assert.equal(a.automaticPrimaryMutation,false);
+  assert.equal(a.semantics.accelerateEvidenceUseNotScientificThresholds,true);
+  assert.ok(a.accelerationPotential>0);
+});
+
+
+test('runtime wiring uses adaptive cadence and bounded budgets',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  const leverage=await fs.readFile(new URL('./biggj-research-leverage-engine.mjs',import.meta.url),'utf8');
+  assert.match(bot,/TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP \|\| 3/);
+  assert.match(bot,/TCX_SHADOW_COMPETITION_EVAL_MS \|\| 15\*60_000/);
+  assert.match(bot,/effectiveAutoLearnMaxIssuedPerSweep/);
+  assert.match(bot,/effectiveShadowCompetitionHistoryRows/);
+  assert.match(bot,/buildOutcomeDeadlinePlan/);
+  assert.match(bot,/biggjResearchAccelerator/);
+  assert.match(leverage,/batchReuse:\.10/);
+  assert.match(leverage,/basePriority:\.15/);
+});
