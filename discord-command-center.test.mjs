@@ -102,6 +102,7 @@ test('BIGGJ V6 exposes the unified user experience surfaces',()=>{
     'world-watch',
     'trader-watch',
     'trade-cockpit',
+    'chart-desk',
     'mobile-app',
     'refreshExperiencePanels',
     'refreshNewsFeed',
@@ -110,4 +111,41 @@ test('BIGGJ V6 exposes the unified user experience surfaces',()=>{
     'upsertMarkedAtBottom'
   ]) assert.ok(source.includes(required)||experienceSource.includes(required),required);
   assert.ok(source.includes("BIGGJ_DISCORD_COMMAND_CENTER_V6"));
+});
+
+
+test('BIGGJ V6 news channels are append-only deduplicated event streams',()=>{
+  for(const required of [
+    'BIGGJ_NEWS_EVENT:',
+    'syncNewsChannel',
+    'newsEventKey',
+    'newsEventPayload',
+    'not independently verified',
+    "syncNewsChannel('news-feed'",
+    "syncNewsChannel('world-watch'"
+  ]) assert.ok(source.includes(required),required);
+});
+
+test('BIGGJ V6 academy keeps the current panel at the bottom and lesson actions contextual',()=>{
+  assert.ok(source.includes('upsertMarkedAtBottom'));
+  assert.ok(source.includes('academyLessonComponents(topic)'));
+  assert.ok(source.includes("const practical={"));
+  assert.ok(source.includes("structure:["));
+  assert.ok(source.includes("journal:["));
+  assert.ok(source.includes("const actions=practical[String(topic||'').toLowerCase()]||null"));
+});
+
+
+test('BIGGJ V6.1 exposes one-tap user commands',()=>{
+  for(const required of [
+    "name:'charts'",
+    "name:'news'",
+    "name:'world'",
+    "name:'memecoins'",
+    "name:'app'",
+    "liveSurfaceCallbacks",
+    "charts:'chart-desk'",
+    "app:'mobile-app'",
+    'COMMAND CENTER V6.1'
+  ]) assert.ok(source.includes(required),required);
 });

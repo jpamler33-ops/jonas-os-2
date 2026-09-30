@@ -9401,6 +9401,7 @@ function missionControlData(){
       .sort((a,b)=>Number(b?.availableAt||b?.timestamp||0)-Number(a?.availableAt||a?.timestamp||0))
       .slice(0,40)
       .map(x=>({
+        id:x?.id||null,
         title:x?.title||x?.headline||x?.eventType||'Event',
         family:x?.family||x?.eventFamily||'OTHER',
         status:x?.status||'WATCH',
@@ -9424,7 +9425,7 @@ function missionControlData(){
   },
   memecoinRadar:{
     version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
-    sourceReady:Boolean(memecoinExperienceSnapshot?.rows?.length||memecoinExperienceSnapshot?.metas?.length),
+    sourceReady:Boolean(memecoinExperienceSnapshot?.rows?.length||memecoinExperienceSnapshot?.metas?.length)&&!memecoinExperienceLastError,
     capturedAt:memecoinExperienceSnapshot?.capturedAt||null,
     source:memecoinExperienceSnapshot?.source||'DEXSCREENER_PUBLIC_API',
     lastError:memecoinExperienceLastError,
