@@ -176,6 +176,7 @@ import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './f
 import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } from './expansion-runtime/institutional-expansion.mjs';
 import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/dexscreener-public-provider.mjs';
 import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
+import { createCftcCotPublicProvider, CFTC_COT_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/cftc-cot-public-provider.mjs';
 import { createExternalResearchProvider, coinMetricsSnapshotToExtraFeatures, deribitOptionsSnapshotToExtraFeatures, macroSnapshotToExtraFeatures, predictionMarketSnapshotToExtraFeatures, EXTERNAL_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/external-research-provider.mjs';
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
 import { createLiquidationPublicStream, liquidationSnapshotToExtraFeatures, LIQUIDATION_PUBLIC_STREAM_VERSION } from './expansion-runtime/liquidation-public-stream.mjs';
@@ -544,6 +545,7 @@ const marketDataProvider=createMarketDataProvider({
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
+const cftcCotResearchProvider=createCftcCotPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
 const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.TCX_GLOBAL_NEWS_REFRESH_MS||120_000)));
 const globalNewsTimeoutMs=Math.max(8000,Math.min(30_000,Number(process.env.TCX_GLOBAL_NEWS_TIMEOUT_MS||18_000)));
 const globalNewsSecondaryTimeoutMs=Math.max(4000,Math.min(20_000,Number(process.env.TCX_GLOBAL_NEWS_SECONDARY_TIMEOUT_MS||8000)));
@@ -6131,6 +6133,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let publicContextResearchSnapshot=null;
   let dexContextResearchSnapshot=null;
   let dexPromotionResearchSnapshot=null;
+  let cftcCotResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     const researchAsOf=Date.now();
     try{
@@ -6155,6 +6158,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       {
         id:'public_context',
         run:()=>publicMarketContextProvider.fetchContext()
+      },
+      {
+        id:'cftc_cot',
+        run:()=>cftcCotResearchProvider.fetchSnapshot(symbol)
       },
       {
         id:'dex_context',
@@ -6191,6 +6198,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     publicContextResearchSnapshot=fanout.results.public_context?.value||null;
     dexContextResearchSnapshot=fanout.results.dex_context?.value||null;
     dexPromotionResearchSnapshot=fanout.results.dex_promotion?.value||null;
+    cftcCotResearchSnapshot=fanout.results.cftc_cot?.value||null;
     entityFlowResearchSnapshot=fanout.results.entity_flow?.value||null;
     walletResearchSnapshot=fanout.results.wallet?.value||null;
 
@@ -6200,13 +6208,14 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       if(id==='derivatives') ok=ok&&value?.ok===true;
       else if(id==='external') ok=ok&&Boolean(value?.coinMetrics?.ok||value?.deribitOptions?.ok||value?.macro?.ok||value?.predictionMarket?.ok);
       else if(id==='public_context') ok=ok&&Boolean(value?.sentiment||value?.global||value?.defi||value?.stablecoins);
+      else if(id==='cftc_cot') ok=ok&&value?.ok===true;
       else if(['dex_context','dex_promotion'].includes(id)) ok=ok&&Array.isArray(value?.rows)&&value.rows.length>0;
       else if(['onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
       const error=row.status==='REJECTED'
         ?row.error
         :(ok?null:(value?.reason||((value?.errors||[]).map(x=>x.error||x.reason||String(x)).join(' | ')||'PROVIDER_NO_USABLE_DATA')));
       recordOperation(observability,{
-        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':id==='dex_context'?'dexscreener_trending_research':id==='dex_promotion'?'dexscreener_promotion_research':'research_provider_'+id,
+        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':id==='cftc_cot'?'cftc_cot_positioning_research':id==='dex_context'?'dexscreener_trending_research':id==='dex_promotion'?'dexscreener_promotion_research':'research_provider_'+id,
         ok,
         latencyMs:row.durationMs,
         error
@@ -6264,7 +6273,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         externalSnapshot:externalResearchSnapshot,
         publicContextSnapshot:publicContextResearchSnapshot,
         dexContextSnapshot:dexContextResearchSnapshot,
-        dexPromotionSnapshot:dexPromotionResearchSnapshot
+        dexPromotionSnapshot:dexPromotionResearchSnapshot,
+        cftcCotSnapshot:cftcCotResearchSnapshot
       });
       researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
       markForecastMemory('rdp-append');
