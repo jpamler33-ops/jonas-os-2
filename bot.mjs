@@ -9532,6 +9532,14 @@ const server = http.createServer((req,res) => {
         file:autonomousOperatorFile,
         refreshMs:autonomousOperatorRefreshMs
       },
+      governanceTriage:{
+        ...biggjGovernanceTriageSummary(buildBiggjGovernanceTriage({
+          livingResearchState:biggjLivingResearchState,
+          modelPromotionReviewSummary:modelPromotionReviewLastSummary,
+          asOf:Date.now()
+        })),
+        version:BIGGJ_GOVERNANCE_TRIAGE_VERSION
+      },
       persistence:{
         file:stateFile,
         healthy:persistenceHealthy,
