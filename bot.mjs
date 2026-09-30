@@ -8892,6 +8892,11 @@ function currentPersistenceCompatibility(){
         healthy:biggjLivingResearchHealthy,
         recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
         loadedSchema:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
+      },
+      BIGGJ_AUTONOMOUS_OPERATOR:{
+        healthy:autonomousOperatorHealthy,
+        recoveredFromCorrupt:false,
+        loadedSchema:BIGGJ_AUTONOMOUS_OPERATOR_VERSION
       }
     },
     localFilePersistence:true,
@@ -9485,6 +9490,14 @@ const server = http.createServer((req,res) => {
         lastError:autonomousResearchFactoryLastError,
         file:autonomousResearchFactoryFile,
         refreshMs:autonomousResearchFactoryRefreshMs
+      },
+      autonomousOperator:{
+        ...biggjAutonomousOperatorSummary(autonomousOperatorState),
+        version:BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
+        healthy:autonomousOperatorHealthy,
+        lastError:autonomousOperatorLastError,
+        file:autonomousOperatorFile,
+        refreshMs:autonomousOperatorRefreshMs
       },
       persistence:{
         file:stateFile,
