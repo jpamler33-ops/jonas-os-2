@@ -54,28 +54,33 @@ function booleanDeficit(id,value,{blocking=true}={}){
 }
 function evidenceStats(node){
   const e=node?.evidenceSummary||{};
-  const total=Math.max(0,finite(e.total));
-  const forwardShadow=Math.max(0,finite(e.forwardShadow));
-  const independentEpisodes=Math.max(0,finite(e.independentEpisodes));
-  const positive=Math.max(0,finite(e.positive));
-  const negative=Math.max(0,finite(e.negative));
+  const researchTotal=Math.max(0,finite(e.total));
+  const researchIndependentEpisodes=Math.max(0,finite(e.independentEpisodes));
+  const total=Math.max(0,finite(e.validationTotal));
+  const forwardShadow=Math.max(0,finite(e.validationForwardShadow));
+  const independentEpisodes=Math.max(0,finite(e.validationIndependentEpisodes));
+  const positive=Math.max(0,finite(e.validationPositive));
+  const negative=Math.max(0,finite(e.validationNegative));
   return {
+    researchContextTotal:Math.max(0,researchTotal-total),
+    researchEvidenceTotal:researchTotal,
+    researchIndependentEpisodes,
     total,
-    pitSafe:Math.max(0,finite(e.pitSafe)),
-    auditReady:Math.max(0,finite(e.auditReady)),
-    sciencePassed:Math.max(0,finite(e.sciencePassed)),
+    pitSafe:Math.max(0,finite(e.validationPitSafe)),
+    auditReady:Math.max(0,finite(e.validationAuditReady)),
+    sciencePassed:Math.max(0,finite(e.validationSciencePassed)),
     forwardShadow,
     independentEpisodes,
-    chronologicalStable:Math.max(0,finite(e.chronologicalStable)),
-    costStressPassed:Math.max(0,finite(e.costStressPassed)),
-    concentrationPassed:Math.max(0,finite(e.concentrationPassed)),
-    winnerRemovalPassed:Math.max(0,finite(e.winnerRemovalPassed)),
+    chronologicalStable:Math.max(0,finite(e.validationChronologicalStable)),
+    costStressPassed:Math.max(0,finite(e.validationCostStressPassed)),
+    concentrationPassed:Math.max(0,finite(e.validationConcentrationPassed)),
+    winnerRemovalPassed:Math.max(0,finite(e.validationWinnerRemovalPassed)),
     positive,
     negative,
-    neutral:Math.max(0,finite(e.neutral)),
-    pitCoverage:ratio(e.pitSafe,total),
-    auditCoverage:ratio(e.auditReady,total),
-    scienceCoverage:ratio(e.sciencePassed,total),
+    neutral:Math.max(0,finite(e.validationNeutral)),
+    pitCoverage:ratio(e.validationPitSafe,total),
+    auditCoverage:ratio(e.validationAuditReady,total),
+    scienceCoverage:ratio(e.validationSciencePassed,total),
     positiveRate:safeRate(positive,total),
     negativeRate:safeRate(negative,total)
   };
@@ -250,6 +255,8 @@ export function evaluateBiggjResearchSkillValidation(tree,skillId){
     primaryMutationAllowed:false,
     semantics:{
       reviewDoesNotChangeSkillStatus:true,
+      researchContextEvidenceCannotUnlockMaturity:true,
+      validationDenominatorExcludesDiscoveryAndAssociationContext:true,
       readinessScoreIsDiagnosticNotProbability:true,
       independentEpisodeIdsAreConservativePartitionsNotProofOfStatisticalIndependence:true,
       outcomeEvidenceCannotProveCausality:true
