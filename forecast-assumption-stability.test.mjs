@@ -163,6 +163,43 @@ test('issue-unsupported assumption is not mislabeled as later stale',()=>{
   assert.equal(out.event,null);
 });
 
+test('issue-unsupported recovery establishes support without inventing stale history',()=>{
+  let state=createInitialAssumptionStability({
+    assumptionId:'THESIS_WITNESS_SUPPORT_ADEQUATE',
+    issueSupported:false,
+    issueEvidenceIds:[]
+  });
+
+  const first=observeAssumptionStability(state,{
+    assumption:witnessAssumption({supported:true,external:2}),
+    observedAt:100_000
+  });
+  assert.equal(first.stability.state,'RECOVERING');
+  assert.equal(first.event.type,'RECOVERY_STARTED');
+  assert.equal(first.stability.recoveryOriginState,'ISSUE_UNSUPPORTED');
+
+  const failed=observeAssumptionStability(first.stability,{
+    assumption:witnessAssumption({supported:false,external:1}),
+    observedAt:120_000
+  });
+  assert.equal(failed.stability.state,'ISSUE_UNSUPPORTED');
+  assert.equal(failed.event.type,'ISSUE_SUPPORT_ESTABLISHMENT_FAILED');
+  assert.equal(failed.stability.firstPersistentStaleAt,null);
+
+  const restart=observeAssumptionStability(failed.stability,{
+    assumption:witnessAssumption({supported:true,external:2}),
+    observedAt:200_000
+  });
+  const established=observeAssumptionStability(restart.stability,{
+    assumption:witnessAssumption({supported:true,external:2}),
+    observedAt:500_000
+  });
+  assert.equal(established.stability.state,'SUPPORTED_STABLE');
+  assert.equal(established.event.type,'ISSUE_UNSUPPORTED_SUPPORT_ESTABLISHED');
+  assert.equal(established.stability.supportEstablishmentCount,1);
+  assert.equal(established.stability.persistentStaleCount,0);
+});
+
 test('explicit falsifiers are derived from visible PIT provenance',()=>{
   const witness=witnessAssumption({
     supported:false,
