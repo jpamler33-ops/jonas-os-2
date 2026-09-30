@@ -25,7 +25,7 @@ const COMMANDS=[
   {name:'dashboard',description:'TCX Mission Control öffnen'},
   {name:'market',description:'Marktübersicht öffnen',options:[symbolOption()]},
   {name:'forecast',description:'TCX Forecast anzeigen',options:[symbolOption()]},
-  {name:'signal',description:'BIGGJ Signal Lab öffnen',options:[symbolOption(),signalHorizonOption()]},
+  {name:'signal',description:'BIGGJ Signal Lab öffnen',options:[symbolOption(),signalHorizonOption(),signalModeOption()]},
   {name:'proof',description:'BIGGJ Forecast Proof Feed öffnen',options:[optionalSymbolOption()]},
   {name:'chart',description:'Marktchart anzeigen',options:[symbolOption(),intervalOption()]},
   {name:'superchart',description:'TCX SuperChart öffnen',options:[symbolOption(),intervalOption()]},
@@ -866,6 +866,7 @@ const V3_SYMBOLS=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','LINK','AVAX','DOT'
 function symbolOption(){return {type:3,name:'symbol',description:'z. B. BTC, ETH, SOL',required:true};}
 function optionalSymbolOption(){return {type:3,name:'symbol',description:'Optional: BTC, ETH, SOL oder leer für alle',required:false};}
 function signalHorizonOption(){return {type:3,name:'horizon',description:'Forecast-Horizont',required:false,choices:['5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
+function signalModeOption(){return {type:3,name:'mode',description:'Evidence-Fokus',required:false,choices:[{name:'Full BIGGJ',value:'FULL'},{name:'Structure',value:'STRUCTURE'},{name:'Flow',value:'FLOW'},{name:'Liquidity',value:'LIQUIDITY'},{name:'Macro',value:'MACRO'}]};}
 function intervalOption(){return {type:3,name:'interval',description:'Zeitrahmen',required:false,choices:['1m','5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
 function normalizeDiscordSymbol(value=''){const raw=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return raw?(raw.endsWith('USDT')?raw:raw+'USDT'):null;}
 function marketSelectRow(){return {type:1,components:[{type:3,custom_id:'dc3:market-select',placeholder:'Markt öffnen …',min_values:1,max_values:1,options:V3_SYMBOLS.map(x=>({label:x+'/USDT',value:x+'USDT',description:'TCX '+x+' Research'}))}]};}
@@ -888,7 +889,7 @@ function marketActionComponents(symbol){
   const s=normalizeDiscordSymbol(symbol)||'BTCUSDT';
   return [
     {type:1,components:[
-      {type:2,style:1,label:'Signal Lab',custom_id:'dc3:signallab:'+s+':1h'},
+      {type:2,style:1,label:'Signal Lab',custom_id:'dc3:signallab:'+s+':1h:FULL'},
       {type:2,style:1,label:'Chart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
       {type:2,style:1,label:'Thesis',custom_id:'dc4:thesis:'+s},
       {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s}
@@ -968,7 +969,7 @@ function callbackDataForCommand(interaction){
   if(n==='xray')return 'xray:'+s;
   if(n==='events')return 'events:'+s;
   if(n==='accuracy')return 'accuracy:'+s;
-  if(n==='signal')return 'signallab:'+s+':'+(interaction.options?.getString('horizon')||'1h');
+  if(n==='signal')return 'signallab:'+s+':'+(interaction.options?.getString('horizon')||'1h')+':'+(interaction.options?.getString('mode')||'FULL');
   return null;
 }
 
