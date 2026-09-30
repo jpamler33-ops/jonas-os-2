@@ -192,7 +192,16 @@ export function buildBiggjTradeCockpitPayload(snapshot={}){
   const recent=arr(p.recentClosed).slice(0,5).map(x=>
     '• '+clip(x.symbol,16)+' · '+clip(x.side,8)+' · '+money(x?.netPnlQuote??x?.pnlQuote)+' · '+clip(x?.exitReason||'closed',42)
   ).join('\n')||'Keine kürzlich geschlossenen Shadow-Trades.';
-  const components=open.slice(0,2).map(x=>{
+  const controlPositions=[];
+  const seenControlSymbols=new Set();
+  for(const x of open){
+    const symbol=String(x?.symbol||'').toUpperCase();
+    if(!symbol||seenControlSymbols.has(symbol))continue;
+    seenControlSymbols.add(symbol);
+    controlPositions.push(x);
+    if(controlPositions.length>=2)break;
+  }
+  const components=controlPositions.map(x=>{
     const symbol=String(x?.symbol||'').toUpperCase();
     return {type:1,components:[
       {type:2,style:1,label:clip(symbol.replace('USDT','')+' Chart',24),custom_id:'dc3:superchart:'+symbol+':PRO:5m'},
