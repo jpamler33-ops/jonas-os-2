@@ -44,7 +44,8 @@ function horizonFor(issuance,horizonId){
   const hs=arr(issuance?.forecast?.horizons);
   if(!hs.length)return null;
   const wanted=String(horizonId||'').toLowerCase();
-  return hs.find(x=>String(x?.horizonId||'').toLowerCase()===wanted)||hs[0];
+  if(!wanted)return hs[0];
+  return hs.find(x=>String(x?.horizonId||'').toLowerCase()===wanted)||null;
 }
 
 function topProbability(horizon){
