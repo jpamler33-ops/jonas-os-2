@@ -64,6 +64,33 @@ export class ForecastIntelligenceService {
         }
         return changed;
     }
+    bindThesis(forecastId, memory) {
+        const before = this.tracker.get(forecastId);
+        const record = this.tracker.bindThesis(forecastId, memory);
+        if (!before?.thesisMemory) {
+            this.emit('THESIS_MEMORY_BOUND', Number(memory?.issuedAt ?? record.issuedAt), record.symbol, record.id, {
+                issueGraphFingerprint: memory?.issueGraphFingerprint ?? null,
+                assumptionCount: Number(memory?.assumptionCount ?? 0),
+                execution: 'SHADOW_ONLY',
+            });
+        }
+        return record;
+    }
+    updateThesisMemory(forecastId, memory, event = null) {
+        const record = this.tracker.updateThesisMemory(forecastId, memory);
+        if (event) {
+            this.emit('THESIS_REVISION_RECORDED', Number(event?.observedAt ?? memory?.lastObservedAt ?? record.issuedAt), record.symbol, record.id, {
+                eventId: event?.eventId ?? null,
+                supportTransitions: Array.isArray(event?.supportTransitions) ? event.supportTransitions.length : 0,
+                missingDeclarations: Array.isArray(event?.missingDeclarationIds) ? event.missingDeclarationIds.length : 0,
+                forecastAssessment: event?.forecastAssessmentTransition?.to ?? 'UNKNOWN',
+                firstStaleAt: memory?.firstStaleAt ?? null,
+                firstForecastInvalidatedAt: memory?.firstForecastInvalidatedAt ?? null,
+                execution: 'SHADOW_ONLY',
+            });
+        }
+        return record;
+    }
     counterfactual(forecastId, options = {}) {
         const record = this.tracker.get(forecastId);
         if (!record)
