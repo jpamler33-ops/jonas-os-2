@@ -156,3 +156,20 @@ test('runtime throughput tuning uses lightweight pending rows and bounded adapti
   assert.match(bot,/maxHardHeapMb:370/);
   assert.match(bot,/minWorkerHeapMb:128/);
 });
+
+
+test('background memory retry wiring preserves issue gates while improving recovery',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  const docker=await fs.readFile(new URL('./Dockerfile',import.meta.url),'utf8');
+  assert.match(bot,/TCX_AUTOLEARN_RESUME_RSS_MB \|\| 660/);
+  assert.match(bot,/TCX_AUTOLEARN_RESUME_EXTERNAL_MB \|\| 56/);
+  assert.match(bot,/TCX_SHADOW_COMPETITION_MEMORY_RETRY_MS\|\|90_000/);
+  assert.match(bot,/retryAdmissionAfterBackgroundGc/);
+  assert.match(bot,/SHADOW_REPLAY_AFTER_SLOT_WAIT/);
+  assert.match(bot,/SHADOW_REPLAY_POST_SNAPSHOT/);
+  assert.match(bot,/currentShadowCompetitionResourcePlan\(Date\.now\(\)\)/);
+  assert.match(docker,/CMD \["node", "--expose-gc", "bot\.mjs"\]/);
+  assert.match(bot,/issueRssMb:autoLearnRssHeadroomMb/);
+  assert.match(bot,/issueExternalMb:autoLearnExternalHeadroomMb/);
+});

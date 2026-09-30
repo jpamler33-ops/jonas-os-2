@@ -73,6 +73,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'autonomous-research-training-factory.mjs',
   'biggj-research-leverage-engine.mjs',
   'biggj-research-accelerator.mjs',
+  'biggj-background-memory-control.mjs',
   'biggj-autonomous-operator.mjs',
   'biggj-governance-triage.mjs',
   'runtime-release-registry.mjs',
