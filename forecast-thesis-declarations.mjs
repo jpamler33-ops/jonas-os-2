@@ -100,10 +100,21 @@ export function buildForecastThesisDeclarations({
   const disagreementCount=Math.max(0,Math.floor(Number(evidenceRecord?.disagreementCount)||0));
   const evidenceGate=txt(evidenceRecord?.gate);
   const evidenceStateFingerprint=evidenceRecord?.stateFingerprint?.hash??null;
+  const disagreementLayers=(evidenceRecord?.map?.layers||[])
+    .filter(x=>String(x?.relation||'').toUpperCase()==='CONFLICT')
+    .map(x=>safe(x?.layer))
+    .filter(Boolean)
+    .sort();
+  const mechanismChannels=Object.entries(mechanism?.channels||{})
+    .map(([id,score])=>[safe(id),clamp(score)])
+    .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))
+    .slice(0,4);
 
   const dependencyGate=txt(researchDependencyGraph?.gate);
   const dependencyCoverage=clamp(researchDependencyGraph?.impact?.coverage);
   const blockedFeatures=Math.max(0,Math.floor(Number(researchDependencyGraph?.impact?.blockedFeatures)||0));
+  const blockedFeatureIds=uniq(researchDependencyGraph?.impact?.blockedFeatureIds).slice(0,12);
+  const dependencyReasons=uniq(researchDependencyGraph?.reasons).slice(0,12);
   const dependencyAdequate=['PASS','CAUTION'].includes(dependencyGate)&&blockedFeatures===0;
 
   const scienceGate=txt(scientificValidity?.gate??scientificValidity?.status);
@@ -160,7 +171,8 @@ export function buildForecastThesisDeclarations({
         'CANDIDATE_SCORE:'+String(mechanismScore),
         'EVIDENCE_STRENGTH:'+String(evidenceStrength),
         'GATE:'+mechanismGate,
-        'CAUSAL_STATUS:'+causalStatus
+        'CAUSAL_STATUS:'+causalStatus,
+        ...mechanismChannels.map(([id,score])=>'CHANNEL:'+id+':'+String(score))
       ],
       availableAt:issuedAt
     }),
@@ -184,7 +196,8 @@ export function buildForecastThesisDeclarations({
         'INDEX:'+String(evidenceIndex??'UNKNOWN'),
         'DISAGREEMENT_COUNT:'+String(disagreementCount),
         'GATE:'+evidenceGate,
-        'FINGERPRINT:'+String(evidenceRecord?.fingerprint??'')
+        'FINGERPRINT:'+String(evidenceRecord?.fingerprint??''),
+        ...disagreementLayers.map(x=>'CONFLICT_LAYER:'+x)
       ],
       availableAt:issuedAt
     }),
@@ -196,7 +209,9 @@ export function buildForecastThesisDeclarations({
         'GATE:'+dependencyGate,
         'COVERAGE:'+String(dependencyCoverage),
         'BLOCKED_FEATURES:'+String(blockedFeatures),
-        'FINGERPRINT:'+String(researchDependencyGraph?.fingerprint??'')
+        'FINGERPRINT:'+String(researchDependencyGraph?.fingerprint??''),
+        ...blockedFeatureIds.map(x=>'BLOCKED_FEATURE:'+x),
+        ...dependencyReasons.map(x=>'REASON:'+safe(x))
       ],
       availableAt:issuedAt
     }),
@@ -394,6 +409,11 @@ export function buildForecastThesisDeclarations({
       dependencyAdequate,
       disagreementWithinTolerance,
       scienceAdequate,
+      disagreementLayers,
+      witnessContradictions,
+      topMechanismChannels:mechanismChannels.map(([id,score])=>({id,score})),
+      blockedFeatureIds,
+      dependencyReasons,
       unsupportedMaterialAssumptions:assumptions
         .filter(x=>x.requiresEvidence&&x.evidenceIds.length===0)
         .map(x=>x.assumptionId)
