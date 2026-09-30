@@ -485,18 +485,21 @@ export function refreshAutonomousResearchTrainingFactory(state,{
   const governanceBlocked=(Array.isArray(researchDataGovernanceSummary?.quarantinedSources)?researchDataGovernanceSummary.quarantinedSources.length:finite(researchDataGovernanceSummary?.quarantinedSources))>0||
     (Array.isArray(researchDataGovernanceSummary?.blockedSources)?researchDataGovernanceSummary.blockedSources.length:finite(researchDataGovernanceSummary?.blockedSources))>0;
   const dataNeeds=uniq(tasks.flatMap(x=>x.dataNeeds));
+  const stalledResearch=finite(leverage?.summary?.stalledTaskCount)>0;
 
   let mode='AUTONOMOUS_RESEARCH_ACTIVE';
   if(governanceBlocked)mode='DATA_QUALITY_BLOCKED';
   else if(manual.length)mode='MANUAL_REVIEW_REQUIRED';
   else if(unowned.length)mode='AUTOMATION_GAP';
+  else if(stalledResearch)mode='RESEARCH_STALLED';
   else if(automatic.length===0)mode='IDLE_MONITORING';
   else if(dataOnly.length===automatic.length)mode='DATA_COLLECTION_ONLY';
 
   const operatorDataOnly=
     !governanceBlocked&&
     manual.length===0&&
-    unowned.length===0;
+    unowned.length===0&&
+    !stalledResearch;
 
   const compactHistory=arr(base.history).slice(-31);
   compactHistory.push({
