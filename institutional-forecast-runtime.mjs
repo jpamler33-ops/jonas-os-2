@@ -954,11 +954,18 @@ function intelligenceForPersistence(snapshot,{externalizeTrackerArchive=false}={
 }
 
 function trackerArchiveRowForPersistence(record){
+  // Sidecar persistence must snapshot mutable tracker state. Returning live
+  // nested references allows revisions/thesis memory to change between the
+  // fingerprint pass and the asynchronous gzip pass. Read each live field once
+  // and clone it so even accessor-backed state has one point-in-time value.
+  const issueState=record?.issueState;
+  const revisions=record?.revisions;
+  const thesisMemory=record?.thesisMemory;
   return {
     id:record?.id,
-    issueState:record?.issueState,
-    revisions:Array.isArray(record?.revisions)?record.revisions:[],
-    thesisMemory:record?.thesisMemory??null
+    issueState:issueState==null?null:clone(issueState),
+    revisions:clone(Array.isArray(revisions)?revisions:[]),
+    thesisMemory:thesisMemory==null?null:clone(thesisMemory)
   };
 }
 
@@ -1119,12 +1126,17 @@ export async function saveInstitutionalForecastRuntime(runtime){
     }
     if(externalizeArchives){
       const trackerRows=[...(runtime?.intelligence?.tracker?.records?.values?.()??[])];
-      const archiveFingerprint=fingerprintJsonArrayStore({
+      // Snapshot/project exactly once before any asynchronous I/O. The tracker
+      // is live and may receive revisions while gzip yields to the event loop;
+      // hashing one view and serializing a later view caused production
+      // fingerprint mismatches and correctly failed the runtime closed.
+      const trackerArchiveRows=trackerRows.map(trackerArchiveRowForPersistence);
+      const trackerArchiveBuffers=[...jsonArrayStoreBuffers({
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         arrayKey:'records',
-        rows:trackerRows,
-        projectRow:trackerArchiveRowForPersistence
-      });
+        rows:trackerArchiveRows
+      })];
+      const archiveFingerprint=fingerprintJsonBuffers(trackerArchiveBuffers);
       const archiveLogicalBytes=archiveFingerprint.logicalBytes;
       const maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
       if(archiveLogicalBytes>maxTrackerArchiveBytes){
@@ -1142,12 +1154,9 @@ export async function saveInstitutionalForecastRuntime(runtime){
         const archivePath=trackerArchivePath(runtime.filePath,slot);
         const archiveTmp=archivePath+'.tmp-'+process.pid;
         try{
-          const streamed=await writeGzipJsonArrayStore({
+          const streamed=await writeGzipJsonBuffers({
             filePath:archiveTmp,
-            version:FORECAST_TRACKER_ARCHIVE_VERSION,
-            arrayKey:'records',
-            rows:trackerRows,
-            projectRow:trackerArchiveRowForPersistence,
+            buffers:trackerArchiveBuffers,
             level:1
           });
           if(streamed.sha256!==archiveHash||streamed.logicalBytes!==archiveLogicalBytes){
@@ -1160,8 +1169,8 @@ export async function saveInstitutionalForecastRuntime(runtime){
           throw err;
         }
       }
-      const revisionCount=trackerRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
-      const thesisRevisionEventCount=trackerRows.reduce((n,row)=>n+Number(row?.thesisMemory?.eventCount||0),0);
+      const revisionCount=trackerArchiveRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
+      const thesisRevisionEventCount=trackerArchiveRows.reduce((n,row)=>n+Number(row?.thesisMemory?.eventCount||0),0);
       trackerArchiveMeta={
         version:FORECAST_TRACKER_ARCHIVE_VERSION,
         slot,
@@ -1179,12 +1188,15 @@ export async function saveInstitutionalForecastRuntime(runtime){
     }
     if(externalizeArchives){
       const issuanceRows=trimIssuances(runtime.issuances,runtime.maxIssuances);
-      const storeFingerprint=fingerprintJsonArrayStore({
+      // Issuances are also live objects. Project/clone once so the hash and
+      // sidecar bytes are from the same point-in-time serialization.
+      const issuanceStoreRows=issuanceRows.map(issuanceForPersistence);
+      const issuanceStoreBuffers=[...jsonArrayStoreBuffers({
         version:FORECAST_ISSUANCE_STORE_VERSION,
         arrayKey:'issuances',
-        rows:issuanceRows,
-        projectRow:issuanceForPersistence
-      });
+        rows:issuanceStoreRows
+      })];
+      const storeFingerprint=fingerprintJsonBuffers(issuanceStoreBuffers);
       const storeLogicalBytes=storeFingerprint.logicalBytes;
       const maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
       if(storeLogicalBytes>maxIssuanceStoreBytes){
@@ -1202,12 +1214,9 @@ export async function saveInstitutionalForecastRuntime(runtime){
         const storePath=issuanceStorePath(runtime.filePath,slot);
         const storeTmp=storePath+'.tmp-'+process.pid;
         try{
-          const streamed=await writeGzipJsonArrayStore({
+          const streamed=await writeGzipJsonBuffers({
             filePath:storeTmp,
-            version:FORECAST_ISSUANCE_STORE_VERSION,
-            arrayKey:'issuances',
-            rows:issuanceRows,
-            projectRow:issuanceForPersistence,
+            buffers:issuanceStoreBuffers,
             level:1
           });
           if(streamed.sha256!==storeHash||streamed.logicalBytes!==storeLogicalBytes){

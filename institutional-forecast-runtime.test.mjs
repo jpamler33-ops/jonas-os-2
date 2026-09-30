@@ -1107,3 +1107,76 @@ test('gzip sidecar hashing is stable when a live journal row changes between ser
   assert.equal(r.lastError,null);
   assert.equal(reads,1);
 });
+
+
+test('gzip persistence snapshots mutable tracker fields once before async sidecar I/O',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-tracker-race-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  const record=r.intelligence.tracker.records.get(issued.forecastId);
+  assert.ok(record,'live tracker record required');
+  let reads=0;
+  Object.defineProperty(record,'revisions',{
+    configurable:true,
+    enumerable:true,
+    get(){
+      reads++;
+      return [{id:'race-'+reads,observedAt:inp.asOf+reads,reason:'TEST_MUTABLE_ACCESSOR'}];
+    }
+  });
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.ok(meta.trackerArchive);
+  assert.ok(reads>=2);
+  const sidecar=file+'.tracker.'+meta.trackerArchive.slot+'.json.gz';
+  const logical=gunzipSync(await readFile(sidecar)).toString('utf8');
+  assert.equal(Buffer.byteLength(logical),meta.trackerArchive.logicalBytes);
+  assert.equal(sha256(logical),meta.trackerArchive.sha256);
+  assert.equal(JSON.parse(logical).records.length,1);
+  assert.equal(r.healthy,true);
+});
+
+test('gzip persistence snapshots mutable issuance objects once before async sidecar I/O',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-issuance-race-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  const mutable=structuredClone(r.issuances[0]);
+  let reads=0;
+  Object.defineProperty(mutable,'raceMarker',{
+    configurable:true,
+    enumerable:true,
+    get(){
+      reads++;
+      return 'marker-'+reads;
+    }
+  });
+  r.issuances[0]=mutable;
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.ok(meta.issuanceStore);
+  assert.ok(reads>=1);
+  const sidecar=file+'.issuances.'+meta.issuanceStore.slot+'.json.gz';
+  const logical=gunzipSync(await readFile(sidecar)).toString('utf8');
+  assert.equal(Buffer.byteLength(logical),meta.issuanceStore.logicalBytes);
+  assert.equal(sha256(logical),meta.issuanceStore.sha256);
+  assert.equal(JSON.parse(logical).issuances.length,1);
+  assert.equal(r.healthy,true);
+});
