@@ -303,3 +303,35 @@ test('operator state persists and reloads with fingerprint verification',async()
   const loaded=await loadBiggjAutonomousOperator(file);
   assert.deepEqual(loaded,state);
 });
+
+
+test('intentional worker deferral stays operator-free while passive data accumulates',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'RESEARCH_STALLED',
+      operatorDataOnly:false,
+      automatic:12,
+      manual:0,
+      dataOnly:12,
+      unowned:0,
+      dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+      nextTasks:[task()]
+    }),
+    operations:{
+      forecast_shadow_competition:{
+        lastAt:now-10_000,
+        lastError:'DEFERRED_PRE_SNAPSHOT_HARD_MEMORY_PRESSURE'
+      }
+    },
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.ownerAssessments[0].state,'BACKPRESSURE');
+  assert.equal(summary.mode,'WAITING_FOR_DATA');
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.activeIncidents,0);
+  assert.equal(out.actions.length,0);
+});
