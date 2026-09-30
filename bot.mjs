@@ -5399,35 +5399,55 @@ async function showShadowPortfolio(chatId,messageId=null){
  const now=Date.now();
  const x=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const research=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
+ const wallets=shadowDualWalletSummary(shadowPortfolioLedger,{asOf:now});
+ const normal=wallets.normal,lab=wallets.lab;
  const money=v=>Number.isFinite(Number(v))?(Number(v)>=0?'+':'')+fmt(Number(v),2)+' USDT':'—';
+ const pct=v=>Number.isFinite(Number(v))?fmt(Number(v)*100,1)+'%':'—';
  const lines=[
-  'TCX // SHADOW PORTFOLIO','━━━━━━━━━━━━━━━━━━━━',
-  'PRIMARY PERFORMANCE','','EQUITY      '+fmt(x.equityQuote,2)+' USDT',
-  'GESAMT PnL  '+money(x.netPnlQuote),
-  'HEUTE       '+money(shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:'DAY',asOf:now,timeZone:shadowStatsTimeZone}).realizedPnlQuote),
-  'DRAWDOWN    '+fmt(x.maxDrawdownPct*100,2)+'%','',
-  'Trades '+x.closedTrades+'   ·   Winrate '+(x.winRate==null?'—':fmt(x.winRate*100,1)+'%'),
-  'Profit Factor '+(x.profitFactor==null?'—':fmt(x.profitFactor,2))+'   ·   Offen '+x.openPositions,'',
-  'AKTIVE HAUPTPOSITIONEN'
+  'BIGGJ // DUAL SHADOW WALLETS','━━━━━━━━━━━━━━━━━━━━',
+  '',
+  'WALLET 2 · NORMAL',
+  'Kapitalmodell  geregelt / begrenzt',
+  'Equity         '+fmt(x.equityQuote,2)+' USDT',
+  'PnL            '+money(normal.netPnlQuote),
+  'Heute          '+money(shadowPortfolioPeriodStats(shadowPortfolioLedger,{period:'DAY',asOf:now,timeZone:shadowStatsTimeZone}).realizedPnlQuote),
+  'Drawdown       '+fmt(x.maxDrawdownPct*100,2)+'%',
+  'Trades         '+normal.closedTrades+' · offen '+normal.openPositions,
+  'Winrate        '+pct(normal.winRate),
+  'Profit Factor  '+(normal.profitFactor==null?'—':fmt(normal.profitFactor,2)),
+  '',
+  'WALLET 1 · LAB',
+  'Kapitalmodell  ∞ virtuelles Kapital',
+  'PnL realisiert '+money(lab.realizedPnlQuote),
+  'PnL offen      '+money(lab.unrealizedPnlQuote),
+  'Recovery Debt  '+fmt(lab.currentRecoveryDebtQuote,2)+' USDT',
+  'Recovery       '+fmt(lab.recoveryCoverage*100,1)+'%',
+  'Surplus        '+fmt(lab.retainedSurplusQuote,2)+' USDT',
+  'Aktiv gebunden '+fmt(lab.currentCapitalAtRiskQuote,2)+' USDT',
+  'Trades         '+lab.closedTrades+' · offen '+lab.openPositions,
+  'Winrate        '+pct(lab.winRate),
+  'Profit Factor  '+(lab.profitFactor==null?'—':fmt(lab.profitFactor,2)),
+  'Status         '+String(lab.objectiveStatus).replaceAll('_',' '),
+  '',
+  'LAB LANES',
+  'Unconstrained '+(research.byMode.LAB_UNCONSTRAINED?.open||0)+' offen / '+(research.byMode.LAB_UNCONSTRAINED?.closed||0)+' fertig · '+fmt(labWalletUnitNotionalQuote,0)+' USDT Unit',
+  'Coverage      '+(research.byMode.COVERAGE_PROBE?.open||0)+' offen / '+(research.byMode.COVERAGE_PROBE?.closed||0)+' fertig',
+  'Discovery     '+(research.byMode.EXPLORATION?.open||0)+' offen / '+(research.byMode.EXPLORATION?.closed||0)+' fertig',
+  'ABSTAIN Probe '+(research.byMode.ABSTAIN_PROBE?.open||0)+' offen / '+(research.byMode.ABSTAIN_PROBE?.closed||0)+' fertig',
+  'Challenger    '+(research.byMode.CHALLENGER?.open||0)+' offen / '+(research.byMode.CHALLENGER?.closed||0)+' fertig',
+  '',
+  'ZIEL LAB',
+  'Verluste komplett wieder verdienen und über viele abgeschlossene Trades nach Kosten kumuliert positiv werden.',
+  'Keine Kapital-/Drawdown-/Academy-Limits. Nur PIT, Datenintegrität, Dedupe und Runtime-Schutz bleiben.',
+  '',
+  'AKTIVE NORMAL-TRADES'
  ];
- if(x.active.length)for(const p of x.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.side+' · virtuell '+fmt(p.entryQuote,0)+' USDT · PnL '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene Hauptposition.');
- lines.push(
-  '',
-  'RESEARCH / PROBES · NICHT IN PRIMARY PERFORMANCE',
-  'Offen '+research.openPositions+'   ·   Abgeschlossen '+research.closedTrades,
-  'Research PnL '+money(research.netPnlQuote),
-  'Coverage '+(research.byMode.COVERAGE_PROBE?.open||0)+' offen / '+(research.byMode.COVERAGE_PROBE?.closed||0)+' fertig · '+fmt(coverageCurriculumNotional,0)+' USDT Probe',
-  'Discovery '+(research.byMode.EXPLORATION?.open||0)+' offen / '+(research.byMode.EXPLORATION?.closed||0)+' fertig · '+fmt(mandatoryShadowDiscoveryNotional,0)+' USDT Basis',
-  'ABSTAIN '+(research.byMode.ABSTAIN_PROBE?.open||0)+' offen / '+(research.byMode.ABSTAIN_PROBE?.closed||0)+' fertig',
-  'Challenger '+(research.byMode.CHALLENGER?.open||0)+' offen / '+(research.byMode.CHALLENGER?.closed||0)+' fertig',
-  '',
-  'AKTIVE RESEARCH-TRADES'
- );
- if(research.active.length)for(const p of research.active.slice(0,5))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.entryMode+' · virtuell '+fmt(p.entryQuote,0)+' USDT · PnL '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offenen Research-Trades.');
- lines.push('','TRADE LOOP','Entry → Position → Exit → Attribution → Learning','','SHADOW ONLY · REAL ORDERS BLOCKED');
- const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[[{text:'🔄 Aktualisieren',callback_data:'home:portfolio'},{text:'📈 Performance',callback_data:'home:stats_day'}],[{text:'🎯 Signale',callback_data:'home:radar'},{text:'🔎 Kein Trade?',callback_data:'cmdrun:why_not_trade'}],[{text:'🧠 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
+ if(normal.active.length)for(const p of normal.active.slice(0,4))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.side+' · '+fmt(p.entryQuote,0)+' USDT · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene NORMAL-Position.');
+ lines.push('','AKTIVE LAB-TRADES');
+ if(lab.active.length)for(const p of lab.active.slice(0,6))lines.push((p.side==='LONG'?'↗':'↘')+' '+p.symbol.replace('USDT','/USDT')+' · '+p.entryMode+' · '+fmt(p.entryQuote,0)+' USDT · '+money(p.unrealizedNetPnlQuote));else lines.push('Keine offene LAB-Position.');
+ lines.push('','SHADOW_ONLY · REAL ORDERS BLOCKED');
+ const payload={chat_id:chatId,text:lines.join('\n').slice(0,4096),reply_markup:{inline_keyboard:[[{text:'🔄 Wallets',callback_data:'home:portfolio'},{text:'📈 NORMAL Stats',callback_data:'home:stats_day'}],[{text:'🎯 Signale',callback_data:'home:radar'},{text:'🔎 Kein Trade?',callback_data:'cmdrun:why_not_trade'}],[{text:'🧠 Lernzentrum',callback_data:'home:performance'},{text:'🏠 Command Center',callback_data:'home'}]]}};return messageId?tg('editMessageText',{...payload,message_id:messageId}):tg('sendMessage',payload);
 }
-
 async function showTradeDiscoveryDiagnostics(chatId,messageId=null){
   const now=Date.now();
   const positions=shadowPortfolioLedger.positions||[];
