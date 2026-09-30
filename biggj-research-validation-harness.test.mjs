@@ -49,7 +49,9 @@ function evidence(tree,skillId,{
   chronology=false,
   cost=false,
   concentration=false,
-  winner=false
+  winner=false,
+  validationEligible=true,
+  provenance=null
 }={}){
   const at=2000+n;
   return recordBiggjSkillEvidence(tree,{
@@ -70,7 +72,8 @@ function evidence(tree,skillId,{
     costStressPassed:cost,
     concentrationPassed:concentration,
     winnerRemovalPassed:winner,
-    provenance:[{n}]
+    validationEligible,
+    provenance:provenance??[{n}]
   });
 }
 
@@ -89,6 +92,40 @@ test('new discovered skill receives a concrete validation plan but no execution 
   assert.equal(review.automaticPromotionAllowed,false);
   assert.equal(review.canInfluencePrimary,false);
   assert.equal(review.canExecuteLive,false);
+});
+
+test('research context is visible to the harness but excluded from validation readiness',()=>{
+  let tree=discoveredTree();
+  const id=discoveredSkillId(tree);
+  tree=evidence(tree,id,{
+    n:1,episode:'episode:A',validationEligible:false,
+    provenance:[{kind:'PROSPECTIVE_PERSISTENT_CASE'}]
+  });
+  tree=evidence(tree,id,{
+    n:2,episode:'episode:B',validationEligible:false,
+    provenance:[{kind:'PROSPECTIVE_PERSISTENT_CASE'}]
+  });
+  tree=evidence(tree,id,{
+    n:3,episode:'episode:C',validationEligible:false,
+    provenance:[{kind:'PERSISTENCE_FILTERED_ASSOCIATION'}]
+  });
+
+  const node=tree.nodes.find(x=>x.skillId===id);
+  assert.equal(node.evidenceSummary.total,3);
+  assert.equal(node.evidenceSummary.independentEpisodes,3);
+  assert.equal(node.evidenceSummary.validationTotal,0);
+  assert.equal(node.evidenceSummary.validationIndependentEpisodes,0);
+
+  const review=evaluateBiggjResearchSkillValidation(tree,id);
+  assert.equal(review.evidence.researchEvidenceTotal,3);
+  assert.equal(review.evidence.researchContextTotal,3);
+  assert.equal(review.evidence.total,0);
+  assert.equal(review.evidence.independentEpisodes,0);
+  assert.equal(review.recommendedStatus,'DISCOVERING');
+  assert.equal(review.manualTransitionReviewEligible,false);
+  assert.ok(review.blockers.some(x=>x.id==='TOTAL_EVIDENCE'));
+  assert.equal(review.semantics.researchContextEvidenceCannotUnlockMaturity,true);
+  assert.equal(review.automaticStatusTransitionAllowed,false);
 });
 
 test('three PIT rows across two conservative episodes make only a manual learning review eligible',()=>{
