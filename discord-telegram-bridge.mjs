@@ -12,12 +12,17 @@ import {
   BIGGJ_EXPERIENCE_LAYOUT,
   buildBiggjExperiencePanelMap
 } from './biggj-experience-center.mjs';
+import {
+  BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT,
+  buildBiggjDiscordMarketSciencePanelMap,
+  buildBiggjDiscordMarketSciencePayload
+} from './biggj-discord-market-science.mjs';
 import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
 import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 import { renderBiggjProofFeed } from './biggj-signal-lab.mjs';
 
-export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V10';
+export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_MARKET_SCIENCE_V7';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -47,6 +52,11 @@ const COMMANDS=[
   {name:'memory',description:'Episode Memory für einen Markt',options:[symbolOption()]},
   {name:'evidence',description:'Evidence-Diagnostik für einen Markt',options:[symbolOption()]},
   {name:'validity',description:'Research-Validity für einen Markt',options:[symbolOption()]},
+  {name:'science',description:'BIGGJ Market Science Home öffnen'},
+  {name:'worldmodel',description:'BIGGJ World Model öffnen'},
+  {name:'lab',description:'BIGGJ Scientific Lab öffnen'},
+  {name:'decision_intel',description:'BIGGJ Decision Intelligence öffnen'},
+  {name:'autopilot',description:'BIGGJ Autopilot Supervisor öffnen'},
   {name:'executive',description:'BIGGJ Executive State öffnen'},
   {name:'brain',description:'BIGGJ Brain Pulse öffnen'},
   {name:'knowledge',description:'BIGGJ Wissens- und Capability-Map öffnen'},
@@ -82,32 +92,29 @@ const COMMANDS=[
 
 
 const SERVER_LAYOUT=Object.freeze([
-  {category:'TCX • CONTROL',channels:[
-    {name:'start-here',topic:'Startpunkt, Befehle und Sicherheitsstatus von TCX.'},
-    {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'},
-    {name:'signal-lab',topic:'3-Klick Signal Lab: Markt → Horizont → klare Bias-/ABSTAIN-Ausgabe mit Calibration-Gate.'},
-    {name:'proof-feed',topic:'Forecast BEFORE → LIVE commitment → Outcome AFTER → Learning. Zeigt offene Commitments, Treffer und Fehler ohne Cherry-Picking.'}
-  ]},
+  ...BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT,
   ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT,
   ...BIGGJ_EXPERIENCE_LAYOUT,
-  {category:'TCX • MARKETS',channels:[
-    {name:'market-overview',topic:'Übersicht der wichtigsten beobachteten Märkte.'},
-    {name:'btc',topic:'BTC/USDT Live-Marktpanel von TCX.'},
-    {name:'eth',topic:'ETH/USDT Live-Marktpanel von TCX.'},
-    {name:'sol',topic:'SOL/USDT Live-Marktpanel von TCX.'},
-    {name:'memecoins',topic:'Memecoin Intelligence Lab: Live DEX Trends, Liquidität, Risikoindikatoren, Datenlücken und Research. SHADOW_ONLY.'}
+  {category:'BIGGJ • MARKET INPUTS',channels:[
+    {name:'market-overview',topic:'Beobachtete Märkte als Reality/World-Model Input; keine autonome Trade-Empfehlung.'},
+    {name:'btc',topic:'BTC/USDT Live-Marktpanel als Downstream-Marktansicht.'},
+    {name:'eth',topic:'ETH/USDT Live-Marktpanel als Downstream-Marktansicht.'},
+    {name:'sol',topic:'SOL/USDT Live-Marktpanel als Downstream-Marktansicht.'},
+    {name:'memecoins',topic:'Memecoin Reality/Research Input: DEX Trends, Liquidität, Risikoindikatoren und Datenlücken. SHADOW_ONLY.'}
   ]},
-  {category:'TCX • INTELLIGENCE',channels:[
-    {name:'forecasts',topic:'Probabilistische TCX Forecasts und Invalidation.'},
-    {name:'global-intel',topic:'Legacy Global-Intel Oberfläche; neue Nutzerflächen sind #news-feed und #world-watch.'},
-    {name:'anomalies',topic:'Anomalien, Regimewechsel und Research-Hinweise.'},
-    {name:'alerts',topic:'Priorisierte TCX System- und Research-Alerts.'},
-    {name:'theses',topic:'BIGGJ Living Theses, Ghost Paths und Trade DNA für aktive Shadow-Trades.'}
+  {category:'BIGGJ • DECISION APPLICATIONS',channels:[
+    {name:'tcx-terminal',topic:'Legacy/technical TCX Mission Control. TCX ist Decision Application, nicht BIGGJs Identität.'},
+    {name:'signal-lab',topic:'Downstream Signal Lab: Markt → Horizont → Bias/ABSTAIN mit Calibration-Gate.'},
+    {name:'proof-feed',topic:'Forecast BEFORE → commitment → Outcome AFTER → Learning ohne Cherry-Picking.'},
+    {name:'forecasts',topic:'Probabilistische Forecasts und Invalidation als Downstream Decision Intelligence.'},
+    {name:'anomalies',topic:'Anomalien und Regimewechsel als Research-/Decision-Hinweise.'},
+    {name:'global-intel',topic:'Legacy Global-Intel Oberfläche; kanonische Reality-Flächen sind #news-feed und #world-watch.'},
+    {name:'theses',topic:'Living Theses und Trade DNA für aktive Shadow-Trades; keine wissenschaftliche Autorität.'}
   ]},
-  {category:'TCX • SHADOW',channels:[
-    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades mit kompakter Thesis, Risiko, PnL und Live-Chart-Thread. Keine echten Orders.'},
-    {name:'closed-trades',topic:'Nur abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
-    {name:'performance',topic:'Tages-, Wochen- und Monatsperformance im Shadow-Modus.'},
+  {category:'BIGGJ • SHADOW TRADING',channels:[
+    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades. Trading ist Downstream Application; keine echten Orders.'},
+    {name:'closed-trades',topic:'Abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
+    {name:'performance',topic:'Shadow-Performance als Application-Metrik; PnL darf keine Theorie promoten.'},
     {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen mit Point-in-Time Kontext.'}
   ]},
   {category:'BIGGJ • TRADING ACADEMY',channels:[
@@ -121,20 +128,22 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'academy-questions',topic:'Fragen stellen mit sauberem Analyse-Template.'}
   ]},
   {category:'BIGGJ • OPERATIONS',channels:[
+    {name:'alerts',topic:'Nur relevante Zustandsänderungen und echte Ausnahmen; keine normale passive Wartezeit als Alarm.'},
     {name:'channel-supervisor',topic:'Meta-Überwachung aller Channel-Manager: Zustand, Freshness, Fehler, Entscheidungen und Auto-Reparaturen.'},
-    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'},
-    {name:'rulebook',topic:'Kanonisches BIGGJ Rulebook: Soll, Nicht-Soll, HARD-Regeln, Runtime-Verstöße und Coverage.'}
+    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'}
   ]},
-  {category:'TCX • SYSTEM',channels:[
-    {name:'system-status',topic:'Runtime-, Daten- und Sicherheitsstatus.'},
+  {category:'BIGGJ • SYSTEM',channels:[
+    {name:'system-status',topic:'Runtime-, Science-, Daten- und Sicherheitsstatus.'},
     {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
-    {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'}
+    {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'},
+    {name:'rulebook',topic:'Kanonisches BIGGJ Rulebook: Soll, Nicht-Soll, HARD-Regeln, Runtime-Verstöße und Coverage.'}
   ]}
 ]);
 
 const CHANNEL_PROFILE_GROUPS=Object.freeze({
   HOME:new Set(['start-here']),
   LIVE_60:new Set([
+    'science-home','world-model','science-lab','decision-intelligence','autopilot-supervisor',
     'tcx-terminal','signal-lab','proof-feed','performance','system-status','data-health',
     'biggj-needs','learned-playbook','trader-watch','trade-cockpit','chart-desk','mobile-app',
     'forecasts','anomalies','trade-replay','errors','channel-supervisor','channel-improvements','rulebook'
