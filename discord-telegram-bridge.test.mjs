@@ -153,7 +153,7 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/COMMODITIES/);
   assert.match(source,/DISCOVERY_ONLY/);
   assert.match(source,/noch nicht unabhängig verifiziert/);
-  assert.match(source,/posted>=12|posted>=12/);
+  assert.match(source,/posted\+migrated>=12/);
 });
 
 test('channel manager supervisor is wired across all declared channels without runtime dependencies',async()=>{
