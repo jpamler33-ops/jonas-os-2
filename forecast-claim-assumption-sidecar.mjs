@@ -476,14 +476,16 @@ export function createForecastClaimAssumptionShadowObservation(sidecar,{
       everStaleAssumptionIdsBeforeMaturity:Array.isArray(thesisRevisionState?.everStaleAssumptionIdsBeforeMaturity)
         ?[...new Set(thesisRevisionState.everStaleAssumptionIdsBeforeMaturity.map(String))].sort()
         :[],
-      firstStaleAt:Number.isFinite(Number(thesisRevisionState?.firstStaleAt))?Number(thesisRevisionState.firstStaleAt):null,
-      firstWatchAt:Number.isFinite(Number(thesisRevisionState?.firstWatchAt))?Number(thesisRevisionState.firstWatchAt):null,
-      firstForecastInvalidatedAt:Number.isFinite(Number(thesisRevisionState?.firstForecastInvalidatedAt))
-        ?Number(thesisRevisionState.firstForecastInvalidatedAt)
-        :null,
-      firstWarningAt:Number.isFinite(Number(thesisRevisionState?.firstWarningAt))?Number(thesisRevisionState.firstWarningAt):null,
+      firstStaleAt:thesisRevisionState?.firstStaleAt==null?null:Number.isFinite(Number(thesisRevisionState.firstStaleAt))?Number(thesisRevisionState.firstStaleAt):null,
+      firstWatchAt:thesisRevisionState?.firstWatchAt==null?null:Number.isFinite(Number(thesisRevisionState.firstWatchAt))?Number(thesisRevisionState.firstWatchAt):null,
+      firstForecastInvalidatedAt:thesisRevisionState?.firstForecastInvalidatedAt==null
+        ?null
+        :Number.isFinite(Number(thesisRevisionState.firstForecastInvalidatedAt))
+          ?Number(thesisRevisionState.firstForecastInvalidatedAt)
+          :null,
+      firstWarningAt:thesisRevisionState?.firstWarningAt==null?null:Number.isFinite(Number(thesisRevisionState.firstWarningAt))?Number(thesisRevisionState.firstWarningAt):null,
       warningAvailableBeforeMaturity:thesisRevisionState?.warningAvailableBeforeMaturity===true,
-      warningLeadMs:Number.isFinite(Number(thesisRevisionState?.warningLeadMs))?Number(thesisRevisionState.warningLeadMs):null,
+      warningLeadMs:thesisRevisionState?.warningLeadMs==null?null:Number.isFinite(Number(thesisRevisionState.warningLeadMs))?Number(thesisRevisionState.warningLeadMs):null,
       forecastInvalidatedBeforeMaturity:thesisRevisionState?.forecastInvalidatedBeforeMaturity===true,
       interpretation:'PRE_OUTCOME_REVISION_SIGNAL_NOT_CAUSAL_PROOF'
     }:null,
