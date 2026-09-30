@@ -304,3 +304,15 @@ test('restore quarantines tampered committed rows before learning rehydration',(
   assert.equal(restored.entries[0].proofIntegrity,'MISMATCH');
   assert.equal(restored.proofIntegrityStats().invalid,1);
 });
+
+
+test('runtime forwards Signal Lab mode and exposes read-only mobile APIs',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(source,/showSignalLab\(chatId,textMessageId,a\.symbol,a\.horizon\|\|'1h',a\.mode\|\|'FULL'\)/);
+  assert.match(source,/\/signal-lab\.json/);
+  assert.match(source,/\/proof-feed\.json/);
+  assert.match(source,/currentSignalLab\(symbol,horizon,mode\)/);
+  assert.match(source,/currentProofFeed\(symbol,\{limit:20,liveLimit:8\}\)/);
+  assert.match(source,/canExecuteLive:false/);
+});
