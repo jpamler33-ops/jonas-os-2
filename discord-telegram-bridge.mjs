@@ -705,7 +705,7 @@ function buildRulebookPayload(snapshot={}){
   }],allowedMentions:{parse:[]}};
 }
 
-function buildChannelSupervisorPayload(managerState={},translationHealth=null,rulebookRuntime=null){
+function buildChannelSupervisorPayload(managerState={},translationHealth=null,rulebookRuntime=null,outcomeSupervisor=null){
   const counts=managerState?.counts||{};
   const problems=(managerState?.topProblems||[]).slice(0,10).map(x=>
     '• **#'+String(x.name)+'** · '+String(x.status)+' → '+String(x.decision)+'\n  '+String(x.reason)
@@ -723,6 +723,7 @@ function buildChannelSupervisorPayload(managerState={},translationHealth=null,ru
       {name:'Operations-Director',value:String(director?.status||'—')+' · '+String(director?.healthyDomains||0)+'/'+String(director?.domains||0)+' Domains gesund',inline:true},
       {name:'Meta-Supervisor',value:String(managerState?.metaSupervisor?.status||'—')+' · Coverage '+Math.round(Number(managerState?.metaSupervisor?.managerCoverage||0)*100)+'% · Blindspots '+String(managerState?.metaSupervisor?.unprofiledManagers||0),inline:true},
       {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
+      {name:'Outcome-Supervisor',value:outcomeSupervisor?String(outcomeSupervisor.status||'UNKNOWN')+' · Research '+String(outcomeSupervisor?.outcomeHealth?.researchEvidence||0)+' → Validation '+String(outcomeSupervisor?.outcomeHealth?.validationEvidence||0)+' → Forward '+String(outcomeSupervisor?.outcomeHealth?.forwardShadow||0)+' · stalled '+String(outcomeSupervisor?.outcomeHealth?.stalledResearchTasks||0):'—',inline:false},
       {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
       {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
       {name:'Rulebook',value:rulebookRuntime?String(rulebookRuntime.state||'UNKNOWN')+' · Verstöße '+String(rulebookRuntime?.counts?.failed||0)+' · HARD '+String(rulebookRuntime?.counts?.hard||0):'—',inline:true},
@@ -1545,7 +1546,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const translation=germanTranslator.health();
     const mission=await safeMissionSnapshot();
     const rulebookRuntime=mission?.health?.biggjRulebook?.runtime||null;
-    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation,rulebookRuntime));
+    await refreshStableManagedPanel('channel-supervisor','BIGGJ_CHANNEL_SUPERVISOR_V1',buildChannelSupervisorPayload(after,translation,rulebookRuntime,mission?.health?.biggjObservability?.outcomeSupervisor||null));
     await refreshStableManagedPanel('channel-improvements','BIGGJ_CHANNEL_IMPROVEMENTS_V1',buildChannelImprovementsPayload(after,translation,rulebookRuntime));
     await refreshStableManagedPanel('rulebook',MARKERS.rulebook,buildRulebookPayload(mission));
     const finalState=managerSnapshot();
@@ -2014,7 +2015,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='supervisor'){
       await interaction.deferReply();
       const mission=await safeMissionSnapshot();
-      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health(),mission?.health?.biggjRulebook?.runtime||null));
+      await interaction.editReply(buildChannelSupervisorPayload(managerSnapshot(),germanTranslator.health(),mission?.health?.biggjRulebook?.runtime||null,mission?.health?.biggjObservability?.outcomeSupervisor||null));
       return;
     }
     if(name==='improvements'){
