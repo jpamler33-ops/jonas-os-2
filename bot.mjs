@@ -6062,6 +6062,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let externalResearchSnapshot=null;
   let publicContextResearchSnapshot=null;
   let dexContextResearchSnapshot=null;
+  let dexPromotionResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     const researchAsOf=Date.now();
     try{
@@ -6090,6 +6091,10 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       {
         id:'dex_context',
         run:()=>dexScreenerProvider.fetchTrendingMetas({limit:20})
+      },
+      {
+        id:'dex_promotion',
+        run:()=>dexScreenerProvider.fetchMemecoinRadar({limit:6,chainIds:['solana','base','ethereum']})
       }
     ];
     if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
@@ -6117,6 +6122,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     externalResearchSnapshot=fanout.results.external?.value||null;
     publicContextResearchSnapshot=fanout.results.public_context?.value||null;
     dexContextResearchSnapshot=fanout.results.dex_context?.value||null;
+    dexPromotionResearchSnapshot=fanout.results.dex_promotion?.value||null;
     entityFlowResearchSnapshot=fanout.results.entity_flow?.value||null;
     walletResearchSnapshot=fanout.results.wallet?.value||null;
 
@@ -6125,14 +6131,14 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       let ok=row.status==='FULFILLED';
       if(id==='derivatives') ok=ok&&value?.ok===true;
       else if(id==='external') ok=ok&&Boolean(value?.coinMetrics?.ok||value?.deribitOptions?.ok||value?.macro?.ok||value?.predictionMarket?.ok);
-      else if(id==='public_context') ok=ok&&Boolean(value?.sentiment||value?.global||value?.defi);
-      else if(id==='dex_context') ok=ok&&Array.isArray(value?.rows)&&value.rows.length>0;
+      else if(id==='public_context') ok=ok&&Boolean(value?.sentiment||value?.global||value?.defi||value?.stablecoins);
+      else if(['dex_context','dex_promotion'].includes(id)) ok=ok&&Array.isArray(value?.rows)&&value.rows.length>0;
       else if(['onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
       const error=row.status==='REJECTED'
         ?row.error
         :(ok?null:(value?.reason||((value?.errors||[]).map(x=>x.error||x.reason||String(x)).join(' | ')||'PROVIDER_NO_USABLE_DATA')));
       recordOperation(observability,{
-        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':id==='dex_context'?'dexscreener_trending_research':'research_provider_'+id,
+        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':id==='dex_context'?'dexscreener_trending_research':id==='dex_promotion'?'dexscreener_promotion_research':'research_provider_'+id,
         ok,
         latencyMs:row.durationMs,
         error
@@ -6189,7 +6195,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         walletSnapshot:walletResearchSnapshot,
         externalSnapshot:externalResearchSnapshot,
         publicContextSnapshot:publicContextResearchSnapshot,
-        dexContextSnapshot:dexContextResearchSnapshot
+        dexContextSnapshot:dexContextResearchSnapshot,
+        dexPromotionSnapshot:dexPromotionResearchSnapshot
       });
       researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
       markForecastMemory('rdp-append');

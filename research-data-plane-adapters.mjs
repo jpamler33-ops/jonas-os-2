@@ -33,12 +33,14 @@ import {
 } from './expansion-runtime/public-market-context-provider.mjs';
 import {
   dexScreenerTrendingMetasToExtraFeatures,
+  dexScreenerPromotionRadarToExtraFeatures,
   DEXSCREENER_PUBLIC_PROVIDER_VERSION
 } from './expansion-runtime/dexscreener-public-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V5';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V6';
 
 function finite(v){
+  if(v==null||v==='') return null;
   const n=Number(v);
   return Number.isFinite(n)?n:null;
 }
@@ -561,6 +563,52 @@ function publicContextInputs(symbol,context,ingestedAt){
     }
   }
 
+  if(context?.stablecoins){
+    const featureIds=[
+      'research.stablecoin.totalSupplyLog',
+      'research.stablecoin.chainCountLog',
+      'research.stablecoin.ethereumSupplyShare',
+      'research.stablecoin.tronSupplyShare',
+      'research.stablecoin.solanaSupplyShare',
+      'research.stablecoin.baseSupplyShare',
+      'research.stablecoin.top5SupplyShare',
+      'research.stablecoin.supplyToDefiTvlRatio'
+    ];
+    const features=featureIds.map(id=>byId.get(id)).filter(Boolean);
+    if(features.length){
+      const availableAt=finite(context?.capturedAt)??ingestedAt;
+      const eventTime=availableAt;
+      rows.push(createResearchFeatureSnapshot({
+        streamKey:symbol,
+        domain:'STABLECOIN_CONTEXT',
+        source:'DEFILLAMA_STABLECOIN_CHAINS',
+        sourceVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+        sourceEventId:makeSourceEventId({symbol,source:'DEFILLAMA_STABLECOIN_CHAINS',eventTime,features:features.map(x=>[x.id,x.value])}),
+        eventTime,
+        availableAt,
+        ingestedAt,
+        ttlMs:30*60_000,
+        finality:'OBSERVED',
+        quality:{
+          completeness:features.length/featureIds.length,
+          sourceCount:1,
+          expectedSourceCount:1,
+          status:'CURRENT_PUBLIC_STABLECOIN_SUPPLY_SNAPSHOT'
+        },
+        features,
+        provenance:{
+          adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+          providerVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+          upstreamSource:String(context.stablecoins.source||'DefiLlama Stablecoins Public API'),
+          endpoint:String(context.stablecoins.endpoint||'/stablecoinchains'),
+          timestampSemantics:'CAPTURE_TIME_CURRENT_SNAPSHOT',
+          epistemic:String(context.stablecoins.epistemic||'CURRENT_STABLECOIN_SUPPLY_SNAPSHOT_NOT_FLOW_OR_FORECAST'),
+          researchOnly:true
+        }
+      }));
+    }
+  }
+
   return rows.filter(Boolean);
 }
 
@@ -593,6 +641,42 @@ function dexContextInput(symbol,snapshot,ingestedAt){
       upstreamSource:String(snapshot?.source||'DEXSCREENER_PUBLIC_API'),
       timestampSemantics:'CAPTURE_TIME_CURRENT_SNAPSHOT',
       epistemic:String(snapshot?.epistemic||'TRENDING_META_ACTIVITY_NOT_SOCIAL_SENTIMENT_OR_FORECAST'),
+      researchOnly:true
+    }
+  });
+}
+
+function dexPromotionInput(symbol,snapshot,ingestedAt){
+  const features=dexScreenerPromotionRadarToExtraFeatures(snapshot);
+  if(!features.length) return null;
+  const availableAt=finite(snapshot?.capturedAt)??ingestedAt;
+  const eventTime=eventTimeOrAvailable(snapshot?.capturedAt,availableAt);
+  return createResearchFeatureSnapshot({
+    streamKey:symbol,
+    domain:'DEX_PROMOTION_CONTEXT',
+    source:'DEXSCREENER_PROMOTION_RADAR',
+    sourceVersion:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+    sourceEventId:makeSourceEventId({symbol,source:'DEXSCREENER_PROMOTION_RADAR',eventTime,features:features.map(x=>[x.id,x.value])}),
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:10*60_000,
+    finality:'OBSERVED',
+    quality:{
+      completeness:features.length/9,
+      sourceCount:1,
+      expectedSourceCount:1,
+      status:'CURRENT_PUBLIC_DEX_PROMOTION_SNAPSHOT'
+    },
+    features,
+    provenance:{
+      adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+      providerVersion:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
+      upstreamSource:String(snapshot?.source||'DEXSCREENER_PUBLIC_API'),
+      timestampSemantics:'CAPTURE_TIME_CURRENT_SNAPSHOT',
+      epistemic:'PROMOTION_BIASED_DEX_ACTIVITY_NOT_ALPHA_OR_FORECAST_PROBABILITY',
+      promotionBiased:true,
+      causalClaim:false,
       researchOnly:true
     }
   });
@@ -647,7 +731,8 @@ export function buildResearchDataPlaneSnapshots({
   walletSnapshot=null,
   externalSnapshot=null,
   publicContextSnapshot=null,
-  dexContextSnapshot=null
+  dexContextSnapshot=null,
+  dexPromotionSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -661,6 +746,7 @@ export function buildResearchDataPlaneSnapshots({
     walletInput(s,walletSnapshot,t),
     ...externalInputs(s,externalSnapshot,t),
     ...publicContextInputs(s,publicContextSnapshot,t),
-    dexContextInput(s,dexContextSnapshot,t)
+    dexContextInput(s,dexContextSnapshot,t),
+    dexPromotionInput(s,dexPromotionSnapshot,t)
   ].filter(Boolean);
 }
