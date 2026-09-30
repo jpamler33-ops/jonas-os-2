@@ -226,3 +226,53 @@ test('runtime assessment exposes unproven coverage and blocks verification laund
   assert.equal(bad.state,'BLOCKED');
   assert.ok(bad.violations.some(v=>v.ruleId==='NEWS-003'));
 });
+
+
+test('runtime assessment detects future news, stale live data, broken token identity and manager blind spots',()=>{
+  const now=Date.parse('2026-09-30T12:00:00Z');
+  const out=evaluateBiggjRuntimeRulebook({
+    asOf:now,
+    newsFreshnessMs:60_000,
+    health:{
+      institutionalKernel:{execution:'SHADOW_ONLY',canExecute:false},
+      autonomousOperator:{
+        canExecuteLive:false,
+        automaticPrimaryMutation:false,
+        automaticPromotion:false,
+        automaticSkillTransition:false
+      },
+      operationalReadiness:{ready:true,hardReasons:[]},
+      globalIntel:{
+        sourceReady:true,
+        lastRefreshAt:now-120_000,
+        recent:[{id:'future',availableAt:now+60_000,verified:false}]
+      },
+      memecoinRadar:{rows:[{chainId:'solana',tokenAddress:''}]},
+      discordBridge:{
+        enabled:true,
+        channelManagerCoverage:.95,
+        channelManagerMetaStatus:'BLIND_SPOTS'
+      }
+    }
+  });
+  assert.equal(out.state,'BLOCKED');
+  const ids=new Set(out.violations.map(v=>v.ruleId));
+  for(const id of ['DATA-001','DATA-004','MEME-003','CH-001'])assert.ok(ids.has(id),id);
+});
+
+test('runtime readiness contradiction is blocked',()=>{
+  const out=evaluateBiggjRuntimeRulebook({
+    health:{
+      institutionalKernel:{execution:'SHADOW_ONLY',canExecute:false},
+      autonomousOperator:{
+        canExecuteLive:false,
+        automaticPrimaryMutation:false,
+        automaticPromotion:false,
+        automaticSkillTransition:false
+      },
+      operationalReadiness:{ready:true,hardReasons:['AUDIT_LEDGER_INVALID']}
+    }
+  });
+  assert.equal(out.state,'BLOCKED');
+  assert.ok(out.violations.some(v=>v.ruleId==='OPS-001'));
+});
