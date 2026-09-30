@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
-import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobileApp, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
+import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
@@ -9517,12 +9517,6 @@ const server = http.createServer((req,res) => {
     return;
   }
   if (req.url === '/mission-control') {
-    const snapshot=missionControlData();
-    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
-    res.end(renderBiggjMobileApp(snapshot));
-    return;
-  }
-  if (req.url === '/mission-control/legacy') {
     const snapshot=missionControlData();
     res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
     res.end(renderMissionControlHtml(snapshot));
