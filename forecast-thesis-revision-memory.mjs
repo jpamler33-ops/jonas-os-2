@@ -362,19 +362,25 @@ export function verifyForecastThesisRevisionArtifact(value){
   }
 }
 
-export function applyForecastThesisRevision(memory,artifact,{maxEvents=96}={}){
+export function applyForecastThesisRevision(memory,artifact,{maxEvents=96,stabilityConfig={}}={}){
   const mv=verifyForecastThesisRevisionMemory(memory);
   if(!mv.ok) throw new Error('thesis revision memory invalid: '+mv.reasons.join(','));
   const av=verifyForecastThesisRevisionArtifact(artifact);
   if(!av.ok) throw new Error('thesis revision artifact invalid: '+av.reasons.join(','));
-  if(memory.forecastId!==artifact.forecastId||memory.issuanceId!==artifact.issuanceId){
+
+  const working=upgradeForecastThesisRevisionMemory(memory);
+  const migrationChanged=working.fingerprint!==memory.fingerprint;
+  if(working.forecastId!==artifact.forecastId||working.issuanceId!==artifact.issuanceId){
     throw new Error('thesis revision identity mismatch');
   }
-  if(Number(artifact.observedAt)<Number(memory.issueKnowledgeAt)) throw new Error('revision predates issue knowledge');
+  if(Number(artifact.observedAt)<Number(working.issueKnowledgeAt)) throw new Error('revision predates issue knowledge');
 
-  const priorById=new Map(memory.assumptions.map(x=>[x.assumptionId,x]));
+  const priorById=new Map(working.assumptions.map(x=>[x.assumptionId,x]));
   const supportTransitions=[];
+  const stabilityTransitions=[];
   const missingDeclarationIds=[];
+  let stabilityMemoryChanged=false;
+
   const nextAssumptions=artifact.assumptions.map(row=>{
     const prior=priorById.get(row.assumptionId);
     if(!prior) throw new Error('revision assumption missing from issue memory: '+row.assumptionId);
@@ -382,11 +388,13 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96}={}){
       missingDeclarationIds.push(row.assumptionId);
       return clone(prior);
     }
+
     const previous=prior.currentSupported;
     const current=row.currentSupported;
     let transition='UNCHANGED';
     if(previous===true&&current===false) transition='SUPPORT_LOST';
     else if(previous===false&&current===true) transition='SUPPORT_RESTORED';
+
     if(transition!=='UNCHANGED'){
       supportTransitions.push({
         assumptionId:row.assumptionId,
@@ -399,6 +407,20 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96}={}){
         currentEvidence:clone(row.currentEvidence)
       });
     }
+
+    const stabilityObservation=observeAssumptionStability(prior.stability,{
+      assumption:row,
+      observedAt:artifact.observedAt,
+      config:stabilityConfig
+    });
+    if(stabilityObservation.changed) stabilityMemoryChanged=true;
+    if(stabilityObservation.event){
+      stabilityTransitions.push({
+        assumptionId:row.assumptionId,
+        ...clone(stabilityObservation.event)
+      });
+    }
+
     return {
       ...clone(prior),
       currentSupportState:row.currentSupportState,
@@ -412,84 +434,106 @@ export function applyForecastThesisRevision(memory,artifact,{maxEvents=96}={}){
         prior.firstSupportRestoredAt??
         (transition==='SUPPORT_RESTORED'?artifact.observedAt:null),
       lastSupportChangedAt:transition==='UNCHANGED'?prior.lastSupportChangedAt:artifact.observedAt,
-      supportTransitionCount:Number(prior.supportTransitionCount||0)+(transition==='UNCHANGED'?0:1)
+      supportTransitionCount:Number(prior.supportTransitionCount||0)+(transition==='UNCHANGED'?0:1),
+      stability:stabilityObservation.stability
     };
   });
 
   const assessmentStatus=text(artifact?.forecastAssessment?.status,'UNKNOWN').toUpperCase();
-  const priorAssessmentStatus=text(memory?.lastForecastAssessmentStatus,'ISSUED').toUpperCase();
+  const priorAssessmentStatus=text(working?.lastForecastAssessmentStatus,'ISSUED').toUpperCase();
   const assessmentChanged=assessmentStatus!==priorAssessmentStatus;
   const meaningfulAssessmentChange=
     assessmentChanged&&
     ['VALID','WATCH','INVALIDATED','INSUFFICIENT'].includes(assessmentStatus);
-  const significant=
+
+  const significantEvent=
     supportTransitions.length>0||
+    stabilityTransitions.length>0||
     missingDeclarationIds.length>0||
     meaningfulAssessmentChange;
+  const memoryChanged=migrationChanged||stabilityMemoryChanged||significantEvent;
 
-  if(!significant){
+  if(!memoryChanged){
     return deepFreeze({
       changed:false,
-      memory,
+      memory:working,
       event:null,
       reasons:['NO_MEANINGFUL_REVISION_TRANSITION']
     });
   }
 
-  const eventCore={
-    eventVersion:'TCX_FORECAST_THESIS_REVISION_EVENT_V1',
-    forecastId:memory.forecastId,
-    issuanceId:memory.issuanceId,
-    observedAt:artifact.observedAt,
-    currentDeclarationFingerprint:artifact.currentDeclarationFingerprint,
-    currentInputFingerprint:artifact.currentInputFingerprint,
-    supportTransitions,
-    missingDeclarationIds:uniq(missingDeclarationIds),
-    forecastAssessmentTransition:{
-      from:priorAssessmentStatus,
-      to:assessmentStatus,
-      changed:assessmentChanged,
-      score:artifact.forecastAssessment.score,
-      reasons:clone(artifact.forecastAssessment.reasons),
-      warnings:clone(artifact.forecastAssessment.warnings),
-      regimeChanged:artifact.forecastAssessment.regimeChanged,
-      hardGuardActive:artifact.forecastAssessment.hardGuardActive,
-      envelopeBreach:artifact.forecastAssessment.envelopeBreach
-    },
-    currentUnsupportedAssumptionIds:clone(artifact.diagnostics.currentUnsupportedAssumptionIds),
-    issueGraphFingerprint:memory.issueGraphFingerprint,
-    artifactFingerprint:artifact.fingerprint,
-    execution:'SHADOW_ONLY',
-    action:'ABSTAIN',
-    canInfluencePrimary:false,
-    canExecuteLive:false
-  };
-  const event=deepFreeze({...eventCore,eventId:sha256(eventCore)});
+  let revisionEvent=null;
+  if(significantEvent){
+    const eventCore={
+      eventVersion:'TCX_FORECAST_THESIS_REVISION_EVENT_V2',
+      forecastId:working.forecastId,
+      issuanceId:working.issuanceId,
+      observedAt:artifact.observedAt,
+      currentDeclarationFingerprint:artifact.currentDeclarationFingerprint,
+      currentInputFingerprint:artifact.currentInputFingerprint,
+      supportTransitions,
+      stabilityTransitions,
+      missingDeclarationIds:uniq(missingDeclarationIds),
+      forecastAssessmentTransition:{
+        from:priorAssessmentStatus,
+        to:assessmentStatus,
+        changed:assessmentChanged,
+        score:artifact.forecastAssessment.score,
+        reasons:clone(artifact.forecastAssessment.reasons),
+        warnings:clone(artifact.forecastAssessment.warnings),
+        regimeChanged:artifact.forecastAssessment.regimeChanged,
+        hardGuardActive:artifact.forecastAssessment.hardGuardActive,
+        envelopeBreach:artifact.forecastAssessment.envelopeBreach
+      },
+      currentUnsupportedAssumptionIds:clone(artifact.diagnostics.currentUnsupportedAssumptionIds),
+      currentPersistentStaleAssumptionIds:nextAssumptions
+        .filter(x=>x?.stability?.state==='PERSISTENT_STALE')
+        .map(x=>x.assumptionId)
+        .sort(),
+      issueGraphFingerprint:working.issueGraphFingerprint,
+      artifactFingerprint:artifact.fingerprint,
+      execution:'SHADOW_ONLY',
+      action:'ABSTAIN',
+      canInfluencePrimary:false,
+      canExecuteLive:false
+    };
+    revisionEvent=deepFreeze({...eventCore,eventId:sha256(eventCore)});
+  }
+
   const supportLostNow=supportTransitions.some(x=>x.transition==='SUPPORT_LOST');
-  const firstStaleAt=memory.firstStaleAt??(supportLostNow?artifact.observedAt:null);
-  const firstWatchAt=memory.firstWatchAt??(assessmentStatus==='WATCH'?artifact.observedAt:null);
+  const persistentNow=stabilityTransitions.some(x=>x.type==='PERSISTENT_STALE_CONFIRMED');
+  const firstStaleAt=working.firstStaleAt??(supportLostNow?artifact.observedAt:null);
+  const firstPersistentStaleAt=working.firstPersistentStaleAt??(persistentNow?artifact.observedAt:null);
+  const firstWatchAt=working.firstWatchAt??(assessmentStatus==='WATCH'?artifact.observedAt:null);
   const firstForecastInvalidatedAt=
-    memory.firstForecastInvalidatedAt??
+    working.firstForecastInvalidatedAt??
     (assessmentStatus==='INVALIDATED'?artifact.observedAt:null);
-  const bounded=[...memory.events,clone(event)].slice(-Math.max(8,Math.floor(Number(maxEvents)||96)));
+  const bounded=revisionEvent
+    ?[...working.events,clone(revisionEvent)].slice(-Math.max(8,Math.floor(Number(maxEvents)||96)))
+    :working.events;
 
   const core={
-    ...coreOf(memory),
+    ...coreOf(working),
+    version:FORECAST_THESIS_REVISION_MEMORY_VERSION,
     assumptions:nextAssumptions,
     lastObservedAt:artifact.observedAt,
     lastCurrentDeclarationFingerprint:artifact.currentDeclarationFingerprint,
     lastForecastAssessmentStatus:assessmentStatus,
     firstWatchAt,
     firstStaleAt,
+    firstPersistentStaleAt,
     firstForecastInvalidatedAt,
-    eventCount:Number(memory.eventCount||0)+1,
+    eventCount:Number(working.eventCount||0)+(revisionEvent?1:0),
+    stabilityEventCount:Number(working.stabilityEventCount||0)+stabilityTransitions.length,
     events:bounded
   };
   return deepFreeze({
     changed:true,
     memory:finalized(core),
-    event,
-    reasons:[]
+    event:revisionEvent,
+    reasons:migrationChanged&&!significantEvent&&!stabilityMemoryChanged
+      ?['LEGACY_MEMORY_UPGRADED']
+      :[]
   });
 }
 
