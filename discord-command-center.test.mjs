@@ -134,3 +134,18 @@ test('BIGGJ V6 academy keeps the current panel at the bottom and lesson actions 
   assert.ok(source.includes("journal:["));
   assert.ok(source.includes("const actions=practical[String(topic||'').toLowerCase()]||null"));
 });
+
+
+test('BIGGJ V6.1 exposes one-tap user commands',()=>{
+  for(const required of [
+    "name:'charts'",
+    "name:'news'",
+    "name:'world'",
+    "name:'memecoins'",
+    "name:'app'",
+    "liveSurfaceCallbacks",
+    "charts:'chart-desk'",
+    "app:'mobile-app'",
+    'COMMAND CENTER V6.1'
+  ]) assert.ok(source.includes(required),required);
+});
