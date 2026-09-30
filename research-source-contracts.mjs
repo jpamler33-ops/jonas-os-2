@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V11';
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V12';
 
 const contracts=[
   {id:'BINANCE_USDM_DERIVATIVES',domain:'DERIVATIVES',source:'BINANCE_USDM_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
@@ -20,8 +20,8 @@ const contracts=[
   {id:'FRED_VIXCLS_CURRENT',domain:'MACRO',source:'FRED_VIXCLS_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_SP500_CURRENT',domain:'MACRO',source:'FRED_SP500_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_DCOILWTICO_CURRENT',domain:'MACRO',source:'FRED_DCOILWTICO_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
-  {id:'FRED_CPIAUCSL_CURRENT',domain:'MACRO',source:'FRED_CPIAUCSL_CURRENT',minCompleteness:1,maxPublicationLagMs:3888000000,maxIngestLagMs:1200000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
-  {id:'FRED_UNRATE_CURRENT',domain:'MACRO',source:'FRED_UNRATE_CURRENT',minCompleteness:1,maxPublicationLagMs:3888000000,maxIngestLagMs:1200000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'FRED_CPIAUCSL_CURRENT',domain:'MACRO',source:'FRED_CPIAUCSL_CURRENT',minCompleteness:1,maxPublicationLagMs:3888000000,maxObservationAgeMs:6480000000,eventTimeSemantics:'OBSERVATION_PERIOD_START',cadence:'MONTHLY',maxIngestLagMs:1200000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'FRED_UNRATE_CURRENT',domain:'MACRO',source:'FRED_UNRATE_CURRENT',minCompleteness:1,maxPublicationLagMs:3888000000,maxObservationAgeMs:6480000000,eventTimeSemantics:'OBSERVATION_PERIOD_START',cadence:'MONTHLY',maxIngestLagMs:1200000,maxSilenceMs:3888000000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'ALTERNATIVE_FEAR_GREED',domain:'SENTIMENT',source:'ALTERNATIVE_ME_FEAR_GREED',minCompleteness:.66,maxPublicationLagMs:172800000,maxIngestLagMs:600000,maxSilenceMs:259200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'ALTERNATIVE_GLOBAL_MARKET',domain:'MARKET_CONTEXT',source:'ALTERNATIVE_ME_GLOBAL',minCompleteness:.66,maxPublicationLagMs:1800000,maxIngestLagMs:600000,maxSilenceMs:7200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},
   {id:'DEFILLAMA_PUBLIC_CHAINS',domain:'DEFI_CONTEXT',source:'DEFILLAMA_PUBLIC_CHAINS',minCompleteness:.5,maxPublicationLagMs:1800000,maxIngestLagMs:600000,maxSilenceMs:7200000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:2,requiredFinality:null},

@@ -298,3 +298,75 @@ test('finalized entity flow still quarantines sustained finality lag above 30 mi
   assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
   assert.ok(quarantinedResearchSourceKeys(state).includes('ENTITY_FLOW:VERIFIED_ENTITY_FINALIZED_FLOW'));
 });
+
+
+function monthlyFredSnapshot({
+  source='FRED_CPIAUCSL_CURRENT',
+  featureId='research.macro.cpiIndex',
+  value=310,
+  eventTime,
+  availableAt,
+  ingestedAt=availableAt+1_000,
+  sourceEventId='monthly-fred'
+}={}){
+  return createResearchFeatureSnapshot({
+    streamKey:'BTCUSDT',
+    domain:'MACRO',
+    source,
+    sourceVersion:'TEST',
+    sourceEventId,
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:6*60*60_000,
+    finality:'OBSERVED',
+    quality:{completeness:1,sourceCount:1,expectedSourceCount:1,status:'CURRENT_SERIES_CAPTURE'},
+    features:[{id:featureId,value}],
+    provenance:{fredTransport:'FRED_GRAPH_CSV',fredSeriesIds:[source==='FRED_UNRATE_CURRENT'?'UNRATE':'CPIAUCSL']}
+  });
+}
+
+test('monthly FRED observation-period timestamps use observation-age semantics instead of false publication lag',()=>{
+  const DAY=24*60*60_000;
+  const availableAt=Date.UTC(2026,8,30,12,0,0);
+  const eventTime=availableAt-60*DAY;
+  const state=createResearchDataGovernanceState({createdAt:availableAt});
+  const governed=governResearchSnapshot(state,monthlyFredSnapshot({eventTime,availableAt}),{evaluatedAt:availableAt+1_000});
+  assert.equal(governed.governance.decision,'ACCEPT');
+  assert.equal(governed.governance.sourceStatus,'HEALTHY');
+  assert.equal(governed.governance.timelinessMetric,'OBSERVATION_AGE');
+  assert.equal(governed.governance.eventTimeSemantics,'OBSERVATION_PERIOD_START');
+  assert.equal(governed.governance.observationAgeMs,60*DAY);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='PUBLICATION_LAG_SLO_BREACH'),false);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='OBSERVATION_AGE_SLO_BREACH'),false);
+});
+
+test('monthly FRED observation age still fails closed when older than its bounded cadence allowance',()=>{
+  const DAY=24*60*60_000;
+  const availableAt=Date.UTC(2026,8,30,12,0,0);
+  const state=createResearchDataGovernanceState({createdAt:availableAt});
+  const decisions=[];
+  for(let i=0;i<3;i++){
+    const a=availableAt+i*2_000;
+    const governed=governResearchSnapshot(state,monthlyFredSnapshot({
+      eventTime:a-76*DAY,
+      availableAt:a,
+      ingestedAt:a+500,
+      sourceEventId:'monthly-stale-'+i
+    }),{evaluatedAt:a+500});
+    decisions.push(governed.governance.decision);
+    assert.ok(governed.governance.reasons.some(x=>x.code==='OBSERVATION_AGE_SLO_BREACH'));
+  }
+  assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
+});
+
+test('both monthly FRED contracts declare explicit observation-period semantics',async()=>{
+  const { researchSourceContract, RESEARCH_SOURCE_CONTRACTS_VERSION }=await import('./research-source-contracts.mjs');
+  assert.equal(RESEARCH_SOURCE_CONTRACTS_VERSION,'TCX_RESEARCH_SOURCE_CONTRACTS_V12');
+  for(const source of ['FRED_CPIAUCSL_CURRENT','FRED_UNRATE_CURRENT']){
+    const contract=researchSourceContract('MACRO',source);
+    assert.equal(contract.eventTimeSemantics,'OBSERVATION_PERIOD_START');
+    assert.equal(contract.cadence,'MONTHLY');
+    assert.equal(contract.maxObservationAgeMs,75*24*60*60_000);
+  }
+});

@@ -175,6 +175,13 @@ export function governResearchSnapshot(state,snapshot,{
   const ingestedAt=finite(snapshot.ingestedAt);
   const completeness=finite(snapshot?.quality?.completeness);
   const publicationLagMs=eventTime!=null&&availableAt!=null?Math.max(0,availableAt-eventTime):null;
+  const observationPeriodStart=String(contract?.eventTimeSemantics||'').toUpperCase()==='OBSERVATION_PERIOD_START';
+  const observationAgeMs=observationPeriodStart?publicationLagMs:null;
+  const timelinessMetric=observationPeriodStart?'OBSERVATION_AGE':'PUBLICATION_LAG';
+  const timelinessLimitMs=observationPeriodStart
+    ?finite(contract?.maxObservationAgeMs)
+    :finite(contract?.maxPublicationLagMs);
+  const timelinessValueMs=observationPeriodStart?observationAgeMs:publicationLagMs;
   const ingestLagMs=availableAt!=null&&ingestedAt!=null?Math.max(0,ingestedAt-availableAt):null;
 
   if(publicationLagMs!=null) boundedPush(src.publicationLagMs,publicationLagMs,state.maxSourceHistory);
@@ -187,9 +194,13 @@ export function governResearchSnapshot(state,snapshot,{
       operationalViolation=true;
       reasons.push({code:'COMPLETENESS_SLO_BREACH',value:completeness,limit:contract.minCompleteness});
     }
-    if(publicationLagMs==null||publicationLagMs>contract.maxPublicationLagMs){
+    if(timelinessValueMs==null||timelinessLimitMs==null||timelinessValueMs>timelinessLimitMs){
       operationalViolation=true;
-      reasons.push({code:'PUBLICATION_LAG_SLO_BREACH',value:publicationLagMs,limit:contract.maxPublicationLagMs});
+      reasons.push({
+        code:observationPeriodStart?'OBSERVATION_AGE_SLO_BREACH':'PUBLICATION_LAG_SLO_BREACH',
+        value:timelinessValueMs,
+        limit:timelinessLimitMs
+      });
     }
     if(ingestLagMs==null||ingestLagMs>contract.maxIngestLagMs){
       operationalViolation=true;
@@ -265,7 +276,7 @@ export function governResearchSnapshot(state,snapshot,{
   const qualityScore=contract
     ?Math.max(0,Math.min(1,
       .5*Math.max(0,Math.min(1,Number(completeness??0)))+
-      .25*(publicationLagMs!=null&&publicationLagMs<=contract.maxPublicationLagMs?1:0)+
+      .25*(timelinessValueMs!=null&&timelinessLimitMs!=null&&timelinessValueMs<=timelinessLimitMs?1:0)+
       .25*(ingestLagMs!=null&&ingestLagMs<=contract.maxIngestLagMs?1:0)
     ))
     :0;
@@ -286,6 +297,10 @@ export function governResearchSnapshot(state,snapshot,{
     semanticDrift:semanticReviews.length?'REVIEW':'NORMAL',
     semanticReviewCount:semanticReviews.length,
     publicationLagMs,
+    observationAgeMs,
+    eventTimeSemantics:contract?.eventTimeSemantics||'EVENT_TIME_IS_PUBLICATION_REFERENCE',
+    timelinessMetric,
+    timelinessLimitMs,
     ingestLagMs,
     completeness,
     execution:'SHADOW_ONLY',
@@ -351,6 +366,11 @@ export function researchDataGovernanceSummary(state,{now=Date.now()}={}){
       lastSeenAt:src?.lastSeenAt??null,
       silenceMs,
       maxSilenceMs:contract.maxSilenceMs,
+      eventTimeSemantics:contract.eventTimeSemantics||'EVENT_TIME_IS_PUBLICATION_REFERENCE',
+      timelinessMetric:String(contract.eventTimeSemantics||'').toUpperCase()==='OBSERVATION_PERIOD_START'?'OBSERVATION_AGE':'PUBLICATION_LAG',
+      timelinessLimitMs:String(contract.eventTimeSemantics||'').toUpperCase()==='OBSERVATION_PERIOD_START'
+        ?finite(contract.maxObservationAgeMs)
+        :finite(contract.maxPublicationLagMs),
       lastDecision:src?.lastDecision??null,
       consecutiveViolations:Number(src?.consecutiveViolations||0),
       consecutiveHealthy:Number(src?.consecutiveHealthy||0),
