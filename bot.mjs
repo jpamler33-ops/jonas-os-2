@@ -704,8 +704,10 @@ let claimAssumptionResearchLastLoggedObservationCount=0;
 let claimAssumptionResearchLastSummary=null;
 let claimAssumptionResearchLastReport=null;
 let biggjLivingResearchLastLoggedFingerprint=null;
+let biggjLivingResearchRefreshQueue=Promise.resolve();
 
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
+  const run=async()=>{
   const started=Date.now();
   try{
     const thesisMemories=(forecastRuntime?.intelligence?.all?.()||[])
@@ -788,6 +790,10 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
     }));
     return null;
   }
+  };
+  const queued=biggjLivingResearchRefreshQueue.then(run,run);
+  biggjLivingResearchRefreshQueue=queued.then(()=>undefined,()=>undefined);
+  return queued;
 }
 
 function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
@@ -841,6 +847,7 @@ function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=
       latencyMs:Date.now()-started,
       error:Number(report?.rejectedObservationCount||0)>0?'INVALID_SHADOW_OBSERVATIONS_PRESENT':null
     });
+    void refreshBiggjLivingResearch('claim-assumption-evaluation',report);
     return summary;
   }catch(err){
     const msg=err instanceof Error?err.message:String(err);
@@ -1050,6 +1057,15 @@ const institutionalConfig = Object.freeze({
     version:RESEARCH_DATA_GOVERNANCE_VERSION,
     objective:'SOURCE_QUALITY_AND_POINT_IN_TIME_DATA_CONTROL',
     canExecuteLive:false
+  },
+  biggjLivingResearch:{
+    version:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION,
+    objective:'PERSISTENT_THESIS_FAILURE_TO_RESEARCH_ONLY_SKILL_DISCOVERY',
+    automaticPromotion:false,
+    automaticKill:false,
+    automaticExperimentLaunch:false,
+    primaryMutationAllowed:false,
+    canExecuteLive:false
   }
 });
 
@@ -1110,7 +1126,8 @@ try {
       forecastProduct:FORECAST_PRODUCT_VERSION,
       researchDataPlane:RESEARCH_DATA_PLANE_VERSION,
       researchDataGovernance:RESEARCH_DATA_GOVERNANCE_VERSION,
-      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION
+      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION,
+      biggjLivingResearch:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -9056,6 +9073,10 @@ async function gracefulShutdown(signal) {
   await persistEpisodeMemory(`shutdown:${signal}`);
   await persistEvidenceHistory(`shutdown:${signal}`);
   await persistForecastRuntime(`shutdown:${signal}`,{force:true});
+  await biggjLivingResearchRefreshQueue.catch(()=>{});
+  await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState).catch(err=>{
+    console.error('[TCX_BIGGJ_LIVING_RESEARCH_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
+  });
   await researchDataPlaneAppendQueue.catch(()=>{});
   await saveResearchDataGovernance(researchGovernanceFile,researchDataGovernance).catch(()=>{});
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
