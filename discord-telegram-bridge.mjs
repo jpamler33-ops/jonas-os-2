@@ -17,7 +17,7 @@ import { createGermanTranslationProvider } from './biggj-german-translation.mjs'
 import { renderBiggjProofFeed } from './biggj-signal-lab.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V9';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V10';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -25,7 +25,7 @@ const COMMANDS=[
   {name:'dashboard',description:'TCX Mission Control öffnen'},
   {name:'market',description:'Marktübersicht öffnen',options:[symbolOption()]},
   {name:'forecast',description:'TCX Forecast anzeigen',options:[symbolOption()]},
-  {name:'signal',description:'BIGGJ Signal Lab öffnen',options:[symbolOption(),signalHorizonOption()]},
+  {name:'signal',description:'BIGGJ Signal Lab öffnen',options:[symbolOption(),signalHorizonOption(),signalModeOption()]},
   {name:'proof',description:'BIGGJ Forecast Proof Feed öffnen',options:[optionalSymbolOption()]},
   {name:'chart',description:'Marktchart anzeigen',options:[symbolOption(),intervalOption()]},
   {name:'superchart',description:'TCX SuperChart öffnen',options:[symbolOption(),intervalOption()]},
@@ -86,7 +86,7 @@ const SERVER_LAYOUT=Object.freeze([
     {name:'start-here',topic:'Startpunkt, Befehle und Sicherheitsstatus von TCX.'},
     {name:'tcx-terminal',topic:'Live Mission Control für TCX/BIGGJ.'},
     {name:'signal-lab',topic:'3-Klick Signal Lab: Markt → Horizont → klare Bias-/ABSTAIN-Ausgabe mit Calibration-Gate.'},
-    {name:'proof-feed',topic:'Forecast BEFORE → Outcome AFTER. Zeigt Treffer und Fehler ohne Cherry-Picking.'}
+    {name:'proof-feed',topic:'Forecast BEFORE → LIVE commitment → Outcome AFTER → Learning. Zeigt offene Commitments, Treffer und Fehler ohne Cherry-Picking.'}
   ]},
   ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT,
   ...BIGGJ_EXPERIENCE_LAYOUT,
@@ -210,8 +210,8 @@ const MARKERS=Object.freeze({
   academyProgress:'BIGGJ_ACADEMY_PROGRESS_V1',
   academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1',
   forecasts:'BIGGJ_CHANNEL_FORECAST_DESK_V7',
-  signalLab:'BIGGJ_SIGNAL_LAB_DESK_V1',
-  proofFeed:'BIGGJ_PROOF_FEED_DESK_V1',
+  signalLab:'BIGGJ_SIGNAL_LAB_DESK_V2',
+  proofFeed:'BIGGJ_PROOF_FEED_DESK_V2',
   intelHub:'BIGGJ_CHANNEL_INTEL_HUB_V7',
   anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
   replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
@@ -612,19 +612,20 @@ function buildSignalLabDeskPayload(snapshot={}){
   const lab=snapshot?.health?.biggjSignalLab||{};
   return {embeds:[{
     title:'BIGGJ // SIGNAL LAB',
-    description:'**3 Klicks: Markt → Horizont → klare Bias-/ABSTAIN-Ausgabe.**\nWahrscheinlichkeiten erscheinen nur, wenn die Calibration-Gates sie ausdrücklich freigeben.',
+    description:'**3 Klicks: Markt → Horizont → Evidence-Linse.**\nFULL / STRUCTURE / FLOW / LIQUIDITY / MACRO ändern nur die Sicht auf Evidenz — niemals den kanonischen Forecast. Wahrscheinlichkeiten erscheinen nur nach Calibration-Gates.',
     fields:[
       {name:'Safety',value:'SHADOW_ONLY · ACTION ABSTAIN · REAL ORDERS BLOCKED',inline:false},
       {name:'Probability Policy',value:'Keine rohe Modell-Confidence. Bei fehlender Kalibrierung wird die Zahl unterdrückt.',inline:false},
-      {name:'Runtime',value:String(lab.version||'—')+' · Proof '+String(lab.proofVersion||'—'),inline:false}
+      {name:'Runtime',value:String(lab.version||'—')+' · Proof '+String(lab.proofVersion||'—'),inline:false},
+      {name:'Evidence Lenses',value:(Array.isArray(lab.modes)?lab.modes:['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO']).join(' · ')+' · view-only',inline:false}
     ],
     footer:{text:MARKERS.signalLab},
     timestamp:new Date().toISOString()
   }],components:[
     {type:1,components:[
-      {type:2,style:1,label:'BTC · 1H',custom_id:'dc3:signallab:BTCUSDT:1h'},
-      {type:2,style:1,label:'ETH · 1H',custom_id:'dc3:signallab:ETHUSDT:1h'},
-      {type:2,style:1,label:'SOL · 1H',custom_id:'dc3:signallab:SOLUSDT:1h'}
+      {type:2,style:1,label:'BTC · 1H',custom_id:'dc3:signallab:BTCUSDT:1h:FULL'},
+      {type:2,style:1,label:'ETH · 1H',custom_id:'dc3:signallab:ETHUSDT:1h:FULL'},
+      {type:2,style:1,label:'SOL · 1H',custom_id:'dc3:signallab:SOLUSDT:1h:FULL'}
     ]},
     {type:1,components:[
       {type:2,style:2,label:'Proof Feed',custom_id:'dc3:proof:ALL'},
@@ -866,6 +867,7 @@ const V3_SYMBOLS=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','LINK','AVAX','DOT'
 function symbolOption(){return {type:3,name:'symbol',description:'z. B. BTC, ETH, SOL',required:true};}
 function optionalSymbolOption(){return {type:3,name:'symbol',description:'Optional: BTC, ETH, SOL oder leer für alle',required:false};}
 function signalHorizonOption(){return {type:3,name:'horizon',description:'Forecast-Horizont',required:false,choices:['5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
+function signalModeOption(){return {type:3,name:'mode',description:'Evidence-Linse; ändert den kanonischen Forecast nicht',required:false,choices:[{name:'Full BIGGJ',value:'FULL'},{name:'Structure',value:'STRUCTURE'},{name:'Flow',value:'FLOW'},{name:'Liquidity',value:'LIQUIDITY'},{name:'Macro',value:'MACRO'}]};}
 function intervalOption(){return {type:3,name:'interval',description:'Zeitrahmen',required:false,choices:['1m','5m','15m','1h','4h'].map(x=>({name:x,value:x}))};}
 function normalizeDiscordSymbol(value=''){const raw=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return raw?(raw.endsWith('USDT')?raw:raw+'USDT'):null;}
 function marketSelectRow(){return {type:1,components:[{type:3,custom_id:'dc3:market-select',placeholder:'Markt öffnen …',min_values:1,max_values:1,options:V3_SYMBOLS.map(x=>({label:x+'/USDT',value:x+'USDT',description:'TCX '+x+' Research'}))}]};}
@@ -888,7 +890,7 @@ function marketActionComponents(symbol){
   const s=normalizeDiscordSymbol(symbol)||'BTCUSDT';
   return [
     {type:1,components:[
-      {type:2,style:1,label:'Signal Lab',custom_id:'dc3:signallab:'+s+':1h'},
+      {type:2,style:1,label:'Signal Lab',custom_id:'dc3:signallab:'+s+':1h:FULL'},
       {type:2,style:1,label:'Chart',custom_id:'dc3:superchart:'+s+':PRO:5m'},
       {type:2,style:1,label:'Thesis',custom_id:'dc4:thesis:'+s},
       {type:2,style:2,label:'Forecast',custom_id:'dc3:forecast:'+s}
@@ -968,7 +970,7 @@ function callbackDataForCommand(interaction){
   if(n==='xray')return 'xray:'+s;
   if(n==='events')return 'events:'+s;
   if(n==='accuracy')return 'accuracy:'+s;
-  if(n==='signal')return 'signallab:'+s+':'+(interaction.options?.getString('horizon')||'1h');
+  if(n==='signal')return 'signallab:'+s+':'+(interaction.options?.getString('horizon')||'1h')+':'+(interaction.options?.getString('mode')||'FULL');
   return null;
 }
 
@@ -2012,7 +2014,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(!result.ok){await interaction.editReply(result.error==='MANAGE_CHANNELS_REQUIRED'?'Gib dem Bot **Kanäle verwalten** und führe \`/setup\` erneut aus.':'Setup fehlgeschlagen: '+result.error);return;}
     const g=await getGuild(),member=g.members.me||await g.members.fetchMe().catch(()=>null),threads=Boolean(member?.permissions?.has(PermissionFlagsBits.CreatePublicThreads));
     const managers=managerSnapshot();
-    await interaction.editReply('BIGGJ Discord V7 eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
+    await interaction.editReply('BIGGJ Discord V10 eingerichtet: '+result.channels+' Channels · '+managers.managers+' Channel-Manager · Supervisor '+managers.supervisor.status+' · Meta '+managers.metaSupervisor.status+' · '+(state.observabilityPanels+state.experiencePanels)+' Live-Panels'+(result.created.length?' · '+result.created.length+' neu':'')+'.\n'+(threads?'Trade-Threads: bereit.':'Für Trade-Threads zusätzlich **Öffentliche Threads erstellen** aktivieren.'));
   }
   async function thesisCommand(interaction){
     const symbol=normalizeDiscordSymbol(interaction.options?.getString('symbol'));

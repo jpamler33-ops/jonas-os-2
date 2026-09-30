@@ -1,7 +1,8 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V1';
-export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V1';
+export const BIGGJ_SIGNAL_LAB_VERSION='TCX_BIGGJ_SIGNAL_LAB_V2';
+export const BIGGJ_PROOF_FEED_VERSION='TCX_BIGGJ_PROOF_FEED_V2';
+export const BIGGJ_SIGNAL_LAB_MODES=Object.freeze(['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO']);
 
 const arr=v=>Array.isArray(v)?v:[];
 const finite=(v,f=null)=>Number.isFinite(Number(v))?Number(v):f;
@@ -39,6 +40,77 @@ const directionLabel=v=>{
   if(x==='FLAT'||x==='SIDEWAYS'||x==='NEUTRAL')return '→ SIDEWAYS';
   return '—';
 };
+
+const MODE_KEYWORDS=Object.freeze({
+  STRUCTURE:['structure','trend','break','breakout','support','resistance','swing','hh','hl','lh','ll','regime','mtf','candle'],
+  FLOW:['flow','cvd','funding','open interest','open_interest','oi','volume','spot','futures','orderbook','order book','bid','ask','whale'],
+  LIQUIDITY:['liquidation','liquidity','heatmap','cluster','stop','sweep','imbalance','depth','book'],
+  MACRO:['macro','fed','fomc','rate','rates','cpi','ppi','jobs','payroll','treasury','yield','dxy','dollar','ecb','inflation','gdp','etf']
+});
+function normalizeMode(value){
+  const x=String(value||'FULL').toUpperCase();
+  return BIGGJ_SIGNAL_LAB_MODES.includes(x)?x:'FULL';
+}
+function compactText(value,max=180){
+  const x=String(value==null?'':value).replace(/\s+/g,' ').trim();
+  return x.length<=max?x:x.slice(0,max-1)+'…';
+}
+function flattenEvidenceText(value,{prefix='',depth=0,maxDepth=2}={}){
+  if(value==null||depth>maxDepth)return [];
+  if(['string','number','boolean'].includes(typeof value)){
+    const text=compactText((prefix?prefix+' ':'')+String(value));
+    return text?[text]:[];
+  }
+  if(Array.isArray(value))return value.slice(0,10).flatMap((x,i)=>flattenEvidenceText(x,{prefix:prefix?prefix+'.'+i:String(i),depth:depth+1,maxDepth}));
+  if(typeof value==='object'){
+    return Object.entries(value).slice(0,20).flatMap(([k,v])=>
+      flattenEvidenceText(v,{prefix:prefix?prefix+'.'+k:k,depth:depth+1,maxDepth})
+    );
+  }
+  return [];
+}
+function buildModeLens({mode,issuance,horizon,setup,risk}={}){
+  const selected=normalizeMode(mode);
+  const rows=[];
+  for(const x of arr(horizon?.reasons))rows.push({source:'FORECAST_REASON',text:compactText(x)});
+  for(const x of arr(horizon?.warnings))rows.push({source:'FORECAST_WARNING',text:compactText(x)});
+  for(const x of arr(setup?.eventRows)){
+    rows.push({
+      source:'STRUCTURE_EVENT',
+      text:compactText([x?.type,x?.label,x?.state,x?.detail].filter(Boolean).join(' · '))
+    });
+  }
+  for(const x of arr(risk?.reasons))rows.push({source:'RISK_REASON',text:compactText(x)});
+  for(const x of arr(issuance?.trace?.evidence)){
+    for(const text of flattenEvidenceText(x,{prefix:'trace'}))rows.push({source:'TRACE_EVIDENCE',text});
+  }
+  for(const x of arr(issuance?.trace?.contradictions)){
+    for(const text of flattenEvidenceText(x,{prefix:'contradiction'}))rows.push({source:'TRACE_CONTRADICTION',text});
+  }
+  const seen=new Set();
+  const unique=rows.filter(row=>{
+    if(!row.text)return false;
+    const key=row.source+'|'+row.text.toLowerCase();
+    if(seen.has(key))return false;
+    seen.add(key);
+    return true;
+  });
+  const keywords=MODE_KEYWORDS[selected]||[];
+  const filtered=selected==='FULL'
+    ?unique
+    :unique.filter(row=>{
+      if(selected==='STRUCTURE'&&row.source==='STRUCTURE_EVENT')return true;
+      const text=row.text.toLowerCase();
+      return keywords.some(k=>text.includes(k));
+    });
+  return freeze({
+    mode:selected,
+    available:filtered.length>0,
+    items:filtered.slice(0,8),
+    sourceCount:new Set(filtered.map(x=>x.source)).size,
+    semantics:'Evidence lens only. It does not recompute, override or strengthen the canonical forecast.'
+  });
+}
 
 function horizonFor(issuance,horizonId){
   const hs=arr(issuance?.forecast?.horizons);
@@ -96,6 +168,8 @@ export function buildBiggjSignalLab({
   const top=topProbability(horizon);
   const allowProbability=probabilityAllowed(issuance,horizon,accuracy);
   const state=signalState({issuance,horizon,setup,risk});
+  const selectedMode=normalizeMode(mode);
+  const modeLens=buildModeLens({mode:selectedMode,issuance,horizon,setup,risk});
   const supports=[
     ...arr(horizon?.reasons),
     ...arr(setup?.eventRows).map(x=>String(x?.type||x?.label||'STRUCTURE_EVENT'))
@@ -108,7 +182,7 @@ export function buildBiggjSignalLab({
     version:BIGGJ_SIGNAL_LAB_VERSION,
     generatedAt:finite(asOf,Date.now()),
     symbol:s,
-    mode:String(mode||'FULL').toUpperCase(),
+    mode:selectedMode,
     requestedHorizon:String(horizonId||'1h').toLowerCase(),
     selectedHorizon:horizon?String(horizon.horizonId||horizonId):null,
     state,
@@ -142,12 +216,14 @@ export function buildBiggjSignalLab({
       accuracyReady:accuracy?.ready===true,
       resolvedAccuracyCases:finite(accuracy?.evaluation?.resolvedCount,0)
     },
+    modeLens,
     supportReasons:supports,
     counterReasons:counters,
     semantics:{
       watchIsNotOrderAuthorization:true,
       probabilityOnlyWhenCalibrationGatePasses:true,
       diagnosticEvidenceScoreIsNotProbability:true,
+      modeLensDoesNotRecomputeForecast:true,
       noProfitGuarantee:true
     },
     safety:{
@@ -165,6 +241,8 @@ export function verifyBiggjSignalLab(value){
   if(value?.version!==BIGGJ_SIGNAL_LAB_VERSION)reasons.push('VERSION_INVALID');
   if(value?.safety?.execution!=='SHADOW_ONLY'||value?.safety?.action!=='ABSTAIN'||value?.safety?.canExecute!==false||value?.safety?.canExecuteLive!==false)reasons.push('SAFETY_INVALID');
   if(value?.probability?.displayAllowed!==true&&value?.probability?.calibrated!=null)reasons.push('SUPPRESSED_PROBABILITY_LEAK');
+  if(!BIGGJ_SIGNAL_LAB_MODES.includes(String(value?.mode||'')))reasons.push('MODE_INVALID');
+  if(value?.modeLens?.mode!==value?.mode)reasons.push('MODE_LENS_MISMATCH');
   const {fingerprint,...core}=value||{};
   if(fingerprint!==sha256(core))reasons.push('FINGERPRINT_MISMATCH');
   return {ok:reasons.length===0,reasons};
@@ -198,6 +276,13 @@ export function renderBiggjSignalLab(value={}){
     'Range        '+signedPct(f.intervalQ10)+' → '+signedPct(f.intervalQ90),
     'As-of        '+iso(f.asOf)
   );
+  lines.push('','MODE LENS · '+String(value?.mode||'FULL'));
+  if(value?.modeLens?.available){
+    for(const item of arr(value?.modeLens?.items).slice(0,6))lines.push('• '+String(item?.source||'EVIDENCE')+' · '+compactText(item?.text,170));
+  }else{
+    lines.push('• Keine mode-spezifische Evidenz im aktuellen strukturierten State. Canonical Forecast bleibt unverändert.');
+  }
+  lines.push('Lens only · kein zweiter Forecast-Engine-Pfad.');
   lines.push('','WARUM');
   if(arr(value?.supportReasons).length)for(const x of arr(value.supportReasons))lines.push('• '+x);
   else lines.push('• Keine zusätzliche Support-Begründung freigegeben.');
@@ -232,10 +317,46 @@ function proofCommitment(row){
   });
 }
 
-function proofRow(row){
-  const r=row?.resolution||{};
+function learningIncludesResolvedRow(row,learningSummary,cutoff){
+  const resolvedAt=finite(row?.resolution?.resolvedAt);
+  return Boolean(
+    row?.status==='RESOLVED'&&
+    resolvedAt!=null&&
+    resolvedAt<=cutoff&&
+    finite(learningSummary?.generatedAt,null)!=null&&
+    Number(learningSummary.generatedAt)>=resolvedAt&&
+    finite(learningSummary?.resolvedOutcomes,0)>0
+  );
+}
+
+function proofLifecycleRow(row,{cutoff,learningSummary}={}){
+  const r=row?.resolution||null;
   const beforeHash=proofCommitment(row);
-  const outcomeCore={
+  const issuedAsOf=finite(row?.asOf);
+  const dueAt=finite(row?.dueAt);
+  const resolvedAt=finite(r?.resolvedAt);
+  const generated=issuedAsOf!=null&&issuedAsOf<=cutoff;
+  const resolved=row?.status==='RESOLVED'&&r&&resolvedAt!=null&&resolvedAt<=cutoff;
+  // Reconstruct lifecycle strictly as-of the requested cutoff. A row that is
+  // RESOLVED today was still LIVE before its historical resolution timestamp.
+  const live=generated&&!resolved&&(dueAt==null||cutoff<dueAt);
+  const awaitingOutcome=generated&&!resolved&&dueAt!=null&&cutoff>=dueAt;
+  const matured=resolved;
+  const reviewed=Boolean(
+    matured&&
+    typeof r?.topCorrect==='boolean'&&
+    typeof r?.intervalMiss==='boolean'&&
+    finite(r?.actualReturn,null)!=null
+  );
+  const learned=reviewed&&learningIncludesResolvedRow(row,learningSummary,cutoff);
+  const currentStage=
+    learned?'LEARNED':
+    reviewed?'REVIEWED':
+    matured?'MATURED':
+    awaitingOutcome?'AWAITING_OUTCOME':
+    live?'LIVE':
+    generated?'GENERATED':'NOT_YET_VISIBLE';
+  const outcomeCore=resolved?{
     beforeHash,
     resolvedAt:r?.resolvedAt,
     resolvedPrice:r?.resolvedPrice,
@@ -243,28 +364,31 @@ function proofRow(row){
     actualDirection:r?.actualDirection,
     topCorrect:r?.topCorrect===true,
     intervalMiss:r?.intervalMiss===true
-  };
+  }:null;
   return freeze({
-    proofId:'proof:'+sha256({id:row?.id,beforeHash,resolvedAt:r?.resolvedAt}).slice(0,28),
+    proofId:'proof:'+sha256({id:row?.id,beforeHash,resolvedAt:r?.resolvedAt??null}).slice(0,28),
     forecastId:String(row?.id||'UNKNOWN'),
     symbol:String(row?.symbol||'UNKNOWN').toUpperCase(),
     horizonId:String(row?.horizonId||'UNKNOWN'),
-    issuedAsOf:finite(row?.asOf),
-    dueAt:finite(row?.dueAt),
+    issuedAsOf,
+    dueAt,
     startPrice:finite(row?.startPrice),
     predictedDirection:String(row?.direction||'UNKNOWN').toUpperCase(),
     expectedReturn:finite(row?.expectedReturn),
     intervalQ10:finite(row?.interval?.q10),
     intervalQ90:finite(row?.interval?.q90),
     forecastGate:String(row?.gate||'UNKNOWN').toUpperCase(),
-    resolvedAt:finite(r?.resolvedAt),
+    resolvedAt,
     resolvedPrice:finite(r?.resolvedPrice),
     actualReturn:finite(r?.actualReturn),
     actualDirection:String(r?.actualDirection||'UNKNOWN').toUpperCase(),
-    directionalHit:r?.topCorrect===true,
-    intervalHit:r?.intervalMiss===false,
+    directionalHit:resolved?r?.topCorrect===true:null,
+    intervalHit:resolved?r?.intervalMiss===false:null,
+    currentStage,
+    milestones:freeze({generated,live,matured,reviewed,learned}),
     beforeHash,
-    outcomeHash:sha256(outcomeCore),
+    outcomeHash:outcomeCore?sha256(outcomeCore):null,
+    learningMeaning:learned?'Included in the current aggregate learning summary; not a promoted skill or production-policy mutation.':null,
     semantics:'Internal deterministic commitment hash. Not an external timestamp, blockchain proof, or independent attestation.'
   });
 }
@@ -272,42 +396,74 @@ function proofRow(row){
 export function buildBiggjProofFeed(entries=[],{
   symbol=null,
   limit=12,
-  asOf=Date.now()
+  liveLimit=5,
+  asOf=Date.now(),
+  learningSummary=null
 }={}){
   const target=symbol?String(symbol).toUpperCase():null;
   const take=Math.max(1,Math.min(50,Math.floor(finite(limit,12))));
+  const liveTake=Math.max(1,Math.min(20,Math.floor(finite(liveLimit,5))));
   const cutoff=finite(asOf,Date.now());
-  const latest=[];
-  for(const row of arr(entries)){
-    const resolvedAt=finite(row?.resolution?.resolvedAt);
-    if(row?.status!=='RESOLVED'||!row?.resolution||resolvedAt==null||resolvedAt>cutoff)continue;
-    if(target&&String(row?.symbol||'').toUpperCase()!==target)continue;
-    let i=0;
-    while(i<latest.length&&finite(latest[i]?.resolution?.resolvedAt,0)>=resolvedAt)i++;
-    latest.splice(i,0,row);
-    if(latest.length>take)latest.pop();
-  }
-  const resolved=latest.map(proofRow);
-  const hits=resolved.filter(x=>x.directionalHit).length;
-  const misses=resolved.length-hits;
+  const learningGeneratedAt=finite(learningSummary?.generatedAt,null);
+  const effectiveLearningSummary=learningGeneratedAt!=null&&learningGeneratedAt<=cutoff?learningSummary:null;
+  const scoped=arr(entries).filter(row=>{
+    const issued=finite(row?.asOf);
+    if(issued==null||issued>cutoff)return false;
+    if(target&&String(row?.symbol||'').toUpperCase()!==target)return false;
+    return true;
+  });
+  const lifecycle=scoped.map(row=>proofLifecycleRow(row,{cutoff,learningSummary:effectiveLearningSummary}));
+  const resolved=lifecycle
+    .filter(x=>['MATURED','REVIEWED','LEARNED'].includes(x.currentStage))
+    .sort((a,b)=>finite(b.resolvedAt,0)-finite(a.resolvedAt,0)||String(a.forecastId).localeCompare(String(b.forecastId)))
+    .slice(0,take);
+  const live=lifecycle
+    .filter(x=>['GENERATED','LIVE','AWAITING_OUTCOME'].includes(x.currentStage))
+    .sort((a,b)=>finite(b.issuedAsOf,0)-finite(a.issuedAsOf,0)||String(a.forecastId).localeCompare(String(b.forecastId)))
+    .slice(0,liveTake);
+  const hits=resolved.filter(x=>x.directionalHit===true).length;
+  const misses=resolved.filter(x=>x.directionalHit===false).length;
+  const counts={
+    scoped:lifecycle.length,
+    generated:lifecycle.filter(x=>x.milestones.generated).length,
+    live:lifecycle.filter(x=>x.currentStage==='LIVE').length,
+    awaitingOutcome:lifecycle.filter(x=>x.currentStage==='AWAITING_OUTCOME').length,
+    resolved:resolved.length,
+    hits,
+    misses,
+    reviewed:lifecycle.filter(x=>x.milestones.reviewed).length,
+    learned:lifecycle.filter(x=>x.milestones.learned).length
+  };
   const core={
     version:BIGGJ_PROOF_FEED_VERSION,
-    generatedAt:finite(asOf,Date.now()),
+    generatedAt:cutoff,
     symbol:target,
+    liveRows:live,
     rows:resolved,
-    counts:{resolved:resolved.length,hits,misses},
+    counts,
+    learning:{
+      phase:String(effectiveLearningSummary?.phase||'UNKNOWN'),
+      generatedAt:finite(effectiveLearningSummary?.generatedAt),
+      resolvedOutcomes:finite(effectiveLearningSummary?.resolvedOutcomes,0),
+      futureSummarySuppressed:learningGeneratedAt!=null&&learningGeneratedAt>cutoff,
+      meaning:'LEARNED means included in the current aggregate learning summary; it does not mean skill promotion or production-policy mutation.'
+    },
     policy:{
       includesWins:true,
       includesLosses:true,
-      selection:'MOST_RECENT_RESOLVED_WITHIN_REQUESTED_SCOPE',
+      includesOpenCommitments:true,
+      selection:'MOST_RECENT_LIVE_AND_RESOLVED_WITHIN_REQUESTED_SCOPE',
       retrospectiveEditingAllowed:false,
       probabilityDisplaySuppressed:true
     },
     semantics:{
       beforeHashCommitsForecastFields:true,
+      liveCommitmentExistsBeforeOutcome:true,
       outcomeHashBindsResolutionToBeforeHash:true,
       hashesAreInternalNotIndependentAttestation:true,
-      resolvedOutcomeDoesNotProveCausalityOrFutureProfitability:true
+      resolvedOutcomeDoesNotProveCausalityOrFutureProfitability:true,
+      lifecycleStagesAreDerivedFromStoredJournalState:true,
+      futureLearningSummaryIsSuppressed:true
     },
     safety:{
       execution:'SHADOW_ONLY',
@@ -323,7 +479,12 @@ export function verifyBiggjProofFeed(value){
   if(value?.version!==BIGGJ_PROOF_FEED_VERSION)reasons.push('VERSION_INVALID');
   if(value?.safety?.execution!=='SHADOW_ONLY'||value?.safety?.action!=='ABSTAIN'||value?.safety?.canExecuteLive!==false)reasons.push('SAFETY_INVALID');
   if(value?.policy?.includesWins!==true||value?.policy?.includesLosses!==true)reasons.push('SELECTION_BIAS_POLICY_INVALID');
+  if(value?.policy?.includesOpenCommitments!==true)reasons.push('OPEN_COMMITMENT_POLICY_INVALID');
   if(value?.policy?.probabilityDisplaySuppressed!==true)reasons.push('PROBABILITY_POLICY_INVALID');
+  for(const row of arr(value?.liveRows)){
+    if(row?.outcomeHash!=null)reasons.push('LIVE_OUTCOME_HASH_LEAK');
+    if(!['GENERATED','LIVE','AWAITING_OUTCOME'].includes(String(row?.currentStage)))reasons.push('LIVE_STAGE_INVALID');
+  }
   const {fingerprint,...core}=value||{};
   if(fingerprint!==sha256(core))reasons.push('FINGERPRINT_MISMATCH');
   return {ok:reasons.length===0,reasons};
@@ -331,26 +492,45 @@ export function verifyBiggjProofFeed(value){
 
 export function renderBiggjProofFeed(feed={}){
   const rows=arr(feed?.rows);
+  const live=arr(feed?.liveRows);
   const lines=[
     'BIGGJ // PROOF FEED'+(feed?.symbol?' · '+String(feed.symbol).replace('USDT','/USDT'):''),
     '━━━━━━━━━━━━━━━━━━━━',
-    'FORECAST BEFORE → OUTCOME AFTER',
+    'FORECAST BEFORE → OUTCOME AFTER → LEARNING',
     '',
-    'Resolved '+String(feed?.counts?.resolved||0)+' · Hits '+String(feed?.counts?.hits||0)+' · Misses '+String(feed?.counts?.misses||0),
+    'Live '+String(feed?.counts?.live||0)+' · Awaiting '+String(feed?.counts?.awaitingOutcome||0)+' · Resolved '+String(feed?.counts?.resolved||0)+' · Learned '+String(feed?.counts?.learned||0),
+    'Hits '+String(feed?.counts?.hits||0)+' · Misses '+String(feed?.counts?.misses||0),
     ''
   ];
+  if(live.length){
+    lines.push('LIVE COMMITMENTS');
+    for(const row of live.slice(0,4)){
+      lines.push(
+        '◐ '+row.currentStage.replaceAll('_',' ')+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
+        'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
+        'As-of   '+iso(row.issuedAsOf)+' · Due '+iso(row.dueAt),
+        'Hash    '+String(row.beforeHash).slice(0,16)+'…',
+        ''
+      );
+    }
+  }else{
+    lines.push('LIVE COMMITMENTS','Keine offenen Forecast-Commitments im gewählten Scope.','');
+  }
+  lines.push('RESOLVED PROOFS');
   if(!rows.length)lines.push('Noch keine aufgelösten Forecasts im gewählten Scope.');
-  for(const row of rows.slice(0,10)){
+  for(const row of rows.slice(0,8)){
     lines.push(
-      (row.directionalHit?'✓ HIT':'✕ MISS')+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
+      (row.directionalHit?'✓ HIT':'✕ MISS')+' · '+row.currentStage+' · '+row.symbol.replace('USDT','/USDT')+' · '+row.horizonId.toUpperCase(),
       'Before  '+directionLabel(row.predictedDirection)+' · Expected '+signedPct(row.expectedReturn)+' · Range '+signedPct(row.intervalQ10)+' → '+signedPct(row.intervalQ90),
       'After   '+directionLabel(row.actualDirection)+' · Return '+signedPct(row.actualReturn)+' · Range '+(row.intervalHit?'HIT':'MISS'),
       'As-of   '+iso(row.issuedAsOf)+' · Resolved '+iso(row.resolvedAt),
-      'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash).slice(0,12)+'…',
+      'Hash    '+String(row.beforeHash).slice(0,12)+'… → '+String(row.outcomeHash||'').slice(0,12)+'…',
       ''
     );
   }
   lines.push(
+    'Lifecycle: GENERATED → LIVE → MATURED → REVIEWED → LEARNED.',
+    'LEARNED = im aktuellen Learning-Aggregat enthalten; keine Skill-Promotion und keine PRIMARY-Änderung.',
     'Feed zeigt Gewinne UND Fehler; keine Cherry-Pick-Policy.',
     'Hashes sind interne deterministische Commitments, keine unabhängige externe Beglaubigung.',
     'Vergangene Treffer beweisen keine zukünftige Profitabilität.',
@@ -359,19 +539,22 @@ export function renderBiggjProofFeed(feed={}){
   return lines.join('\n').slice(0,4096);
 }
 
-export function signalLabKeyboard(symbol,horizonId='1h'){
+export function signalLabKeyboard(symbol,horizonId='1h',mode='FULL'){
   const s=String(symbol||'BTCUSDT').toUpperCase();
   const active=String(horizonId||'1h').toLowerCase();
-  const b=(h)=>({text:(active===h?'● ':'')+h.toUpperCase(),callback_data:'signallab:'+s+':'+h});
+  const activeMode=normalizeMode(mode);
+  const h=(id)=>({text:(active===id?'● ':'')+id.toUpperCase(),callback_data:'signallab:'+s+':'+id+':'+activeMode});
+  const m=(id,label=id)=>({text:(activeMode===id?'● ':'')+label,callback_data:'signallab:'+s+':'+active+':'+id});
   return {inline_keyboard:[
-    [b('5m'),b('15m'),b('1h'),b('4h')],
+    [h('5m'),h('15m'),h('1h'),h('4h')],
+    [m('FULL','FULL'),m('STRUCTURE','STRUCT'),m('FLOW','FLOW'),m('LIQUIDITY','LIQ'),m('MACRO','MACRO')],
     [
       {text:'🧠 SUPERCHART',callback_data:'superchart:'+s+':PRO:5m'},
       {text:'◇ EVIDENCE',callback_data:'evidence:'+s}
     ],
     [
       {text:'▣ PROOF FEED',callback_data:'proof:'+s},
-      {text:'↻ REFRESH',callback_data:'signallab:'+s+':'+active}
+      {text:'↻ REFRESH',callback_data:'signallab:'+s+':'+active+':'+activeMode}
     ],
     [{text:'⌂ HOME',callback_data:'home'}]
   ]};
@@ -387,7 +570,7 @@ export function proofFeedKeyboard(symbol=null){
     ],
     [
       {text:'ALLE',callback_data:'proof:ALL'},
-      ...(s?[{text:'SIGNAL',callback_data:'signallab:'+s+':1h'}]:[])
+      ...(s?[{text:'SIGNAL',callback_data:'signallab:'+s+':1h:FULL'}]:[])
     ],
     [{text:'⌂ HOME',callback_data:'home'}]
   ]};

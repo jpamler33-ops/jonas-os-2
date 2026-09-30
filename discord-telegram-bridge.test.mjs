@@ -127,6 +127,9 @@ test('BIGGJ Discord V6 operator and experience layers are wired into the bridge'
   assert.match(source,/name:'executive'/);
   assert.match(source,/name:'signal'/);
   assert.match(source,/name:'proof'/);
+  assert.match(source,/signalModeOption/);
+  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V10/);
+  assert.match(source,/Evidence-Linse/);
   assert.match(source,/name:'brain'/);
   assert.match(source,/name:'timeline'/);
   assert.match(source,/name:'needs'/);
