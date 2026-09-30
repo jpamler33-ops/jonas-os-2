@@ -319,3 +319,43 @@ test('adapter rejects null ingest time instead of converting it to epoch zero',(
     ingestedAt:null
   }),/ingestedAt must be finite/);
 });
+
+
+test('CFTC weekly positioning enters its own governed research domain',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    cftcCotSnapshot:{
+      ok:true,
+      source:'CFTC_TFF_FUTURES_ONLY',
+      sourceEventId:'260929133741F',
+      contractCode:'133741',
+      contractMarketName:'BITCOIN',
+      marketAndExchange:'BITCOIN - CHICAGO MERCANTILE EXCHANGE',
+      reportDate:1_500_000,
+      reportWeek:'2026 Report Week 40',
+      capturedAt:1_999_900,
+      availableAt:1_999_900,
+      openInterest:20000,
+      changeOpenInterest:1000,
+      dealer:{netShare:-.05,longShare:.05,shortShare:.1},
+      assetManager:{netShare:.1,longShare:.2,shortShare:.1},
+      leveragedMoney:{netShare:-.15,longShare:.25,shortShare:.4},
+      nonreportable:{netShare:.025},
+      top4LongConcentration:.45,
+      top4ShortConcentration:.55,
+      epistemic:'OFFICIAL_WEEKLY_POSITIONING_REPORT_NOT_LIVE_FLOW_OR_FORECAST'
+    }
+  });
+  assert.equal(rows.length,1);
+  const cot=rows[0];
+  assert.equal(cot.domain,'CFTC_POSITIONING');
+  assert.equal(cot.source,'CFTC_TFF_FUTURES_ONLY');
+  assert.equal(cot.eventTime,1_500_000);
+  assert.equal(cot.availableAt,1_999_900);
+  assert.equal(cot.quality.completeness,1);
+  assert.equal(cot.provenance.weeklyReport,true);
+  assert.equal(cot.provenance.liveFlow,false);
+  assert.equal(cot.provenance.directionalExecutionAuthority,false);
+  assert.ok(cot.features.some(x=>x.id==='research.cftc.leveragedMoneyNetShare'&&x.value===-.15));
+});
