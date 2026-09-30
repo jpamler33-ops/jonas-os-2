@@ -8362,11 +8362,22 @@ async function shadowCompetitionWatcher(){
           await sleep(shadowCompetitionEvalMs);
           continue;
         }
-        const history=forecastRuntime.engine.historySnapshot(Number.POSITIVE_INFINITY,{limit:shadowCompetitionHistoryRows});
-        const historyProgressAt=forecastHistoryProgressAt(history);
-        if(shadowCompetitionLastHistoryProgressAt>0&&!forecastHistoryHasAdvanced(history,shadowCompetitionLastHistoryProgressAt)){
+        const preflightHistoryProgressAt=forecastRuntime.engine.historyProgressAt(
+          Number.POSITIVE_INFINITY,
+          {limit:shadowCompetitionHistoryRows}
+        );
+        if(
+          shadowCompetitionLastHistoryProgressAt>0&&
+          preflightHistoryProgressAt<=shadowCompetitionLastHistoryProgressAt
+        ){
           shadowCompetitionWorkerNoChangeSkips++;
-          shadowCompetitionWorkerLastDecision={...admission,at:Date.now(),allowed:false,reason:'NO_NEW_PIT_HISTORY',historyProgressAt};
+          shadowCompetitionWorkerLastDecision={
+            ...admission,
+            at:Date.now(),
+            allowed:false,
+            reason:'NO_NEW_PIT_HISTORY',
+            historyProgressAt:preflightHistoryProgressAt
+          };
           recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'SKIPPED_NO_NEW_PIT_HISTORY'});
           await sleep(shadowCompetitionEvalMs);
           continue;
@@ -8379,6 +8390,9 @@ async function shadowCompetitionWatcher(){
 
         let result=null;
         let freshAdmission=null;
+        let payloadAdmission=null;
+        let history=null;
+        let historyProgressAt=preflightHistoryProgressAt;
         let heapBefore=0;
         try{
           const freshMemory=process.memoryUsage();
@@ -8394,44 +8408,78 @@ async function shadowCompetitionWatcher(){
             hardRssMb:900,
             hardExternalMb:shadowCompetitionHardExternalMb
           });
-          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs};
+          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs,stage:'PRE_SNAPSHOT'};
           if(freshAdmission.allowed){
-            const cfg=forecastRuntime.engine.configSnapshot();
-            const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
-            heapBefore=Math.round(freshMemory.heapUsed/1024/1024);
-            result=await runForecastShadowEvaluationWorker({
-              competitionState:shadowCompetitionState,
-              experimentGovernorState,
-              historyRows:history,
-              incumbentConfig:cfg,
-              releaseId,
-              minSeedRows:shadowCompetitionMinSeedRows,
-              minimumTrainCases:shadowCompetitionMinTrainCases,
-              maxGeneratedHypotheses:4,
-              now:Date.now()
-            },{
-              timeoutMs:shadowCompetitionWorkerTimeoutMs,
-              maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+            history=forecastRuntime.engine.historySnapshot(
+              Number.POSITIVE_INFINITY,
+              {limit:shadowCompetitionHistoryRows}
+            );
+            historyProgressAt=forecastHistoryProgressAt(history);
+
+            const payloadMemory=process.memoryUsage();
+            payloadAdmission=evaluateShadowWorkerAdmission({
+              mode:'ON',
+              heapUsedMb:Math.round(payloadMemory.heapUsed/1024/1024),
+              rssMb:Math.round(payloadMemory.rss/1024/1024),
+              externalMb:Math.round(payloadMemory.external/1024/1024),
+              autoHeapMb:shadowCompetitionAutoHeapMb,
+              autoRssMb:shadowCompetitionAutoRssMb,
+              autoExternalMb:shadowCompetitionAutoExternalMb,
+              hardHeapMb:300,
+              hardRssMb:900,
+              hardExternalMb:shadowCompetitionHardExternalMb
             });
+            shadowCompetitionWorkerLastDecision={
+              ...payloadAdmission,
+              at:Date.now(),
+              slotWaitMs,
+              stage:'POST_SNAPSHOT_HARD_GATE',
+              historyRows:history.length,
+              historyProgressAt
+            };
+            if(payloadAdmission.allowed){
+              const cfg=forecastRuntime.engine.configSnapshot();
+              const releaseId=String(runtimeManifest?.releaseId||'UNAVAILABLE');
+              heapBefore=Math.round(payloadMemory.heapUsed/1024/1024);
+              result=await runForecastShadowEvaluationWorker({
+                competitionState:shadowCompetitionState,
+                experimentGovernorState,
+                historyRows:history,
+                incumbentConfig:cfg,
+                releaseId,
+                minSeedRows:shadowCompetitionMinSeedRows,
+                minimumTrainCases:shadowCompetitionMinTrainCases,
+                maxGeneratedHypotheses:4,
+                now:Date.now()
+              },{
+                timeoutMs:shadowCompetitionWorkerTimeoutMs,
+                maxOldGenerationSizeMb:shadowCompetitionWorkerHeapMb
+              });
+            }
           }
         }finally{
           if(activeBackgroundResearchJob==='shadow-competition') activeBackgroundResearchJob=null;
         }
 
-        if(!freshAdmission?.allowed){
+        const finalAdmission=freshAdmission?.allowed?payloadAdmission:freshAdmission;
+        if(!finalAdmission?.allowed){
           shadowCompetitionWorkerMemoryDeferrals++;
+          const stage=freshAdmission?.allowed?'POST_SNAPSHOT_HARD_GATE':'PRE_SNAPSHOT';
           console.warn('shadow competition deferred after research-slot wait',JSON.stringify({
             mode:shadowCompetitionWorkerMode,
-            reason:freshAdmission?.reason||'MEMORY_PRESSURE',
+            stage,
+            reason:finalAdmission?.reason||'MEMORY_PRESSURE',
             slotWaitMs,
-            memory:freshAdmission?.memory||null,
-            limits:freshAdmission?.limits||null
+            memory:finalAdmission?.memory||null,
+            limits:finalAdmission?.limits||null,
+            historyRows:Array.isArray(history)?history.length:0
           }));
+          history=null;
           recordOperation(observability,{
             name:'forecast_shadow_competition',
             ok:true,
             latencyMs:Date.now()-started,
-            error:'DEFERRED_AFTER_SLOT_'+String(freshAdmission?.reason||'MEMORY_PRESSURE')
+            error:'DEFERRED_'+stage+'_'+String(finalAdmission?.reason||'MEMORY_PRESSURE')
           });
           await sleep(shadowCompetitionEvalMs);
           continue;
@@ -8439,15 +8487,17 @@ async function shadowCompetitionWatcher(){
 
         shadowCompetitionState=result.competitionState;
         experimentGovernorState=result.experimentGovernorState;
-        shadowCompetitionLastHistorySize=Number(result.historyRows||history.length);
+        shadowCompetitionLastHistorySize=Number(result.historyRows||(history?.length||0));
         shadowCompetitionLastHistoryProgressAt=historyProgressAt;
         shadowCompetitionWorkerRuns++;
         shadowCompetitionWorkerLastDecision={
-          ...admission,
+          ...payloadAdmission,
           at:Date.now(),
           allowed:true,
           reason:'WORKER_COMPLETED',
-          historyProgressAt
+          stage:'WORKER_COMPLETED',
+          historyProgressAt,
+          slotWaitMs
         };
 
         await saveShadowCompetition(shadowCompetitionFile,shadowCompetitionState);

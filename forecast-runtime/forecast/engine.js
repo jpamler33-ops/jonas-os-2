@@ -275,6 +275,27 @@ export class ProbabilisticForecastEngine {
         this.trimHistory();
     } }
     historySize() { return this.history.length; }
+    historyProgressAt(asOf = Number.POSITIVE_INFINITY, { limit = Number.POSITIVE_INFINITY } = {}) {
+        const maxRows = Number.isFinite(Number(limit))
+            ? Math.max(0, Math.floor(Number(limit)))
+            : Number.POSITIVE_INFINITY;
+        if (maxRows === 0)
+            return 0;
+        let seen = 0;
+        let latest = 0;
+        for (let i = this.history.length - 1; i >= 0 && seen < maxRows; i--) {
+            const r = this.history[i];
+            if (r.timestamp > asOf || r.availableAt > asOf)
+                continue;
+            seen++;
+            for (const value of [r.timestamp, r.availableAt, r.resolvedAt]) {
+                const n = Number(value);
+                if (Number.isFinite(n) && n > latest)
+                    latest = n;
+            }
+        }
+        return latest;
+    }
     hasHistory(id) { return this.historyKeys.has(String(id)); }
     /** Point-in-time safe copy for diagnostics/intelligence layers. */
     historySnapshot(asOf = Number.POSITIVE_INFINITY, { limit = Number.POSITIVE_INFINITY } = {}) {
