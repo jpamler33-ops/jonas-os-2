@@ -163,6 +163,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'research-provider-fanout.mjs',
   'model-promotion-review-service.mjs',
   'expansion-runtime/dexscreener-public-provider.mjs',
+  'expansion-runtime/defillama-public-provider.mjs',
   'expansion-runtime/public-market-context-provider.mjs',
   'expansion-runtime/external-research-provider.mjs',
 
