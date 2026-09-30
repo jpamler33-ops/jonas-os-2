@@ -126,6 +126,15 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     walletId:String(order.strategyMeta?.walletId||shadowWalletIdForPosition({entryMode:order.strategyMeta?.entryMode})).toUpperCase(),
     labWalletVersion:String(order.strategyMeta?.labWalletVersion||''),
     labDecisionKey:String(order.strategyMeta?.labDecisionKey||''),
+    labLaneKey:String(order.strategyMeta?.labLaneKey||''),
+    labSelectionScore:finite(order.strategyMeta?.labSelectionScore),
+    labSelectionComponents:order.strategyMeta?.labSelectionComponents&&typeof order.strategyMeta.labSelectionComponents==='object'
+      ?JSON.parse(JSON.stringify(order.strategyMeta.labSelectionComponents))
+      :null,
+    labLearningState:String(order.strategyMeta?.labLearningState||''),
+    labLearningSamples:finite(order.strategyMeta?.labLearningSamples),
+    labHistoricalShrunkMeanReturn:finite(order.strategyMeta?.labHistoricalShrunkMeanReturn),
+    labHistoricalProfitFactor:finite(order.strategyMeta?.labHistoricalProfitFactor),
     labCapitalFacility:String(order.strategyMeta?.labCapitalFacility||''),
     labCalibrationStatus:String(order.strategyMeta?.labCalibrationStatus||''),
     labCounterfactualOnly:order.strategyMeta?.labCounterfactualOnly===true,
