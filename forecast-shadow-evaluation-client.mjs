@@ -3,6 +3,7 @@ import { Worker } from 'node:worker_threads';
 export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1';
 
 export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2';
+export const SHADOW_WORKER_HEADROOM_RETRY_POLICY_VERSION='TCX_SHADOW_WORKER_HEADROOM_RETRY_POLICY_V1';
 
 export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V1';
 
@@ -99,6 +100,43 @@ export function evaluateShadowWorkerAdmission({
     return {allowed:false,mode:effectiveMode,reason:'ADAPTIVE_MEMORY_PRESSURE',memory,limits};
   }
   return {allowed:true,mode:effectiveMode,reason:'MEMORY_HEADROOM_AVAILABLE',memory,limits};
+}
+
+export function shadowWorkerHeadroomRetryPolicy(admission,{
+  attempt=0,
+  elapsedMs=0,
+  maxAttempts=8,
+  maxWaitMs=20_000,
+  pollMs=2_500
+}={}){
+  const tries=Math.max(0,Math.floor(Number(attempt)||0));
+  const elapsed=Math.max(0,Number(elapsedMs)||0);
+  const attemptsLimit=Math.max(1,Math.floor(Number(maxAttempts)||1));
+  const waitLimit=Math.max(0,Number(maxWaitMs)||0);
+  const poll=Math.max(250,Number(pollMs)||250);
+  const remainingMs=Math.max(0,waitLimit-elapsed);
+  const adaptive=
+    admission?.allowed!==true&&
+    String(admission?.mode||'AUTO').toUpperCase()==='AUTO'&&
+    String(admission?.reason||'')==='ADAPTIVE_MEMORY_PRESSURE';
+  const retry=
+    adaptive&&
+    tries<attemptsLimit&&
+    remainingMs>0;
+  const delayMs=retry?Math.min(poll,remainingMs):0;
+  return {
+    version:SHADOW_WORKER_HEADROOM_RETRY_POLICY_VERSION,
+    retry,
+    delayMs,
+    attempt:tries,
+    remainingMs,
+    terminalReason:admission?.allowed===true
+      ?'HEADROOM_AVAILABLE'
+      :adaptive
+        ?retry?'WAIT_FOR_NATURAL_HEADROOM':'ADAPTIVE_WINDOW_EXHAUSTED'
+        :String(admission?.reason||'NON_RETRYABLE_ADMISSION'),
+    thresholdsUnchanged:true
+  };
 }
 
 export function forecastHistoryProgressAt(historyRows){
