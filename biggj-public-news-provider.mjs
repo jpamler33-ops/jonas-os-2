@@ -1,4 +1,5 @@
-export const BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION='BIGGJ_PUBLIC_NEWS_PROVIDER_V3';
+import { createOfficialIntelProvider, OFFICIAL_INTEL_SOURCES } from './official-intel-sources.mjs';
+export const BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION='BIGGJ_PUBLIC_NEWS_PROVIDER_V4';
 
 const DEFAULT_GENERAL_QUERY='(bitcoin OR ethereum OR crypto OR markets OR economy OR inflation OR "federal reserve" OR tariffs OR sanctions OR oil OR gold OR AI OR semiconductor)';
 const DEFAULT_WORLD_QUERY='(war OR ceasefire OR sanctions OR tariffs OR geopolitics OR "central bank" OR inflation OR oil OR gas OR Taiwan OR China OR Russia OR Ukraine OR "Middle East" OR NATO OR trade)';
@@ -157,6 +158,8 @@ export function createBiggjPublicNewsProvider({
   secondaryBaseUrl='https://news.google.com/rss/search',
   timeoutMs=18000,
   secondaryTimeoutMs=8000,
+  officialTimeoutMs=8000,
+  officialSources=OFFICIAL_INTEL_SOURCES,
   gdeltCooldownMs=10*60_000,
   cacheTtlMs=120000,
   maxRecords=30,
@@ -171,6 +174,13 @@ export function createBiggjPublicNewsProvider({
   if(typeof fetchImpl!=='function')throw new Error('fetch implementation required');
   let cache=null;
   let gdeltCooldownUntil=0;
+  const officialProvider=createOfficialIntelProvider({
+    fetchImpl,
+    sources:Array.isArray(officialSources)?officialSources:OFFICIAL_INTEL_SOURCES,
+    timeoutMs:officialTimeoutMs,
+    cacheTtlMs,
+    now
+  });
 
   async function fetchTimed(url,{accept,timeout}){
     const controller=new AbortController();
@@ -293,13 +303,40 @@ export function createBiggjPublicNewsProvider({
     if(!force&&cache&&t-cache.at<cacheTtlMs)return cache.value;
     const settled=await Promise.allSettled([
       queryWithFallback(generalQuery,generalFallbackQuery,generalSecondaryQuery,'GENERAL'),
-      queryWithFallback(worldQuery,worldFallbackQuery,worldSecondaryQuery,'WORLD')
+      queryWithFallback(worldQuery,worldFallbackQuery,worldSecondaryQuery,'WORLD'),
+      officialProvider.fetchFeed({force})
     ]);
     const errors=[];
     const recoveries=[];
     const rows=[];
     const providerHealth={};
     settled.forEach((r,i)=>{
+      if(i===2){
+        if(r.status==='fulfilled'){
+          rows.push(...(r.value.events||[]));
+          for(const e of r.value.errors||[]) errors.push({
+            queryClass:'OFFICIAL_PRIMARY:'+String(e.sourceId||'UNKNOWN'),
+            error:String(e.error||'OFFICIAL_SOURCE_FAILED')
+          });
+          providerHealth.official=Object.freeze({
+            provider:'OFFICIAL_PRIMARY_FEEDS',
+            rows:(r.value.events||[]).length,
+            healthySources:Number(r.value.healthySourceCount||0),
+            totalSources:Number(r.value.sourceCount||0),
+            sources:r.value.providerHealth||{}
+          });
+        }else{
+          errors.push({queryClass:'OFFICIAL_PRIMARY',error:errText(r.reason)});
+          providerHealth.official=Object.freeze({
+            provider:'OFFICIAL_PRIMARY_FEEDS',
+            rows:0,
+            healthySources:0,
+            totalSources:Array.isArray(officialSources)?officialSources.length:0,
+            sources:{}
+          });
+        }
+        return;
+      }
       const queryClass=i===0?'GENERAL':'WORLD';
       if(r.status==='fulfilled'){
         rows.push(...r.value.rows);
@@ -321,9 +358,11 @@ export function createBiggjPublicNewsProvider({
     const all=dedupe(rows).sort((a,b)=>rank(b)-rank(a)||Number(b.availableAt)-Number(a.availableAt)).slice(0,120);
     const world=all.filter(x=>x.worldRelevant).slice(0,60);
     const sourceIds=uniq(all.map(x=>x.sourceId));
-    const source=sourceIds.length===1
-      ?(sourceIds[0]==='GDELT_DOC_API'?'GDELT DOC 2.1':'Google News RSS')
-      :sourceIds.length>1?'GDELT DOC 2.1 + Google News RSS':'GDELT DOC 2.1 / Google News RSS';
+    const sourceParts=[];
+    if(sourceIds.includes('GDELT_DOC_API')) sourceParts.push('GDELT DOC 2.1');
+    if(sourceIds.includes('GOOGLE_NEWS_RSS')) sourceParts.push('Google News RSS');
+    if(sourceIds.some(x=>!['GDELT_DOC_API','GOOGLE_NEWS_RSS'].includes(x))) sourceParts.push('Official primary feeds');
+    const source=sourceParts.length?sourceParts.join(' + '):'Public news sources';
     const value=Object.freeze({
       version:BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION,
       capturedAt:t,
@@ -331,6 +370,8 @@ export function createBiggjPublicNewsProvider({
       source,
       sourceUrl:'https://www.gdeltproject.org/',
       secondarySourceUrl:'https://news.google.com/',
+      officialSourceCount:Array.isArray(officialSources)?officialSources.length:0,
+      officialArticleCount:all.filter(x=>x.sourceAuthority==='OFFICIAL_PRIMARY').length,
       articleCount:all.length,
       worldCount:world.length,
       events:Object.freeze(all),
@@ -340,7 +381,7 @@ export function createBiggjPublicNewsProvider({
       fallbackUsed:recoveries.some(x=>x.strategy==='SECONDARY_PROVIDER_FALLBACK'||x.strategy==='GDELT_COOLDOWN_BYPASS'),
       gdeltCooldownUntil:gdeltCooldownUntil||null,
       providerHealth:Object.freeze(providerHealth),
-      epistemic:'PUBLIC_NEWS_DISCOVERY_NOT_FACT_VERIFICATION'
+      epistemic:'PUBLIC_NEWS_DISCOVERY_PLUS_OFFICIAL_PRIMARY_SOURCES_NOT_INDEPENDENT_FACT_VERIFICATION'
     });
     cache={at:t,value};
     return value;
