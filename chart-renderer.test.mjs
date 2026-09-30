@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderCandlestickPng } from './chart-renderer.mjs';
+import { renderCandlestickPng, derivePriceScale } from './chart-renderer.mjs';
 
 test('renders a valid PNG signature',()=>{
   const candles=[];
@@ -50,4 +50,33 @@ test('renders full superchart layers with forecast',()=>{
   });
   assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
   assert.ok(png.length>1000);
+});
+
+
+test('SOL replay scale ignores malformed external price anchors instead of flattening candles',()=>{
+  const candles=[];
+  for(let i=0;i<100;i++){
+    const base=118+i*.035+Math.sin(i/7)*.45;
+    candles.push({openTime:i,o:base,h:base+.65,l:base-.6,c:base+.12,v:100+i,closeTime:i+1,closed:true});
+  }
+  const analysis={support:0.001,resistance:123.8,ema20:121.1,ema50:120.4,classifiedPivots:[]};
+  const tradeOverlay={entryPrice:121.28,stopPrice:122.1,takeProfitPrice:119.2,currentPrice:120.53,side:'SHORT',status:'CLOSED'};
+  const scale=derivePriceScale(candles,analysis,null,tradeOverlay);
+  assert.ok(scale.min>80,'scale must remain near SOL market range');
+  assert.ok(scale.max<170,'malformed support must not expand scale');
+  assert.ok(scale.ignoredExternal.some(x=>x.source==='SUPPORT'));
+  assert.ok(scale.ignoredExternalCount>=1);
+  const png=renderCandlestickPng(candles,analysis,{width:900,height:560,tradeOverlay,tradeReplay:{entryAt:95,entryPrice:121.28,exitAt:99,exitPrice:120.53}});
+  assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+  assert.ok(png.length>1000);
+});
+
+test('single malformed candle wick cannot collapse replay price scale',()=>{
+  const candles=[];
+  for(let i=0;i<100;i++) candles.push({openTime:i,o:120+i*.01,h:121+i*.01,l:119+i*.01,c:120.3+i*.01,v:10,closeTime:i+1,closed:true});
+  candles[15]={...candles[15],l:.01};
+  const scale=derivePriceScale(candles,{support:119.5,resistance:122});
+  assert.ok(scale.min>80);
+  assert.ok(scale.max<170);
+  assert.ok(scale.ignoredCandleCount>=1);
 });
