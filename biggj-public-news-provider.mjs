@@ -1,8 +1,10 @@
 
-export const BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION='BIGGJ_PUBLIC_NEWS_PROVIDER_V1';
+export const BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION='BIGGJ_PUBLIC_NEWS_PROVIDER_V2';
 
 const DEFAULT_GENERAL_QUERY='(bitcoin OR ethereum OR crypto OR markets OR economy OR inflation OR "federal reserve" OR tariffs OR sanctions OR oil OR gold OR AI OR semiconductor)';
 const DEFAULT_WORLD_QUERY='(war OR ceasefire OR sanctions OR tariffs OR geopolitics OR "central bank" OR inflation OR oil OR gas OR Taiwan OR China OR Russia OR Ukraine OR "Middle East" OR NATO OR trade)';
+const DEFAULT_GENERAL_FALLBACK_QUERY='(bitcoin OR ethereum OR markets OR inflation OR oil OR AI)';
+const DEFAULT_WORLD_FALLBACK_QUERY='(war OR sanctions OR tariffs OR oil OR China OR Russia OR Ukraine)';
 
 const WORLD_KEYWORDS=[
   'war','ceasefire','sanction','tariff','geopolit','military','missile','attack','nato','taiwan',
@@ -126,30 +128,32 @@ function dedupe(events){
 export function createBiggjPublicNewsProvider({
   fetchImpl=globalThis.fetch,
   baseUrl='https://api.gdeltproject.org/api/v2/doc/doc',
-  timeoutMs=9000,
+  timeoutMs=18000,
   cacheTtlMs=120000,
-  maxRecords=50,
+  maxRecords=30,
   generalQuery=DEFAULT_GENERAL_QUERY,
   worldQuery=DEFAULT_WORLD_QUERY,
+  generalFallbackQuery=DEFAULT_GENERAL_FALLBACK_QUERY,
+  worldFallbackQuery=DEFAULT_WORLD_FALLBACK_QUERY,
   now=()=>Date.now()
 }={}){
   if(typeof fetchImpl!=='function')throw new Error('fetch implementation required');
   let cache=null;
 
-  async function query(queryText,queryClass){
+  async function query(queryText,queryClass,{records=maxRecords,timespan='12h'}={}){
     const u=new URL(baseUrl);
     u.searchParams.set('query',queryText);
     u.searchParams.set('mode','ArtList');
     u.searchParams.set('format','json');
-    u.searchParams.set('maxrecords',String(Math.max(10,Math.min(100,Number(maxRecords)||50))));
-    u.searchParams.set('sort','HybridRel');
-    u.searchParams.set('timespan','24h');
+    u.searchParams.set('maxrecords',String(Math.max(10,Math.min(75,Number(records)||30))));
+    u.searchParams.set('sort','DateDesc');
+    u.searchParams.set('timespan',timespan);
     const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),Math.max(1500,Number(timeoutMs)||9000));
+    const timer=setTimeout(()=>controller.abort(),Math.max(3000,Number(timeoutMs)||18000));
     try{
       const res=await fetchImpl(u.toString(),{
         method:'GET',
-        headers:{accept:'application/json','user-agent':'BIGGJ/1.0 public-news-research'},
+        headers:{accept:'application/json','user-agent':'BIGGJ/2.0 public-news-research'},
         signal:controller.signal
       });
       if(!res?.ok)throw new Error('GDELT_HTTP_'+String(res?.status??'UNKNOWN'));
@@ -160,18 +164,43 @@ export function createBiggjPublicNewsProvider({
     }finally{clearTimeout(timer);}
   }
 
+  async function queryWithFallback(primaryQuery,fallbackQuery,queryClass){
+    try{
+      return {rows:await query(primaryQuery,queryClass),recovery:null};
+    }catch(primaryError){
+      try{
+        const rows=await query(fallbackQuery,queryClass,{records:20,timespan:'6h'});
+        return {
+          rows,
+          recovery:Object.freeze({
+            queryClass,
+            primaryError:primaryError instanceof Error?primaryError.message:String(primaryError),
+            strategy:'COMPACT_QUERY_RETRY'
+          })
+        };
+      }catch(fallbackError){
+        const a=primaryError instanceof Error?primaryError.message:String(primaryError);
+        const b=fallbackError instanceof Error?fallbackError.message:String(fallbackError);
+        throw new Error('PRIMARY:'+a+' | FALLBACK:'+b);
+      }
+    }
+  }
+
   async function fetchFeed({force=false}={}){
     const t=Number(now());
     if(!force&&cache&&t-cache.at<cacheTtlMs)return cache.value;
     const settled=await Promise.allSettled([
-      query(generalQuery,'GENERAL'),
-      query(worldQuery,'WORLD')
+      queryWithFallback(generalQuery,generalFallbackQuery,'GENERAL'),
+      queryWithFallback(worldQuery,worldFallbackQuery,'WORLD')
     ]);
     const errors=[];
+    const recoveries=[];
     const rows=[];
     settled.forEach((r,i)=>{
-      if(r.status==='fulfilled')rows.push(...r.value);
-      else errors.push({
+      if(r.status==='fulfilled'){
+        rows.push(...r.value.rows);
+        if(r.value.recovery)recoveries.push(r.value.recovery);
+      }else errors.push({
         queryClass:i===0?'GENERAL':'WORLD',
         error:r.reason instanceof Error?r.reason.message:String(r.reason)
       });
@@ -189,6 +218,7 @@ export function createBiggjPublicNewsProvider({
       events:Object.freeze(all),
       world:Object.freeze(world),
       errors:Object.freeze(errors),
+      recoveries:Object.freeze(recoveries),
       epistemic:'PUBLIC_NEWS_DISCOVERY_NOT_FACT_VERIFICATION'
     });
     cache={at:t,value};
