@@ -101,6 +101,35 @@ export function evaluateShadowWorkerAdmission({
   return {allowed:true,mode:effectiveMode,reason:'MEMORY_HEADROOM_AVAILABLE',memory,limits};
 }
 
+export function shadowWorkerRetryDelayMs(admission,{
+  normalDelayMs=60*60_000,
+  adaptiveBaseDelayMs=60_000,
+  adaptiveMaxDelayMs=5*60_000,
+  hardBaseDelayMs=3*60_000,
+  hardMaxDelayMs=10*60_000,
+  deferralStreak=1
+}={}){
+  const normal=Math.max(15_000,Number(normalDelayMs)||60*60_000);
+  const adaptiveBase=Math.max(15_000,Number(adaptiveBaseDelayMs)||60_000);
+  const adaptiveMax=Math.max(adaptiveBase,Number(adaptiveMaxDelayMs)||5*60_000);
+  const hardBase=Math.max(adaptiveBase,Number(hardBaseDelayMs)||3*60_000);
+  const hardMax=Math.max(hardBase,Number(hardMaxDelayMs)||10*60_000);
+  const streak=Math.max(1,Math.floor(Number(deferralStreak)||1));
+  const reason=String(admission?.reason||'UNKNOWN').toUpperCase();
+
+  if(admission?.allowed===true) return normal;
+  if(reason==='DISABLED') return normal;
+
+  const exponent=Math.min(3,streak-1);
+  if(reason==='HARD_MEMORY_PRESSURE'){
+    return Math.min(hardMax,hardBase*(2**exponent));
+  }
+  if(reason==='ADAPTIVE_MEMORY_PRESSURE'){
+    return Math.min(adaptiveMax,adaptiveBase*(2**exponent));
+  }
+  return Math.min(normal,adaptiveBase);
+}
+
 export function forecastHistoryProgressAt(historyRows){
   let latest=0;
   for(const row of Array.isArray(historyRows)?historyRows:[]){
