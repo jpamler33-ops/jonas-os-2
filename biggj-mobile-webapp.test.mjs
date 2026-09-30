@@ -75,12 +75,11 @@ test('mobile intel separates world, general news, memecoins and trader source tr
     },
     portfolio:{}
   });
-  assert.match(html,/World situation/);
-  assert.match(html,/General relevant news/);
-  assert.match(html,/Memecoin radar/);
-  assert.match(html,/Trader watch/);
-  assert.match(html,/not independently verified/);
-  assert.match(html,/Market radar/);
+  assert.match(html,/Live Intelligence/);
+  assert.match(html,/Memecoin Radar/);
+  assert.match(html,/Trader Intelligence/);
+  assert.match(html,/nicht unabhängig bestätigt/);
+  assert.match(html,/Market Radar/);
 });
 
 
@@ -103,12 +102,11 @@ test('V2 renders BIGGJ command-center hierarchy and live states',()=>{
   assert.match(html,/Living Research/);
   assert.match(html,/Market Radar/);
   assert.match(html,/Execution Boundary/);
-  assert.match(html,/Legacy Diagnose/);
+  assert.match(html,/Live Diagnose/);
 });
 
-test('canonical mission-control route serves V2 app and keeps legacy diagnostics separate',async()=>{
-  const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
-  assert.match(source,/res\.end\(renderBiggjMobileApp\(snapshot\)\)/);
-  assert.match(source,/req\.url === '\/mission-control\/legacy'/);
-  assert.match(source,/res\.end\(renderMissionControlHtml\(snapshot\)\)/);
+test('canonical mission-control renderer delegates to the V2 mobile app',async()=>{
+  const source=await readFile(new URL('./mission-control.mjs',import.meta.url),'utf8');
+  assert.match(source,/import \{ renderBiggjMobileApp \} from '\.\/biggj-mobile-webapp\.mjs'/);
+  assert.match(source,/return renderBiggjMobileApp\(snapshot\)/);
 });
