@@ -289,3 +289,18 @@ test('legacy outcomes remain visible without being misrepresented as forecast-ti
   assert.equal(verifyBiggjProofFeed(feed).ok,true);
   assert.match(renderBiggjProofFeed(feed),/LEGACY UNCOMMITTED/);
 });
+
+
+test('restore quarantines tampered committed rows before learning rehydration',()=>{
+  const source=new ForecastLearningJournal(journalEngineStub());
+  source.record(journalInput(),journalReport());
+  source.observe({symbol:'BTCUSDT',timestamp:3_601_000,price:102,quality:1});
+  const snapshot=source.snapshot();
+  snapshot.entries[0].expectedReturn=.99;
+
+  const restored=new ForecastLearningJournal(journalEngineStub());
+  restored.restore(snapshot);
+  assert.equal(restored.entries[0].status,'PROOF_INVALID');
+  assert.equal(restored.entries[0].proofIntegrity,'MISMATCH');
+  assert.equal(restored.lightweightStats().proofInvalid,1);
+});
