@@ -6,11 +6,13 @@ import {
   biggjLivingResearchRuntimeSummary
 } from './biggj-living-research-runtime.mjs';
 import { biggjResearchValidationSummary } from './biggj-research-validation-harness.mjs';
+import { buildBiggjOutcomeSupervisor, BIGGJ_OUTCOME_SUPERVISOR_VERSION } from './biggj-outcome-supervisor.mjs';
 
-export const BIGGJ_DISCORD_OBSERVABILITY_VERSION='BIGGJ_DISCORD_OBSERVABILITY_V1';
+export const BIGGJ_DISCORD_OBSERVABILITY_VERSION='BIGGJ_DISCORD_OBSERVABILITY_V2';
 
 export const BIGGJ_DISCORD_OBSERVABILITY_LAYOUT=Object.freeze([
   {category:'BIGGJ • BRAIN',channels:[
+    {name:'executive-state',topic:'Verdichteter BIGGJ Zustand: was zählt, was hängt, warum es hängt und welcher nächste Schritt echten Research-Fortschritt erzeugt.'},
     {name:'brain-pulse',topic:'Was BIGGJ gerade weiß, untersucht, bezweifelt und als Nächstes lernen will.'},
     {name:'knowledge',topic:'Capability- und Wissensstand mit Reifegrad, Unsicherheit und Wissenslücken.'},
     {name:'research-queue',topic:'Priorisierte Forschungsfragen, Informationswert, Blocker und nächste Experimente.'},
@@ -29,6 +31,7 @@ export const BIGGJ_DISCORD_OBSERVABILITY_LAYOUT=Object.freeze([
 ]);
 
 export const BIGGJ_DISCORD_OBSERVABILITY_MARKERS=Object.freeze({
+  executive:'BIGGJ_OBSERVABILITY_EXECUTIVE_STATE_V1',
   pulse:'BIGGJ_OBSERVABILITY_BRAIN_PULSE_V1',
   knowledge:'BIGGJ_OBSERVABILITY_KNOWLEDGE_V1',
   research:'BIGGJ_OBSERVABILITY_RESEARCH_QUEUE_V1',
@@ -242,6 +245,7 @@ export function buildBiggjDiscordObservabilitySnapshot({
   claimAssumptionResearch=null,
   researchCoverage=null,
   discovery=null,
+  autonomousResearchFactory=null,
   asOf=Date.now()
 }={}){
   const state=livingResearchState||{};
@@ -269,6 +273,11 @@ export function buildBiggjDiscordObservabilitySnapshot({
   const claim=claimAssumptionResearch||{};
   const updatedAt=finite(state?.updatedAt,finite(asOf));
   const timeline=learningTimeline(state,nodes,updatedAt);
+  const outcomeSupervisor=buildBiggjOutcomeSupervisor({
+    livingResearchState:state,
+    autonomousResearchFactory,
+    asOf:updatedAt
+  });
   return Object.freeze({
     version:BIGGJ_DISCORD_OBSERVABILITY_VERSION,
     generatedAt:updatedAt,
@@ -368,6 +377,7 @@ export function buildBiggjDiscordObservabilitySnapshot({
     },
     researchCoverage:researchCoverage||{},
     discovery:discovery||{},
+    outcomeSupervisor,
     semantics:{
       visibleReasoningIsStructuredStateNotHiddenChainOfThought:true,
       readinessScoresAreDiagnosticsNotProbabilities:true,
@@ -387,17 +397,20 @@ export function buildBiggjDiscordObservabilitySnapshot({
 export function biggjObservabilityNavComponents(){
   return [
     {type:1,components:[
+      {type:2,style:3,label:'Executive',custom_id:'dc6:brain:executive'},
       {type:2,style:1,label:'Brain',custom_id:'dc6:brain:pulse'},
       {type:2,style:2,label:'Research',custom_id:'dc6:brain:research'},
       {type:2,style:2,label:'Skills',custom_id:'dc6:brain:skills'},
-      {type:2,style:2,label:'Progress',custom_id:'dc6:brain:progress'},
-      {type:2,style:2,label:'Changes',custom_id:'dc6:brain:changes'}
+      {type:2,style:2,label:'Progress',custom_id:'dc6:brain:progress'}
     ]},
     {type:1,components:[
+      {type:2,style:2,label:'Changes',custom_id:'dc6:brain:changes'},
       {type:2,style:3,label:'Reviews',custom_id:'dc6:brain:reviews'},
       {type:2,style:2,label:'Evidence',custom_id:'dc6:brain:evidence'},
       {type:2,style:2,label:'Decisions',custom_id:'dc6:brain:decisions'},
-      {type:2,style:2,label:'Experiments',custom_id:'dc6:brain:experiments'},
+      {type:2,style:2,label:'Experiments',custom_id:'dc6:brain:experiments'}
+    ]},
+    {type:1,components:[
       {type:2,style:2,label:'Timeline',custom_id:'dc6:brain:timeline'}
     ]}
   ];
@@ -474,6 +487,41 @@ function diagnosticLines(value,limit=6){
   return out.length?out.map(x=>'• '+x).join('\n'):'—';
 }
 
+function outcomeAttentionLines(snapshot,limit=6){
+  const rows=arr(snapshot?.outcomeSupervisor?.attention).slice(0,limit);
+  return rows.length?rows.map((x,i)=>
+    (i+1)+'. **'+clip(x.type,40)+' · '+clip(x.subject,64)+'**\n'+
+    clip(x.why,220)+'\nNEXT · '+clip(x.nextAction,220)
+  ).join('\n\n'):'Keine Outcome-Bottlenecks erkannt.';
+}
+
+export function buildBiggjExecutivePayload(snapshot={}){
+  const o=snapshot?.outcomeSupervisor||{};
+  const h=o?.outcomeHealth||{};
+  return payload(
+    'BIGGJ // EXECUTIVE STATE',
+    '**Was zählt gerade wirklich?** Diese Ansicht trennt technische Aktivität von messbarem Research-Fortschritt.',
+    [
+      safeField('CURRENT STATE',[
+        'Outcome status **'+clip(o.status||'UNKNOWN',44)+'**',
+        clip(o?.executive?.headline||'No executive headline available.',400),
+        'Machine activity ≠ outcome: '+(o?.executive?.machineActivityIsNotOutcome===true?'ENFORCED':'UNKNOWN')
+      ].join('\n')),
+      safeField('PIPELINE CONVERSION',[
+        'Research evidence '+fmt(h.researchEvidence)+' → validation '+fmt(h.validationEvidence)+' → forward shadow '+fmt(h.forwardShadow),
+        'Independent episodes '+fmt(h.independentEpisodes)+' · review-ready '+fmt(h.reviewReady),
+        'Validation conversion '+(h.validationConversion==null?'—':pct(h.validationConversion))+' · forward conversion '+(h.forwardConversion==null?'—':pct(h.forwardConversion)),
+        'These are diagnostic pipeline ratios, not probabilities or profitability scores.'
+      ].join('\n')),
+      safeField('WHAT NEEDS ATTENTION',outcomeAttentionLines(snapshot,5)),
+      safeField('NEXT BEST ACTION',clip(o?.executive?.nextAction||'Continue governed measurement.',900)),
+      safeField('GUARDS','SHADOW_ONLY · ABSTAIN · no auto-promotion · no automatic skill transition · no PRIMARY mutation')
+    ],
+    BIGGJ_DISCORD_OBSERVABILITY_MARKERS.executive,
+    snapshot
+  );
+}
+
 export function buildBiggjBrainPulsePayload(snapshot={}){
   const claim=snapshot?.claimAssumptionResearch||{};
   return payload(
@@ -487,6 +535,11 @@ export function buildBiggjBrainPulsePayload(snapshot={}){
         'Claim/Assumption evaluator: '+clip(claim.state,40)+' · '+fmt(claim.observations)+' observations',
         'Promotion review: '+(claim.manualPromotionReviewEligible?'eligible for MANUAL review':'not eligible'),
         'Automatic production mutation: OFF'
+      ].join('\n')),
+      safeField('OUTCOME HEALTH',[
+        'Status '+clip(snapshot?.outcomeSupervisor?.status||'UNKNOWN',44),
+        'Research '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.researchEvidence)+' → validation '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.validationEvidence)+' → forward '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.forwardShadow),
+        'Stalled tasks '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.stalledResearchTasks)+' · review-ready '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.reviewReady)
       ].join('\n')),
       safeField('PROGRESS',[
         'Maturity index '+pct(snapshot.maturityIndex)+' (diagnostic)',
@@ -647,6 +700,12 @@ export function buildBiggjProgressPayload(snapshot={}){
         'Open '+fmt(snapshot?.researchReviews?.open)+' · blocked '+fmt(snapshot?.researchReviews?.blocked)+' · decisions '+fmt(snapshot?.researchReviews?.decisions),
         'Automatic apply OFF · explicit operator approval required'
       ].join('\n')),
+      safeField('OUTCOME SUPERVISOR',[
+        'Status '+clip(snapshot?.outcomeSupervisor?.status||'UNKNOWN',44),
+        'Research '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.researchEvidence)+' → validation '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.validationEvidence)+' → forward '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.forwardShadow),
+        'Stalled '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.stalledResearchTasks)+' · integrity blocks '+fmt(snapshot?.outcomeSupervisor?.outcomeHealth?.integrityBlocks),
+        clip(snapshot?.outcomeSupervisor?.executive?.nextAction||'Continue governed measurement.',400)
+      ].join('\n')),
       safeField('ACTIVITY WINDOWS',[
         '24h '+fmt(snapshot?.learningTimeline?.last24h?.total)+' events · '+Object.entries(snapshot?.learningTimeline?.last24h?.byKind||{}).map(([k,v])=>k+' '+fmt(v)).join(' · '),
         '7d '+fmt(snapshot?.learningTimeline?.last7d?.total)+' events · '+Object.entries(snapshot?.learningTimeline?.last7d?.byKind||{}).map(([k,v])=>k+' '+fmt(v)).join(' · '),
@@ -786,6 +845,7 @@ export function buildBiggjDecisionTracePayload(snapshot={}){
 
 export function buildBiggjDiscordObservabilityPayload(view='pulse',snapshot={}){
   const key=String(view||'pulse').toLowerCase();
+  if(key==='executive')return buildBiggjExecutivePayload(snapshot);
   if(key==='knowledge')return buildBiggjKnowledgePayload(snapshot);
   if(key==='research')return buildBiggjResearchQueuePayload(snapshot);
   if(key==='hypotheses')return buildBiggjHypothesesPayload(snapshot);
@@ -802,6 +862,7 @@ export function buildBiggjDiscordObservabilityPayload(view='pulse',snapshot={}){
 
 export function buildBiggjDiscordObservabilityPanelMap(snapshot={}){
   return [
+    {channel:'executive-state',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.executive,payload:buildBiggjExecutivePayload(snapshot)},
     {channel:'brain-pulse',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.pulse,payload:buildBiggjBrainPulsePayload(snapshot)},
     {channel:'knowledge',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.knowledge,payload:buildBiggjKnowledgePayload(snapshot)},
     {channel:'research-queue',marker:BIGGJ_DISCORD_OBSERVABILITY_MARKERS.research,payload:buildBiggjResearchQueuePayload(snapshot)},
