@@ -80,3 +80,13 @@ test('single malformed candle wick cannot collapse replay price scale',()=>{
   assert.ok(scale.max<170);
   assert.ok(scale.ignoredCandleCount>=1);
 });
+
+
+test('trade replay caption falls back to stored research lane instead of UNKNOWN setup',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(source,/function tradeReplayContextLabel/);
+  assert.match(source,/mode&&mode!==['"]UNKNOWN['"]&&mode!==['"]STANDARD['"]/);
+  assert.match(source,/tradeReplayContextLabel\(p\)/);
+  assert.match(source,/PRIMARY_UNCLASSIFIED/);
+});
