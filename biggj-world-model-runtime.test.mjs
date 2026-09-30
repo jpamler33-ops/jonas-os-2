@@ -114,6 +114,34 @@ test('radar rows form an inferred state atlas rather than observed fact',()=>{
   assert.equal(runtime.stateAtlas[0].causal,false);
 });
 
+test('latent-state candidate can be researched without becoming canonical state or decision authority',()=>{
+  const runtime=buildBiggjWorldModelRuntime({
+    seriesBySymbol:{
+      BTCUSDT:series(60000,.00010),
+      ETHUSDT:series(3000,.00012),
+      SOLUSDT:series(150,.00008),
+      BNBUSDT:series(600,.00009),
+      XRPUSDT:series(.6,.00011)
+    },
+    radarRows:[
+      {symbol:'BTCUSDT',capturedAt:T0,regime:'TREND',bias:'BULLISH',status:'VALID',witnessAgreement:.8,support:12,contradiction:.1},
+      {symbol:'ETHUSDT',capturedAt:T0,regime:'TREND',bias:'BULLISH',status:'VALID',witnessAgreement:.75,support:11,contradiction:.1},
+      {symbol:'SOLUSDT',capturedAt:T0,regime:'TREND',bias:'BULLISH',status:'VALID',witnessAgreement:.72,support:10,contradiction:.2}
+    ],
+    assetClassBySymbol:{BTCUSDT:'MAJOR',ETHUSDT:'MAJOR',SOLUSDT:'L1',BNBUSDT:'L1',XRPUSDT:'ALT'},
+    asOf:T0
+  });
+  const candidate=runtime.latentState.researchCandidate;
+  assert.equal(runtime.latentState.status,'UNKNOWN');
+  assert.equal(runtime.latentState.estimatorPromoted,false);
+  assert.equal(candidate.status,'RESEARCH_CANDIDATE');
+  assert.equal(candidate.epistemicClass,'MODELLED');
+  assert.equal(candidate.decisionAuthority,false);
+  assert.equal(candidate.tradingAuthority,false);
+  assert.ok(candidate.coverage.populatedDimensions>=4);
+  assert.match(candidate.meaning,/NOT_A_VALIDATED_LATENT_MARKET_STATE/);
+});
+
 test('forecast field is explicitly forecast-performance evidence, not intrinsic predictability',()=>{
   const runtime=buildBiggjWorldModelRuntime({
     seriesBySymbol:{
