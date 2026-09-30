@@ -222,6 +222,11 @@ import {
   biggjMarketScienceOsSummary,
   BIGGJ_MARKET_SCIENCE_OS_VERSION
 } from './biggj-market-science-os.mjs';
+import {
+  buildBiggjWorldModelRuntime,
+  biggjWorldModelRuntimeSummary,
+  BIGGJ_WORLD_MODEL_RUNTIME_VERSION
+} from './biggj-world-model-runtime.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -523,6 +528,8 @@ const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
 const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || requestedSymbols.join(','))
   .split(',').map(x=>x.trim().toUpperCase()).filter(x=>requestedSymbols.includes(x));
+const biggjWorldModelRefreshMs=Math.max(60_000,Number(process.env.TCX_BIGGJ_WORLD_MODEL_REFRESH_MS||300_000));
+const biggjWorldModelMaxSymbols=Math.max(3,Math.min(requestedSymbols.length,Number(process.env.TCX_BIGGJ_WORLD_MODEL_MAX_SYMBOLS||12)));
 const MEMECOIN_CEX_SYMBOLS=new Set(
   (process.env.TCX_MEMECOIN_CEX_SYMBOLS||'DOGEUSDT,PEPEUSDT,SHIBUSDT,BONKUSDT,WIFUSDT,FLOKIUSDT')
     .split(',').map(x=>x.trim().toUpperCase()).filter(Boolean)
@@ -561,6 +568,10 @@ const telegramChatLifecycle=createTelegramChatLifecycle({
 });
 const witnessCache = new Map();
 const radarCache = new Map();
+let biggjWorldModelRuntimeState=buildBiggjWorldModelRuntime({asOf:Date.now()});
+let biggjWorldModelRuntimeHealthy=true;
+let biggjWorldModelRuntimeLastError=null;
+let biggjWorldModelRuntimeLastRefreshAt=null;
 const researchAlertContextCache = new Map();
 const researchCoverageDiagnostics = new Map();
 const observability = createObservability({sampleLimit:500});
@@ -3980,6 +3991,95 @@ async function showWorldModel(chatId,messageId,symbol){
  ]}});
 }
 
+function biggjWorldAssetClass(symbol){
+ const s=String(symbol||'').toUpperCase();
+ if(MEMECOIN_CEX_SYMBOLS.has(s))return 'MEME';
+ if(['BTCUSDT','ETHUSDT'].includes(s))return 'MAJOR';
+ if(['SOLUSDT','BNBUSDT','ADAUSDT','AVAXUSDT','DOTUSDT','TRXUSDT'].includes(s))return 'L1';
+ return 'ALT';
+}
+
+async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
+ const started=Date.now();
+ const pressure=servingMemoryPressure();
+ if(pressure.pressured){
+  console.warn('[BIGGJ_WORLD_MODEL_DEFERRED]',JSON.stringify({
+   reason:'MEMORY_PRESSURE',
+   refreshReason:reason,
+   memory:pressure,
+   execution:'SHADOW_ONLY',
+   canExecuteLive:false
+  }));
+  return biggjWorldModelRuntimeSummary(biggjWorldModelRuntimeState);
+ }
+ try{
+  const now=Date.now();
+  const symbols=requestedSymbols.slice(0,biggjWorldModelMaxSymbols);
+  const fetched=await Promise.allSettled(symbols.map(async symbol=>({
+   symbol,
+   rows:(await fetchKlines(symbol,'5m',130)).rows
+  })));
+  const seriesBySymbol={};
+  for(const item of fetched){
+   if(item.status!=='fulfilled')continue;
+   const candles=closedCandles(candlesFromKlines(item.value.rows,now));
+   if(candles.length<48)continue;
+   seriesBySymbol[item.value.symbol]=candles.map(x=>({closeTime:x.closeTime,close:x.c}));
+  }
+  const radarRows=symbols.map(symbol=>({symbol,...(radarCache.get(symbol)||{})}));
+  const assetClassBySymbol=Object.fromEntries(symbols.map(symbol=>[symbol,biggjWorldAssetClass(symbol)]));
+  const journalEntries=forecastRuntime?.journal?.all?.()??forecastRuntime?.journal?.entries??[];
+  biggjWorldModelRuntimeState=buildBiggjWorldModelRuntime({
+   seriesBySymbol,
+   radarRows,
+   forecastJournalEntries:journalEntries,
+   assetClassBySymbol,
+   asOf:now,
+   minCorrelation:.35,
+   minForecastSamples:30
+  });
+  biggjWorldModelRuntimeHealthy=true;
+  biggjWorldModelRuntimeLastError=null;
+  biggjWorldModelRuntimeLastRefreshAt=now;
+  const summary=biggjWorldModelRuntimeSummary(biggjWorldModelRuntimeState);
+  recordOperation(observability,{name:'biggj_world_model_refresh',ok:true,latencyMs:Date.now()-started,error:null});
+  console.log('[BIGGJ_WORLD_MODEL]',JSON.stringify({
+   reason,
+   version:summary.version,
+   markets:summary.marketCount,
+   states:summary.stateCount,
+   associationEdges:summary.associationEdges,
+   flowCandidates:summary.informationFlowCandidates,
+   forecastability:summary.forecastabilityStatus,
+   latentState:summary.latentState?.status||'UNKNOWN',
+   execution:'SHADOW_ONLY',
+   canExecuteLive:false
+  }));
+  return summary;
+ }catch(err){
+  const msg=err instanceof Error?err.message:String(err);
+  biggjWorldModelRuntimeHealthy=false;
+  biggjWorldModelRuntimeLastError=msg;
+  recordError(observability,{scope:'biggj_world_model',message:msg});
+  recordOperation(observability,{name:'biggj_world_model_refresh',ok:false,latencyMs:Date.now()-started,error:msg});
+  console.error('[BIGGJ_WORLD_MODEL_ERROR]',JSON.stringify({
+   reason,
+   error:msg,
+   execution:'SHADOW_ONLY',
+   canExecuteLive:false
+  }));
+  return biggjWorldModelRuntimeSummary(biggjWorldModelRuntimeState);
+ }
+}
+
+async function biggjWorldModelWatcher(){
+ while(running){
+  await sleep(biggjWorldModelRefreshMs);
+  if(!running)break;
+  await refreshBiggjWorldModelRuntime('PERIODIC_REFRESH');
+ }
+}
+
 async function scientificBrainContext(symbol){
  const base=await terminalContext(symbol);
  await captureEpisodeFromState(base.state,{persist:true});
@@ -4249,15 +4349,19 @@ async function showHomeSection(chatId,messageId,section) {
   if(section==='WORLD'){
     const snap=missionControlData(),world=(snap.biggj||snap.health?.biggjMarketScienceOs||{}).worldModel||{};
     const markets=(world.markets||[]).slice(0,10).map(x=>'• '+String(x.symbol||'UNKNOWN').replace('USDT','/USDT')+' · '+String(x.regime||'UNKNOWN')+' · '+String(x.epistemicClass||'INFERRED'));
+    const latent=world.latentStateDiscovery||{},candidate=latent.researchCandidate||{};
     const text=[
       'BIGGJ // WORLD MODEL','━━━━━━━━━━━━━━━━━━━━','',
       'MARKET STATES  '+Number(world.marketsObserved||0),'',
       ...(markets.length?markets:['Noch keine kanonischen Marktstates.']),'',
-      'LATENT STATE       '+String(world.latentStateDiscovery?.status||'UNKNOWN'),
+      'LATENT STATE       '+String(latent.status||'UNKNOWN'),
+      candidate.status==='RESEARCH_CANDIDATE'?'Research Candidate  '+String(candidate.candidateKey||'UNNAMED'):'Research Candidate  —',
+      candidate.status==='RESEARCH_CANDIDATE'?'Authority           NONE · MODELLED':'',
       'INFORMATION FLOW   '+String(world.informationFlowGraph?.status||'UNKNOWN'),
       'PREDICTABILITY     '+String(world.predictabilityField?.status||'UNKNOWN'),'',
-      'Nicht implementierte Zustände werden nicht erfunden.'
-    ].join('\n');
+      'Hidden State bleibt UNKNOWN, bis OOS + Cross-Regime-Replikation bestehen.',
+      'Association / Lead-Lag ≠ Kausalität.'
+    ].filter(Boolean).join('\n');
     return deliverTelegramTextCard(tg,chatId,messageId,{text:text.slice(0,4096),reply_markup:{inline_keyboard:[[{text:'◉ Science',callback_data:'home:science'},{text:'⌬ Lab',callback_data:'home:lab'}],[{text:'▤ Reality Feed',callback_data:'home:news'},{text:'🏠 BIGGJ',callback_data:'home'}]]}});
   }
   if(section==='LAB'){
@@ -9649,7 +9753,7 @@ function currentOperationalReadiness(){
 function autonomousResearchFactoryInputs(now=Date.now()){
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
-  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
+  const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now,worldModelSummary:biggjWorldModelRuntimeState});
   return {
     livingResearchState:biggjLivingResearchState,
     marketScienceDirectorSummary:biggjMarketScienceDirectorSummary(marketScienceDirector),
@@ -9931,7 +10035,7 @@ async function autonomousOperatorWatcher(){
 function missionControlData(){
  const now=Date.now();
  const researchCoverage=buildResearchCoverageFleetSummary([...researchCoverageDiagnostics.values()],{now});
- const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now});
+ const marketScienceDirector=buildBiggjMarketScienceDirector(biggjEpistemicState,{asOf:now,worldModelSummary:biggjWorldModelRuntimeState});
  const governanceTriage=buildBiggjGovernanceTriage({
   livingResearchState:biggjLivingResearchState,
   modelPromotionReviewSummary:modelPromotionReviewLastSummary,
@@ -9984,6 +10088,14 @@ function missionControlData(){
   biggjMarketScienceDirector:{
     ...biggjMarketScienceDirectorSummary(marketScienceDirector),
     version:BIGGJ_MARKET_SCIENCE_DIRECTOR_VERSION
+  },
+  biggjWorldModel:{
+    ...biggjWorldModelRuntimeSummary(biggjWorldModelRuntimeState),
+    version:BIGGJ_WORLD_MODEL_RUNTIME_VERSION,
+    healthy:biggjWorldModelRuntimeHealthy,
+    lastError:biggjWorldModelRuntimeLastError,
+    lastRefreshAt:biggjWorldModelRuntimeLastRefreshAt,
+    refreshMs:biggjWorldModelRefreshMs
   },
   autonomousResearchFactory:{
     ...autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
@@ -10138,6 +10250,7 @@ function missionControlData(){
    livingResearchSummary:health.biggjLivingResearch,
    researchFactorySummary:health.autonomousResearchFactory,
    marketRadar:health.marketRadar,
+   worldModelRuntime:biggjWorldModelRuntimeState,
    globalIntel:health.globalIntel,
    proofFeed:health.biggjProofFeed,
    portfolio:portfolioView,
@@ -10586,6 +10699,7 @@ process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 liquidationResearchStream.start();
 await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
+await refreshBiggjWorldModelRuntime('STARTUP');
 await refreshPublicExperienceIntel('startup');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
@@ -10723,4 +10837,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),biggjWorldModelWatcher()]);

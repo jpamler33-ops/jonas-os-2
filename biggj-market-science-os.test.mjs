@@ -79,12 +79,50 @@ test('OS snapshot exposes science, world, lab, decisions and trading in downstre
   assert.equal(os.trading.role,'DOWNSTREAM_DECISION_APPLICATION');
 });
 
-test('world model refuses to invent latent state, information flow or predictability field',()=>{
+test('world model keeps unknown epistemic state when canonical world runtime is unavailable',()=>{
   const os=buildBiggjMarketScienceOs({...fixture(),asOf:T0});
-  assert.equal(os.worldModel.latentStateDiscovery.status,'NOT_YET_IMPLEMENTED');
-  assert.equal(os.worldModel.informationFlowGraph.status,'NOT_YET_IMPLEMENTED');
-  assert.equal(os.worldModel.predictabilityField.status,'NOT_YET_IMPLEMENTED');
+  assert.equal(os.worldModel.latentStateDiscovery.status,'UNKNOWN');
+  assert.equal(os.worldModel.informationFlowGraph.status,'NOT_YET_AVAILABLE');
+  assert.equal(os.worldModel.predictabilityField.status,'INSUFFICIENT');
   assert.equal(os.semantics.unimplementedWorldModelCapabilitiesRemainExplicitlyUnknown,true);
+});
+
+test('canonical world runtime upgrades screens without upgrading them into causal claims',()=>{
+  const input=fixture();
+  const worldModelRuntime={
+    version:'BIGGJ_WORLD_MODEL_RUNTIME_V1',
+    asOf:T0,
+    markets:['BTCUSDT','ETHUSDT'],
+    stateAtlas:[{
+      symbol:'BTCUSDT',
+      epistemicClass:'INFERRED',
+      state:{status:'VALID',regime:'TREND',bias:'UP',witnessAgreement:.8,memorySupport:12,evidenceStrength:.7}
+    }],
+    associationGraph:{
+      status:'MEASURED_ASSOCIATION',
+      nodes:[{symbol:'BTCUSDT'},{symbol:'ETHUSDT'}],
+      edges:[{a:'BTCUSDT',b:'ETHUSDT',strength:.8,samples:96,epistemicClass:'OBSERVED_ASSOCIATION',causal:false}],
+      meaning:'POINT_IN_TIME_ASSOCIATION_GRAPH_NOT_CAUSAL_GRAPH'
+    },
+    rotation:{status:'OBSERVED_CROSS_SECTION',meaning:'RELATIVE_PRICE_ROTATION_NOT_CAPITAL_FLOW_PROOF'},
+    shockMap:{status:'NO_ACTIVE_SHOCK',origins:[],associatedWaves:[],meaning:'NOT_CAUSAL'},
+    latentState:{status:'UNKNOWN',estimatorPromoted:false,dimensions:[],meaning:'NO_CANONICAL_LATENT_STATE_IS_INFERRED'},
+    informationFlowHypotheses:{
+      status:'RESEARCH_HYPOTHESES',
+      candidates:[{leader:'BTCUSDT',follower:'ETHUSDT',lagBars:1,epistemicClass:'HYPOTHESIS',causal:false,predictivePermission:false}],
+      meaning:'LEAD_LAG_SCREEN_GENERATES_INFORMATION_FLOW_HYPOTHESES_NOT_CAUSAL_EDGES'
+    },
+    forecastabilityField:{status:'MEASURED',markets:[],meaning:'FORECAST_PERFORMANCE_FIELD_NOT_GUARANTEED_PREDICTABILITY'},
+    unknowns:[{id:'CAUSAL_INFORMATION_FLOW',status:'HYPOTHESES_EXIST'}],
+    epistemicPolicy:{observedAssociationIsNotCausality:true,leadLagIsHypothesisOnly:true,forecastPerformanceIsNotIntrinsicPredictability:true,unknownIsValidState:true}
+  };
+  const os=buildBiggjMarketScienceOs({...input,worldModelRuntime,asOf:T0});
+  assert.equal(os.worldModel.associationGraph.status,'MEASURED_ASSOCIATION');
+  assert.equal(os.worldModel.associationGraph.edges[0].causal,false);
+  assert.equal(os.worldModel.informationFlowGraph.status,'RESEARCH_HYPOTHESES');
+  assert.equal(os.worldModel.informationFlowGraph.candidates[0].causal,false);
+  assert.equal(os.worldModel.latentStateDiscovery.status,'UNKNOWN');
+  assert.equal(os.worldModel.predictabilityField.status,'MEASURED');
 });
 
 test('PnL is visible downstream but has no scientific authority',()=>{

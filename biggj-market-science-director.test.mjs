@@ -206,6 +206,52 @@ test('alternative theories for one question form a competition with no automatic
   assert.equal(competition.semantics.rankingDoesNotEstablishTruth,true);
 });
 
+test('world-model research candidates become science questions without decision authority',()=>{
+  const ledger=createEpistemicLedger({asOf:T0});
+  const worldModelSummary={
+    fingerprint:'world_fp_1',
+    latentState:{
+      status:'UNKNOWN',
+      researchCandidate:{
+        status:'RESEARCH_CANDIDATE',
+        candidateKey:'SYNC|COUPLED|ROTATING|QUIET',
+        coverage:{populatedDimensions:6},
+        epistemicClass:'MODELLED',
+        decisionAuthority:false,
+        tradingAuthority:false
+      }
+    },
+    informationFlowHypotheses:{
+      candidates:[{
+        leader:'BTCUSDT',
+        follower:'ETHUSDT',
+        lagBars:1,
+        samples:96,
+        rho:.58,
+        causal:false,
+        predictivePermission:false
+      }]
+    },
+    forecastabilityField:{
+      markets:[
+        {symbol:'BTCUSDT',status:'INSUFFICIENT'},
+        {symbol:'ETHUSDT',status:'INSUFFICIENT'}
+      ]
+    }
+  };
+  const d=buildBiggjMarketScienceDirector(ledger,{asOf:T0+10_000,worldModelSummary});
+  assert.ok(d.agenda.some(x=>x.worldModelTarget==='LATENT_STATE_CANDIDATE'));
+  assert.ok(d.agenda.some(x=>x.worldModelTarget==='INFORMATION_FLOW_HYPOTHESIS'));
+  assert.ok(d.agenda.some(x=>x.worldModelTarget==='FORECASTABILITY_FIELD'));
+  for(const x of d.agenda.filter(x=>x.worldModelTarget)){
+    assert.equal(x.primaryMutationAllowed,false);
+    assert.equal(x.canInfluencePrimary,false);
+    assert.equal(x.canExecuteLive,false);
+  }
+  assert.equal(d.knowledgeFrontier.worldModelQuestions,3);
+  assert.equal(d.semantics.worldModelCandidatesRequireIndependentValidation,true);
+});
+
 test('summary exposes the knowledge frontier and preserves fail-closed semantics',()=>{
   let ledger=createEpistemicLedger({asOf:T0});
   ledger=addTheory(ledger).ledger;

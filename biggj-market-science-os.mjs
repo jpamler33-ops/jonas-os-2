@@ -184,6 +184,7 @@ export function buildBiggjMarketScienceOs({
   livingResearchSummary={},
   researchFactorySummary={},
   marketRadar={},
+  worldModelRuntime=null,
   globalIntel={},
   proofFeed={},
   portfolio={},
@@ -196,12 +197,26 @@ export function buildBiggjMarketScienceOs({
   const t=finite(asOf,NaN);
   if(!Number.isFinite(t)) throw new Error('BIGGJ_MARKET_SCIENCE_OS_ASOF_INVALID');
 
-  const markets=marketStateRows(marketRadar?.rows||[]);
+  const fallbackMarkets=marketStateRows(marketRadar?.rows||[]);
+  const canonicalWorld=worldModelRuntime?.version==='BIGGJ_WORLD_MODEL_RUNTIME_V1'?worldModelRuntime:null;
+  const markets=canonicalWorld
+    ?(canonicalWorld.stateAtlas||[]).map(x=>({
+        symbol:x.symbol,
+        status:x.state?.status||'UNKNOWN',
+        regime:x.state?.regime||'UNKNOWN',
+        bias:x.state?.bias||'UNKNOWN',
+        witnessAgreement:x.state?.witnessAgreement??null,
+        support:x.state?.memorySupport??0,
+        score:x.state?.evidenceStrength??x.state?.witnessAgreement??null,
+        epistemicClass:x.epistemicClass||'INFERRED',
+        causal:false
+      }))
+    :fallbackMarkets;
   const frontier=theoryFrontier(epistemicSummary,scienceDirectorSummary);
   const scienceReady=
     txt(epistemicSummary?.version).length>0&&
     txt(scienceDirectorSummary?.version).length>0;
-  const worldReady=markets.length>0;
+  const worldReady=canonicalWorld?canonicalWorld.markets?.length>0:markets.length>0;
   const laboratoryReady=Array.isArray(scienceDirectorSummary?.topAgenda);
   const decisionReady=txt(proofFeed?.version).length>0||finite(proofFeed?.counts?.resolved)>0;
 
@@ -237,21 +252,62 @@ export function buildBiggjMarketScienceOs({
     worldModel:{
       role:'CORE',
       ready:worldReady,
-      marketsObserved:markets.length,
+      version:canonicalWorld?.version||null,
+      asOf:canonicalWorld?.asOf??null,
+      marketsObserved:canonicalWorld?.markets?.length??markets.length,
       markets,
       regimeDistribution:regimeDistribution(markets),
       latestIntelligence:clone((globalIntel?.recent||[]).slice(0,12)),
-      latentStateDiscovery:{
-        status:'NOT_YET_IMPLEMENTED',
-        reason:'No canonical latent-state engine is promoted yet; do not fabricate hidden states.'
+      associationGraph:canonicalWorld?{
+        status:canonicalWorld.associationGraph?.status||'INSUFFICIENT',
+        nodes:clone((canonicalWorld.associationGraph?.nodes||[]).slice(0,20)),
+        edges:clone((canonicalWorld.associationGraph?.edges||[]).slice(0,30)),
+        meaning:canonicalWorld.associationGraph?.meaning||'ASSOCIATION_NOT_CAUSALITY'
+      }:{
+        status:'NOT_YET_AVAILABLE',
+        nodes:[],
+        edges:[],
+        meaning:'ASSOCIATION_NOT_CAUSALITY'
       },
-      informationFlowGraph:{
-        status:'NOT_YET_IMPLEMENTED',
-        reason:'Cross-market directed information propagation has not yet passed a canonical implementation gate.'
+      rotation:canonicalWorld?clone(canonicalWorld.rotation):{
+        status:'INSUFFICIENT',
+        meaning:'RELATIVE_PRICE_ROTATION_NOT_CAPITAL_FLOW_PROOF'
       },
-      predictabilityField:{
-        status:'NOT_YET_IMPLEMENTED',
-        reason:'No canonical market-by-horizon predictability field is promoted yet.'
+      shockMap:canonicalWorld?clone(canonicalWorld.shockMap):{
+        status:'INSUFFICIENT',
+        origins:[],
+        associatedWaves:[],
+        meaning:'NO_CANONICAL_SHOCK_MAP_AVAILABLE'
+      },
+      latentStateDiscovery:canonicalWorld?clone(canonicalWorld.latentState):{
+        status:'UNKNOWN',
+        estimatorPromoted:false,
+        reason:'No validated latent-state estimator has been promoted yet; do not fabricate hidden states.'
+      },
+      informationFlowGraph:canonicalWorld?{
+        status:canonicalWorld.informationFlowHypotheses?.status||'INSUFFICIENT',
+        candidates:clone((canonicalWorld.informationFlowHypotheses?.candidates||[]).slice(0,30)),
+        meaning:canonicalWorld.informationFlowHypotheses?.meaning||'LEAD_LAG_HYPOTHESIS_NOT_CAUSALITY'
+      }:{
+        status:'NOT_YET_AVAILABLE',
+        candidates:[],
+        meaning:'Cross-market directed information propagation has not yet passed a canonical implementation gate.'
+      },
+      predictabilityField:canonicalWorld?clone(canonicalWorld.forecastabilityField):{
+        status:'INSUFFICIENT',
+        markets:[],
+        meaning:'No canonical market-by-horizon forecast-performance field is available yet.'
+      },
+      unknowns:canonicalWorld?clone(canonicalWorld.unknowns):[
+        {id:'LATENT_MARKET_STATE',status:'UNKNOWN'},
+        {id:'CAUSAL_INFORMATION_FLOW',status:'UNKNOWN'},
+        {id:'INTRINSIC_PREDICTABILITY',status:'UNKNOWN'}
+      ],
+      epistemicPolicy:canonicalWorld?clone(canonicalWorld.epistemicPolicy):{
+        observedAssociationIsNotCausality:true,
+        leadLagIsHypothesisOnly:true,
+        forecastPerformanceIsNotIntrinsicPredictability:true,
+        unknownIsValidState:true
       }
     },
     laboratory:{
