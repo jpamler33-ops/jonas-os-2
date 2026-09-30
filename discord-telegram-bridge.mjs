@@ -249,25 +249,46 @@ function academyLessonPayload(topic='basics'){
     }
   };
   const x=lessons[topic]||lessons.basics;
-  return {embeds:[{title:'BIGGJ ACADEMY // '+x.title,description:['**Ziel:** '+x.goal,'',...x.body,'','**Modus: PAPER / SHADOW ONLY · keine echten Orders**'].join('\n'),footer:{text:'BIGGJ_ACADEMY_LESSON:'+topic},timestamp:new Date().toISOString()}],components:academyLessonComponents(),allowedMentions:{parse:[]}};
+  return {embeds:[{title:'BIGGJ ACADEMY // '+x.title,description:['**Ziel:** '+x.goal,'',...x.body,'','**Modus: PAPER / SHADOW ONLY · keine echten Orders**'].join('\n'),footer:{text:'BIGGJ_ACADEMY_LESSON:'+topic},timestamp:new Date().toISOString()}],components:academyLessonComponents(topic),allowedMentions:{parse:[]}};
 }
-function academyLessonComponents(){return [
-  {type:1,components:[
-    {type:2,style:1,label:'1 Grundlagen',custom_id:'dc5:lesson:basics'},
-    {type:2,style:2,label:'2 Struktur',custom_id:'dc5:lesson:structure'},
-    {type:2,style:2,label:'3 Risiko',custom_id:'dc5:lesson:risk'}
-  ]},
-  {type:1,components:[
-    {type:2,style:2,label:'4 Liquidität',custom_id:'dc5:lesson:liquidity'},
-    {type:2,style:2,label:'5 Setup',custom_id:'dc5:lesson:setup'},
-    {type:2,style:2,label:'6 Journal',custom_id:'dc5:lesson:journal'}
-  ]},
-  {type:1,components:[
-    {type:2,style:1,label:'BTC 5m Chart',custom_id:'dc3:chart:BTCUSDT:5m'},
-    {type:2,style:2,label:'BTC Struktur',custom_id:'dc3:structure:BTCUSDT'},
-    {type:2,style:2,label:'BTC Replay',custom_id:'dc3:tradereplay:BTCUSDT'}
-  ]}
-];}
+function academyLessonComponents(topic=null){
+  const rows=[
+    {type:1,components:[
+      {type:2,style:1,label:'1 Grundlagen',custom_id:'dc5:lesson:basics'},
+      {type:2,style:2,label:'2 Struktur',custom_id:'dc5:lesson:structure'},
+      {type:2,style:2,label:'3 Risiko',custom_id:'dc5:lesson:risk'}
+    ]},
+    {type:1,components:[
+      {type:2,style:2,label:'4 Liquidität',custom_id:'dc5:lesson:liquidity'},
+      {type:2,style:2,label:'5 Setup',custom_id:'dc5:lesson:setup'},
+      {type:2,style:2,label:'6 Journal',custom_id:'dc5:lesson:journal'}
+    ]}
+  ];
+  const practical={
+    structure:[
+      {type:2,style:1,label:'BTC Chart',custom_id:'dc3:chart:BTCUSDT:5m'},
+      {type:2,style:2,label:'Struktur prüfen',custom_id:'dc3:structure:BTCUSDT'}
+    ],
+    risk:[
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
+      {type:2,style:2,label:'Risiko prüfen',custom_id:'dc3:terminal:risk:BTCUSDT'}
+    ],
+    liquidity:[
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
+      {type:2,style:2,label:'Deep Dive',custom_id:'dc3:deep:BTCUSDT'}
+    ],
+    setup:[
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
+      {type:2,style:2,label:'Warum?',custom_id:'dc3:why:BTCUSDT'}
+    ],
+    journal:[
+      {type:2,style:1,label:'BTC Replay',custom_id:'dc3:tradereplay:BTCUSDT'}
+    ]
+  };
+  const actions=practical[String(topic||'').toLowerCase()]||null;
+  if(actions?.length)rows.push({type:1,components:actions});
+  return rows;
+}
 function academyStaticPayload(kind){
   const base={allowedMentions:{parse:[]}};
   if(kind==='start')return {...base,embeds:[{title:'BIGGJ // TRADING ACADEMY',description:[
