@@ -200,12 +200,16 @@ export function registerTheory(ledger,input,{at=Date.now()}={}){
   const theoryKey=theoryKeyOf(input);
   const existing=(ledger.theories||[]).find(x=>x.theoryKey===theoryKey);
   if(existing){
+    const derived=evaluateTheory(ledger,existing.theoryId,{asOf:createdAt});
     return deepFreeze({
       ledger,
       created:false,
-      reason:existing.status==='BROKEN'?'MATCHES_GRAVEYARD_THEORY':'THEORY_ALREADY_EXISTS',
+      reason:existing.status==='BROKEN'||derived.derivedStatus==='BROKEN'
+        ?'MATCHES_GRAVEYARD_THEORY'
+        :'THEORY_ALREADY_EXISTS',
       existingTheoryId:existing.theoryId,
-      theory:existing
+      theory:existing,
+      existingDerivedStatus:derived.derivedStatus
     });
   }
 
