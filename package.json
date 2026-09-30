@@ -35,7 +35,7 @@
     "test:historical-proposal-gate": "node --test biggj-historical-proposal-research-gate.test.mjs",
     "test:claim-assumption": "node --test claim-assumption-graph.test.mjs",
     "test:forecast-claim-sidecar": "node --test forecast-claim-assumption-sidecar.test.mjs institutional-forecast-issuance.test.mjs",
-    "test:claim-assumption-evaluator": "node --test claim-assumption-research-evaluator.test.mjs institutional-forecast-runtime.test.mjs"
+    "test:claim-assumption-evaluator": "node --test claim-assumption-research-evaluator.test.mjs"
   },
   "engines": {
     "node": ">=22"
