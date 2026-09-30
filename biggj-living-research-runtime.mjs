@@ -726,6 +726,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
       changed:false,
       state,
       discoveredSkillIds:[],
+      boundEvidenceIds:[],
       reasons:['SOURCE_STATE_UNCHANGED']
     });
   }
@@ -773,6 +774,21 @@ export function refreshBiggjLivingResearchRuntime(state,{
     tree=proposed;
   }
 
+  const boundEvidenceIds=[];
+  for(const signal of signals){
+    if(!signal.researchRequired) continue;
+    const template=templateByAssumption().get(signal.assumptionId);
+    const binding=bindResearchEvidence(tree,{
+      signal,
+      template,
+      persistentCaseRegistry,
+      claimAssumptionReport,
+      asOf:t
+    });
+    tree=binding.tree;
+    boundEvidenceIds.push(...binding.boundEvidenceIds);
+  }
+
   const agenda=signals
     .filter(x=>x.status!=='DORMANT')
     .map(x=>({
@@ -806,6 +822,7 @@ export function refreshBiggjLivingResearchRuntime(state,{
     changed:true,
     state:finalized(core),
     discoveredSkillIds:discovered,
+    boundEvidenceIds:uniq(boundEvidenceIds),
     reasons:[]
   });
 }
@@ -892,6 +909,9 @@ export function biggjLivingResearchRuntimeSummary(value){
     retainedPersistentCases:(value?.persistentCaseRegistry||[]).length,
     retainedStabilityEvents:(value?.stabilityEventRegistry||[]).length,
     discoveredResearchOnlySkills:(value?.discoveredSkillIds||[]).length,
+    researchEvidence:verifyBiggjSkillTree(value?.skillTree).ok
+      ?livingResearchEvidenceSummary(value.skillTree)
+      :null,
     skillTree:verifyBiggjSkillTree(value?.skillTree).ok
       ?biggjSkillTreeSnapshot(value.skillTree)
       :null,
