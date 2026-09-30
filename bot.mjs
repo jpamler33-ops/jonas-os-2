@@ -3881,7 +3881,7 @@ async function showCognitiveCore(chatId,messageId,symbol){
  ]}});
 }
 
-async function showSignalLab(chatId,messageId,symbol,horizonId='1h'){
+async function showSignalLab(chatId,messageId,symbol,horizonId='1h',mode='FULL'){
  const x=await terminalContext(symbol);
  const issuance=latestInstitutionalForecast(forecastRuntime,symbol);
  const lab=buildBiggjSignalLab({
@@ -3891,13 +3891,21 @@ async function showSignalLab(chatId,messageId,symbol,horizonId='1h'){
   risk:x.risk,
   accuracy:x.accuracy,
   horizonId,
-  mode:'FULL',
+  mode,
   asOf:x.state?.availableAt||Date.now()
  });
- return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjSignalLab(lab),reply_markup:signalLabKeyboard(symbol,horizonId)});
+ return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjSignalLab(lab),reply_markup:signalLabKeyboard(symbol,horizonId,lab.mode)});
 }
 async function showProofFeed(chatId,messageId,symbol=null){
- const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit:10,asOf:Date.now()});
+ const now=Date.now();
+ const learningSummary=buildForecastLearningSummary(forecastRuntime,{
+  minDisplaySamples:30,
+  autoLearnEnabled,
+  autoLearnSymbols,
+  autoLearnForecastMs,
+  now
+ });
+ const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit:10,liveLimit:4,asOf:now,learningSummary});
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjProofFeed(feed),reply_markup:proofFeedKeyboard(symbol)});
 }
 async function showTerminalView(chatId,messageId,symbol,view){
@@ -9667,8 +9675,19 @@ function missionControlData(){
   marketDataFabric:{healthy:marketFabric.healthy,events:marketFabric.events.length},
   shadowOms:{healthy:shadowOmsHealthy,total:shadowOrders.length,active:shadowOrders.filter(o=>['ACTIVE','PARTIALLY_FILLED'].includes(o.status)).length,filled:shadowOrders.filter(o=>o.status==='FILLED').length},
   institutionalForecastRuntime:institutionalForecastRuntimeSummary(forecastRuntime),
-  biggjProofFeed:buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{limit:8,asOf:now}),
-  biggjSignalLab:{version:BIGGJ_SIGNAL_LAB_VERSION,proofVersion:BIGGJ_PROOF_FEED_VERSION,execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false},
+  biggjProofFeed:buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{
+   limit:8,
+   liveLimit:4,
+   asOf:now,
+   learningSummary:buildForecastLearningSummary(forecastRuntime,{
+    minDisplaySamples:30,
+    autoLearnEnabled,
+    autoLearnSymbols,
+    autoLearnForecastMs,
+    now
+   })
+  }),
+  biggjSignalLab:{version:BIGGJ_SIGNAL_LAB_VERSION,proofVersion:BIGGJ_PROOF_FEED_VERSION,modes:['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'],execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false},
   claimAssumptionResearch:claimAssumptionResearchLastSummary||{
     state:'NOT_EVALUATED',
     observations:0,
