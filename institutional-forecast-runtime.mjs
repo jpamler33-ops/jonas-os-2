@@ -1515,6 +1515,16 @@ function evaluationsFromResolved(runtime,resolved){
     });
     let claimAssumptionObservation=null;
     if(issuance.claimAssumptionSidecar){
+      const tracked=runtime.intelligence.get(forecastId);
+      let thesisRevisionState=null;
+      if(tracked?.thesisMemory){
+        const mv=verifyForecastThesisRevisionMemory(tracked.thesisMemory);
+        if(!mv.ok) throw new Error('tracked thesis revision memory invalid: '+mv.reasons.join(','));
+        thesisRevisionState=forecastThesisPreOutcomeRevisionState(
+          tracked.thesisMemory,
+          {maturedAt:row.dueAt}
+        );
+      }
       claimAssumptionObservation=createForecastClaimAssumptionShadowObservation(
         issuance.claimAssumptionSidecar,
         {
@@ -1525,7 +1535,8 @@ function evaluationsFromResolved(runtime,resolved){
           evaluationMetrics:evaluation.metrics,
           outcome:evaluation.outcome,
           baselineAuditState:researchTraceBaselineAuditState(issuance.trace),
-          overhead:claimAssumptionObservationOverhead(issuance)
+          overhead:claimAssumptionObservationOverhead(issuance),
+          thesisRevisionState
         }
       );
       const observationVerification=verifyForecastClaimAssumptionShadowObservation(claimAssumptionObservation);
@@ -1561,6 +1572,88 @@ export function observeInstitutionalForecastOutcomePoint(runtime,{
   return deepFreeze({
     resolved:clone(resolved),
     evaluations:evaluationsFromResolved(runtime,resolved)
+  });
+}
+
+export function observeInstitutionalForecastThesisRevisions(runtime,{
+  currentDeclarations,
+  observedAt,
+  currentInputFingerprint=null,
+  forecastRevisions=[]
+}={}){
+  if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
+  const at=finite(observedAt,'observedAt');
+  const symbol=String(currentDeclarations?.symbol??'').toUpperCase();
+  if(!symbol) throw new Error('current thesis declaration symbol required');
+
+  const results=[];
+  let examined=0;
+  let changed=0;
+  let initialized=0;
+  for(const revisionRecord of Array.isArray(forecastRevisions)?forecastRevisions:[]){
+    if(String(revisionRecord?.symbol??'').toUpperCase()!==symbol) continue;
+    const forecastId=String(revisionRecord?.id??'');
+    if(!forecastId) continue;
+    const issuance=runtime.issuances.find(x=>
+      String(x?.forecast?.forecastId??'')===forecastId||
+      (
+        String(x?.symbol??'').toUpperCase()===symbol&&
+        Number(x?.asOf)===Number(revisionRecord?.issuedAt)
+      )
+    );
+    if(!issuance?.claimAssumptionSidecar) continue;
+    examined++;
+
+    let tracked=runtime.intelligence.get(forecastId);
+    if(!tracked?.thesisMemory){
+      const initial=createInitialForecastThesisRevisionMemory({forecastId,issuance});
+      runtime.intelligence.bindThesis(forecastId,initial);
+      initialized++;
+      tracked=runtime.intelligence.get(forecastId);
+    }
+    const mv=verifyForecastThesisRevisionMemory(tracked?.thesisMemory);
+    if(!mv.ok) throw new Error('tracked thesis revision memory invalid: '+mv.reasons.join(','));
+
+    const assessment=
+      revisionRecord?.revisions?.at?.(-1)?.assessment??
+      tracked?.revisions?.at?.(-1)?.assessment??
+      null;
+    const artifact=createForecastThesisRevisionArtifact({
+      issuance,
+      currentDeclarations,
+      observedAt:at,
+      currentInputFingerprint,
+      forecastRevisionAssessment:assessment
+    });
+    const applied=applyForecastThesisRevision(tracked.thesisMemory,artifact);
+    if(applied.changed){
+      runtime.intelligence.updateThesisMemory(forecastId,applied.memory,applied.event);
+      changed++;
+    }
+    results.push({
+      forecastId,
+      issuanceId:issuance.issuanceId,
+      changed:applied.changed,
+      event:applied.event?clone(applied.event):null,
+      artifactFingerprint:artifact.fingerprint,
+      currentUnsupportedAssumptionIds:clone(artifact.diagnostics.currentUnsupportedAssumptionIds),
+      supportLostSinceIssueIds:clone(artifact.diagnostics.supportLostSinceIssueIds),
+      forecastAssessmentStatus:artifact.forecastAssessment.status
+    });
+  }
+
+  return deepFreeze({
+    version:'TCX_INSTITUTIONAL_FORECAST_THESIS_REVISION_OBSERVATION_V1',
+    symbol,
+    observedAt:at,
+    examined,
+    initialized,
+    changed,
+    results,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canInfluencePrimary:false,
+    canExecuteLive:false
   });
 }
 
