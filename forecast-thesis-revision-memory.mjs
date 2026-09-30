@@ -169,6 +169,7 @@ export function createForecastThesisRevisionArtifact({
   const at=finite(observedAt,'observedAt');
   if(at<Number(issuance.asOf)) throw new Error('observedAt cannot predate issuance');
   if(Number(currentDeclarations.asOf)>at) throw new Error('current declarations cannot be from the future');
+  if(Number(currentDeclarations.generatedAt)>at) throw new Error('revision cannot predate declaration knowledge time');
 
   const issueEvidence=graphEvidenceMap(sidecar);
   const currentEvidence=declarationsEvidenceMap(currentDeclarations);
@@ -240,6 +241,7 @@ export function createForecastThesisRevisionArtifact({
     issuanceId:text(issuance?.issuanceId),
     symbol:text(issuance?.symbol).toUpperCase(),
     issuedAt:finite(issuance?.asOf,'issuance.asOf'),
+    currentStateAsOf:finite(currentDeclarations?.asOf,'currentDeclarations.asOf'),
     observedAt:at,
     issueGraphFingerprint:text(sidecar?.graphFingerprint),
     currentDeclarationFingerprint:text(currentDeclarations?.fingerprint),
