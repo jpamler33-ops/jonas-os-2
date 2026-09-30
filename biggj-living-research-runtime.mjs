@@ -18,6 +18,12 @@ import {
   researchEpisodeAssignment,
   BIGGJ_RESEARCH_EPISODE_RESOLVER_VERSION
 } from './biggj-research-episode-resolver.mjs';
+import {
+  compileBiggjResearchProtocol,
+  verifyBiggjResearchProtocol,
+  researchProtocolSummary,
+  BIGGJ_RESEARCH_PROTOCOL_VERSION
+} from './biggj-research-protocol-compiler.mjs';
 
 export const BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION='TCX_BIGGJ_LIVING_RESEARCH_RUNTIME_V1';
 export const BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION='TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V2';
@@ -404,6 +410,7 @@ function collectSignalFor(template,memories,report,{
 function compactSource(memories,report){
   return {
     researchEvidenceBindingVersion:BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
+    researchProtocolVersion:BIGGJ_RESEARCH_PROTOCOL_VERSION,
     memories:memories.map(m=>({
       forecastId:m.forecastId,
       symbol:m.symbol,
@@ -721,6 +728,7 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
     persistentCaseRegistry:[],
     stabilityEventRegistry:[],
     researchEpisodeResolution:[],
+    researchProtocols:[],
     assumptionSignals:[],
     agenda:[],
     discoveredSkillIds:[],
@@ -731,6 +739,8 @@ export function createBiggjLivingResearchRuntime({asOf=Date.now()}={}){
       researchOnlyAutonomousDiscovery:true,
       conservativeResearchEpisodeResolution:true,
       crossSymbolAloneNeverCreatesIndependence:true,
+      researchProtocolsArePreregistered:true,
+      retrospectiveConfirmatoryRelabelingForbidden:true,
       automaticPromotion:false,
       automaticKill:false,
       automaticExperimentLaunch:false,
@@ -759,6 +769,14 @@ export function verifyBiggjLivingResearchRuntime(value){
     if(!Array.isArray(value?.observedForecastIds)) reasons.push('OBSERVED_FORECAST_IDS_INVALID');
     if(!Array.isArray(value?.persistentCaseRegistry)) reasons.push('PERSISTENT_CASE_REGISTRY_INVALID');
     if(!Array.isArray(value?.stabilityEventRegistry)) reasons.push('STABILITY_EVENT_REGISTRY_INVALID');
+    if(value?.researchProtocols!=null&&!Array.isArray(value.researchProtocols)){
+      reasons.push('RESEARCH_PROTOCOLS_INVALID');
+    }else{
+      for(const protocol of value?.researchProtocols||[]){
+        const pv=verifyBiggjResearchProtocol(protocol);
+        if(!pv.ok) reasons.push('RESEARCH_PROTOCOL_INVALID:'+String(protocol?.protocolId||'UNKNOWN'));
+      }
+    }
     const tv=verifyBiggjSkillTree(value?.skillTree);
     if(!tv.ok) reasons.push('SKILL_TREE_INVALID:'+tv.reasons.join('|'));
     const expected=sha256(coreOf(value));
