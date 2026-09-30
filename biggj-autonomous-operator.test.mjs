@@ -233,3 +233,53 @@ test('operator state persists and reloads with fingerprint verification',async()
   const loaded=await loadBiggjAutonomousOperator(file);
   assert.deepEqual(loaded,state);
 });
+
+
+test('healthy data-only stall becomes WAITING_FOR_DATA without recovery or human escalation',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'RESEARCH_STALLED',
+      operatorDataOnly:false,
+      automatic:12,
+      manual:0,
+      dataOnly:12,
+      unowned:0,
+      dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+      nextTasks:[task()]
+    }),
+    operations:{forecast_shadow_competition:{lastAt:now-10_000,lastError:null}},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.mode,'WAITING_FOR_DATA');
+  assert.equal(summary.waitableDataStall,true);
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.humanJobRemaining,'EXCEPTIONS_ONLY');
+  assert.equal(summary.activeIncidents,0);
+  assert.equal(out.actions.length,0);
+});
+
+test('data-only stall stops being waitable when its owner heartbeat is stale',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'RESEARCH_STALLED',
+      automatic:12,
+      manual:0,
+      dataOnly:12,
+      unowned:0,
+      nextTasks:[task()]
+    }),
+    operations:{forecast_shadow_competition:{lastAt:now-900_000,lastError:null}},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.waitableDataStall,false);
+  assert.notEqual(summary.mode,'WAITING_FOR_DATA');
+  assert.ok(summary.activeIncidents>=1);
+});
