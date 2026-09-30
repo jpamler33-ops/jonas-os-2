@@ -202,7 +202,6 @@ const MARKERS=Object.freeze({
   academyProgress:'BIGGJ_ACADEMY_PROGRESS_V1',
   academyQuestions:'BIGGJ_ACADEMY_QUESTIONS_V1',
   forecasts:'BIGGJ_CHANNEL_FORECAST_DESK_V7',
-  intelHub:'BIGGJ_CHANNEL_INTEL_HUB_V7',
   anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
   replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
   errors:'BIGGJ_CHANNEL_ERROR_DESK_V7'
@@ -900,7 +899,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   let lastHealthDigest=null;
   let lastDailyReportDate=null;
   let tradeSyncRunning=false;
-  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
+  const state={registered:false,ready:false,botUser:null,lastReadyAt:null,lastInteractionAt:null,lastRefreshAt:null,lastMarketRefreshAt:null,lastTradeSyncAt:null,lastTradeSyncStartedAt:null,lastTradeSyncDurationMs:null,tradeSyncIntervalMs,tradeSyncConcurrency,tradeCardRefreshMs,thesisRefreshMs,starterRefreshBudget,thesisRefreshBudget,threadThesisRefreshBudget,lastTradeSyncStats:null,visualRefreshQueueDepth:0,lastVisualRenderAt:null,lastVisualRenderDurationMs:null,visualRenderErrors:0,lastError:null,recentErrors:0,channelUxVersion:BIGGJ_DISCORD_CHANNEL_UX_VERSION,channelManagers:channelManagers.names.length,channelManagerProblems:null,channelSupervisorStatus:'PENDING',translationHealth:null,strictGermanNews,commands:COMMANDS.length,v2:true,v3:true,v4:true,v5:true,v6:true,v7:true,autoSetup:Boolean(autoSetup),setupStatus:'PENDING',setupError:null,channels:0,marketPanels:0,tradeCards:0,closedFeedInitialized:false,lastAlertAt:null,academyPanels:0,observabilityPanels:0,lastObservabilityRefreshAt:null,experiencePanels:0,lastExperienceRefreshAt:null,academyLastRefreshAt:null};
   function fail(scope,err){
     const message=err instanceof Error?err.message:String(err);
     state.lastError=scope+': '+message;
