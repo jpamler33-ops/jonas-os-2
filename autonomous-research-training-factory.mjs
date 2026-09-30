@@ -433,7 +433,8 @@ export function refreshAutonomousResearchTrainingFactory(state,{
   const automatic=tasks.filter(x=>x.automaticShadowEligible);
   const dataOnly=automatic.filter(x=>DATA_ONLY_TYPES.has(x.type));
   const unowned=tasks.filter(x=>!x.manualReviewRequired&&!x.autoHandler);
-  const governanceBlocked=finite(researchDataGovernanceSummary?.quarantinedSources??researchDataGovernanceSummary?.blockedSources)>0;
+  const governanceBlocked=(Array.isArray(researchDataGovernanceSummary?.quarantinedSources)?researchDataGovernanceSummary.quarantinedSources.length:finite(researchDataGovernanceSummary?.quarantinedSources))>0||
+    (Array.isArray(researchDataGovernanceSummary?.blockedSources)?researchDataGovernanceSummary.blockedSources.length:finite(researchDataGovernanceSummary?.blockedSources))>0;
   const dataNeeds=uniq(tasks.flatMap(x=>x.dataNeeds));
 
   let mode='AUTONOMOUS_RESEARCH_ACTIVE';
