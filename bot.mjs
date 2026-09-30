@@ -153,7 +153,9 @@ import {
   verifyBiggjRulebook,
   biggjRulebookSummary,
   evaluateBiggjRulebook,
-  evaluateBiggjRuntimeRulebook
+  evaluateBiggjRuntimeRulebook,
+  assertBiggjRulebookAdmission,
+  renderBiggjRulebookMarkdown
 } from './biggj-rulebook.mjs';
 import {
   runForecastShadowEvaluationWorker,
@@ -1955,6 +1957,20 @@ function shadowAuditPayload(event,order,extra={}) {
 async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,latencyMs=shadowDefaultLatencyMs,strategyMeta=null}) {
   if(!shadowOmsHealthy) throw new Error('Shadow OMS unhealthy');
   const started=Date.now();
+  const rulebookAdmission=assertBiggjRulebookAdmission({
+    operation:'SHADOW_ORDER_ADMISSION',
+    asOf:started,
+    facts:{
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false,
+      abstainFirstClass:true,
+      automaticPrimaryMutation:false,
+      automaticPromotion:false,
+      automaticSkillTransition:false,
+      pointInTimeRequired:true
+    }
+  });
   const decisionBook=await fetchExecutionBook(symbol);
   const boundedLatency=Math.max(0,Math.min(5000,Number(latencyMs)));
   if(boundedLatency>0) await sleep(boundedLatency);
@@ -1971,6 +1987,12 @@ async function placeShadowOrder({symbol,side,type,notionalQuote,limitPrice=null,
       hiddenQueueBufferPct:shadowHiddenQueueBufferPct
     }
   });
+  order.rulebook={
+    version:BIGGJ_RULEBOOK_VERSION,
+    state:rulebookAdmission.state,
+    evaluatedAt:rulebookAdmission.evaluatedAt,
+    admissionFingerprint:rulebookAdmission.fingerprint
+  };
   if(order.liquidity==='MAKER' && lastAggTradeId==null){
     order.dataQuality='DEGRADED_NO_TRADE_CURSOR';
   }
@@ -9538,18 +9560,6 @@ function missionControlData(){
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
- const rulebookVerification=verifyBiggjRulebook();
- const rulebookRuntime=evaluateBiggjRuntimeRulebook({
-  health,
-  newsEvents:health.globalIntel?.recent||[],
-  asOf:now
- });
- health.rulebook={
-  ...biggjRulebookSummary(),
-  verification:rulebookVerification,
-  runtime:rulebookRuntime
- };
- if(rulebookRuntime.state==='BLOCKED')health.ok=false;
  const rulebookRuntime=evaluateBiggjRuntimeRulebook({
    health,
    newsEvents:health.globalIntel?.recent||[],
@@ -9558,9 +9568,10 @@ function missionControlData(){
  health.biggjRulebook={
    ...biggjRulebookStaticSummary,
    verification:biggjRulebookVerification,
-   runtime:rulebookRuntime
+   runtime:rulebookRuntime,
+   healthy:biggjRulebookVerification.ok&&rulebookRuntime.state!=='BLOCKED'
  };
- if(rulebookRuntime.state==='BLOCKED')health.ok=false;
+ if(!health.biggjRulebook.healthy)health.ok=false;
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
@@ -9600,16 +9611,13 @@ const server = http.createServer((req,res) => {
     return;
   }
   if (req.url === '/rulebook.json') {
+    const snapshot=missionControlData();
     res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
-    res.end(JSON.stringify({
+    res.end(JSON.stringify(snapshot?.health?.biggjRulebook||{
       version:BIGGJ_RULEBOOK_VERSION,
-      verification:verifyBiggjRulebook(),
-      summary:biggjRulebookSummary(),
-      runtime:evaluateBiggjRuntimeRulebook({
-        health:missionControlData().health,
-        newsEvents:missionControlData().health?.globalIntel?.recent||[],
-        asOf:Date.now()
-      })
+      verification:biggjRulebookVerification,
+      summary:biggjRulebookStaticSummary,
+      runtime:currentBiggjRulebookAssessment()
     }));
     return;
   }
