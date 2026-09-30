@@ -12,7 +12,8 @@ import {
   saveBiggjLivingResearchRuntime,
   verifyBiggjLivingResearchRuntime,
   biggjLivingResearchRuntimeSummary,
-  biggjAssumptionResearchTemplates
+  biggjAssumptionResearchTemplates,
+  BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION
 } from './biggj-living-research-runtime.mjs';
 
 function thesisMemory({
@@ -378,6 +379,25 @@ test('association evidence can raise research priority but remains explicitly no
   assert.ok(signal.informationValue>0);
   assert.equal(signal.researchRequired,true);
   assert.equal(out.discoveredSkillIds.length,1);
+});
+
+test('evidence binding semantics are versioned and future-dated inputs fail closed',()=>{
+  assert.equal(
+    BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_VERSION,
+    'TCX_BIGGJ_LIVING_RESEARCH_EVIDENCE_BINDING_V1'
+  );
+  const initial=createBiggjLivingResearchRuntime({asOf:1000});
+
+  assert.throws(()=>refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[],
+    claimAssumptionReport:report({evaluatedAt:5001}),
+    asOf:5000
+  }),/future claim-assumption research report blocked/);
+
+  assert.throws(()=>refreshBiggjLivingResearchRuntime(initial,{
+    thesisMemories:[thesisMemory({forecastId:'FUTURE',observedAt:6000})],
+    asOf:5000
+  }),/future thesis persistence state blocked|future assumption persistence state blocked|future thesis stability event blocked/);
 });
 
 test('all assumption templates target canonical skill nodes',()=>{
