@@ -1,0 +1,154 @@
+name: TCX Chat Handover
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tcx-chat-handover-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  handover:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build or update handover capsule
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- TCX_CHAT_HANDOVER_V1 -->';
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100
+            });
+
+            const comparison = await github.rest.repos.compareCommits({
+              owner,
+              repo,
+              base: pr.base.sha,
+              head: pr.head.sha,
+              per_page: 100
+            });
+
+            const commits = comparison.data.commits || [];
+            const mergeState = pr.merged
+              ? 'MERGED'
+              : pr.state === 'closed'
+                ? 'CLOSED_UNMERGED'
+                : pr.draft
+                  ? 'DRAFT'
+                  : 'OPEN';
+
+            const bodyText = String(pr.body || '').trim();
+            const maxBody = 6000;
+            const clippedBody = bodyText.length > maxBody
+              ? bodyText.slice(0, maxBody) + '\n…[PR body clipped by handover bot]'
+              : bodyText || '_No PR description supplied._';
+
+            const commitLines = commits.length
+              ? commits.slice(-40).map(c => {
+                  const title = String(c.commit?.message || '').split('\n')[0];
+                  return '- `' + String(c.sha).slice(0, 12) + '` ' + title;
+                }).join('\n')
+              : '- No commits returned by compare API.';
+
+            const fileLines = files.length
+              ? files.slice(0, 80).map(f =>
+                  '- `' + f.filename + '` · ' + f.status +
+                  ' · +' + f.additions + '/-' + f.deletions
+                ).join('\n')
+              : '- No changed files.';
+            const filesClipped = files.length > 80
+              ? '\n- … +' + (files.length - 80) + ' more files'
+              : '';
+
+            const metadata = {
+              schema: 'TCX_CHAT_HANDOVER_V1',
+              repository: context.payload.repository.full_name,
+              pr: pr.number,
+              state: mergeState,
+              title: pr.title,
+              headBranch: pr.head.ref,
+              baseBranch: pr.base.ref,
+              baseSha: pr.base.sha,
+              headSha: pr.head.sha,
+              mergeCommitSha: pr.merge_commit_sha || null,
+              changedFiles: files.length,
+              commits: commits.length,
+              updatedAt: new Date().toISOString(),
+              htmlUrl: pr.html_url
+            };
+
+            const handover = [
+              marker,
+              '## TCX Chat Handover Capsule',
+              '',
+              '**State:** ' + mergeState,
+              '**PR:** #' + pr.number + ' · ' + pr.title,
+              '**Branch:** `' + pr.head.ref + '` → `' + pr.base.ref + '`',
+              '**Base / Head:** `' + pr.base.sha.slice(0, 12) + '` → `' + pr.head.sha.slice(0, 12) + '`',
+              pr.merge_commit_sha ? '**Merge commit:** `' + pr.merge_commit_sha.slice(0, 12) + '`' : '',
+              '',
+              '### What this chat says it changed',
+              clippedBody,
+              '',
+              '### Commits',
+              commitLines,
+              '',
+              '### Changed files',
+              fileLines + filesClipped,
+              '',
+              '### Next-chat recovery checklist',
+              '- Read this capsule and the PR discussion before changing overlapping files.',
+              '- Compare current `main` with this head/merge commit; do not assume this PR is still the newest work.',
+              '- Inspect newer open PRs from parallel chats.',
+              '- Preserve SHADOW_ONLY / ABSTAIN / PIT / scientific guards unless explicitly changed by repository policy.',
+              '- If this PR is merged, verify deployment/runtime separately before calling behavior live.',
+              '',
+              '<details><summary>Machine-readable handover metadata</summary>',
+              '',
+              '```json',
+              JSON.stringify(metadata, null, 2),
+              '```',
+              '</details>',
+              '',
+              '_Generated automatically by GitHub. No manual copy/paste handover is required._'
+            ].filter(Boolean).join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              per_page: 100
+            });
+
+            const existing = comments.find(c =>
+              c.user?.type === 'Bot' && String(c.body || '').includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: handover
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body: handover
+              });
+            }
