@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDexScreenerPublicProvider, dexScreenerTrendingMetasToExtraFeatures } from './dexscreener-public-provider.mjs';
+import { createDexScreenerPublicProvider, dexScreenerTrendingMetasToExtraFeatures, dexScreenerPromotionRadarToExtraFeatures } from './dexscreener-public-provider.mjs';
 
 function response(body,status=200){
   return {ok:status>=200&&status<300,status,json:async()=>body};
@@ -65,4 +65,35 @@ test('missing DEX aggregates stay missing instead of becoming synthetic zeros',(
   assert.equal(ids.has('research.dex.trendingVolumeLog'),false);
   assert.equal(ids.has('research.dex.trendingVolumeLiquidityRatio'),false);
   assert.equal(ids.has('research.dex.trendingMetaCountLog'),true);
+});
+
+
+test('promotion radar converts boosted-token activity into explicitly separate features',()=>{
+  const rows=dexScreenerPromotionRadarToExtraFeatures({
+    rows:[
+      {chainId:'solana',boost:{amount:10,totalAmount:50},pair:{liquidityUsd:100,volumeH1:200,buysH1:8,sellsH1:2,priceChangeH1:10}},
+      {chainId:'base',boost:{amount:5,totalAmount:20},pair:{liquidityUsd:300,volumeH1:100,buysH1:3,sellsH1:7,priceChangeH1:-2}}
+    ]
+  });
+  const byId=new Map(rows.map(x=>[x.id,x.value]));
+  assert.equal(byId.get('research.dex.promotionBuySellImbalanceH1'),.1);
+  assert.equal(byId.get('research.dex.promotionTopLiquidityShare'),.75);
+  assert.equal(byId.get('research.dex.promotionH1MedianPct'),4);
+  assert.ok(byId.get('research.dex.promotionPairCountLog')>0);
+  assert.ok(byId.get('research.dex.promotionChainDiversityLog')>0);
+  assert.ok(byId.get('research.dex.promotionBoostAmountLog')>0);
+  assert.ok(byId.get('research.dex.promotionTotalBoostAmountLog')>0);
+});
+
+test('promotion radar keeps absent market metrics missing instead of synthetic zeros',()=>{
+  const rows=dexScreenerPromotionRadarToExtraFeatures({
+    rows:[{chainId:'solana',boost:{amount:null,totalAmount:null},pair:{liquidityUsd:null,volumeH1:null,buysH1:0,sellsH1:0,priceChangeH1:null}}]
+  });
+  const ids=new Set(rows.map(x=>x.id));
+  assert.equal(ids.has('research.dex.promotionLiquidityLog'),false);
+  assert.equal(ids.has('research.dex.promotionVolumeH1Log'),false);
+  assert.equal(ids.has('research.dex.promotionBuySellImbalanceH1'),false);
+  assert.equal(ids.has('research.dex.promotionBoostAmountLog'),false);
+  assert.equal(ids.has('research.dex.promotionH1MedianPct'),false);
+  assert.equal(ids.has('research.dex.promotionPairCountLog'),true);
 });
