@@ -143,6 +143,38 @@ export function buildBiggjResearchReviewQueue({
   });
 }
 
+export function verifyBiggjResearchReviewQueue(value){
+  try{
+    const reasons=[];
+    if(value?.version!==BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION) reasons.push('VERSION_INVALID');
+    if(value?.execution!=='SHADOW_ONLY'||value?.action!=='ABSTAIN'||value?.canInfluencePrimary!==false||value?.canExecuteLive!==false){
+      reasons.push('SAFETY_INVARIANT_INVALID');
+    }
+    if(value?.automaticApply!==false||value?.productionMutationPerformed!==false){
+      reasons.push('AUTHORITY_INVARIANT_INVALID');
+    }
+    if(!Array.isArray(value?.tickets)) reasons.push('TICKETS_INVALID');
+    if(!Array.isArray(value?.blocked)) reasons.push('BLOCKED_INVALID');
+    const {fingerprint,...core}=value||{};
+    if(fingerprint!==sha256(core)) reasons.push('FINGERPRINT_MISMATCH');
+    const ids=new Set();
+    for(const ticket of value?.tickets||[]){
+      if(ticket?.version!==BIGGJ_RESEARCH_REVIEW_QUEUE_VERSION) reasons.push('TICKET_VERSION_INVALID');
+      if(ids.has(ticket?.ticketId)) reasons.push('TICKET_ID_DUPLICATE');
+      ids.add(ticket?.ticketId);
+      if(ticket?.reviewPolicy?.explicitApprovalRequired!==true||ticket?.reviewPolicy?.automaticApply!==false){
+        reasons.push('TICKET_AUTHORITY_INVALID');
+      }
+      if(ticket?.canExecuteLive!==false||ticket?.canInfluencePrimary!==false){
+        reasons.push('TICKET_SAFETY_INVALID');
+      }
+    }
+    return {ok:reasons.length===0,reasons};
+  }catch(err){
+    return {ok:false,reasons:['REVIEW_QUEUE_INVALID',err instanceof Error?err.message:String(err)]};
+  }
+}
+
 export function applyBiggjResearchReviewDecision({
   tree,
   ticket,
