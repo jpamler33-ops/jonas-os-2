@@ -45,6 +45,43 @@ export function dexScreenerTrendingMetasToExtraFeatures(snapshot){
   return candidates.filter(([,value])=>finite(value)!=null).map(([id,value])=>({id,value:Number(value)}));
 }
 
+export function dexScreenerPromotionRadarToExtraFeatures(snapshot){
+  const radarRows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
+  const rows=radarRows.filter(x=>x?.pair);
+  if(!rows.length) return [];
+  const pairs=rows.map(x=>x.pair);
+  const liquidities=pairs.map(x=>finite(x?.liquidityUsd)).filter(x=>x!=null&&x>=0);
+  const volumes=pairs.map(x=>finite(x?.volumeH1)).filter(x=>x!=null&&x>=0);
+  const priceChanges=pairs.map(x=>finite(x?.priceChangeH1)).filter(x=>x!=null);
+  const boostAmounts=rows.map(x=>finite(x?.boost?.amount)).filter(x=>x!=null&&x>=0);
+  const totalBoostAmounts=rows.map(x=>finite(x?.boost?.totalAmount)).filter(x=>x!=null&&x>=0);
+  const distinctChains=new Set(rows.map(x=>text(x?.chainId).toLowerCase()).filter(Boolean)).size;
+  const totalLiquidity=liquidities.length?liquidities.reduce((a,b)=>a+b,0):null;
+  const totalVolume=volumes.length?volumes.reduce((a,b)=>a+b,0):null;
+  const topLiquidity=liquidities.length?Math.max(...liquidities):null;
+  let buys=0,sells=0,observedTrades=0;
+  for(const pair of pairs){
+    const b=finite(pair?.buysH1),s=finite(pair?.sellsH1);
+    if(b!=null&&s!=null&&(b+s)>0){
+      buys+=Math.max(0,b);
+      sells+=Math.max(0,s);
+      observedTrades+=Math.max(0,b)+Math.max(0,s);
+    }
+  }
+  const candidates=[
+    ['research.dex.promotionPairCountLog',log1pNonNegative(rows.length)],
+    ['research.dex.promotionChainDiversityLog',log1pNonNegative(distinctChains)],
+    ['research.dex.promotionLiquidityLog',log1pNonNegative(totalLiquidity)],
+    ['research.dex.promotionVolumeH1Log',log1pNonNegative(totalVolume)],
+    ['research.dex.promotionBuySellImbalanceH1',observedTrades>0?(buys-sells)/(buys+sells):null],
+    ['research.dex.promotionBoostAmountLog',boostAmounts.length?log1pNonNegative(boostAmounts.reduce((a,b)=>a+b,0)):null],
+    ['research.dex.promotionTotalBoostAmountLog',totalBoostAmounts.length?log1pNonNegative(totalBoostAmounts.reduce((a,b)=>a+b,0)):null],
+    ['research.dex.promotionH1MedianPct',median(priceChanges)],
+    ['research.dex.promotionTopLiquidityShare',topLiquidity!=null&&totalLiquidity>0?topLiquidity/totalLiquidity:null]
+  ];
+  return candidates.filter(([,value])=>finite(value)!=null).map(([id,value])=>({id,value:Number(value)}));
+}
+
 function clampInt(v,min,max,fallback){
   const n=Math.floor(Number(v));
   return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;
