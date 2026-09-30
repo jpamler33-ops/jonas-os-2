@@ -269,7 +269,7 @@ test('forecast-field mutation after record fails closed before outcome learning'
   assert.equal(journal.entries[0].status,'PROOF_INVALID');
   assert.equal(journal.entries[0].proofIntegrity,'MISMATCH');
   assert.equal(journal.entries[0].resolution,undefined);
-  assert.equal(journal.lightweightStats().proofInvalid,1);
+  assert.equal(journal.proofIntegrityStats().invalid,1);
 });
 
 test('legacy outcomes remain visible without being misrepresented as forecast-time proof',()=>{
@@ -302,5 +302,5 @@ test('restore quarantines tampered committed rows before learning rehydration',(
   restored.restore(snapshot);
   assert.equal(restored.entries[0].status,'PROOF_INVALID');
   assert.equal(restored.entries[0].proofIntegrity,'MISMATCH');
-  assert.equal(restored.lightweightStats().proofInvalid,1);
+  assert.equal(restored.proofIntegrityStats().invalid,1);
 });
