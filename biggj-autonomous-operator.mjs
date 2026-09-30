@@ -358,7 +358,7 @@ export function recordBiggjAutonomousOperatorActionResults(state,results,{asOf=D
     };
   }).slice(-DEFAULT_AUTONOMOUS_OPERATOR_POLICY.maxRecoveryHistory);
   const {fingerprint,...rest}=state;
-  return finalized({...rest,updatedAt:t,revision:finite(state.revision)+1,recoveryHistory,plannedActions:[]});
+  return finalized({...rest,updatedAt:t,revision:finite(state.revision)+1,recoveryHistory:history,plannedActions:[]});
 }
 
 export function biggjAutonomousOperatorSummary(state){
