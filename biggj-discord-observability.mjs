@@ -415,24 +415,6 @@ export function biggjObservabilityNavComponents(){
     ]}
   ];
 }
-function legacyBiggjObservabilityNavComponentsRemoved(){
-  return [
-    {type:1,components:[
-      {type:2,style:1,label:'Brain',custom_id:'dc6:brain:pulse'},
-      {type:2,style:2,label:'Research',custom_id:'dc6:brain:research'},
-      {type:2,style:2,label:'Skills',custom_id:'dc6:brain:skills'},
-      {type:2,style:2,label:'Progress',custom_id:'dc6:brain:progress'},
-      {type:2,style:2,label:'Changes',custom_id:'dc6:brain:changes'}
-    ]},
-    {type:1,components:[
-      {type:2,style:3,label:'Reviews',custom_id:'dc6:brain:reviews'},
-      {type:2,style:2,label:'Evidence',custom_id:'dc6:brain:evidence'},
-      {type:2,style:2,label:'Decisions',custom_id:'dc6:brain:decisions'},
-      {type:2,style:2,label:'Experiments',custom_id:'dc6:brain:experiments'},
-      {type:2,style:2,label:'Timeline',custom_id:'dc6:brain:timeline'}
-    ]}
-  ];
-}
 function payload(title,description,fields,marker,snapshot){
   const safeTitle=clip(title,256);
   const safeDescription=clip(description,3500);
