@@ -738,7 +738,7 @@ function buildChannelImprovementsPayload(managerState={},translationHealth=null,
   const translationSuggestion=translationHealth&&!translationHealth.ok
     ?'\n\n**Übersetzung:** Dienst ist gestört. Deutsche News im Strict-Mode werden lieber zurückgehalten als ungeprüft englisch gepostet.'
     :'';
-  const ruleActions=(rulebook?.runtime?.violations||[]).slice(0,6).map(x=>'• **'+String(x.ruleId||'RULE')+'** · '+String(x.reason||x.title||'Verstoß')+' → '+String(x.response||'prüfen')).join('\\n')||'Keine maschinell erkannten Rulebook-Verstöße.';
+  const ruleActions=(rulebook?.runtime?.violations||[]).slice(0,6).map(x=>'• **'+String(x.ruleId||'RULE')+'** · '+String(x.reason||x.title||'Verstoß')+' → '+String(x.response||'prüfen')).join('\n')||'Keine maschinell erkannten Rulebook-Verstöße.';
   return {embeds:[{
     title:'BIGGJ // CHANNEL-VERBESSERUNGEN',
     description:'**Priorisierte Verbesserungsliste aus den einzelnen Channel-Managern.**'+translationSuggestion,
