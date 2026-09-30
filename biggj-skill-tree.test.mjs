@@ -205,6 +205,91 @@ function addEvidence(tree,skillId,count,{
   return t;
 }
 
+test('research-context evidence is retained but cannot unlock the maturity ladder',()=>{
+  let tree=createBiggjSkillTree({asOf:1_000_000});
+  const parent=tree.nodes.find(x=>x.capabilityId==='EVIDENCE_INDEPENDENCE');
+  tree=proposeBiggjChildSkill(tree,{
+    parentSkillId:parent.skillId,
+    title:'CONTEXT_ONLY_RESEARCH',
+    purpose:'Verify that discovery context remains outside validation maturity.',
+    question:'Does context-only recurrence justify validation maturity?',
+    hypothesis:'Context recurrence alone must not unlock maturity.',
+    falsifier:'The maturity engine advances using only context evidence.',
+    asOf:1_100_000
+  });
+  const skill=tree.nodes.find(x=>x.title==='CONTEXT_ONLY_RESEARCH');
+
+  for(const [i,episode] of [[0,'EP:A'],[1,'EP:A'],[2,'EP:B']]){
+    tree=recordBiggjSkillEvidence(tree,{
+      skillId:skill.skillId,
+      epistemicClass:'INFERRED',
+      asOf:2_000_000+i,
+      availableAt:2_000_000+i,
+      sourceId:'THESIS_STABILITY_MEMORY',
+      independentEpisodeId:episode,
+      statement:'Persistent thesis context '+i,
+      outcome:'NEUTRAL',
+      forwardShadow:true,
+      pointInTime:true,
+      auditReady:false,
+      scientificGuardsPassed:false,
+      validationEligible:false,
+      provenance:[{kind:'PROSPECTIVE_PERSISTENT_CASE',caseId:'C'+i}]
+    });
+  }
+
+  const node=tree.nodes.find(x=>x.skillId===skill.skillId);
+  assert.equal(node.evidenceSummary.total,3);
+  assert.equal(node.evidenceSummary.forwardShadow,3);
+  assert.equal(node.evidenceSummary.independentEpisodes,2);
+  assert.equal(node.evidenceSummary.validationTotal,0);
+  assert.equal(node.evidenceSummary.validationForwardShadow,0);
+  assert.equal(node.evidenceSummary.validationIndependentEpisodes,0);
+  const progress=evaluateBiggjSkillProgress(tree,skill.skillId);
+  assert.equal(progress.recommendedStatus,'DISCOVERING');
+  assert.ok(progress.reasons.includes('EARLY_EVIDENCE_REQUIRED'));
+});
+
+test('legacy persisted evidence without validationEligible is reclassified from provenance without rewriting history',()=>{
+  let tree=createBiggjSkillTree({asOf:1_000_000});
+  const skill=tree.nodes.find(x=>x.capabilityId==='LIQUIDITY_SWEEP_REVERSAL');
+  tree=addEvidence(tree,skill.skillId,3,{start:2_000_000});
+
+  const legacy=structuredClone(tree);
+  const node=legacy.nodes.find(x=>x.skillId===skill.skillId);
+  for(const row of node.evidence) delete row.validationEligible;
+  for(const key of Object.keys(node.evidenceSummary)){
+    if(key.startsWith('validation')) delete node.evidenceSummary[key];
+  }
+
+  const generic=evaluateBiggjSkillProgress(legacy,skill.skillId);
+  assert.equal(generic.evidenceSummary.validationTotal,3);
+  assert.equal(generic.evidenceSummary.validationIndependentEpisodes,3);
+  assert.equal(generic.recommendedStatus,'LEARNING');
+
+  for(const row of node.evidence){
+    row.provenance=[{kind:'PROSPECTIVE_PERSISTENT_CASE'}];
+  }
+  const context=evaluateBiggjSkillProgress(legacy,skill.skillId);
+  assert.equal(context.evidenceSummary.total,3);
+  assert.equal(context.evidenceSummary.independentEpisodes,3);
+  assert.equal(context.evidenceSummary.validationTotal,0);
+  assert.equal(context.evidenceSummary.validationIndependentEpisodes,0);
+  assert.equal(context.recommendedStatus,'DISCOVERING');
+});
+
+test('ordinary evidence remains validation-eligible by default for backward-compatible callers',()=>{
+  let tree=createBiggjSkillTree({asOf:1_000_000});
+  const skill=tree.nodes.find(x=>x.capabilityId==='LIQUIDITY_SWEEP_REVERSAL');
+  tree=addEvidence(tree,skill.skillId,3,{start:2_000_000});
+  const node=tree.nodes.find(x=>x.skillId===skill.skillId);
+  assert.equal(node.evidenceSummary.total,3);
+  assert.equal(node.evidenceSummary.validationTotal,3);
+  assert.equal(node.evidenceSummary.independentEpisodes,3);
+  assert.equal(node.evidenceSummary.validationIndependentEpisodes,3);
+  assert.equal(evaluateBiggjSkillProgress(tree,skill.skillId).recommendedStatus,'LEARNING');
+});
+
 test('skill maturity advances through evidence gates and never mutates PRIMARY directly',()=>{
   let tree=createBiggjSkillTree({asOf:1_000_000});
   const seed=tree.nodes.find(x=>x.capabilityId==='LIQUIDITY_SWEEP_REVERSAL');

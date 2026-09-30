@@ -58,7 +58,20 @@ function blankEvidence(){
     chronologicalStable:0,
     costStressPassed:0,
     concentrationPassed:0,
-    winnerRemovalPassed:0
+    winnerRemovalPassed:0,
+    validationTotal:0,
+    validationForwardShadow:0,
+    validationIndependentEpisodes:0,
+    validationPositive:0,
+    validationNegative:0,
+    validationNeutral:0,
+    validationPitSafe:0,
+    validationAuditReady:0,
+    validationSciencePassed:0,
+    validationChronologicalStable:0,
+    validationCostStressPassed:0,
+    validationConcentrationPassed:0,
+    validationWinnerRemovalPassed:0
   };
 }
 
@@ -144,9 +157,21 @@ function findNodeIndex(tree,skillId){
   return tree.nodes.findIndex(x=>String(x.skillId)===String(skillId));
 }
 
+function evidenceIsValidationEligible(e){
+  if(e?.validationEligible===true) return true;
+  if(e?.validationEligible===false) return false;
+  const contextKinds=new Set([
+    'DISCOVERY_COHORT',
+    'PROSPECTIVE_PERSISTENT_CASE',
+    'PERSISTENCE_FILTERED_ASSOCIATION'
+  ]);
+  return !(e?.provenance||[]).some(x=>contextKinds.has(String(x?.kind||'')));
+}
+
 function evidenceSummary(rows){
   const s=blankEvidence();
   const episodes=new Set();
+  const validationEpisodes=new Set();
   for(const e of rows||[]){
     s.total++;
     const cls=String(e.epistemicClass||'').toUpperCase();
@@ -167,8 +192,25 @@ function evidenceSummary(rows){
     if(e.costStressPassed===true)s.costStressPassed++;
     if(e.concentrationPassed===true)s.concentrationPassed++;
     if(e.winnerRemovalPassed===true)s.winnerRemovalPassed++;
+
+    if(evidenceIsValidationEligible(e)){
+      s.validationTotal++;
+      if(e.forwardShadow===true)s.validationForwardShadow++;
+      if(e.independentEpisodeId)validationEpisodes.add(String(e.independentEpisodeId));
+      if(outcome==='POSITIVE')s.validationPositive++;
+      else if(outcome==='NEGATIVE')s.validationNegative++;
+      else s.validationNeutral++;
+      if(e.pointInTime===true&&e.futureLeakage!==true)s.validationPitSafe++;
+      if(e.auditReady===true)s.validationAuditReady++;
+      if(e.scientificGuardsPassed===true)s.validationSciencePassed++;
+      if(e.chronologicalStable===true)s.validationChronologicalStable++;
+      if(e.costStressPassed===true)s.validationCostStressPassed++;
+      if(e.concentrationPassed===true)s.validationConcentrationPassed++;
+      if(e.winnerRemovalPassed===true)s.validationWinnerRemovalPassed++;
+    }
   }
   s.independentEpisodes=episodes.size;
+  s.validationIndependentEpisodes=validationEpisodes.size;
   return s;
 }
 
@@ -396,6 +438,7 @@ export function recordBiggjSkillEvidence(tree,{
   costStressPassed=false,
   concentrationPassed=false,
   winnerRemovalPassed=false,
+  validationEligible=true,
   provenance=[]
 }={}){
   verifyTreeShape(tree);
@@ -431,13 +474,17 @@ export function recordBiggjSkillEvidence(tree,{
     costStressPassed:costStressPassed===true,
     concentrationPassed:concentrationPassed===true,
     winnerRemovalPassed:winnerRemovalPassed===true,
+    validationEligible:validationEligible!==false,
     provenance:Array.isArray(provenance)?structuredClone(provenance):[]
   };
   const evidence={...evidenceCore,evidenceId:'evidence:'+sha256(evidenceCore).slice(0,24)};
   if(!node.evidence.some(x=>x.evidenceId===evidence.evidenceId)) node.evidence.push(evidence);
   node.evidenceSummary=evidenceSummary(node.evidence);
   node.updatedAt=t;
-  node.uncertainty=clamp(1-node.evidenceSummary.independentEpisodes/(node.evidenceSummary.independentEpisodes+20));
+  node.uncertainty=clamp(
+    1-node.evidenceSummary.validationIndependentEpisodes/
+      (node.evidenceSummary.validationIndependentEpisodes+20)
+  );
   if(node.status==='UNKNOWN') node.status='DISCOVERING';
   node.promotionStage=promotionStageForStatus(node.status);
   core.asOf=Math.max(core.asOf,t);
@@ -448,11 +495,14 @@ export function evaluateBiggjSkillProgress(tree,skillId){
   verifyTreeShape(tree);
   const node=tree.nodes.find(x=>x.skillId===skillId);
   if(!node) throw new Error('skill missing');
-  const e=node.evidenceSummary||blankEvidence();
-  const allPit=e.total>0&&e.pitSafe===e.total;
-  const allAudited=e.total>0&&e.auditReady===e.total;
-  const allScience=e.total>0&&e.sciencePassed===e.total;
-  const positiveRate=e.total?e.positive/e.total:0;
+  const e=evidenceSummary(node.evidence||[]);
+  const validationTotal=Number(e.validationTotal||0);
+  const validationForwardShadow=Number(e.validationForwardShadow||0);
+  const validationIndependentEpisodes=Number(e.validationIndependentEpisodes||0);
+  const allPit=validationTotal>0&&Number(e.validationPitSafe||0)===validationTotal;
+  const allAudited=validationTotal>0&&Number(e.validationAuditReady||0)===validationTotal;
+  const allScience=validationTotal>0&&Number(e.validationSciencePassed||0)===validationTotal;
+  const positiveRate=validationTotal?Number(e.validationPositive||0)/validationTotal:0;
   const testingDependencyGate=evaluateBiggjSkillDependencyGate(tree,{skillId,phase:'TESTING'});
   const decisionDependencyGate=evaluateBiggjSkillDependencyGate(tree,{skillId,phase:'DECISION'});
   const trustDependencyGate=evaluateBiggjSkillDependencyGate(tree,{skillId,phase:'TRUST'});
@@ -466,29 +516,29 @@ export function evaluateBiggjSkillProgress(tree,skillId){
     if(!node.question&&!defaultQuestion(node)) reasons.push('QUESTION_MISSING');
     if(!node.hypothesis&&node.kind==='DISCOVERED_SKILL') reasons.push('HYPOTHESIS_MISSING');
     if(!node.falsifier&&node.kind==='DISCOVERED_SKILL') reasons.push('FALSIFIER_MISSING');
-    if(e.total>=3&&e.independentEpisodes>=2&&allPit) recommended='LEARNING';
+    if(validationTotal>=3&&validationIndependentEpisodes>=2&&allPit) recommended='LEARNING';
     else reasons.push('EARLY_EVIDENCE_REQUIRED');
   }else if(node.status==='LEARNING'){
-    const evidenceReady=e.total>=10&&e.independentEpisodes>=5&&allPit&&allAudited;
+    const evidenceReady=validationTotal>=10&&validationIndependentEpisodes>=5&&allPit&&allAudited;
     if(!evidenceReady) reasons.push('LEARNING_SAMPLE_OR_AUDIT_DEFICIT');
     if(!testingDependencyGate.ready) reasons.push('DEPENDENCY_GATE_TESTING_BLOCKED');
     if(evidenceReady&&testingDependencyGate.ready) recommended='TESTING';
   }else if(node.status==='TESTING'){
     const strong=
-      e.forwardShadow>=30&&e.independentEpisodes>=20&&allPit&&allAudited&&allScience&&
-      e.chronologicalStable>=Math.min(20,e.forwardShadow)&&
-      e.costStressPassed>=Math.min(20,e.forwardShadow)&&
-      e.concentrationPassed>=Math.min(20,e.forwardShadow)&&
-      e.winnerRemovalPassed>=Math.min(20,e.forwardShadow)&&
+      validationForwardShadow>=30&&validationIndependentEpisodes>=20&&allPit&&allAudited&&allScience&&
+      Number(e.validationChronologicalStable||0)>=Math.min(20,validationForwardShadow)&&
+      Number(e.validationCostStressPassed||0)>=Math.min(20,validationForwardShadow)&&
+      Number(e.validationConcentrationPassed||0)>=Math.min(20,validationForwardShadow)&&
+      Number(e.validationWinnerRemovalPassed||0)>=Math.min(20,validationForwardShadow)&&
       positiveRate>.50;
     if(!strong) reasons.push('FORWARD_STRESS_VALIDATION_INCOMPLETE');
     if(!decisionDependencyGate.ready) reasons.push('DEPENDENCY_GATE_DECISION_BLOCKED');
     if(strong&&decisionDependencyGate.ready) recommended='VALIDATED';
   }else if(node.status==='VALIDATED'){
     const trusted=
-      e.forwardShadow>=60&&e.independentEpisodes>=40&&allPit&&allAudited&&allScience&&
-      e.chronologicalStable>=40&&e.costStressPassed>=40&&
-      e.concentrationPassed>=40&&e.winnerRemovalPassed>=40&&positiveRate>.52;
+      validationForwardShadow>=60&&validationIndependentEpisodes>=40&&allPit&&allAudited&&allScience&&
+      Number(e.validationChronologicalStable||0)>=40&&Number(e.validationCostStressPassed||0)>=40&&
+      Number(e.validationConcentrationPassed||0)>=40&&Number(e.validationWinnerRemovalPassed||0)>=40&&positiveRate>.52;
     if(!trusted) reasons.push('TRUST_THRESHOLD_NOT_REACHED');
     if(!trustDependencyGate.ready) reasons.push('DEPENDENCY_GATE_TRUST_BLOCKED');
     if(trusted&&trustDependencyGate.ready) recommended='TRUSTED';
@@ -496,7 +546,7 @@ export function evaluateBiggjSkillProgress(tree,skillId){
     if(!trustDependencyGate.ready){
       recommended='DECAYING';
       reasons.push('DEPENDENCY_DECAY_PROPAGATION');
-    }else if(e.total>=10&&e.negative/Math.max(1,e.total)>.55){
+    }else if(validationTotal>=10&&Number(e.validationNegative||0)/Math.max(1,validationTotal)>.55){
       recommended='DECAYING';
       reasons.push('FORWARD_EVIDENCE_DECAY');
     }
@@ -522,7 +572,7 @@ export function evaluateBiggjSkillProgress(tree,skillId){
     recommendedStatus:recommended,
     promotionStage,
     evidenceSummary:{...e},
-    uncertainty:node.uncertainty,
+    uncertainty:clamp(1-validationIndependentEpisodes/(validationIndependentEpisodes+20)),
     dependencyGates:{
       testing:gateSummary(testingDependencyGate),
       decision:gateSummary(decisionDependencyGate),
@@ -574,8 +624,8 @@ export function applyBiggjSkillStatusTransition(tree,{
 }
 
 function researchPriority(node){
-  const e=node.evidenceSummary||blankEvidence();
-  const evidenceDeficit=1-clamp(e.independentEpisodes/30);
+  const e=evidenceSummary(node.evidence||[]);
+  const evidenceDeficit=1-clamp(Number(e.validationIndependentEpisodes||0)/30);
   const statusNeed={
     UNKNOWN:1,DISCOVERING:.92,LEARNING:.78,TESTING:.62,VALIDATED:.35,TRUSTED:.12,DECAYING:.95,RETIRED:0
   }[node.status]??.6;
@@ -598,6 +648,7 @@ export function buildBiggjResearchQueue(tree,{limit=25}={}){
     .map(node=>{
       const leverage=canonicalSkillLeverage(node.capabilityId);
       const dependencyGate=evaluateBiggjSkillDependencyGate(tree,{skillId:node.skillId,phase:'TESTING'});
+      const currentEvidence=evidenceSummary(node.evidence||[]);
       return {
         skillId:node.skillId,
         capabilityId:node.capabilityId,
@@ -607,7 +658,9 @@ export function buildBiggjResearchQueue(tree,{limit=25}={}){
         priority:clamp(researchPriority(node)*(dependencyGate.ready?1:Math.max(.70,1-.10*dependencyGate.blockers.length))),
         question:node.question||defaultQuestion(node),
         uncertainty:node.uncertainty,
-        independentEpisodes:node.evidenceSummary?.independentEpisodes||0,
+        independentEpisodes:currentEvidence.independentEpisodes,
+        validationIndependentEpisodes:currentEvidence.validationIndependentEpisodes,
+        validationEvidenceTotal:currentEvidence.validationTotal,
         nextGate:evaluateBiggjSkillProgress(tree,node.skillId).recommendedStatus,
         dependencyLeverage:leverage.score,
         directUnlocks:leverage.directUnlocks,
