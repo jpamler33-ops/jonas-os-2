@@ -4,7 +4,7 @@ export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVAL
 
 export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2';
 
-export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V1';
+export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V2';
 
 export function evaluateAutoLearnMemoryAdmission({
   phase='ISSUE',
@@ -14,7 +14,7 @@ export function evaluateAutoLearnMemoryAdmission({
   issueHeapMb=320,
   issueRssMb=720,
   issueExternalMb=64,
-  resumeHeapMb=280,
+  resumeHeapMb=300,
   resumeRssMb=620,
   resumeExternalMb=48
 }={}){
