@@ -8551,6 +8551,17 @@ async function autoLearnForecastWatcher() {
         await sleep(autoLearnSweepMs);
         continue;
       }
+      console.log('autolearn memory headroom restored',JSON.stringify({
+        ...resumeAdmission.memory,
+        threshold:resumeAdmission.limits,
+        action:'RETRY_IMMEDIATELY',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+      // Do not burn the recovered low-memory window by sleeping another full
+      // sweep. The next loop iteration performs the normal ISSUE admission
+      // check again before any forecast work begins.
+      continue;
     }
     await sleep(autoLearnSweepMs);
   }
