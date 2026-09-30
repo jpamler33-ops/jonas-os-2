@@ -708,9 +708,7 @@ let biggjLivingResearchLastLoggedFingerprint=null;
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
   const started=Date.now();
   try{
-    const thesisMemories=(forecastRuntime?.intelligence?.all?.()||[])
-      .map(x=>x?.thesisMemory)
-      .filter(Boolean);
+    const thesisMemories=forecastRuntime?.intelligence?.thesisMemories?.()||[];
     const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
       thesisMemories,
       claimAssumptionReport:report,
