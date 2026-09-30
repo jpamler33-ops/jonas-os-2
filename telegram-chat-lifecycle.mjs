@@ -36,7 +36,8 @@ export function createTelegramChatLifecycle({
   function touch(chatId,{at=now()}={}){
     const s=ensure(chatId,at);
     const idleForMs=Math.max(0,Number(at)-Number(s.lastActivityAt||at));
-    const hadExpired=idleForMs>=timeoutMs;
+    const wasResetDone=s.resetDone===true;
+    const hadExpired=!wasResetDone&&idleForMs>=timeoutMs;
     s.lastActivityAt=Number(at);
     s.resetDone=false;
     s.resetInFlight=false;
@@ -44,6 +45,7 @@ export function createTelegramChatLifecycle({
       chatId:s.chatId,
       idleForMs,
       hadExpired,
+      wasResetDone,
       trackedUiMessages:s.uiMessageIds.length
     };
   }
