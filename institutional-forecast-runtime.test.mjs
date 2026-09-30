@@ -9,12 +9,14 @@ import { sha256 } from './institutional-kernel.mjs';
 import { selectIndependenceAwareAnalogs } from './forecast-runtime/forecast/engine.js';
 import { evaluateScientificValidity } from './scientific-validity.mjs';
 import { verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
+import { buildForecastThesisDeclarations } from './forecast-thesis-declarations.mjs';
 import {
   openInstitutionalForecastRuntime,
   saveInstitutionalForecastRuntime,
   seedInstitutionalForecastRuntimeFromEpisodes,
   issueInstitutionalForecast,
   observeInstitutionalForecastRuntime,
+  observeInstitutionalForecastThesisRevisions,
   observeInstitutionalForecastOutcomePoint,
   recordCoverageProbeCalibration,
   forecastClaimAssumptionShadowDataset,
@@ -123,6 +125,74 @@ function traceContext(inp){
     contradictions:[],
     provenance:{source:'TEST',version:'1'}
   };
+}
+
+function thesisDeclarations(inp,{witnessSupported=true,generatedAt=inp.asOf+100}={}){
+  return buildForecastThesisDeclarations({
+    symbol:inp.symbol,
+    asOf:inp.asOf,
+    generatedAt,
+    inputFingerprint:inp.inputFingerprint,
+    state:{
+      memoryDashboard:{
+        regime:inp.regimeId,
+        bias:'BULLISH',
+        flow:'BID_PRESSURE',
+        liquidity:'NORMAL',
+        pressureScore:70
+      },
+      memoryAnalysis:{trend:'BULLISH'},
+      mtf:{bias:'BULLISH'}
+    },
+    witnessReport:{
+      agreementScore:witnessSupported?.88:.42,
+      independentWitnessSatisfied:witnessSupported,
+      externalWitnessCount:witnessSupported?2:1,
+      contradictions:witnessSupported?[]:['PRICE_DIVERGENCE']
+    },
+    mechanism:{
+      version:'MTL_V1',
+      channels:{REFLEXIVE_ALIGNMENT:.72,FORCED_FLOW:.45},
+      hypothesis:{
+        candidate:'REFLEXIVE_ALIGNMENT',
+        candidateScore:.72,
+        evidenceStrength:.7,
+        gate:'HYPOTHESIS_SUPPORTED',
+        causalStatus:'NOT_IDENTIFIED'
+      },
+      lattice:{
+        sufficient:true,
+        support:12,
+        transitionCoherence:.74,
+        novelty:.2
+      },
+      audit:{contradictionScore:witnessSupported?.1:.2}
+    },
+    evidenceRecord:{
+      index:70,
+      disagreementCount:witnessSupported?0:1,
+      gate:'HYPOTHESIS_SUPPORTED',
+      fingerprint:sha256({type:'evidence',asOf:inp.asOf,witnessSupported}),
+      stateFingerprint:{hash:sha256({type:'state',asOf:inp.asOf})},
+      map:{layers:witnessSupported?[]:[{layer:'WITNESS',relation:'CONFLICT'}]}
+    },
+    researchDependencyGraph:{
+      gate:'PASS',
+      fingerprint:sha256({type:'dependency',asOf:inp.asOf}),
+      reasons:[],
+      impact:{coverage:1,blockedFeatures:0,blockedFeatureIds:[]}
+    },
+    scientificValidity:{
+      gate:'PASS',
+      fingerprint:sha256({type:'science',asOf:inp.asOf})
+    }
+  });
+}
+
+function traceContextWithThesis(inp,options={}){
+  const context=traceContext(inp);
+  context.claimAssumptionDeclarations=thesisDeclarations(inp,options);
+  return context;
 }
 
 async function runtime(){
@@ -270,6 +340,52 @@ test('matured journal outcome becomes Research Trace evaluation only after due t
   assert.equal(due.evaluations.length,1);
   assert.equal(due.evaluations[0].evaluation.horizonId,'5m');
   assert.equal(due.evaluations[0].evaluation.traceId,due.evaluations[0].trace.traceId);
+});
+
+test('live thesis revision memory records support loss before maturity and exposes warning lead time',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContextWithThesis(inp),
+    generatedAt:inp.asOf+100
+  });
+  const initial=r.intelligence.get(issued.forecastId);
+  assert.ok(initial.thesisMemory);
+  assert.equal(initial.thesisMemory.assumptionCount,8);
+  assert.equal(initial.thesisMemory.eventCount,0);
+
+  const next=input(inp.asOf+60_000,inp.price*1.001);
+  const live=observeInstitutionalForecastRuntime(r,{input:next,quality:1});
+  const current=thesisDeclarations(next,{witnessSupported:false,generatedAt:next.asOf+100});
+  const revised=observeInstitutionalForecastThesisRevisions(r,{
+    currentDeclarations:current,
+    observedAt:next.asOf+100,
+    currentInputFingerprint:next.inputFingerprint,
+    forecastRevisions:live.revisions
+  });
+  assert.equal(revised.examined,1);
+  assert.equal(revised.changed,1);
+  assert.ok(revised.results[0].supportLostSinceIssueIds.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
+
+  const memory=r.intelligence.get(issued.forecastId).thesisMemory;
+  assert.equal(memory.firstStaleAt,next.asOf+100);
+  assert.ok(memory.events[0].supportTransitions.some(x=>
+    x.assumptionId==='THESIS_WITNESS_SUPPORT_ADEQUATE'&&x.transition==='SUPPORT_LOST'
+  ));
+
+  const due=observeInstitutionalForecastRuntime(r,{input:input(inp.asOf+300_000,65100)});
+  assert.equal(due.evaluations.length,1);
+  const revisionState=due.evaluations[0].claimAssumptionObservation.preOutcomeThesisRevisionState;
+  assert.ok(revisionState);
+  assert.equal(revisionState.warningAvailableBeforeMaturity,true);
+  assert.ok(revisionState.warningLeadMs>0);
+  assert.ok(revisionState.everStaleAssumptionIdsBeforeMaturity.includes('THESIS_WITNESS_SUPPORT_ADEQUATE'));
+  assert.equal(revisionState.interpretation,'PRE_OUTCOME_REVISION_SIGNAL_NOT_CAUSAL_PROOF');
 });
 
 test('matured forecast outcome emits reconstructible claim-assumption forward-shadow observation',async()=>{
@@ -734,7 +850,7 @@ test('gzip persistence externalizes engine learning memories and restores them l
   assert.ok(['a','b'].includes(reopened.engineStoreSlot));
 });
 
-test('gzip persistence externalizes tracker issue-state and revision history losslessly',async()=>{
+test('gzip persistence externalizes tracker issue-state, forecast revisions and thesis memory losslessly',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-tracker-archive-'));
   const file=path.join(dir,'runtime.json.gz');
   const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
@@ -745,12 +861,19 @@ test('gzip persistence externalizes tracker issue-state and revision history los
     scientificValidity:science(inp.asOf,'PASS'),
     dataSafety:{state:'NORMAL'},
     researchValidity:{status:'VALID'},
-    traceContext:traceContext(inp),
+    traceContext:traceContextWithThesis(inp),
     generatedAt:inp.asOf+100
   });
-  observeInstitutionalForecastRuntime(r,{
-    input:input(inp.asOf+60_000,inp.price*1.001),
+  const firstObserved=input(inp.asOf+60_000,inp.price*1.001);
+  const firstLive=observeInstitutionalForecastRuntime(r,{
+    input:firstObserved,
     quality:1
+  });
+  observeInstitutionalForecastThesisRevisions(r,{
+    currentDeclarations:thesisDeclarations(firstObserved,{witnessSupported:false,generatedAt:firstObserved.asOf+100}),
+    observedAt:firstObserved.asOf+100,
+    currentInputFingerprint:firstObserved.inputFingerprint,
+    forecastRevisions:firstLive.revisions
   });
   observeInstitutionalForecastRuntime(r,{
     input:input(inp.asOf+120_000,inp.price*.999),
@@ -760,11 +883,14 @@ test('gzip persistence externalizes tracker issue-state and revision history los
   const before=r.intelligence.get(issued.forecastId);
   assert.equal(before.revisions.length,2);
   assert.ok(before.issueState);
+  assert.ok(before.thesisMemory);
+  assert.equal(before.thesisMemory.eventCount,1);
 
   const meta=await saveInstitutionalForecastRuntime(r);
   assert.ok(meta.trackerArchive);
   assert.equal(meta.trackerArchive.recordCount,1);
   assert.equal(meta.trackerArchive.revisionCount,2);
+  assert.equal(meta.trackerArchive.thesisRevisionEventCount,1);
   assert.ok(meta.trackerArchive.storageBytes<meta.trackerArchive.logicalBytes);
   const trackerSidecar=file+'.tracker.'+meta.trackerArchive.slot+'.json.gz';
   const logicalTracker=gunzipSync(await readFile(trackerSidecar)).toString('utf8');
@@ -776,7 +902,9 @@ test('gzip persistence externalizes tracker issue-state and revision history los
   const persisted=main.intelligence.tracker.records[0];
   assert.equal(persisted.issueState,null);
   assert.deepEqual(persisted.revisions,[]);
+  assert.equal(persisted.thesisMemory,null);
   assert.equal(main.trackerArchive.revisionCount,2);
+  assert.equal(main.trackerArchive.thesisRevisionEventCount,1);
 
   const reopened=await openInstitutionalForecastRuntime(file,{
     snapshotCompression:'gzip',
@@ -786,6 +914,8 @@ test('gzip persistence externalizes tracker issue-state and revision history los
   assert.equal(restored.revisions.length,2);
   assert.equal(restored.issueState.inputFingerprint,before.issueState.inputFingerprint);
   assert.deepEqual(restored.revisions,JSON.parse(JSON.stringify(before.revisions)));
+  assert.deepEqual(restored.thesisMemory,JSON.parse(JSON.stringify(before.thesisMemory)));
+  assert.equal(reopened.trackerArchiveThesisRevisionEventCount,1);
   const cf=reopened.intelligence.counterfactual(issued.forecastId,{maxFeatures:2});
   assert.equal(cf.interpretation,'MODEL_SENSITIVITY_NOT_CAUSAL');
 });
