@@ -282,15 +282,16 @@ test('association milestones bind modelled non-causal evidence without becoming 
   skill=updated.state.skillTree.nodes.find(x=>x.skillId===skillId);
   assert.equal(updated.boundEvidenceIds.length,1);
   assert.equal(skill.evidenceSummary.total,3);
-  assert.equal(skill.evidenceSummary.forwardShadow,1);
+  assert.equal(skill.evidenceSummary.forwardShadow,0);
   assert.equal(skill.evidenceSummary.independentEpisodes,0);
   assert.equal(skill.status,'DISCOVERING');
   const secondAssociation=skill.evidence.find(x=>
     x.provenance?.some(p=>p.associationMilestone==='THESIS_WITNESS_SUPPORT_ADEQUATE:100')
   );
   assert.ok(secondAssociation);
-  assert.equal(secondAssociation.forwardShadow,true);
+  assert.equal(secondAssociation.forwardShadow,false);
   assert.equal(secondAssociation.independentEpisodeId,null);
+  assert.equal(secondAssociation.provenance[0].postHypothesisSubsetResolved,false);
 });
 
 test('persistent research cases survive removal from hot forecast tracker',()=>{
