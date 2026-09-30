@@ -1,13 +1,13 @@
 
-export const BIGGJ_MOBILE_WEBAPP_VERSION='BIGGJ_MOBILE_COMMAND_CENTER_V3';
+export const BIGGJ_MOBILE_WEBAPP_VERSION='BIGGJ_MARKET_SCIENCE_APP_V1';
 
 const jsonForScript=value=>JSON.stringify(value??{}).replace(/</g,'\\u003c');
 
 export function biggjWebManifest(){
   return JSON.stringify({
-    name:'BIGGJ Command Center',
+    name:'BIGGJ Market Science OS',
     short_name:'BIGGJ',
-    description:'Mobile read-only command center for BIGGJ / TCX Research OS.',
+    description:'Mobile control plane for BIGGJ Autonomous Market Science & Decision Intelligence.',
     start_url:'/mission-control',
     scope:'/',
     display:'standalone',
@@ -42,7 +42,7 @@ export function renderBiggjMobileApp(snapshot={}){
 <link rel="manifest" href="/app.webmanifest">
 <link rel="icon" href="/biggj-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/biggj-icon.svg">
-<title>BIGGJ // Command Center</title>
+<title>BIGGJ // Market Science OS</title>
 <style>
 :root{
   --bg:#05070a;--bg2:#080c12;--surface:#0b1018;--surface2:#0e1520;--surface3:#111a27;
@@ -129,7 +129,7 @@ button{font:inherit;color:inherit}
   <div class="topline">
     <div class="brand">
       <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M6 4h7.2c3 0 4.8 1.5 4.8 3.8 0 1.4-.7 2.5-1.9 3.1 1.7.6 2.6 1.8 2.6 3.6 0 3-2.3 4.5-5.9 4.5H6V4Zm4 5.1h2.4c1 0 1.5-.4 1.5-1.2 0-.7-.5-1.1-1.5-1.1H10v2.3Zm0 6.1h2.8c1.2 0 1.8-.5 1.8-1.4 0-.9-.6-1.3-1.8-1.3H10v2.7Z" fill="currentColor"/></svg></div>
-      <div class="brandText"><div class="brandTitle">BIGGJ <span style="color:#46566b">//</span> TCX</div><div class="brandSub">Research Operating System</div></div>
+      <div class="brandText"><div class="brandTitle">BIGGJ</div><div class="brandSub">Autonomous Market Science OS</div></div>
     </div>
     <div class="topActions">
       <div class="sync" id="syncBadge"><span class="syncDot"></span><span id="syncText">LIVE</span></div>
@@ -143,17 +143,17 @@ button{font:inherit;color:inherit}
 </main>
 
 <nav class="bottomNav" id="nav" aria-label="BIGGJ Navigation">
-  <button data-tab="overview" class="active" aria-label="Übersicht"><svg viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Übersicht</span></button>
-  <button data-tab="markets" aria-label="Märkte"><svg viewBox="0 0 24 24"><path d="M4 18 9 12l4 3 7-9"/><path d="M17 6h3v3"/></svg><span>Märkte</span></button>
-  <button data-tab="signals" aria-label="Signale"><svg viewBox="0 0 24 24"><path d="M4 17 9 12l3 3 8-9"/><path d="M16 6h4v4"/></svg><span>Signale</span></button>
-  <button data-tab="research" aria-label="Research"><svg viewBox="0 0 24 24"><path d="M9 4h6M10 4v5l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V4"/><path d="M8 15h8"/></svg><span>Research</span></button>
-  <button data-tab="trades" aria-label="Trades"><svg viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7"/><path d="M3 19h18"/></svg><span>Trades</span></button>
+  <button data-tab="science" class="active" aria-label="Science"><svg viewBox="0 0 24 24"><path d="M9 3h6m-5 0v6l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7.5 15h9"/></svg><span>Science</span></button>
+  <button data-tab="world" aria-label="World Model"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8S14.4 17.8 12 20c-2.4-2.2-3.6-4.9-3.6-8S9.6 6.2 12 4Z"/></svg><span>World</span></button>
+  <button data-tab="lab" aria-label="Laboratory"><svg viewBox="0 0 24 24"><path d="M9 3h6m-5 0v6l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M8 15h8M8.7 12h6.6"/></svg><span>Lab</span></button>
+  <button data-tab="decisions" aria-label="Decision Intelligence"><svg viewBox="0 0 24 24"><path d="M4 17 9 12l3 3 8-9"/><path d="M16 6h4v4"/></svg><span>Decide</span></button>
+  <button data-tab="trading" aria-label="Trading Application"><svg viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7"/><path d="M3 19h18"/></svg><span>Trading</span></button>
   <button data-tab="system" aria-label="System"><svg viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg><span>System</span></button>
 </nav>
 
 <script>
 let S=__BIGGJ_BOOT__;
-let TAB='overview';
+let TAB='science';
 let refreshing=false;
 let lastGoodAt=Date.now();
 let SIGNAL={
@@ -234,12 +234,13 @@ function operatorCopy(op,factory){
 }
 
 function buildStatusStrip(){
-  const h=S.health||{},op=h.autonomousOperator||{},lr=h.biggjLivingResearch||{},ready=h.operationalReadiness||{},cov=h.researchCoverage||{};
+  const h=S.health||{},os=S.biggj||h.biggjMarketScienceOs||{},frontier=os.science?.frontier||{},ready=h.operationalReadiness||{},cov=h.researchCoverage||{};
   const rows=[
-    ['Runtime',ready.ready?'READY':ready.status||'CHECK',ready.ready?'good':'warn'],
-    ['Operator',statusDE(op.mode),cls(op.mode)],
-    ['Research',N(lr.researchRequired)+' offen',N(lr.researchRequired)>0?'warn':'good'],
+    ['BIGGJ','MARKET SCIENCE','cyan'],
+    ['Theories',N(frontier.total),N(frontier.broken)>0?'warn':'good'],
+    ['Evidence',N(frontier.evidence),'good'],
     ['Coverage',P(cov.averageCoverage),N(cov.blocked)>0?'warn':'good'],
+    ['Runtime',ready.ready?'READY':ready.status||'CHECK',ready.ready?'good':'warn'],
     ['Mode','SHADOW_ONLY','good']
   ];
   document.getElementById('statusStrip').innerHTML=rows.map(x=>'<div class="chip '+x[2]+'">'+E(x[0])+' <strong>'+E(x[1])+'</strong></div>').join('');
@@ -285,8 +286,8 @@ function renderSignals(){
   const confidence=p.displayAllowed===true&&Number.isFinite(Number(p.calibrated))?P(p.calibrated):'SUPPRESSED';
   const live=(proof.liveRows||[]).slice(0,5);
   const resolved=(proof.rows||[]).slice(0,8);
-  let html='<section class="view '+(TAB==='signals'?'active':'')+'">';
-  html+='<div class="hero"><div class="heroGrid"><div><div class="overline">Canonical Signal Lab</div><div class="signalState '+cls(state)+'">'+E(statusDE(state))+'</div><div class="signalBias">'+E(String(SIGNAL.symbol).replace('USDT','/USDT'))+' · '+E(SIGNAL.horizon.toUpperCase())+' · '+E(SIGNAL.mode)+' · '+E(DIR(lab.bias))+'</div><div class="heroCopy">Eine einfache Oberfläche vor derselben PIT-/Calibration-/Science-Pipeline. Mode-Lenses filtern Evidence; sie berechnen keinen zweiten Forecast.</div></div><div class="orb"><svg viewBox="0 0 24 24" fill="none"><path d="M4 17 9 12l3 3 8-9M16 6h4v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>';
+  let html='<section class="view '+(TAB==='decisions'?'active':'')+'">';
+  html+='<div class="hero"><div class="heroGrid"><div><div class="overline">DECISION INTELLIGENCE · TCX APPLICATION</div><div class="signalState '+cls(state)+'">'+E(statusDE(state))+'</div><div class="signalBias">'+E(String(SIGNAL.symbol).replace('USDT','/USDT'))+' · '+E(SIGNAL.horizon.toUpperCase())+' · '+E(SIGNAL.mode)+' · '+E(DIR(lab.bias))+'</div><div class="heroCopy">TCX konsumiert den validierten Science-/World-Model-Stand. Dieser Layer trifft Entscheidungen, besitzt aber keine wissenschaftliche Autorität.</div></div><div class="orb"><svg viewBox="0 0 24 24" fill="none"><path d="M4 17 9 12l3 3 8-9M16 6h4v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>';
   html+='<div class="signalSelectors">'+selectorRow(['BTCUSDT','ETHUSDT','SOLUSDT'],SIGNAL.symbol,'data-signal-symbol',x=>x.replace('USDT',''))+selectorRow(['5m','15m','1h','4h'],SIGNAL.horizon,'data-signal-horizon',x=>x.toUpperCase())+selectorRow(['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'],SIGNAL.mode,'data-signal-mode',x=>x==='STRUCTURE'?'STRUCT':x==='LIQUIDITY'?'LIQ':x)+'</div>';
   html+='<div class="heroFooter"><div class="badge">Confidence <b>'+E(confidence)+'</b></div><div class="badge">Forecast <b>'+E(lab.forecastGate||'—')+'</b></div><div class="badge">Risk <b>'+E(d.riskStatus||'—')+'</b></div></div></div>';
   if(SIGNAL.error)html+='<div class="refreshError show" style="margin-top:10px">'+E(SIGNAL.error)+' · letzter gültiger Signal-State bleibt sichtbar.</div>';
@@ -327,7 +328,9 @@ function renderResearch(){
 
 function renderTrades(){
   const p=S.portfolio||{},open=(p.positions||[]).filter(x=>String(x.status||'OPEN').toUpperCase()==='OPEN'),closed=(p.recentClosed||[]).slice(0,12),research=p.researchActivity||{};
-  let html='<section class="view '+(TAB==='trades'?'active':'')+'">';
+  let html='<section class="view '+(TAB==='trading'?'active':'')+'">';
+  html+=sectionHead('Trading Application','Downstream von Science & Decisions');
+  html+=panel('<span class="cyan">TCX / RIFT → SHADOW TRADING</span>','PnL und Trade-Ergebnisse fließen nur als Evidence zurück. Sie dürfen niemals wissenschaftliche Wahrheit oder Theorie-Promotion erzwingen.','APPLICATION');
   html+=sectionHead('Shadow Portfolio','keine Real-Money-Orders');
   html+='<div class="metricGrid">'+metric('Equity',MONEY(p.equityQuote),'Shadow Equity')+metric('Net PnL',MONEY(p.netPnlQuote),N(p.closedTrades)+' closed',pnlTone(p.netPnlQuote))+metric('Open',N(p.openPositions),'aktive Shadow-Positionen')+metric('Research',N(research.openPositions||0)+' / '+N(research.closedTrades||0),'open / closed')+'</div>';
   html+=sectionHead('Offene Trades',open.length+' Positionen');
@@ -335,6 +338,56 @@ function renderTrades(){
   html+=sectionHead('Zuletzt geschlossen');
   html+='<div class="stack">'+(closed.length?closed.map(x=>{const pnl=N(x.netPnlQuote??x.realizedNetPnlQuote??x.pnlQuote);return panel(E(String(x.symbol||'').replace('USDT','/USDT'))+' · '+E(x.side||'—'),'<span class="'+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</span> · '+E(x.exitReason||'closed'),x.closedAt?AGE(x.closedAt)+' alt':'CLOSED')}).join(''):empty('Noch keine kürzlich geschlossenen Trades.'))+'</div>';
   html+='<div class="safety" style="margin-top:12px"><div class="safetyTitle">Execution Boundary</div><div class="safetyBody">SHADOW_ONLY · canExecute:false · canExecuteLive:false. Diese Oberfläche zeigt Research-/Shadow-Zustände und besitzt keine Live-Order-Autorität.</div></div>';
+  return html+'</section>';
+}
+
+
+function renderScience(){
+  const h=S.health||{},os=S.biggj||h.biggjMarketScienceOs||{},science=os.science||{},frontier=science.frontier||{},director=science.director||{},next=director.nextResearchQuestion||null;
+  const agenda=(director.topAgenda||[]).slice(0,8),requests=(director.topDataRequests||[]).slice(0,6);
+  let html='<section class="view '+(TAB==='science'?'active':'')+'">';
+  html+='<div class="hero"><div class="heroGrid"><div><div class="overline">BIGGJ CORE</div><div class="heroMode">MARKET<br><span class="cyan">SCIENCE</span></div><div class="heroCopy">BIGGJ baut überprüfbares Marktwissen. Trading ist eine nachgelagerte Anwendung und besitzt keine Autorität über wissenschaftliche Wahrheit.</div></div><div class="orb"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M3 12h18M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg></div></div>';
+  html+='<div class="heroFooter"><div class="badge">Home <b>SCIENCE</b></div><div class="badge">Execution <b class="good">SHADOW_ONLY</b></div><div class="badge">Unknown <b class="cyan">VALID STATE</b></div></div></div>';
+  html+=sectionHead('Knowledge Frontier','kanonischer Wissensstand');
+  html+='<div class="metricGrid">'+metric('Theorien',N(frontier.total),N(frontier.robust)+' robust · '+N(frontier.broken)+' broken','cyan')+metric('Evidence',N(frontier.evidence),'PIT + Provenance')+metric('Experimente',N(frontier.experiments),'wissenschaftliche Tests')+metric('Surprises',N(frontier.surprises),'Fehler werden Forschungsinput',N(frontier.surprises)>0?'warn':'good')+'</div>';
+  html+=sectionHead('Nächste Forschungsfrage');
+  html+=next?panel('<span class="cyan">'+E(next.kind||'QUESTION')+'</span> · '+E(next.title||'BIGGJ Research'),E(next.question||next.nextExperimentPurpose||'—'),'P '+Math.round(N(next.priority)*100)):empty('Noch keine priorisierte Forschungsfrage vorhanden.');
+  html+=sectionHead('Science Agenda',agenda.length+' Fragen');
+  html+='<div class="stack">'+(agenda.length?agenda.map(x=>panel(E(x.question||x.title||x.kind||'Research Question'),'Status '+E(x.derivedStatus||'UNKNOWN')+' · Next '+E(x.nextExperimentType||'—')+' · Information Gain '+P(x.expectedInformationGainProxy),E(x.kind||'RESEARCH'),'researchCard '+(x.kind==='BROKEN_THEORY'||x.kind==='CONTRADICTION'?'required':''))).join(''):empty('Science Director hat aktuell keine Agenda erzeugt.'))+'</div>';
+  html+=sectionHead('Data Requests',requests.length+' Hypothesen');
+  html+='<div class="stack">'+(requests.length?requests.map(x=>panel(E(x.variable||'UNKNOWN_VARIABLE'),E(x.question||'')+' · Surprise-Cluster '+N(x.surpriseCount),'P '+Math.round(N(x.priority)*100),'researchCard')).join(''):empty('Keine wiederkehrende fehlende Variable erkannt.'))+'</div>';
+  html+='<div class="safety" style="margin-top:12px"><div class="safetyTitle">Epistemic Firewall</div><div class="safetyBody">Realität schlägt Modelle. Prediction ist nicht Erklärung. Synthetische Evidenz ist keine reale Evidenz. PnL kann keine Theorie promoten. Jede Theorie muss widerlegbar bleiben.</div></div>';
+  return html+'</section>';
+}
+
+function renderWorld(){
+  const h=S.health||{},os=S.biggj||h.biggjMarketScienceOs||{},world=os.worldModel||{},markets=(world.markets||[]),regimes=(world.regimeDistribution||[]),events=(world.latestIntelligence||[]).slice(0,12);
+  let html='<section class="view '+(TAB==='world'?'active':'')+'">';
+  html+='<div class="hero"><div class="heroGrid"><div><div class="overline">WORLD MODEL</div><div class="heroMode">'+N(world.marketsObserved)+' <span class="cyan">MARKETS</span></div><div class="heroCopy">Die Weltmodell-Schicht beschreibt, was BIGGJ aktuell über Marktstates behaupten darf. Nicht implementierte verborgene Zustände bleiben ausdrücklich UNKNOWN statt erfunden zu werden.</div></div><div class="orb"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8S14.4 17.8 12 20c-2.4-2.2-3.6-4.9-3.6-8S9.6 6.2 12 4Z" stroke="currentColor" stroke-width="1.4"/></svg></div></div></div>';
+  html+=sectionHead('Observed / Inferred Market State',markets.length+' States');
+  html+='<div class="marketRail">'+(markets.length?markets.map(x=>{const score=Number.isFinite(Number(x.score))?CLAMP(x.score):CLAMP(x.witnessAgreement);return '<div class="market"><div class="marketSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+'</div><div class="marketStatus">'+E(x.epistemicClass||'INFERRED')+' · '+E(x.regime||'UNKNOWN')+'</div><div class="marketScore">'+Math.round(score*100)+'</div><div class="bar"><i style="width:'+Math.round(score*100)+'%"></i></div><div class="marketFoot"><span>'+E(statusDE(x.status))+'</span><span>'+N(x.support)+' support</span></div></div>'}).join(''):empty('Noch keine kanonischen Marktstates verfügbar.'))+'</div>';
+  html+=sectionHead('Regime Distribution',regimes.length+' Zustände');
+  html+='<div class="stack">'+(regimes.length?regimes.map(x=>panel(E(x.regime),N(x.count)+' Märkte','INFERRED')).join(''):empty('Keine Regime-Verteilung verfügbar.'))+'</div>';
+  html+=sectionHead('Ungeklärte World-Model-Schichten');
+  for(const item of [['Latent State',world.latentStateDiscovery],['Information Flow',world.informationFlowGraph],['Predictability Field',world.predictabilityField]]){
+    const v=item[1]||{};html+=panel(E(item[0])+' · <span class="warn">'+E(v.status||'UNKNOWN')+'</span>',E(v.reason||'Keine kanonische Aussage.'),'NO FABRICATION');
+  }
+  html+=sectionHead('Reality Feed',events.length+' Events');
+  html+='<div class="stack">'+(events.length?events.map(x=>panel(E(x.title||x.eventType||'Event'),'<span class="sourceTag">'+E(x.family||'OTHER')+'</span>'+E(x.marketStatus||x.status||'WATCH')+' · '+(x.verified?'verifiziert':'noch nicht unabhängig bestätigt'),x.availableAt?AGE(x.availableAt)+' alt':'LIVE')).join(''):empty('Noch kein Intelligence-Event im aktuellen Snapshot.'))+'</div>';
+  return html+'</section>';
+}
+
+function renderLab(){
+  const h=S.health||{},os=S.biggj||h.biggjMarketScienceOs||{},lab=os.laboratory||{},agenda=(lab.agenda||[]).slice(0,10),requests=(lab.dataRequests||[]).slice(0,8);
+  let html='<section class="view '+(TAB==='lab'?'active':'')+'">';
+  html+='<div class="hero"><div class="heroGrid"><div><div class="overline">SCIENTIFIC LABORATORY</div><div class="heroMode">'+N(lab.experimentCount)+' <span class="cyan">EXPERIMENTS</span></div><div class="heroCopy">Hier versucht BIGGJ seine eigenen Ideen zu zerstören: OOS, Placebos, Ablations, Gegenwelten, Cross-Market- und Cross-Regime-Tests. Kein Lab-Ergebnis darf direkt PRIMARY verändern.</div></div><div class="orb"><svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6m-5 0v6l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3M8 15h8" stroke="currentColor" stroke-width="1.7"/></svg></div></div>';
+  html+='<div class="heroFooter"><div class="badge">Factory <b>'+E(statusDE(lab.factoryMode||'UNKNOWN'))+'</b></div><div class="badge">Auto <b>'+N(lab.automaticResearchTasks)+'</b></div><div class="badge">Manual <b>'+N(lab.manualResearchTasks)+'</b></div></div></div>';
+  html+=sectionHead('Experiment Queue',agenda.length+' Prioritäten');
+  html+='<div class="stack">'+(agenda.length?agenda.map(x=>panel(E(x.nextExperimentType||x.kind||'EXPERIMENT'),E(x.question||x.nextExperimentPurpose||'')+' · Replication gap '+P(x.replicationGap)+' · Generalization gap '+P(x.generalizationGap),E(x.derivedStatus||'HYPOTHESIS'),'researchCard '+(x.kind==='CONTRADICTION'||x.kind==='BROKEN_THEORY'?'required':''))).join(''):empty('Keine Experiment-Priorität vorhanden.'))+'</div>';
+  html+=sectionHead('Missing Variables',requests.length+' Requests');
+  html+='<div class="stack">'+(requests.length?requests.map(x=>panel(E(x.variable||'UNKNOWN'),E(x.question||'')+' · max divergence '+N(x.maxDivergence).toFixed(2),N(x.surpriseCount)+' surprises')).join(''):empty('Keine wiederkehrenden Missing-Variable-Cluster.'))+'</div>';
+  html+=sectionHead('Lab Boundary');
+  html+='<div class="safety"><div class="safetyTitle">Research ≠ Authority</div><div class="safetyBody">Synthetic worlds dürfen Hypothesen erzeugen und stressen, zählen aber nicht als reale Evidence. Experimente werden nicht automatisch zu Trading-Regeln. Primary mutation bleibt gesperrt.</div></div>';
   return html+'</section>';
 }
 
@@ -357,6 +410,9 @@ function renderSystem(){
   html+='<div class="panel">'+rows.map(x=>'<div class="systemRow"><div class="systemName">'+E(x[0])+'</div><div class="systemValue '+cls(x[1])+'">'+E(x[1])+'</div></div>').join('')+'</div>';
   html+=sectionHead('Autonomy');
   html+='<div class="metricGrid">'+metric('Automation',P(op.automationCoverage),op.operatorNeeded?'Human action offen':'kein Human-Task',op.operatorNeeded?'bad':'good')+metric('Self Healing',N(op.selfHealing),'geplante Recovery Actions')+metric('Incidents',N(op.activeIncidents),'aktive Incidents',N(op.activeIncidents)>0?'warn':'good')+metric('Research Rev',N(lr.revision),N(lr.activeAgendaItems)+' Agenda Items')+'</div>';
+  const os=S.biggj||h.biggjMarketScienceOs||{};
+  html+=sectionHead('Canonical Architecture');
+  html+='<div class="panel">'+((os.architecture?.layerOrder||[]).map((x,i)=>'<div class="systemRow"><div class="systemName">'+(i+1)+'. '+E(x)+'</div><div class="systemValue">'+(i<5?'CORE':'APPLICATION')+'</div></div>').join('')||'<div class="empty">Architecture snapshot unavailable.</div>')+'</div>';
   html+=sectionHead('Safety Contract');
   html+='<div class="safety"><div class="safetyTitle">Unveränderliche Grenze</div><div class="safetyBody">SHADOW_ONLY · ABSTAIN ist vollwertig · canExecute:false · canExecuteLive:false · keine automatische Trading-Policy-Mutation · keine automatische Promotion · keine stille PRIMARY-Mutation.</div></div>';
   html+='<div class="installCard"><b>Als iPhone-App installieren</b><p>Safari → Teilen → <strong>Zum Home-Bildschirm</strong>. BIGGJ startet danach im Standalone-Modus und nutzt diese Oberfläche als Command Center.</p></div>';
@@ -366,7 +422,7 @@ function renderSystem(){
 
 function render(){
   buildStatusStrip();
-  root.innerHTML=renderOverview()+renderMarkets()+renderSignals()+renderResearch()+renderTrades()+renderSystem();
+  root.innerHTML=renderScience()+renderWorld()+renderLab()+renderSignals()+renderTrades()+renderSystem();
   const gen=N(S.generatedAt||lastGoodAt,lastGoodAt);
   const age=Date.now()-gen;
   const badge=document.getElementById('syncBadge');
@@ -383,7 +439,7 @@ async function refresh(){
     const r=await fetch('/mission-control.json',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     S=await r.json();lastGoodAt=Date.now();errorBox.classList.remove('show');render();
-    if(TAB==='signals')loadSignalLab(false);
+    if(TAB==='decisions')loadSignalLab(false);
   }catch(err){
     errorBox.classList.add('show');render();
   }finally{
@@ -395,14 +451,14 @@ nav.addEventListener('click',e=>{
   TAB=b.dataset.tab;
   for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x===b);
   render();window.scrollTo({top:0,behavior:'smooth'});
-  if(TAB==='signals')loadSignalLab(false);
+  if(TAB==='decisions')loadSignalLab(false);
 });
 root.addEventListener('click',e=>{
   const symbol=e.target.closest('[data-signal-symbol]');if(symbol){SIGNAL.symbol=symbol.getAttribute('data-signal-symbol');SIGNAL.lab=null;SIGNAL.proof=null;render();loadSignalLab(true);return;}
   const horizon=e.target.closest('[data-signal-horizon]');if(horizon){SIGNAL.horizon=horizon.getAttribute('data-signal-horizon');SIGNAL.lab=null;render();loadSignalLab(true);return;}
   const mode=e.target.closest('[data-signal-mode]');if(mode){SIGNAL.mode=mode.getAttribute('data-signal-mode');SIGNAL.lab=null;render();loadSignalLab(true);return;}
 });
-document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='signals')loadSignalLab(true)});
+document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='decisions')loadSignalLab(true)});
 window.addEventListener('online',()=>{render();refresh()});
 window.addEventListener('offline',render);
 render();
