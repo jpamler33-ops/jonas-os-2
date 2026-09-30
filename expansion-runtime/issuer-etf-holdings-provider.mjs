@@ -26,6 +26,11 @@ function finite(v){
 }
 function parseDateMs(v){
   const s=String(v??'').replaceAll('"','').trim();
+  const m=/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})$/i.exec(s);
+  if(m){
+    const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+    return Date.UTC(Number(m[3]),months[m[1].toLowerCase()],Number(m[2]));
+  }
   const t=Date.parse(s);
   return Number.isFinite(t)?t:null;
 }
