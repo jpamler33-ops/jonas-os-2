@@ -8,6 +8,35 @@ function finite(v){
 function text(v){
   return String(v??'').trim();
 }
+function log1pNonNegative(v){
+  const n=finite(v);
+  return n!=null&&n>=0?Math.log1p(n):null;
+}
+
+export function publicMarketContextToExtraFeatures(context){
+  const s=context?.sentiment||null;
+  const g=context?.global||null;
+  const rows=[];
+  const add=(id,value)=>{
+    const n=finite(value);
+    if(n!=null) rows.push({id,value:n});
+  };
+  if(s){
+    add('research.sentiment.fearGreedLevel',finite(s.value)==null?null:Number(s.value)/100);
+    add('research.sentiment.fearGreedCentered',finite(s.value)==null?null:(Number(s.value)-50)/50);
+    add('research.sentiment.fearGreedDelta',finite(s.delta)==null?null:Number(s.delta)/100);
+  }
+  if(g){
+    add('research.marketContext.bitcoinDominancePct',g.bitcoinDominancePct);
+    add('research.marketContext.totalMarketCapLog',log1pNonNegative(g.totalMarketCapUsd));
+    add('research.marketContext.totalVolume24hLog',log1pNonNegative(g.totalVolume24hUsd));
+    add('research.marketContext.volumeToCapRatio',
+      finite(g.totalMarketCapUsd)>0&&finite(g.totalVolume24hUsd)!=null?Number(g.totalVolume24hUsd)/Number(g.totalMarketCapUsd):null);
+    add('research.marketContext.activeCryptocurrenciesLog',log1pNonNegative(g.activeCryptocurrencies));
+    add('research.marketContext.activeMarketsLog',log1pNonNegative(g.activeMarkets));
+  }
+  return rows;
+}
 
 export function createPublicMarketContextProvider({
   fetchImpl=globalThis.fetch,

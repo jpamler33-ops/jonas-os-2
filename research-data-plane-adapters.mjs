@@ -27,8 +27,12 @@ import {
   predictionMarketSnapshotToExtraFeatures,
   EXTERNAL_RESEARCH_PROVIDER_VERSION
 } from './expansion-runtime/external-research-provider.mjs';
+import {
+  publicMarketContextToExtraFeatures,
+  PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION
+} from './expansion-runtime/public-market-context-provider.mjs';
 
-export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V3';
+export const RESEARCH_DATA_PLANE_ADAPTER_VERSION='TCX_RESEARCH_DATA_PLANE_ADAPTER_V4';
 
 function finite(v){
   const n=Number(v);
@@ -335,6 +339,11 @@ const FRED_FEATURE_GROUPS=Object.freeze([
   Object.freeze({source:'FRED_DGS10_CURRENT',seriesIds:['DGS10'],featureIds:['research.macro.us10yPct']}),
   Object.freeze({source:'FRED_DTWEXBGS_CURRENT',seriesIds:['DTWEXBGS'],featureIds:['research.macro.broadDollarIndex']}),
   Object.freeze({source:'FRED_WALCL_CURRENT',seriesIds:['WALCL'],featureIds:['research.macro.fedAssetsLog']}),
+  Object.freeze({source:'FRED_VIXCLS_CURRENT',seriesIds:['VIXCLS'],featureIds:['research.macro.vix']}),
+  Object.freeze({source:'FRED_SP500_CURRENT',seriesIds:['SP500'],featureIds:['research.macro.sp500Log']}),
+  Object.freeze({source:'FRED_DCOILWTICO_CURRENT',seriesIds:['DCOILWTICO'],featureIds:['research.macro.wtiUsd']}),
+  Object.freeze({source:'FRED_CPIAUCSL_CURRENT',seriesIds:['CPIAUCSL'],featureIds:['research.macro.cpiIndex']}),
+  Object.freeze({source:'FRED_UNRATE_CURRENT',seriesIds:['UNRATE'],featureIds:['research.macro.unemploymentPct']}),
   Object.freeze({
     source:'FRED_DFF_DGS10_DERIVED',
     seriesIds:['DFF','DGS10'],
@@ -416,6 +425,97 @@ function externalInputs(symbol,bundle,ingestedAt){
   ].filter(Boolean);
 }
 
+function publicContextInputs(symbol,context,ingestedAt){
+  if(!context) return [];
+  const all=publicMarketContextToExtraFeatures(context);
+  if(!all.length) return [];
+  const byId=new Map(all.map(x=>[x.id,x]));
+  const rows=[];
+
+  if(context?.sentiment){
+    const features=[
+      byId.get('research.sentiment.fearGreedLevel'),
+      byId.get('research.sentiment.fearGreedCentered'),
+      byId.get('research.sentiment.fearGreedDelta')
+    ].filter(Boolean);
+    if(features.length){
+      const availableAt=finite(context?.capturedAt)??ingestedAt;
+      const eventTime=eventTimeOrAvailable(context?.sentiment?.timestamp,availableAt);
+      rows.push(createResearchFeatureSnapshot({
+        streamKey:symbol,
+        domain:'SENTIMENT',
+        source:'ALTERNATIVE_ME_FEAR_GREED',
+        sourceVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+        sourceEventId:makeSourceEventId({symbol,source:'ALTERNATIVE_ME_FEAR_GREED',eventTime,features:features.map(x=>[x.id,x.value])}),
+        eventTime,
+        availableAt,
+        ingestedAt,
+        ttlMs:36*60*60_000,
+        finality:'OBSERVED',
+        quality:{
+          completeness:features.length/3,
+          sourceCount:1,
+          expectedSourceCount:1,
+          status:'PUBLIC_SENTIMENT_INDEX'
+        },
+        features,
+        provenance:{
+          adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+          providerVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+          upstreamSource:String(context.sentiment.source||'Alternative.me Fear & Greed Index'),
+          attributionRequired:context.sentiment.attributionRequired===true,
+          epistemic:String(context.sentiment.epistemic||'MARKET_SENTIMENT_INDEX_NOT_FORECAST_PROBABILITY'),
+          researchOnly:true
+        }
+      }));
+    }
+  }
+
+  if(context?.global){
+    const featureIds=[
+      'research.marketContext.bitcoinDominancePct',
+      'research.marketContext.totalMarketCapLog',
+      'research.marketContext.totalVolume24hLog',
+      'research.marketContext.volumeToCapRatio',
+      'research.marketContext.activeCryptocurrenciesLog',
+      'research.marketContext.activeMarketsLog'
+    ];
+    const features=featureIds.map(id=>byId.get(id)).filter(Boolean);
+    if(features.length){
+      const availableAt=finite(context?.capturedAt)??ingestedAt;
+      const eventTime=eventTimeOrAvailable(context?.global?.lastUpdated,availableAt);
+      rows.push(createResearchFeatureSnapshot({
+        streamKey:symbol,
+        domain:'MARKET_CONTEXT',
+        source:'ALTERNATIVE_ME_GLOBAL',
+        sourceVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+        sourceEventId:makeSourceEventId({symbol,source:'ALTERNATIVE_ME_GLOBAL',eventTime,features:features.map(x=>[x.id,x.value])}),
+        eventTime,
+        availableAt,
+        ingestedAt,
+        ttlMs:30*60_000,
+        finality:'OBSERVED',
+        quality:{
+          completeness:features.length/featureIds.length,
+          sourceCount:1,
+          expectedSourceCount:1,
+          status:'PUBLIC_GLOBAL_CRYPTO_CONTEXT'
+        },
+        features,
+        provenance:{
+          adapterVersion:RESEARCH_DATA_PLANE_ADAPTER_VERSION,
+          providerVersion:PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION,
+          upstreamSource:String(context.global.source||'Alternative.me Crypto API'),
+          epistemic:String(context.global.epistemic||'GLOBAL_MARKET_SNAPSHOT_NOT_FORECAST_PROBABILITY'),
+          researchOnly:true
+        }
+      }));
+    }
+  }
+
+  return rows.filter(Boolean);
+}
+
 function walletInput(symbol,snapshot,ingestedAt){
   const features=walletCohortSnapshotToExtraFeatures(snapshot);
   if(!features.length) return null;
@@ -463,7 +563,8 @@ export function buildResearchDataPlaneSnapshots({
   onchainSnapshot=null,
   entityFlowSnapshot=null,
   walletSnapshot=null,
-  externalSnapshot=null
+  externalSnapshot=null,
+  publicContextSnapshot=null
 }={}){
   const s=String(symbol||'').toUpperCase();
   const t=finite(ingestedAt);
@@ -475,6 +576,7 @@ export function buildResearchDataPlaneSnapshots({
     onchainInput(s,onchainSnapshot,t),
     entityFlowInput(s,entityFlowSnapshot,t),
     walletInput(s,walletSnapshot,t),
-    ...externalInputs(s,externalSnapshot,t)
+    ...externalInputs(s,externalSnapshot,t),
+    ...publicContextInputs(s,publicContextSnapshot,t)
   ].filter(Boolean);
 }

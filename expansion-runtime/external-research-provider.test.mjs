@@ -20,7 +20,7 @@ test('external research provider normalizes public and optional sources',async()
     ]});
     if(u.includes('series/observations')){
       const sid=new URL(u).searchParams.get('series_id');
-      const val={DFF:5,DGS10:4,DTWEXBGS:120,WALCL:7000}[sid];
+      const val={DFF:5,DGS10:4,DTWEXBGS:120,WALCL:7000,VIXCLS:18,SP500:6200,DCOILWTICO:72,CPIAUCSL:325,UNRATE:4.2}[sid];
       return response({realtime_start:'2026-09-28',realtime_end:'2026-09-28',observations:[{date:'2026-09-26',value:String(val),realtime_start:'2026-09-28',realtime_end:'2026-09-28'},{date:'2026-09-25',value:String(val-1)}]});
     }
     if(u.includes('polymarket')) return response([{id:'m1',question:'Will BTC close above X?',outcomes:'["Yes","No"]',outcomePrices:'["0.63","0.37"]',liquidityNum:100000,volume24hr:50000,endDate:'2026-10-01'}]);
@@ -31,17 +31,23 @@ test('external research provider normalizes public and optional sources',async()
   assert.equal(bundle.coinMetrics.ok,true);
   assert.equal(bundle.deribitOptions.metrics.putCallOiRatio,.5);
   assert.equal(bundle.macro.metrics.us10yPct,4);
+  assert.equal(bundle.macro.metrics.vix,18);
+  assert.equal(bundle.macro.metrics.sp500,6200);
+  assert.equal(bundle.macro.metrics.wtiUsd,72);
+  assert.equal(bundle.macro.metrics.cpiIndex,325);
+  assert.equal(bundle.macro.metrics.unemploymentPct,4.2);
   assert.equal(bundle.predictionMarket.metrics.yesProbability,.63);
   assert.ok(coinMetricsSnapshotToExtraFeatures(bundle.coinMetrics).length>=4);
   assert.ok(deribitOptionsSnapshotToExtraFeatures(bundle.deribitOptions).some(x=>x.id==='research.options.putCallIvSkewPct'&&x.value===10));
   assert.ok(macroSnapshotToExtraFeatures(bundle.macro).some(x=>x.id==='research.macro.us10yMinusFedFundsPct'&&x.value===-1));
+  assert.ok(macroSnapshotToExtraFeatures(bundle.macro).some(x=>x.id==='research.macro.vix'&&x.value===18));
   assert.ok(predictionMarketSnapshotToExtraFeatures(bundle.predictionMarket).some(x=>x.id==='research.prediction.yesProbability'&&x.value===.63));
 });
 
 test('FRED macro falls back to public CSV when no API key is configured',async()=>{
   const fetchImpl=async url=>{
     const sid=new URL(String(url)).searchParams.get('id');
-    const val={DFF:[5,4.9],DGS10:[4,3.9],DTWEXBGS:[120,119],WALCL:[7000,6990]}[sid];
+    const val={DFF:[5,4.9],DGS10:[4,3.9],DTWEXBGS:[120,119],WALCL:[7000,6990],VIXCLS:[18,19],SP500:[6200,6180],DCOILWTICO:[72,71],CPIAUCSL:[325,324],UNRATE:[4.2,4.1]}[sid];
     if(!val) throw new Error('unexpected '+url);
     return csvResponse(sid,val[0],val[1]);
   };

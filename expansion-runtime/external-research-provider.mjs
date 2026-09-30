@@ -81,7 +81,12 @@ export function macroSnapshotToExtraFeatures(snapshot){
     ['research.macro.us10yPct',finite(m.us10yPct)],
     ['research.macro.broadDollarIndex',finite(m.broadDollarIndex)],
     ['research.macro.fedAssetsLog',log1pNonNegative(m.fedAssets)],
-    ['research.macro.us10yMinusFedFundsPct',finite(m.us10yPct)!=null&&finite(m.fedFundsPct)!=null?Number(m.us10yPct)-Number(m.fedFundsPct):null]
+    ['research.macro.us10yMinusFedFundsPct',finite(m.us10yPct)!=null&&finite(m.fedFundsPct)!=null?Number(m.us10yPct)-Number(m.fedFundsPct):null],
+    ['research.macro.vix',finite(m.vix)],
+    ['research.macro.sp500Log',log1pNonNegative(m.sp500)],
+    ['research.macro.wtiUsd',finite(m.wtiUsd)],
+    ['research.macro.cpiIndex',finite(m.cpiIndex)],
+    ['research.macro.unemploymentPct',finite(m.unemploymentPct)]
   ];
   return rows.filter(([,value])=>value!=null).map(([id,value])=>({id,value}));
 }
@@ -237,7 +242,7 @@ export function createExternalResearchProvider({
 
   async function fetchMacroSnapshot({force=false}={}){
     return cached('fred:macro',15*60_000,async()=>{
-      const seriesIds=['DFF','DGS10','DTWEXBGS','WALCL'];
+      const seriesIds=['DFF','DGS10','DTWEXBGS','WALCL','VIXCLS','SP500','DCOILWTICO','CPIAUCSL','UNRATE'];
       const hasApiKey=Boolean(String(fredApiKey||'').trim());
       const loader=hasApiKey?fetchFredApiSeries:fetchFredCsvSeries;
       const settled=await Promise.allSettled(seriesIds.map(loader));
@@ -245,14 +250,24 @@ export function createExternalResearchProvider({
       const errors=[];
       settled.forEach((r,i)=>{if(r.status==='fulfilled'&&r.value) byId[seriesIds[i]]=r.value; else if(r.status==='rejected') errors.push({seriesId:seriesIds[i],error:r.reason instanceof Error?r.reason.message:String(r.reason)});});
       const availableAt=now();
-      const metrics={fedFundsPct:byId.DFF?.current??null,us10yPct:byId.DGS10?.current??null,broadDollarIndex:byId.DTWEXBGS?.current??null,fedAssets:byId.WALCL?.current??null};
+      const metrics={
+        fedFundsPct:byId.DFF?.current??null,
+        us10yPct:byId.DGS10?.current??null,
+        broadDollarIndex:byId.DTWEXBGS?.current??null,
+        fedAssets:byId.WALCL?.current??null,
+        vix:byId.VIXCLS?.current??null,
+        sp500:byId.SP500?.current??null,
+        wtiUsd:byId.DCOILWTICO?.current??null,
+        cpiIndex:byId.CPIAUCSL?.current??null,
+        unemploymentPct:byId.UNRATE?.current??null
+      };
       const availableCount=Object.values(metrics).filter(v=>finite(v)!=null).length;
       const source=hasApiKey?'FRED_REALTIME_V1':'FRED_GRAPH_CSV_CURRENT';
       const eventDates=Object.values(byId).map(x=>Date.parse(String(x?.date||''))).filter(Number.isFinite);
       const eventTime=eventDates.length?Math.max(...eventDates):availableAt;
       return freeze({
         version:EXTERNAL_RESEARCH_PROVIDER_VERSION,ok:availableCount>0,source,eventTime,availableAt,metrics,
-        series:byId,errors,quality:{availableCount,expectedCount:4,completeness:availableCount/4},
+        series:byId,errors,quality:{availableCount,expectedCount:seriesIds.length,completeness:availableCount/seriesIds.length},
         provenance:{
           realtimeMode:hasApiKey?'CURRENT_VINTAGE_CAPTURE':'CURRENT_SERIES_CAPTURE',
           transport:hasApiKey?'FRED_API':'FRED_GRAPH_CSV',

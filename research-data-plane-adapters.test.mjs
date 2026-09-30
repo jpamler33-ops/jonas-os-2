@@ -170,3 +170,38 @@ test('FRED macro series are isolated by cadence and retain transport lineage',()
     'MACRO:FRED_DFF_CURRENT','MACRO:FRED_DGS10_CURRENT'
   ]);
 });
+
+
+test('public market context enters the governed research plane',()=>{
+  const rows=buildResearchDataPlaneSnapshots({
+    symbol:'BTCUSDT',
+    ingestedAt:2_000_000,
+    publicContextSnapshot:{
+      capturedAt:1_999_900,
+      sentiment:{
+        value:69,delta:3,timestamp:1_900_000,
+        source:'Alternative.me Fear & Greed Index',
+        attributionRequired:true,
+        epistemic:'MARKET_SENTIMENT_INDEX_NOT_FORECAST_PROBABILITY'
+      },
+      global:{
+        bitcoinDominancePct:55.2,
+        totalMarketCapUsd:1000000,
+        totalVolume24hUsd:250000,
+        activeCryptocurrencies:1000,
+        activeMarkets:5000,
+        lastUpdated:1_999_800,
+        source:'Alternative.me Crypto API',
+        epistemic:'GLOBAL_MARKET_SNAPSHOT_NOT_FORECAST_PROBABILITY'
+      }
+    }
+  });
+  assert.deepEqual(rows.map(x=>x.domain),['SENTIMENT','MARKET_CONTEXT']);
+  const sentiment=rows[0];
+  const market=rows[1];
+  assert.equal(sentiment.source,'ALTERNATIVE_ME_FEAR_GREED');
+  assert.equal(market.source,'ALTERNATIVE_ME_GLOBAL');
+  assert.ok(sentiment.features.some(x=>x.id==='research.sentiment.fearGreedLevel'&&x.value===.69));
+  assert.ok(market.features.some(x=>x.id==='research.marketContext.volumeToCapRatio'&&x.value===.25));
+  assert.equal(sentiment.provenance.attributionRequired,true);
+});

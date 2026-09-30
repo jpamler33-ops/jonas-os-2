@@ -77,11 +77,27 @@ define('research.macro.us10yPct','MACRO',{unit:'PERCENT',min:-20,max:100,descrip
 define('research.macro.broadDollarIndex','MACRO',{unit:'INDEX',min:0,max:1000,description:'FRED broad trade-weighted US dollar index'});
 define('research.macro.fedAssetsLog','MACRO',{unit:'LOG_LEVEL',min:0,description:'log1p Federal Reserve total assets'});
 define('research.macro.us10yMinusFedFundsPct','MACRO',{unit:'PERCENTAGE_POINTS',min:-100,max:100,description:'US 10-year yield minus effective Fed Funds'});
+define('research.macro.vix','MACRO',{unit:'INDEX',min:0,max:200,description:'FRED CBOE VIX close'});
+define('research.macro.sp500Log','MACRO',{unit:'LOG_LEVEL',min:0,description:'log1p FRED S&P 500 level'});
+define('research.macro.wtiUsd','MACRO',{unit:'USD_BARREL',min:-100,max:1000,description:'FRED WTI crude oil spot price'});
+define('research.macro.cpiIndex','MACRO',{unit:'INDEX',min:0,max:1000,description:'FRED US CPI all urban consumers index'});
+define('research.macro.unemploymentPct','MACRO',{unit:'PERCENT',min:0,max:100,description:'FRED US unemployment rate'});
 
 define('research.prediction.yesProbability','PREDICTION_MARKET',{unit:'PROBABILITY',min:0,max:1,description:'Configured Polymarket YES probability'});
 define('research.prediction.confidenceFromHalf','PREDICTION_MARKET',{unit:'SHARE',min:0,max:1,description:'Distance of configured market probability from 50 percent'});
 define('research.prediction.liquidityLog','PREDICTION_MARKET',{unit:'LOG_USD',min:0,description:'log1p configured Polymarket liquidity'});
 define('research.prediction.volume24hLog','PREDICTION_MARKET',{unit:'LOG_USD',min:0,description:'log1p configured Polymarket 24h volume'});
+
+define('research.sentiment.fearGreedLevel','SENTIMENT',{unit:'SHARE',min:0,max:1,description:'Alternative.me Fear & Greed index normalized to 0..1'});
+define('research.sentiment.fearGreedCentered','SENTIMENT',{unit:'SIGNED_SHARE',min:-1,max:1,description:'Alternative.me Fear & Greed centered around neutral 50'});
+define('research.sentiment.fearGreedDelta','SENTIMENT',{unit:'RATE',min:-1,max:1,description:'Change in Alternative.me Fear & Greed versus prior observation normalized by 100'});
+
+define('research.marketContext.bitcoinDominancePct','MARKET_CONTEXT',{unit:'PERCENT',min:0,max:100,description:'Alternative.me Bitcoin share of global crypto market cap'});
+define('research.marketContext.totalMarketCapLog','MARKET_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p global crypto market capitalization'});
+define('research.marketContext.totalVolume24hLog','MARKET_CONTEXT',{unit:'LOG_USD',min:0,description:'log1p global crypto 24h volume'});
+define('research.marketContext.volumeToCapRatio','MARKET_CONTEXT',{unit:'RATIO',min:0,max:100,description:'Global crypto 24h volume divided by market cap'});
+define('research.marketContext.activeCryptocurrenciesLog','MARKET_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p active crypto assets'});
+define('research.marketContext.activeMarketsLog','MARKET_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p active crypto markets'});
 
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});

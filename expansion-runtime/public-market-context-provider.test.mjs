@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPublicMarketContextProvider } from './public-market-context-provider.mjs';
+import { createPublicMarketContextProvider, publicMarketContextToExtraFeatures } from './public-market-context-provider.mjs';
 
 function response(body,status=200){
   return {ok:status>=200&&status<300,status,json:async()=>body};
@@ -39,4 +39,25 @@ test('context degrades per-source instead of fabricating data',async()=>{
   assert.equal(out.sentiment,null);
   assert.equal(out.global.totalMarketCapUsd,10);
   assert.equal(out.errors.length,1);
+});
+
+
+test('context converts to bounded research features',()=>{
+  const rows=publicMarketContextToExtraFeatures({
+    sentiment:{value:69,delta:3},
+    global:{
+      bitcoinDominancePct:55.2,
+      totalMarketCapUsd:1000000,
+      totalVolume24hUsd:250000,
+      activeCryptocurrencies:1000,
+      activeMarkets:5000
+    }
+  });
+  const byId=new Map(rows.map(x=>[x.id,x.value]));
+  assert.equal(byId.get('research.sentiment.fearGreedLevel'),.69);
+  assert.equal(byId.get('research.sentiment.fearGreedCentered'),.38);
+  assert.equal(byId.get('research.sentiment.fearGreedDelta'),.03);
+  assert.equal(byId.get('research.marketContext.bitcoinDominancePct'),55.2);
+  assert.equal(byId.get('research.marketContext.volumeToCapRatio'),.25);
+  assert.ok(byId.get('research.marketContext.totalMarketCapLog')>0);
 });
