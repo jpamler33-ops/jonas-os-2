@@ -678,18 +678,24 @@ function buildChannelSupervisorPayload(managerState={},translationHealth=null){
   const problems=(managerState?.topProblems||[]).slice(0,10).map(x=>
     '• **#'+String(x.name)+'** · '+String(x.status)+' → '+String(x.decision)+'\n  '+String(x.reason)
   ).join('\n')||'Alle Channel-Manager melden einen gesunden bzw. erwarteten Zustand.';
+  const domains=(managerState?.domainSupervisors||[]).map(x=>
+    '• **'+String(x.category)+'** · '+String(x.status)+' · '+String(x.healthy)+'/'+String(x.managers)+' gesund'
+  ).join('\n')||'Keine Domain-Supervisoren verfügbar.';
+  const director=managerState?.operationsDirector||{};
   return {embeds:[{
-    title:'BIGGJ // CHANNEL-MANAGER SUPERVISOR',
-    description:'**Jeder Channel hat einen eigenen Manager. Dieser Supervisor überwacht wiederum alle Manager.**\nManager prüfen Zweck, Freshness, Fehler, Layout und nächsten Handlungsbedarf.',
+    title:'BIGGJ // CHANNEL OPERATIONS',
+    description:'**Channel-Manager → Domain-Supervisor → Operations-Director → Meta-Supervisor.**\nJede Ebene prüft die Ebene darunter; Reparaturrechte bleiben auf UI, Layout und Refresh begrenzt.',
     fields:[
-      {name:'Gesamtzustand',value:String(managerState?.supervisor?.status||'—')+' · '+String(managerState?.healthy||0)+' gesund / '+String(managerState?.managers||0)+' Manager',inline:false},
-      {name:'Meta-Supervisor',value:String(managerState?.metaSupervisor?.status||'—')+' · Coverage '+Math.round(Number(managerState?.metaSupervisor?.managerCoverage||0)*100)+'% · Blindspots '+String(managerState?.metaSupervisor?.unprofiledManagers||0),inline:false},
+      {name:'Channel-Manager',value:String(managerState?.supervisor?.status||'—')+' · '+String(managerState?.healthy||0)+' gesund / '+String(managerState?.managers||0)+' Manager',inline:false},
+      {name:'Domain-Supervisoren',value:domains.slice(0,1024),inline:false},
+      {name:'Operations-Director',value:String(director?.status||'—')+' · '+String(director?.healthyDomains||0)+'/'+String(director?.domains||0)+' Domains gesund',inline:true},
+      {name:'Meta-Supervisor',value:String(managerState?.metaSupervisor?.status||'—')+' · Coverage '+Math.round(Number(managerState?.metaSupervisor?.managerCoverage||0)*100)+'% · Blindspots '+String(managerState?.metaSupervisor?.unprofiledManagers||0),inline:true},
       {name:'Statusverteilung',value:'Healthy '+String(counts.HEALTHY||0)+' · Idle '+String(counts.IDLE_OK||0)+' · Stale '+String(counts.STALE||0)+' · Empty '+String(counts.EMPTY||0)+' · Degraded '+String(counts.DEGRADED||0)+' · Broken '+String(counts.BROKEN||0),inline:false},
       {name:'Aktuelle Probleme / Entscheidungen',value:problems.slice(0,1024),inline:false},
       {name:'News-Übersetzer',value:translationHealth?(translationHealth.ok?'OK':'DEGRADED')+' · Cache '+String(translationHealth.cacheSize)+' · Fehler '+String(translationHealth.failures):'—',inline:true},
-      {name:'Sicherheitsgrenze',value:'Auto-Reparatur nur für UI/Refresh/Layout. Keine Live-Orders, keine stillen PRIMARY-Policy-Änderungen.',inline:false}
+      {name:'Sicherheitsgrenze',value:'Keine Live-Orders · keine stillen PRIMARY-Policy-Änderungen · keine wissenschaftlichen Guards lockern.',inline:false}
     ],
-    footer:{text:'BIGGJ_CHANNEL_SUPERVISOR_V1'},
+    footer:{text:'BIGGJ_CHANNEL_SUPERVISOR_V2'},
     timestamp:new Date().toISOString()
   }],allowedMentions:{parse:[]}};
 }
@@ -1150,7 +1156,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const raw=String(event?.id||event?.url||[event?.title,event?.availableAt].join('|')||'event');
     return Buffer.from(raw).toString('base64url').slice(0,72);
   }
-  function newsEventPayload(event,{world=false,translatedTitle=null,translationSourceLanguage='unknown'}={}){
+  function newsEventPayload(event,{world=false,translatedTitle=null,translationSourceLanguage='unknown',translationOk=true}={}){
     const verified=event?.verified===true||Number(event?.independentConfirmation||0)>=.45;
     const source=String(event?.source||'ÖFFENTLICHE_NEWS');
     const familyRaw=String(event?.family||event?.eventFamily||'OTHER').toUpperCase();
@@ -1179,9 +1185,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
           {name:'Quelle',value:source.slice(0,1024),inline:true},
           {name:'Marktreaktion',value:(marketMap[String(event?.marketStatus||'').toUpperCase()]||String(event?.marketStatus||'WARTE AUF MARKTDATEN').replaceAll('_',' ')).slice(0,1024),inline:true},
           {name:'Evidenzstatus',value:epistemic.slice(0,1024),inline:false},
-          {name:'Übersetzung',value:translationSourceLanguage==='de'?'Original bereits Deutsch':'Automatisch ins Deutsche übersetzt',inline:false}
+          {name:'Übersetzung',value:translationOk?(translationSourceLanguage==='de'?'Original bereits Deutsch':'Automatisch ins Deutsche übersetzt'):'Übersetzung fehlgeschlagen · Original beibehalten',inline:false}
         ],
-        footer:{text:'BIGGJ_NEWS_EVENT:'+key+' · '+(verified?'VERIFIED/CORROBORATED':'DISCOVERY_ONLY')},
+        footer:{text:'BIGGJ_NEWS_EVENT:'+key+' · '+(verified?'VERIFIED/CORROBORATED':'DISCOVERY_ONLY')+' · DE_V1'},
         timestamp:new Date(Number.isFinite(observedAt)?observedAt:Date.now()).toISOString()
       }],
       allowedMentions:{parse:[]}
@@ -1197,20 +1203,24 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       .sort((a,b)=>Number(a?.availableAt||a?.timestamp||0)-Number(b?.availableAt||b?.timestamp||0));
     let messages;
     try{messages=await c.messages.fetch({limit:100});}catch(err){fail(channelName+'-history',err);messages=null;}
-    const seen=new Set();
+    const existingByKey=new Map();
     if(messages){
       for(const m of messages.values()){
         for(const e of m.embeds||[]){
           const footer=String(e?.footer?.text||'');
           const hit=/BIGGJ_NEWS_EVENT:([A-Za-z0-9_-]+)/.exec(footer);
-          if(hit)seen.add(hit[1]);
+          if(hit&&!existingByKey.has(hit[1]))existingByKey.set(hit[1],{
+            message:m,
+            germanized:footer.includes('DE_V1')||(e?.fields||[]).some(f=>String(f?.name||'')==='Übersetzung')
+          });
         }
       }
     }
-    let posted=0,translationFailures=0,translated=0;
+    let posted=0,migrated=0,translationFailures=0,translated=0;
     for(const event of rows){
       const key=newsEventKey(event);
-      if(seen.has(key))continue;
+      const existing=existingByKey.get(key)||null;
+      if(existing?.germanized)continue;
       const rawTitle=String(event?.title||event?.headline||'Ereignis');
       const translation=await germanTranslator.translate(rawTitle);
       if(!translation.ok){
@@ -1219,20 +1229,27 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       }
       const germanTitle=translation.ok?translation.text:rawTitle;
       if(translation.ok&&translation.sourceLanguage!=='de')translated++;
-      await c.send(newsEventPayload(event,{
+      const payload=newsEventPayload(event,{
         world,
         translatedTitle:germanTitle,
-        translationSourceLanguage:translation.ok?translation.sourceLanguage:'unknown'
-      }));
-      seen.add(key);
-      posted++;
-      if(posted>=12)break;
+        translationSourceLanguage:translation.ok?translation.sourceLanguage:'unknown',
+        translationOk:translation.ok
+      });
+      if(existing?.message){
+        await existing.message.edit(payload);
+        migrated++;
+      }else{
+        await c.send(payload);
+        posted++;
+      }
+      existingByKey.set(key,{message:existing?.message||null,germanized:true});
+      if(posted+migrated>=12)break;
     }
-    const detail='News '+posted+' gepostet · übersetzt '+translated+' · Übersetzungsfehler '+translationFailures;
+    const detail='News '+posted+' neu · '+migrated+' Bestand germanisiert · übersetzt '+translated+' · Übersetzungsfehler '+translationFailures;
     if(translationFailures>0&&strictGermanNews)channelManagers.failure(channelName,'GERMAN_TRANSLATION_FAILED_'+translationFailures,detail);
     else channelManagers.success(channelName,detail);
-    try{logger.info?.('[BIGGJ_GERMAN_NEWS] '+JSON.stringify({channel:channelName,posted,translated,translationFailures,strictGermanNews,translation:germanTranslator.health()}));}catch{}
-    return posted;
+    try{logger.info?.('[BIGGJ_GERMAN_NEWS] '+JSON.stringify({channel:channelName,posted,migrated,translated,translationFailures,strictGermanNews,translation:germanTranslator.health()}));}catch{}
+    return posted+migrated;
   }
   async function refreshNewsFeed(){
     try{return await syncNewsChannel('news-feed',{world:false});}
@@ -1442,6 +1459,9 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const finalState=managerSnapshot();
     try{logger.info?.('[BIGGJ_CHANNEL_SUPERVISOR] '+JSON.stringify({
       status:finalState.supervisor.status,
+      director:finalState.operationsDirector?.status||'UNKNOWN',
+      meta:finalState.metaSupervisor?.status||'UNKNOWN',
+      domains:finalState.domainSupervisors?.length||0,
       managers:finalState.managers,
       healthy:finalState.healthy,
       problems:finalState.problems,
