@@ -53,3 +53,16 @@ test('trending metas convert to governed research features without inventing val
   assert.ok(byId.get('research.dex.trendingMarketCapLog')>0);
   assert.ok(byId.get('research.dex.trendingLiquidityLog')>0);
 });
+
+
+test('missing DEX aggregates stay missing instead of becoming synthetic zeros',()=>{
+  const rows=dexScreenerTrendingMetasToExtraFeatures({
+    rows:[{marketCap:null,liquidity:null,volume:null,marketCapChange:{}}]
+  });
+  const ids=new Set(rows.map(x=>x.id));
+  assert.equal(ids.has('research.dex.trendingMarketCapLog'),false);
+  assert.equal(ids.has('research.dex.trendingLiquidityLog'),false);
+  assert.equal(ids.has('research.dex.trendingVolumeLog'),false);
+  assert.equal(ids.has('research.dex.trendingVolumeLiquidityRatio'),false);
+  assert.equal(ids.has('research.dex.trendingMetaCountLog'),true);
+});
