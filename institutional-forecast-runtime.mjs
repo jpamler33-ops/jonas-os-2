@@ -1752,7 +1752,6 @@ export function institutionalForecastRuntimeSummary(runtime){
   const thesisMemories=runtime?.intelligence?.thesisMemories?.()??[];
   const probabilityCalibration=runtime?.journal?.all?evaluateProbabilityCalibrationGate(journalRows):null;
   return {
-  return {
     version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
     healthy:runtime?.healthy===true,
     recoveredFromCorrupt:runtime?.recoveredFromCorrupt===true,
