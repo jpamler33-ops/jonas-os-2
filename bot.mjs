@@ -3905,7 +3905,15 @@ async function showProofFeed(chatId,messageId,symbol=null){
   autoLearnForecastMs,
   now
  });
- const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{symbol,limit:10,liveLimit:4,asOf:now,learningSummary});
+ const feed=buildBiggjProofFeed(forecastRuntime?.journal?.entries||[],{
+  symbol,
+  limit:10,
+  liveLimit:4,
+  asOf:now,
+  learningSummary,
+  issuances:forecastRuntime?.issuances||[],
+  auditLedger
+ });
  return deliverTelegramTextCard(tg,chatId,messageId,{text:renderBiggjProofFeed(feed),reply_markup:proofFeedKeyboard(symbol)});
 }
 async function showTerminalView(chatId,messageId,symbol,view){
@@ -9685,7 +9693,9 @@ function missionControlData(){
     autoLearnSymbols,
     autoLearnForecastMs,
     now
-   })
+   }),
+   issuances:forecastRuntime?.issuances||[],
+   auditLedger
   }),
   biggjSignalLab:{version:BIGGJ_SIGNAL_LAB_VERSION,proofVersion:BIGGJ_PROOF_FEED_VERSION,modes:['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'],execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false},
   claimAssumptionResearch:claimAssumptionResearchLastSummary||{
