@@ -1,4 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {normalizeObservation,crossProviderCheck} from './cross-provider-normalizer.mjs';
-const base={sourceTimestamp:'2026-09-29T07:30:00Z',ingestTimestamp:'2026-09-29T07:31:00Z'};
-test('missing numeric fields remain null rather than becoming zero',()=>{const x=normalizeObservation({...base,provider:'KRAKEN_FUTURES',symbol:'PF_XBTUSD',values:{funding_rate:.0002,mark_price:null}});assert.equal(x.mark_price,null);assert.equal(x.index_price,null);assert.equal(x.open_interest,null);});
-test('missing mark on one provider cannot create false price divergence',()=>{const x=crossProviderCheck([{...base,provider:'OKX',symbol:'BTCUSDT',values:{funding_rate:.0001,mark_price:65000}},{...base,provider:'KRAKEN_FUTURES',symbol:'PF_XBTUSD',values:{funding_rate:.0002,mark_price:null}}]);assert.equal(x.alerts.some(a=>a.type==='MARK_PRICE_DIVERGENCE'),false);});

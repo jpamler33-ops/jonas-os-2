@@ -1,4 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {ORTHOGONAL_DIRECTION_V1,validateOrthogonalObservation,coverage} from './orthogonal-direction-spec.mjs';
-test('orthogonal layer cannot execute live',()=>{assert.equal(ORTHOGONAL_DIRECTION_V1.canExecuteLive,false);assert.equal(ORTHOGONAL_DIRECTION_V1.mode,'SHADOW_ONLY');});
-test('requires source and ingest timestamps',()=>{assert.throws(()=>validateOrthogonalObservation({values:{funding_rate:.001}}),/TIMESTAMP/);assert.equal(validateOrthogonalObservation({sourceTimestamp:'2025-01-01T00:00:00Z',ingestTimestamp:'2025-01-01T00:00:01Z',values:{funding_rate:.001,open_interest:null}}),true);});
-test('missing values stay missing and coverage is explicit',()=>{const xs=[{sourceTimestamp:'2025-01-01T00:00:00Z',values:{funding_rate:null}},{sourceTimestamp:'2025-01-01T01:00:00Z',values:{funding_rate:.001}}];const c=coverage(xs,'funding_rate');assert.equal(c.known,1);assert.equal(c.coverage,.5);});

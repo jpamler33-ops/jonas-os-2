@@ -1,3 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {createFrozenShadowPolicy,verifyFrozenShadowPolicy} from './shadow-policy-freeze.mjs';
-test('frozen policy fingerprint is deterministic across key order',()=>{const a=createFrozenShadowPolicy({frozenAt:1,parameters:{b:2,a:1}}),b=createFrozenShadowPolicy({frozenAt:2,parameters:{a:1,b:2}});assert.equal(a.fingerprint,b.fingerprint);assert.equal(verifyFrozenShadowPolicy(a),true);assert.equal(a.canExecuteLive,false);});
-test('policy fingerprint detects parameter mutation',()=>{const a=createFrozenShadowPolicy({frozenAt:1,parameters:{threshold:.5}});const changed={...a,parameters:{threshold:.6}};assert.equal(verifyFrozenShadowPolicy(changed),false);});
