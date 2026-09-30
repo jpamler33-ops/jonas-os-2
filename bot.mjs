@@ -217,6 +217,11 @@ import {
   biggjMarketScienceDirectorSummary,
   BIGGJ_MARKET_SCIENCE_DIRECTOR_VERSION
 } from './biggj-market-science-director.mjs';
+import {
+  buildBiggjMarketScienceOs,
+  biggjMarketScienceOsSummary,
+  BIGGJ_MARKET_SCIENCE_OS_VERSION
+} from './biggj-market-science-os.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -7261,6 +7266,7 @@ function biggjAiContextSnapshot(extraContext=null){
       livingResearch:snapshot?.health?.biggjLivingResearch||null,
       epistemicKernel:snapshot?.health?.biggjEpistemicKernel||null,
       marketScienceDirector:snapshot?.health?.biggjMarketScienceDirector||null,
+      marketScienceOs:snapshot?.health?.biggjMarketScienceOs||null,
       marketRadar:snapshot?.health?.marketRadar||null,
       biggjRulebook:snapshot?.health?.biggjRulebook||null,
       biggjSignalLab:snapshot?.health?.biggjSignalLab||null,
@@ -10081,8 +10087,25 @@ function missionControlData(){
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   asOf:now
  });
+ const portfolioView={...portfolio,researchActivity,positions:openPositions,recentClosed};
+ const marketScienceOs=buildBiggjMarketScienceOs({
+   epistemicSummary:health.biggjEpistemicKernel,
+   scienceDirectorSummary:health.biggjMarketScienceDirector,
+   livingResearchSummary:health.biggjLivingResearch,
+   researchFactorySummary:health.autonomousResearchFactory,
+   marketRadar:health.marketRadar,
+   globalIntel:health.globalIntel,
+   proofFeed:health.biggjProofFeed,
+   portfolio:portfolioView,
+   operationalReadiness:health.operationalReadiness,
+   asOf:now
+ });
+ health.biggjMarketScienceOs={
+   ...biggjMarketScienceOsSummary(marketScienceOs),
+   version:BIGGJ_MARKET_SCIENCE_OS_VERSION
+ };
  health.experienceNeeds=deriveBiggjExperienceNeeds({health});
- return missionControlSnapshot({health,portfolio:{...portfolio,researchActivity,positions:openPositions,recentClosed},discovery,storage:{persistentStorageMounted}});
+ return missionControlSnapshot({health,portfolio:portfolioView,discovery,storage:{persistentStorageMounted}});
 }
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer(async (req,res) => {
