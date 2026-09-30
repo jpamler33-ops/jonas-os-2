@@ -173,6 +173,7 @@ import { executionResearchReport, EXECUTION_RESEARCH_LAB_VERSION, EXECUTION_RESE
 import { buildCanonicalForecastInput, FORECAST_INPUT_ADAPTER_VERSION } from './forecast-input-adapter.mjs';
 import { buildInstitutionalExpansionEvidence, INSTITUTIONAL_EXPANSION_VERSION } from './expansion-runtime/institutional-expansion.mjs';
 import { createDexScreenerPublicProvider, DEXSCREENER_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/dexscreener-public-provider.mjs';
+import { createDefiLlamaPublicProvider, DEFILLAMA_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/defillama-public-provider.mjs';
 import { createPublicMarketContextProvider, PUBLIC_MARKET_CONTEXT_PROVIDER_VERSION } from './expansion-runtime/public-market-context-provider.mjs';
 import { createExternalResearchProvider, coinMetricsSnapshotToExtraFeatures, deribitOptionsSnapshotToExtraFeatures, macroSnapshotToExtraFeatures, predictionMarketSnapshotToExtraFeatures, EXTERNAL_RESEARCH_PROVIDER_VERSION } from './expansion-runtime/external-research-provider.mjs';
 import { createDerivativesPublicProvider, derivativesSnapshotToExtraFeatures, DERIVATIVES_PUBLIC_PROVIDER_VERSION } from './expansion-runtime/derivatives-public-provider.mjs';
@@ -540,6 +541,7 @@ const marketDataProvider=createMarketDataProvider({
   onOperation:event=>recordOperation(observability,event)
 });
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
+const defiLlamaProvider=createDefiLlamaPublicProvider({fetchImpl:globalThis.fetch});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
 const globalNewsRefreshMs=Math.max(60_000,Math.min(15*60_000,Number(process.env.TCX_GLOBAL_NEWS_REFRESH_MS||120_000)));
@@ -6061,6 +6063,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   let walletResearchSnapshot=null;
   let externalResearchSnapshot=null;
   let publicContextResearchSnapshot=null;
+  let dexActivityResearchSnapshot=null;
+  let defiLiquidityResearchSnapshot=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
     const researchAsOf=Date.now();
     try{
@@ -6085,6 +6089,14 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       {
         id:'public_context',
         run:()=>publicMarketContextProvider.fetchContext()
+      },
+      {
+        id:'dex_activity',
+        run:()=>dexScreenerProvider.fetchLearningContext()
+      },
+      {
+        id:'defi_liquidity',
+        run:()=>defiLlamaProvider.fetchLiquiditySnapshot(symbol)
       }
     ];
     if(symbol==='ETHUSDT'&&entityFlowAddressIndex.addressCount>0){
@@ -6111,6 +6123,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     onchainResearchSnapshot=fanout.results.onchain?.value||null;
     externalResearchSnapshot=fanout.results.external?.value||null;
     publicContextResearchSnapshot=fanout.results.public_context?.value||null;
+    dexActivityResearchSnapshot=fanout.results.dex_activity?.value||null;
+    defiLiquidityResearchSnapshot=fanout.results.defi_liquidity?.value||null;
     entityFlowResearchSnapshot=fanout.results.entity_flow?.value||null;
     walletResearchSnapshot=fanout.results.wallet?.value||null;
 
@@ -6120,12 +6134,12 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       if(id==='derivatives') ok=ok&&value?.ok===true;
       else if(id==='external') ok=ok&&Boolean(value?.coinMetrics?.ok||value?.deribitOptions?.ok||value?.macro?.ok||value?.predictionMarket?.ok);
       else if(id==='public_context') ok=ok&&Boolean(value?.sentiment||value?.global);
-      else if(['onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
+      else if(['dex_activity','defi_liquidity','onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
       const error=row.status==='REJECTED'
         ?row.error
         :(ok?null:(value?.reason||((value?.errors||[]).map(x=>x.error||x.reason||String(x)).join(' | ')||'PROVIDER_NO_USABLE_DATA')));
       recordOperation(observability,{
-        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':'research_provider_'+id,
+        name:id==='derivatives'?'derivatives_research_snapshot':id==='external'?'external_research_data_hub':id==='public_context'?'public_market_context_research':id==='dex_activity'?'dex_activity_research_context':id==='defi_liquidity'?'defi_liquidity_research_context':'research_provider_'+id,
         ok,
         latencyMs:row.durationMs,
         error
@@ -6181,7 +6195,9 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
         entityFlowSnapshot:entityFlowResearchSnapshot,
         walletSnapshot:walletResearchSnapshot,
         externalSnapshot:externalResearchSnapshot,
-        publicContextSnapshot:publicContextResearchSnapshot
+        publicContextSnapshot:publicContextResearchSnapshot,
+        dexActivitySnapshot:dexActivityResearchSnapshot,
+        defiLiquiditySnapshot:defiLiquidityResearchSnapshot
       });
       researchPlaneWrite=await appendResearchDataPlaneQueued(snapshots,'autolearn:'+symbol);
       markForecastMemory('rdp-append');
