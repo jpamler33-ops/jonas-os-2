@@ -539,6 +539,7 @@ function bindResearchEvidence(tree,{
         costStressPassed:false,
         concentrationPassed:false,
         winnerRemovalPassed:false,
+        validationEligible:false,
         provenance:[{
           kind:'DISCOVERY_COHORT',
           cohortId,
@@ -596,6 +597,7 @@ function bindResearchEvidence(tree,{
       costStressPassed:false,
       concentrationPassed:false,
       winnerRemovalPassed:false,
+      validationEligible:false,
       provenance:[{
         kind:'PROSPECTIVE_PERSISTENT_CASE',
         persistentCaseId:row.caseId,
@@ -652,6 +654,7 @@ function bindResearchEvidence(tree,{
         costStressPassed:false,
         concentrationPassed:false,
         winnerRemovalPassed:false,
+        validationEligible:false,
         provenance:[{
           kind:'PERSISTENCE_FILTERED_ASSOCIATION',
           associationMilestone:associationKey,
@@ -691,6 +694,9 @@ function livingResearchEvidenceSummary(tree){
         evidenceTotal:Number(node?.evidenceSummary?.total||0),
         forwardShadow:Number(node?.evidenceSummary?.forwardShadow||0),
         independentEpisodes:Number(node?.evidenceSummary?.independentEpisodes||0),
+        validationEvidenceTotal:Number(node?.evidenceSummary?.validationTotal||0),
+        validationForwardShadow:Number(node?.evidenceSummary?.validationForwardShadow||0),
+        validationIndependentEpisodes:Number(node?.evidenceSummary?.validationIndependentEpisodes||0),
         auditReady:Number(node?.evidenceSummary?.auditReady||0),
         sciencePassed:Number(node?.evidenceSummary?.sciencePassed||0),
         recommendedStatus:progress.recommendedStatus,
@@ -703,6 +709,9 @@ function livingResearchEvidenceSummary(tree){
     evidenceTotal:rows.reduce((n,x)=>n+x.evidenceTotal,0),
     forwardShadow:rows.reduce((n,x)=>n+x.forwardShadow,0),
     independentEpisodes:rows.reduce((n,x)=>n+x.independentEpisodes,0),
+    validationEvidenceTotal:rows.reduce((n,x)=>n+x.validationEvidenceTotal,0),
+    validationForwardShadow:rows.reduce((n,x)=>n+x.validationForwardShadow,0),
+    validationIndependentEpisodes:rows.reduce((n,x)=>n+x.validationIndependentEpisodes,0),
     rows
   };
 }
