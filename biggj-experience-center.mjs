@@ -1,20 +1,22 @@
 
-export const BIGGJ_EXPERIENCE_VERSION='BIGGJ_EXPERIENCE_V6';
+export const BIGGJ_EXPERIENCE_VERSION='BIGGJ_EXPERIENCE_V7_MARKET_SCIENCE';
 
 export const BIGGJ_EXPERIENCE_LAYOUT=Object.freeze([
-  {category:'BIGGJ • DESK',channels:[
-    {name:'biggj-needs',topic:'Was BIGGJ aktuell braucht, um effizienter, vollständiger und autonomer zu werden. Priorisiert und ohne erfundene Anforderungen.'},
-    {name:'learned-playbook',topic:'Was BIGGJ bereits gelernt, validiert, verworfen oder als belastbare Arbeitsregel gespeichert hat.'},
-    {name:'mobile-app',topic:'Installierbares BIGGJ Mobile Command Center für iPhone/Startbildschirm.'}
+  {category:'BIGGJ • SCIENCE',channels:[
+    {name:'biggj-needs',topic:'Science-first Prioritäten: welche Evidence, Quelle, Variable oder Forschungsentscheidung BIGGJ als Nächstes wirklich braucht.'},
+    {name:'learned-playbook',topic:'Kanonischer Wissensstand: Hypothesen, validierte Erkenntnisse, verworfene Theorien und offene Unsicherheit. PnL ist kein Wahrheitskriterium.'}
   ]},
-  {category:'BIGGJ • INTELLIGENCE',channels:[
-    {name:'news-feed',topic:'Live-News-Discovery für markt- und systemrelevante Ereignisse. Verifikation und Marktreaktion werden getrennt ausgewiesen.'},
-    {name:'world-watch',topic:'Weltlage: Geopolitik, Makro, Rohstoffe und globale Risiken. Headlines sind nicht automatisch verifiziert.'},
-    {name:'trader-watch',topic:'Öffentlich belegbare High-Performance-Trader-/Wallet-Research. Keine privaten Daten, keine erfundenen PnL-Rankings.'}
+  {category:'BIGGJ • REALITY',channels:[
+    {name:'news-feed',topic:'Reality feed für markt- und systemrelevante Ereignisse. Beobachtung, Verifikation und Interpretation bleiben getrennt.'},
+    {name:'world-watch',topic:'Makro, Geopolitik, Rohstoffe und globale Risiken als Input für das World Model. Keine Headline wird automatisch zur Theorie.'},
+    {name:'trader-watch',topic:'Öffentlich belegbare Trader-/Wallet-Beobachtungen als mögliche Evidence. Keine privaten Daten und keine erfundenen PnL-Rankings.'}
   ]},
-  {category:'BIGGJ • TRADING',channels:[
-    {name:'trade-cockpit',topic:'Kompaktes Shadow-Trade Cockpit: offene Positionen, Thesis Health, Risiko, Markout und nächste relevante Aktion.'},
-    {name:'chart-desk',topic:'One-Tap Chart Desk: SuperCharts, Radar, Forecast und Deep Dive ohne Command-Suche.'}
+  {category:'BIGGJ • APPLICATIONS',channels:[
+    {name:'chart-desk',topic:'Decision Intelligence / TCX View: Charts, Forecasts und Deep Dives als nachgelagerte Anwendung des Science-Stacks.'},
+    {name:'trade-cockpit',topic:'Shadow-Trading-Anwendung. Trade/PnL-Ergebnisse dürfen als Evidence zurückfließen, besitzen aber keine wissenschaftliche Autorität.'}
+  ]},
+  {category:'BIGGJ • SYSTEM',channels:[
+    {name:'mobile-app',topic:'Installierbares BIGGJ Market Science OS für iPhone/Startbildschirm: Science → World → Lab → Decisions → Trading.'}
   ]}
 ]);
 
