@@ -629,6 +629,34 @@ const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFi
   maxIntervalCalibrationRows:Math.max(300,Math.floor(Number(process.env.TCX_FORECAST_MAX_INTERVAL_ROWS||1200))),
   maxDriftRows:Math.max(500,Math.floor(Number(process.env.TCX_FORECAST_MAX_DRIFT_ROWS||1500)))
 });
+const biggjLivingResearchFile=process.env.TCX_BIGGJ_LIVING_RESEARCH_FILE||'/data/tcx-biggj-living-research.json';
+const biggjLivingResearchOpened=await openBiggjLivingResearchRuntime(biggjLivingResearchFile,{asOf:Date.now()});
+let biggjLivingResearchState=biggjLivingResearchOpened.state;
+let biggjLivingResearchHealthy=biggjLivingResearchOpened.healthy===true;
+const biggjLivingResearchRecoveredFromCorrupt=biggjLivingResearchOpened.recoveredFromCorrupt===true;
+if(biggjLivingResearchOpened.created||biggjLivingResearchOpened.reconciled){
+  try{
+    const admission=await storageWriteAdmission('biggj-living-research-init');
+    if(admission.allowed){
+      await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState);
+    }else{
+      biggjLivingResearchHealthy=false;
+      console.warn('[TCX_BIGGJ_LIVING_RESEARCH_INIT_DEFERRED]',JSON.stringify({
+        reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+    }
+  }catch(err){
+    biggjLivingResearchHealthy=false;
+    console.error('[TCX_BIGGJ_LIVING_RESEARCH_INIT_FAILED]',JSON.stringify({
+      error:err instanceof Error?err.message:String(err),
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+  }
+}
+
 const forecastColdArchiveDir=process.env.TCX_FORECAST_COLD_ARCHIVE_DIR||forecastRuntimeFile+'.cold';
 let forecastColdArchiveState=await forecastColdArchiveSummary(forecastColdArchiveDir);
 
