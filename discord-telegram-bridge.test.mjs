@@ -205,3 +205,23 @@ test('previously empty operational channels now have live builders',async()=>{
     'channel-improvements'
   ]) assert.ok(source.includes(required),required);
 });
+
+
+test('existing news cards are progressively migrated to German instead of permanently skipped',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/existingByKey/);
+  assert.match(source,/germanized/);
+  assert.match(source,/DE_V1/);
+  assert.match(source,/Bestand germanisiert/);
+  assert.match(source,/existing\.message\.edit\(payload\)/);
+});
+
+test('channel supervision has manager, domain, director and meta layers',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/Domain-Supervisoren/);
+  assert.match(source,/Operations-Director/);
+  assert.match(source,/Meta-Supervisor/);
+  assert.match(source,/finalState\.operationsDirector/);
+});
