@@ -120,7 +120,7 @@ test('BIGGJ V6 news channels are append-only deduplicated event streams',()=>{
     'syncNewsChannel',
     'newsEventKey',
     'newsEventPayload',
-    'not independently verified',
+    'noch nicht unabhängig verifiziert',
     "syncNewsChannel('news-feed'",
     "syncNewsChannel('world-watch'"
   ]) assert.ok(source.includes(required),required);
@@ -146,6 +146,35 @@ test('BIGGJ V6.1 exposes one-tap user commands',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'COMMAND CENTER V6.1'
+    'CHANNEL UX V7'
+  ]) assert.ok(source.includes(required),required);
+});
+
+test('BIGGJ V7 channel managers cover every Discord surface and supervise themselves',()=>{
+  for(const required of [
+    'BIGGJ_DISCORD_CHANNEL_UX_V7',
+    'BIGGJ • OPERATIONS',
+    'channel-supervisor',
+    'channel-improvements',
+    'createBiggjChannelManagerRuntime',
+    'refreshChannelSupervisor',
+    'repairManagerProblem',
+    "name:'supervisor'",
+    "name:'improvements'",
+    'buildForecastDeskPayload',
+    'buildAnomalyWatchPayload',
+    'buildReplayDeskPayload',
+    'buildErrorDeskPayload'
+  ]) assert.ok(source.includes(required),required);
+});
+
+test('BIGGJ V7 incoming news is German-first and strict on translation failure',()=>{
+  for(const required of [
+    'createGermanTranslationProvider',
+    'TCX_DISCORD_STRICT_GERMAN_NEWS',
+    'WELTLAGE //',
+    'noch nicht unabhängig verifiziert',
+    'Automatisch ins Deutsche übersetzt',
+    'BIGGJ_GERMAN_NEWS'
   ]) assert.ok(source.includes(required),required);
 });
