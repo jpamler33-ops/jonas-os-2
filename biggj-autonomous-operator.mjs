@@ -260,6 +260,9 @@ export function refreshBiggjAutonomousOperator(state,{
   if(factoryMode==='RESEARCH_STALLED'){
     add('RESEARCH_STALLED','RESEARCH_FACTORY','NO_MEASURABLE_RESEARCH_PROGRESS','REFRESH_RESEARCH_STACK');
   }
+  if(factoryMode==='MANUAL_REVIEW_REQUIRED'&&!assessments.some(x=>x.state==='APPROVAL_REQUIRED')){
+    add('APPROVAL_REQUIRED','RESEARCH_FACTORY','MANUAL_REVIEW_REQUIRED',null);
+  }
   if(factoryMode==='DATA_QUALITY_BLOCKED'){
     add('DATA_QUALITY_BLOCKED','RESEARCH_DATA','GOVERNANCE_OR_COVERAGE_BLOCKED',null);
   }
