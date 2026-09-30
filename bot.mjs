@@ -238,6 +238,11 @@ import {
   biggjResearchAcceleratorSummary,
   BIGGJ_RESEARCH_ACCELERATOR_VERSION
 } from './biggj-research-accelerator.mjs';
+import {
+  attemptBackgroundGc,
+  memoryUsageMb,
+  BIGGJ_BACKGROUND_MEMORY_CONTROL_VERSION
+} from './biggj-background-memory-control.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -418,8 +423,8 @@ const autoLearnExternalHeadroomMb = Math.max(32, Math.min(160, Number(process.en
 const autoLearnMaxIssuedPerSweep = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_AUTOLEARN_MAX_ISSUED_PER_SWEEP || 3) || 3)));
 const autoLearnInterIssueMs = Math.max(2000, Math.min(15000, Number(process.env.TCX_AUTOLEARN_INTER_ISSUE_MS || 8000)));
 const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20, Number(process.env.TCX_AUTOLEARN_RESUME_HEAP_MB || (autoLearnHeapHeadroomMb-20))));
-const autoLearnResumeRssMb = Math.max(450, Math.min(autoLearnRssHeadroomMb-40, Number(process.env.TCX_AUTOLEARN_RESUME_RSS_MB || 620)));
-const autoLearnResumeExternalMb = Math.max(16, Math.min(autoLearnExternalHeadroomMb-8, Number(process.env.TCX_AUTOLEARN_RESUME_EXTERNAL_MB || 48)));
+const autoLearnResumeRssMb = Math.max(450, Math.min(autoLearnRssHeadroomMb-40, Number(process.env.TCX_AUTOLEARN_RESUME_RSS_MB || 660)));
+const autoLearnResumeExternalMb = Math.max(16, Math.min(autoLearnExternalHeadroomMb-8, Number(process.env.TCX_AUTOLEARN_RESUME_EXTERNAL_MB || 56)));
 const autoLearnMemoryBackoffMs = Math.max(30000, Math.min(180000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 90000)));
 const servingGuardHeapMb = Math.max(260, Math.min(380, Number(process.env.TCX_SERVING_GUARD_HEAP_MB || 330)));
 const servingGuardRssMb = Math.max(550, Math.min(900, Number(process.env.TCX_SERVING_GUARD_RSS_MB || 720)));
@@ -438,6 +443,7 @@ const forecastPersistenceExternalHeadroomMb = Math.max(
 );
 const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 15*60_000));
+const shadowCompetitionMemoryRetryMs=Math.max(30_000,Math.min(180_000,Number(process.env.TCX_SHADOW_COMPETITION_MEMORY_RETRY_MS||90_000)));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
 const shadowCompetitionWorkerTimeoutMs = Math.max(60_000, Number(process.env.TCX_SHADOW_COMPETITION_WORKER_TIMEOUT_MS || 8*60_000));
@@ -8945,6 +8951,86 @@ async function syncFeatureResearch(reason='update'){
   }
 }
 
+function currentAutoLearnAdmission(phase='ISSUE'){
+  const memory=memoryUsageMb(process.memoryUsage());
+  return evaluateAutoLearnMemoryAdmission({
+    phase,
+    heapUsedMb:memory.heapUsedMb,
+    rssMb:memory.rssMb,
+    externalMb:memory.externalMb,
+    issueHeapMb:autoLearnHeapHeadroomMb,
+    issueRssMb:autoLearnRssHeadroomMb,
+    issueExternalMb:autoLearnExternalHeadroomMb,
+    resumeHeapMb:autoLearnResumeHeapMb,
+    resumeRssMb:autoLearnResumeRssMb,
+    resumeExternalMb:autoLearnResumeExternalMb
+  });
+}
+
+function retryAdmissionAfterBackgroundGc(scope,admission,reevaluate){
+  if(admission?.allowed)return {admission,gc:null};
+  const gc=attemptBackgroundGc({reason:scope});
+  if(!gc.attempted)return {admission,gc};
+  const next=reevaluate();
+  console.info('[TCX_BACKGROUND_GC]',JSON.stringify({
+    version:BIGGJ_BACKGROUND_MEMORY_CONTROL_VERSION,
+    scope,
+    beforeReason:admission?.reason||null,
+    before:gc.before,
+    after:gc.after,
+    freedHeapMb:gc.freedHeapMb,
+    freedRssMb:gc.freedRssMb,
+    freedExternalMb:gc.freedExternalMb,
+    durationMs:gc.durationMs,
+    admittedAfterGc:next?.allowed===true,
+    afterReason:next?.reason||null,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  }));
+  return {admission:next,gc};
+}
+
+function currentShadowCompetitionResourcePlan(now=Date.now()){
+  const acceleration=currentResearchAccelerator(now);
+  const effectiveHistoryRows=Math.max(
+    500,
+    Math.min(shadowCompetitionHistoryRows,acceleration.resource.shadowReplayHistoryRows)
+  );
+  const replayWindowRatio=Math.max(.25,Math.min(1,effectiveHistoryRows/shadowCompetitionHistoryRows));
+  const autoHeapMb=Math.min(
+    345,
+    shadowCompetitionAutoHeapMb+Math.round((1-replayWindowRatio)*145)
+  );
+  const autoRssMb=Math.min(
+    720,
+    shadowCompetitionAutoRssMb+Math.round((1-replayWindowRatio)*140)
+  );
+  const hardHeapMb=Math.min(370,Math.max(300,autoHeapMb+25));
+  const workerHeapMb=
+    acceleration.resource.mode==='MEMORY_PROTECT'
+      ?128
+      :acceleration.resource.mode==='CAUTIOUS'
+        ?Math.min(144,shadowCompetitionWorkerHeapMb)
+        :shadowCompetitionWorkerHeapMb;
+  return {acceleration,effectiveHistoryRows,autoHeapMb,autoRssMb,hardHeapMb,workerHeapMb};
+}
+
+function currentShadowCompetitionAdmission(plan,mode=shadowCompetitionWorkerMode,memory=process.memoryUsage()){
+  const m=memoryUsageMb(memory);
+  return evaluateShadowWorkerAdmission({
+    mode,
+    heapUsedMb:m.heapUsedMb,
+    rssMb:m.rssMb,
+    externalMb:m.externalMb,
+    autoHeapMb:plan.autoHeapMb,
+    autoRssMb:plan.autoRssMb,
+    autoExternalMb:shadowCompetitionAutoExternalMb,
+    hardHeapMb:plan.hardHeapMb,
+    hardRssMb:900,
+    hardExternalMb:shadowCompetitionHardExternalMb
+  });
+}
+
 async function autoLearnForecastWatcher() {
   await sleep(15000);
   while(running) {
@@ -8964,22 +9050,14 @@ async function autoLearnForecastWatcher() {
       for(const symbol of autoLearnSymbols){
         if(!running) break;
         if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
-        const memory=process.memoryUsage();
-        const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
-        const rssMb=Math.round(memory.rss/1024/1024);
-        const externalMb=Math.round(memory.external/1024/1024);
-        const memoryAdmission=evaluateAutoLearnMemoryAdmission({
-          phase:'ISSUE',
-          heapUsedMb,
-          rssMb,
-          externalMb,
-          issueHeapMb:autoLearnHeapHeadroomMb,
-          issueRssMb:autoLearnRssHeadroomMb,
-          issueExternalMb:autoLearnExternalHeadroomMb,
-          resumeHeapMb:autoLearnResumeHeapMb,
-          resumeRssMb:autoLearnResumeRssMb,
-          resumeExternalMb:autoLearnResumeExternalMb
-        });
+        let memoryAdmission=currentAutoLearnAdmission('ISSUE');
+        if(!memoryAdmission.allowed){
+          memoryAdmission=retryAdmissionAfterBackgroundGc(
+            'AUTOLEARN_ISSUE',
+            memoryAdmission,
+            ()=>currentAutoLearnAdmission('ISSUE')
+          ).admission;
+        }
         // Each issuance may scan research history and write bounded state.
         // Leave headroom for transient parsing/serialization and native/buffer
         // allocations instead of letting background learning pressure serving.
@@ -9070,19 +9148,14 @@ async function autoLearnForecastWatcher() {
           console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
         }
         if(issued>0){
-          const postMemory=process.memoryUsage();
-          const postAdmission=evaluateAutoLearnMemoryAdmission({
-            phase:'ISSUE',
-            heapUsedMb:Math.round(postMemory.heapUsed/1024/1024),
-            rssMb:Math.round(postMemory.rss/1024/1024),
-            externalMb:Math.round(postMemory.external/1024/1024),
-            issueHeapMb:autoLearnHeapHeadroomMb,
-            issueRssMb:autoLearnRssHeadroomMb,
-            issueExternalMb:autoLearnExternalHeadroomMb,
-            resumeHeapMb:autoLearnResumeHeapMb,
-            resumeRssMb:autoLearnResumeRssMb,
-            resumeExternalMb:autoLearnResumeExternalMb
-          });
+          let postAdmission=currentAutoLearnAdmission('ISSUE');
+          if(!postAdmission.allowed){
+            postAdmission=retryAdmissionAfterBackgroundGc(
+              'AUTOLEARN_POST_ISSUE',
+              postAdmission,
+              ()=>currentAutoLearnAdmission('ISSUE')
+            ).admission;
+          }
           if(!postAdmission.allowed){
             deferred++;
             memoryPressure=true;
@@ -9140,19 +9213,14 @@ async function autoLearnForecastWatcher() {
         externalMb:Math.round(before.external/1024/1024)
       }));
       await sleep(autoLearnMemoryBackoffMs);
-      const after=process.memoryUsage();
-      const resumeAdmission=evaluateAutoLearnMemoryAdmission({
-        phase:'RESUME',
-        heapUsedMb:Math.round(after.heapUsed/1024/1024),
-        rssMb:Math.round(after.rss/1024/1024),
-        externalMb:Math.round(after.external/1024/1024),
-        issueHeapMb:autoLearnHeapHeadroomMb,
-        issueRssMb:autoLearnRssHeadroomMb,
-        issueExternalMb:autoLearnExternalHeadroomMb,
-        resumeHeapMb:autoLearnResumeHeapMb,
-        resumeRssMb:autoLearnResumeRssMb,
-        resumeExternalMb:autoLearnResumeExternalMb
-      });
+      let resumeAdmission=currentAutoLearnAdmission('RESUME');
+      if(!resumeAdmission.allowed){
+        resumeAdmission=retryAdmissionAfterBackgroundGc(
+          'AUTOLEARN_RESUME',
+          resumeAdmission,
+          ()=>currentAutoLearnAdmission('RESUME')
+        ).admission;
+      }
       if(!resumeAdmission.allowed){
         console.warn('autolearn remains deferred after memory backoff',JSON.stringify({
           ...resumeAdmission.memory,
@@ -9237,46 +9305,19 @@ async function shadowCompetitionWatcher(){
     const started=Date.now();
     try{
       if(shadowCompetitionEnabled&&shadowCompetitionServingWorkerEnabled&&forecastRuntime.healthy){
-        const researchAcceleration=currentResearchAccelerator(Date.now());
-        const effectiveShadowCompetitionHistoryRows=Math.max(
-          500,
-          Math.min(shadowCompetitionHistoryRows,researchAcceleration.resource.shadowReplayHistoryRows)
-        );
-        const replayWindowRatio=Math.max(.25,Math.min(1,effectiveShadowCompetitionHistoryRows/shadowCompetitionHistoryRows));
-        const adaptiveShadowAutoHeapMb=Math.min(
-          345,
-          shadowCompetitionAutoHeapMb+Math.round((1-replayWindowRatio)*145)
-        );
-        const adaptiveShadowAutoRssMb=Math.min(
-          720,
-          shadowCompetitionAutoRssMb+Math.round((1-replayWindowRatio)*140)
-        );
-        const adaptiveShadowHardHeapMb=Math.min(
-          370,
-          Math.max(300,adaptiveShadowAutoHeapMb+25)
-        );
-        const effectiveShadowWorkerHeapMb=
-          researchAcceleration.resource.mode==='MEMORY_PROTECT'
-            ?128
-            :researchAcceleration.resource.mode==='CAUTIOUS'
-              ?Math.min(144,shadowCompetitionWorkerHeapMb)
-              :shadowCompetitionWorkerHeapMb;
-        const memory=process.memoryUsage();
-        const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
-        const rssMb=Math.round(memory.rss/1024/1024);
-        const externalMb=Math.round(memory.external/1024/1024);
-        const admission=evaluateShadowWorkerAdmission({
-          mode:shadowCompetitionWorkerMode,
-          heapUsedMb,
-          rssMb,
-          externalMb,
-          autoHeapMb:adaptiveShadowAutoHeapMb,
-          autoRssMb:adaptiveShadowAutoRssMb,
-          autoExternalMb:shadowCompetitionAutoExternalMb,
-          hardHeapMb:adaptiveShadowHardHeapMb,
-          hardRssMb:900,
-          hardExternalMb:shadowCompetitionHardExternalMb
-        });
+        let resourcePlan=currentShadowCompetitionResourcePlan(Date.now());
+        let admission=currentShadowCompetitionAdmission(resourcePlan);
+        if(!admission.allowed){
+          const recovered=retryAdmissionAfterBackgroundGc(
+            'SHADOW_REPLAY_PREFLIGHT',
+            admission,
+            ()=>{
+              resourcePlan=currentShadowCompetitionResourcePlan(Date.now());
+              return currentShadowCompetitionAdmission(resourcePlan);
+            }
+          );
+          admission=recovered.admission;
+        }
         shadowCompetitionWorkerLastDecision={...admission,at:Date.now()};
         if(!admission.allowed){
           shadowCompetitionWorkerMemoryDeferrals++;
@@ -9288,12 +9329,12 @@ async function shadowCompetitionWatcher(){
             limits:admission.limits
           }));
           recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'DEFERRED_'+admission.reason});
-          await sleep(shadowCompetitionEvalMs);
+          await sleep(shadowCompetitionMemoryRetryMs);
           continue;
         }
         const preflightHistoryProgressAt=forecastRuntime.engine.historyProgressAt(
           Number.POSITIVE_INFINITY,
-          {limit:effectiveShadowCompetitionHistoryRows}
+          {limit:resourcePlan.effectiveHistoryRows}
         );
         if(
           shadowCompetitionLastHistoryProgressAt>0&&
@@ -9324,40 +9365,29 @@ async function shadowCompetitionWatcher(){
         let historyProgressAt=preflightHistoryProgressAt;
         let heapBefore=0;
         try{
-          const freshMemory=process.memoryUsage();
-          freshAdmission=evaluateShadowWorkerAdmission({
-            mode:shadowCompetitionWorkerMode,
-            heapUsedMb:Math.round(freshMemory.heapUsed/1024/1024),
-            rssMb:Math.round(freshMemory.rss/1024/1024),
-            externalMb:Math.round(freshMemory.external/1024/1024),
-            autoHeapMb:adaptiveShadowAutoHeapMb,
-            autoRssMb:adaptiveShadowAutoRssMb,
-            autoExternalMb:shadowCompetitionAutoExternalMb,
-            hardHeapMb:adaptiveShadowHardHeapMb,
-            hardRssMb:900,
-            hardExternalMb:shadowCompetitionHardExternalMb
-          });
+          resourcePlan=currentShadowCompetitionResourcePlan(Date.now());
+          freshAdmission=currentShadowCompetitionAdmission(resourcePlan);
+          if(!freshAdmission.allowed){
+            const recovered=retryAdmissionAfterBackgroundGc(
+              'SHADOW_REPLAY_AFTER_SLOT_WAIT',
+              freshAdmission,
+              ()=>{
+                resourcePlan=currentShadowCompetitionResourcePlan(Date.now());
+                return currentShadowCompetitionAdmission(resourcePlan);
+              }
+            );
+            freshAdmission=recovered.admission;
+          }
           shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs,stage:'PRE_SNAPSHOT'};
           if(freshAdmission.allowed){
             history=forecastRuntime.engine.historySnapshot(
               Number.POSITIVE_INFINITY,
-              {limit:effectiveShadowCompetitionHistoryRows}
+              {limit:resourcePlan.effectiveHistoryRows}
             );
             historyProgressAt=forecastHistoryProgressAt(history);
 
             const payloadMemory=process.memoryUsage();
-            payloadAdmission=evaluateShadowWorkerAdmission({
-              mode:'ON',
-              heapUsedMb:Math.round(payloadMemory.heapUsed/1024/1024),
-              rssMb:Math.round(payloadMemory.rss/1024/1024),
-              externalMb:Math.round(payloadMemory.external/1024/1024),
-              autoHeapMb:adaptiveShadowAutoHeapMb,
-              autoRssMb:adaptiveShadowAutoRssMb,
-              autoExternalMb:shadowCompetitionAutoExternalMb,
-              hardHeapMb:adaptiveShadowHardHeapMb,
-              hardRssMb:900,
-              hardExternalMb:shadowCompetitionHardExternalMb
-            });
+            payloadAdmission=currentShadowCompetitionAdmission(resourcePlan,'ON',payloadMemory);
             shadowCompetitionWorkerLastDecision={
               ...payloadAdmission,
               at:Date.now(),
@@ -9382,7 +9412,7 @@ async function shadowCompetitionWatcher(){
                 now:Date.now()
               },{
                 timeoutMs:shadowCompetitionWorkerTimeoutMs,
-                maxOldGenerationSizeMb:effectiveShadowWorkerHeapMb
+                maxOldGenerationSizeMb:resourcePlan.workerHeapMb
               });
             }
           }
@@ -9410,7 +9440,7 @@ async function shadowCompetitionWatcher(){
             latencyMs:Date.now()-started,
             error:'DEFERRED_'+stage+'_'+String(finalAdmission?.reason||'MEMORY_PRESSURE')
           });
-          await sleep(shadowCompetitionEvalMs);
+          await sleep(shadowCompetitionMemoryRetryMs);
           continue;
         }
 
@@ -9489,12 +9519,12 @@ async function shadowCompetitionWatcher(){
           mode:shadowCompetitionWorkerMode,
           historyProgressAt,
           configuredHistoryRows:shadowCompetitionHistoryRows,
-          effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
-          acceleratorMode:researchAcceleration.resource.mode,
-          adaptiveAutoHeapMb:adaptiveShadowAutoHeapMb,
-          adaptiveAutoRssMb:adaptiveShadowAutoRssMb,
-          adaptiveHardHeapMb:adaptiveShadowHardHeapMb,
-          effectiveWorkerHeapMb:effectiveShadowWorkerHeapMb,
+          effectiveHistoryRows:resourcePlan.effectiveHistoryRows,
+          acceleratorMode:resourcePlan.acceleration.resource.mode,
+          adaptiveAutoHeapMb:resourcePlan.autoHeapMb,
+          adaptiveAutoRssMb:resourcePlan.autoRssMb,
+          adaptiveHardHeapMb:resourcePlan.hardHeapMb,
+          effectiveWorkerHeapMb:resourcePlan.workerHeapMb,
           workerRuns:shadowCompetitionWorkerRuns,
           slotWaitMs,
           promotionReview:modelPromotionReviewLastSummary
