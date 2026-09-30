@@ -77,6 +77,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'biggj-skill-tree.mjs',
   'biggj-living-research-runtime.mjs',
   'biggj-research-validation-harness.mjs',
+  'biggj-research-experiment-planner.mjs',
   'biggj-research-protocol-compiler.mjs',
   'biggj-research-episode-resolver.mjs',
   'tcx-research-os-contract.mjs',
