@@ -18,6 +18,7 @@ import {
   observeInstitutionalForecastOutcomePoint,
   recordCoverageProbeCalibration,
   forecastClaimAssumptionShadowDataset,
+  evaluateForecastClaimAssumptionResearch,
   latestInstitutionalForecast,
   institutionalForecastRuntimeSummary,
   EPISODE_FORECAST_FEATURE_IDS
@@ -321,6 +322,58 @@ test('claim-assumption shadow dataset reconstructs after forecast runtime restar
   assert.equal(after.observationCount,1);
   assert.equal(after.observations[0].fingerprint,before.observations[0].fingerprint);
   assert.equal(institutionalForecastRuntimeSummary(reopened).claimAssumptionSidecars,1);
+});
+
+test('runtime exposes claim-assumption research evaluator without PRIMARY authority',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const context=traceContext(inp);
+  context.claimAssumptionDeclarations={
+    assumptions:[{
+      assumptionId:'CUSTOM-RUNTIME-ASSUMPTION',
+      statement:'Custom runtime research assumption.',
+      evidenceIds:[],
+      requiresEvidence:false,
+      availableAt:inp.asOf+100
+    }],
+    claims:[{
+      claimId:'CUSTOM-RUNTIME-CLAIM',
+      statement:'Custom runtime research claim.',
+      epistemicClass:'INFERRED',
+      required:false,
+      assumptionIds:['CUSTOM-RUNTIME-ASSUMPTION'],
+      evidenceIds:[],
+      availableAt:inp.asOf+100
+    }]
+  };
+  issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:context,
+    generatedAt:inp.asOf+100
+  });
+  observeInstitutionalForecastRuntime(r,{input:input(inp.asOf+300_000,65100)});
+  const report=evaluateForecastClaimAssumptionResearch(r,{
+    config:{
+      minObservations:20,
+      minPrimaryFailures:10,
+      minChallengerAlerts:5,
+      minChallengerNonAlerts:5,
+      minCustomDeclarationObservations:1,
+      minConclusiveObservations:100
+    }
+  });
+  assert.equal(report.proposalId,'CLAIM_ASSUMPTION_GRAPH');
+  assert.equal(report.acceptedObservationCount,1);
+  assert.equal(report.coverage.customDeclarationObservations,1);
+  assert.equal(report.conclusion.state,'COLLECTING_ALERT_VARIATION');
+  assert.equal(report.governance.conclusionDoesNotAutoPromote,true);
+  assert.equal(report.governance.conclusionDoesNotAutoKill,true);
+  assert.equal(report.canInfluencePrimary,false);
+  assert.equal(report.canExecuteLive,false);
 });
 
 test('duplicate issuance is idempotent',async()=>{
