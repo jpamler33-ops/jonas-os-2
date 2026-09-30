@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source=readFileSync(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+const observabilitySource=readFileSync(new URL('./biggj-discord-observability.mjs',import.meta.url),'utf8');
 
 test('BIGGJ Discord V5 is release-bound and interactive',()=>{
   assert.ok(source.includes('BIGGJ_DISCORD_COMMAND_CENTER_V5'));
@@ -42,14 +43,6 @@ test('BIGGJ V5 exposes governed operator observability navigation',()=>{
     'buildBiggjDiscordObservabilityPanelMap',
     'buildBiggjDiscordObservabilityPayload',
     'refreshBiggjObservabilityPanels',
-    'brain-pulse',
-    'research-queue',
-    'hypotheses',
-    'changes',
-    'experiments',
-    'skill-tree',
-    'evidence-ledger',
-    'decision-trace',
     "name:'brain'",
     "name:'research'",
     "name:'skills'",
@@ -57,6 +50,18 @@ test('BIGGJ V5 exposes governed operator observability navigation',()=>{
     "name:'decisions'",
     'dc6:brain:'
   ]) assert.ok(source.includes(required),required);
+  for(const required of [
+    'brain-pulse',
+    'knowledge',
+    'research-queue',
+    'hypotheses',
+    'changes',
+    'experiments',
+    'skill-tree',
+    'progress',
+    'evidence-ledger',
+    'decision-trace'
+  ]) assert.ok(observabilitySource.includes(required),required);
 });
 
 
