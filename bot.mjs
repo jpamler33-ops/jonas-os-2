@@ -4,7 +4,7 @@ import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobil
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
-import { buildNewsResearchSnapshots, newsResearchSnapshotKey, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
+import { buildNewsResearchSnapshots, filterPreviouslyObservedNewsSnapshots, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
@@ -8313,17 +8313,11 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture',{skipPrevio
       return {ok:false,appended:0,duplicates:0,previouslyObserved:0,governed:0,restrictedSources:0,governanceFingerprint:null,reason:admission.reason,storagePressure:admission.state};
     }
     const submitted=(Array.isArray(inputs)?inputs:[]).filter(Boolean);
-    let previouslyObserved=0;
-    const candidateInputs=skipPreviouslyObservedSourceEvents
-      ?submitted.filter(input=>{
-          const key=newsResearchSnapshotKey(input);
-          if(key&&researchDataPlane.sourcePayload.has(key)){
-            previouslyObserved++;
-            return false;
-          }
-          return true;
-        })
-      :submitted;
+    const observedFilter=skipPreviouslyObservedSourceEvents
+      ?filterPreviouslyObservedNewsSnapshots(researchDataPlane,submitted)
+      :{candidates:submitted,previouslyObserved:0};
+    const candidateInputs=observedFilter.candidates;
+    const previouslyObserved=observedFilter.previouslyObserved;
     const preflight=preflightResearchDataPlaneInputs(researchDataPlane,candidateInputs);
     const nextGovernance=structuredClone(researchDataGovernance);
     refreshResearchSourceFreshness(nextGovernance,{
