@@ -706,7 +706,7 @@ export function renderBiggjProofFeed(feed={}){
   lines.push(
     'Lifecycle: GENERATED → LIVE → MATURED → REVIEWED → LEARNED.',
     'LEARNED = im aktuellen Learning-Aggregat enthalten; keine Skill-Promotion und keine PRIMARY-Änderung.',
-    'Feed zeigt Gewinne UND Fehler; Aggregate zählen den vollständigen gewählten Scope, nicht nur die sichtbaren letzten Rows.',
+    'Feed zeigt Gewinne UND Fehler; keine Cherry-Pick-Policy. Aggregate zählen den vollständigen gewählten Scope, nicht nur die sichtbaren letzten Rows.',
     'AUDIT = Forecast-Issuance war vor Fälligkeit im internen hash-verketteten Ledger gebunden.',
     'LEGACY = nur aus gespeichertem Journal rekonstruiert; keine Behauptung eines vorherigen Audit-Commitments.',
     'Hashes/Audit sind interne Integritätsbelege, keine unabhängige externe Beglaubigung.',
