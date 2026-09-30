@@ -938,8 +938,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       const channel=channelCache.get(row.channel);
       if(!channel)continue;
       const digest=observabilityDigest(row.payload);
-      if(observabilityPanelDigests.get(row.channel)===digest){count++;continue;}
-      await upsertMarked(channel,row.marker,row.payload);
+      if(observabilityPanelDigests.get(row.channel)===digest){channelManagers.success(row.channel,'Observability unverändert und aktuell');count++;continue;}
+      await managed(row.channel,()=>upsertMarked(channel,row.marker,row.payload),{detail:'Observability-Panel aktualisiert'});
       observabilityPanelDigests.set(row.channel,digest);
       count++;
     }
@@ -960,8 +960,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       const channel=channelCache.get(row.channel);
       if(!channel)continue;
       const digest=observabilityDigest(row.payload);
-      if(experiencePanelDigests.get(row.channel)===digest){count++;continue;}
-      await upsertMarked(channel,row.marker,row.payload);
+      if(experiencePanelDigests.get(row.channel)===digest){channelManagers.success(row.channel,'Experience-Panel unverändert und aktuell');count++;continue;}
+      await managed(row.channel,()=>upsertMarked(channel,row.marker,row.payload),{detail:'Experience-Panel aktualisiert'});
       experiencePanelDigests.set(row.channel,digest);
       count++;
     }
@@ -1045,8 +1045,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   }
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
-    if(c)try{return await refreshCorePanel(c,'home:memecoins',{components:[]});}catch(err){fail('memecoin-lab',err);}
-    return null;
+    if(!c)return null;
+    return managed('memecoins',()=>refreshCorePanel(c,'home:memecoins',{components:[]}),{detail:'Memecoin-Radar aktualisiert',rethrow:false});
   }
   async function experienceCommand(interaction,channelName){
     await interaction.deferReply();
