@@ -149,6 +149,13 @@ import { buildResearchDataPlaneSnapshots, RESEARCH_DATA_PLANE_ADAPTER_VERSION } 
 import { loadResearchDataGovernance, saveResearchDataGovernance, governResearchSnapshot, refreshResearchSourceFreshness, quarantinedResearchSourceKeys, researchDataGovernanceSummary, RESEARCH_DATA_GOVERNANCE_VERSION } from './research-data-governance.mjs';
 import { buildResearchDependencyGraph, bindResearchDependencyGateToValidity, RESEARCH_DEPENDENCY_GRAPH_VERSION } from './research-dependency-graph.mjs';
 import { buildForecastThesisDeclarations, forecastThesisDeclarationSummary, FORECAST_THESIS_DECLARATIONS_VERSION } from './forecast-thesis-declarations.mjs';
+import {
+  openBiggjLivingResearchRuntime,
+  saveBiggjLivingResearchRuntime,
+  refreshBiggjLivingResearchRuntime,
+  biggjLivingResearchRuntimeSummary,
+  BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
+} from './biggj-living-research-runtime.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -622,6 +629,34 @@ const forecastRuntime = await openInstitutionalForecastRuntime(forecastRuntimeFi
   maxIntervalCalibrationRows:Math.max(300,Math.floor(Number(process.env.TCX_FORECAST_MAX_INTERVAL_ROWS||1200))),
   maxDriftRows:Math.max(500,Math.floor(Number(process.env.TCX_FORECAST_MAX_DRIFT_ROWS||1500)))
 });
+const biggjLivingResearchFile=process.env.TCX_BIGGJ_LIVING_RESEARCH_FILE||'/data/tcx-biggj-living-research.json';
+const biggjLivingResearchOpened=await openBiggjLivingResearchRuntime(biggjLivingResearchFile,{asOf:Date.now()});
+let biggjLivingResearchState=biggjLivingResearchOpened.state;
+let biggjLivingResearchHealthy=biggjLivingResearchOpened.healthy===true;
+const biggjLivingResearchRecoveredFromCorrupt=biggjLivingResearchOpened.recoveredFromCorrupt===true;
+if(biggjLivingResearchOpened.created||biggjLivingResearchOpened.reconciled){
+  try{
+    const admission=await storageWriteAdmission('biggj-living-research-init');
+    if(admission.allowed){
+      await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState);
+    }else{
+      biggjLivingResearchHealthy=false;
+      console.warn('[TCX_BIGGJ_LIVING_RESEARCH_INIT_DEFERRED]',JSON.stringify({
+        reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+    }
+  }catch(err){
+    biggjLivingResearchHealthy=false;
+    console.error('[TCX_BIGGJ_LIVING_RESEARCH_INIT_FAILED]',JSON.stringify({
+      error:err instanceof Error?err.message:String(err),
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+  }
+}
+
 const forecastColdArchiveDir=process.env.TCX_FORECAST_COLD_ARCHIVE_DIR||forecastRuntimeFile+'.cold';
 let forecastColdArchiveState=await forecastColdArchiveSummary(forecastColdArchiveDir);
 
@@ -667,6 +702,93 @@ let claimAssumptionResearchLastRunAt=0;
 let claimAssumptionResearchLastState=null;
 let claimAssumptionResearchLastLoggedObservationCount=0;
 let claimAssumptionResearchLastSummary=null;
+let claimAssumptionResearchLastReport=null;
+let biggjLivingResearchLastLoggedFingerprint=null;
+
+async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
+  const started=Date.now();
+  try{
+    const thesisMemories=(forecastRuntime?.intelligence?.all?.()||[])
+      .map(x=>x?.thesisMemory)
+      .filter(Boolean);
+    const refreshed=refreshBiggjLivingResearchRuntime(biggjLivingResearchState,{
+      thesisMemories,
+      claimAssumptionReport:report,
+      asOf:Date.now(),
+      reason
+    });
+    if(refreshed.changed){
+      const admission=await storageWriteAdmission('biggj-living-research');
+      if(!admission.allowed){
+        biggjLivingResearchHealthy=false;
+        console.warn('[TCX_BIGGJ_LIVING_RESEARCH_PERSIST_DEFERRED]',JSON.stringify({
+          reason:admission.reason||'STORAGE_WRITE_BLOCKED',
+          refreshReason:reason,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+        return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+      }
+      await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,refreshed.state);
+      biggjLivingResearchState=refreshed.state;
+      biggjLivingResearchHealthy=true;
+      const summary=biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+      if(
+        refreshed.discoveredSkillIds.length>0||
+        biggjLivingResearchLastLoggedFingerprint!==biggjLivingResearchState.fingerprint
+      ){
+        biggjLivingResearchLastLoggedFingerprint=biggjLivingResearchState.fingerprint;
+        console.log('[TCX_BIGGJ_LIVING_RESEARCH]',JSON.stringify({
+          reason,
+          revision:summary.revision,
+          activeAgendaItems:summary.activeAgendaItems,
+          researchRequired:summary.researchRequired,
+          discoveredResearchOnlySkills:summary.discoveredResearchOnlySkills,
+          newSkillIds:refreshed.discoveredSkillIds,
+          topAgenda:summary.topAgenda,
+          automaticPromotion:false,
+          automaticKill:false,
+          automaticExperimentLaunch:false,
+          primaryMutationAllowed:false,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+      recordOperation(observability,{
+        name:'biggj_living_research_refresh',
+        ok:true,
+        latencyMs:Date.now()-started,
+        error:null
+      });
+      return summary;
+    }
+    recordOperation(observability,{
+      name:'biggj_living_research_refresh',
+      ok:true,
+      latencyMs:Date.now()-started,
+      error:null
+    });
+    return biggjLivingResearchRuntimeSummary(biggjLivingResearchState);
+  }catch(err){
+    biggjLivingResearchHealthy=false;
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'biggj_living_research',message:msg});
+    recordOperation(observability,{
+      name:'biggj_living_research_refresh',
+      ok:false,
+      latencyMs:Date.now()-started,
+      error:msg
+    });
+    console.error('[TCX_BIGGJ_LIVING_RESEARCH_ERROR]',JSON.stringify({
+      reason,
+      error:msg,
+      primaryMutationAllowed:false,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+    return null;
+  }
+}
 
 function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
   const now=Date.now();
@@ -678,6 +800,7 @@ function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=
     const report=evaluateForecastClaimAssumptionResearch(forecastRuntime,{
       limit:forecastJournalMaxEntries
     });
+    claimAssumptionResearchLastReport=report;
     const state=String(report?.conclusion?.state||'UNKNOWN');
     const observations=Number(report?.acceptedObservationCount||0);
     const summary={
@@ -732,6 +855,8 @@ function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=
     return null;
   }
 }
+
+await refreshBiggjLivingResearch('startup',null);
 
 const shadowCompetitionFile = process.env.TCX_SHADOW_COMPETITION_FILE || '/data/tcx-shadow-competition.json';
 let shadowCompetitionState = await loadShadowCompetition(shadowCompetitionFile);
@@ -6104,6 +6229,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       await persistForecastRuntime('forecast-thesis-revision');
     }
     if(thesisRevisionObservation.changed>0){
+      await refreshBiggjLivingResearch('thesis-revision');
       console.log('[TCX_THESIS_REVISION]',JSON.stringify({
         symbol,
         examined:thesisRevisionObservation.examined,
@@ -8509,6 +8635,7 @@ async function forecastOutcomeWatcher() {
         }));
         if(postAdmission.allowed){
           maybeEvaluateClaimAssumptionResearch('resolved-outcomes');
+          await refreshBiggjLivingResearch('resolved-outcomes',claimAssumptionResearchLastReport);
           await syncFeatureResearch('resolved-outcomes');
         }else{
           console.warn('resolved-outcome feature research deferred for memory headroom',JSON.stringify({
@@ -8606,6 +8733,11 @@ function currentPersistenceCompatibility(){
       RESEARCH_DATA_GOVERNANCE:{
         healthy:researchGovernanceHealthy,
         recoveredFromCorrupt:researchDataGovernance.recoveredFromCorrupt===true
+      },
+      BIGGJ_LIVING_RESEARCH:{
+        healthy:biggjLivingResearchHealthy,
+        recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
+        loadedSchema:BIGGJ_LIVING_RESEARCH_RUNTIME_VERSION
       }
     },
     localFilePersistence:true,
@@ -8659,6 +8791,12 @@ function missionControlData(){
     execution:'SHADOW_ONLY',
     canInfluencePrimary:false,
     canExecuteLive:false
+  },
+  biggjLivingResearch:{
+    ...biggjLivingResearchRuntimeSummary(biggjLivingResearchState),
+    healthy:biggjLivingResearchHealthy,
+    recoveredFromCorrupt:biggjLivingResearchRecoveredFromCorrupt,
+    file:biggjLivingResearchFile
   },
   episodeMemory:{total:episodes.length,healthy:episodePersistenceHealthy},
   evidenceHistory:{total:evidenceRecords.length,healthy:evidenceHistoryHealthy},
