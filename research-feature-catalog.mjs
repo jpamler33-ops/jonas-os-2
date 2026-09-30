@@ -99,6 +99,21 @@ define('research.marketContext.volumeToCapRatio','MARKET_CONTEXT',{unit:'RATIO',
 define('research.marketContext.activeCryptocurrenciesLog','MARKET_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p active crypto assets'});
 define('research.marketContext.activeMarketsLog','MARKET_CONTEXT',{unit:'LOG_COUNT',min:0,description:'log1p active crypto markets'});
 
+define('research.dex.boostedPairCount','DEX_ACTIVITY',{unit:'COUNT',min:0,max:20,description:'Count of boosted DEX pairs represented in the public learning context'});
+define('research.dex.boostedLiquidityLog','DEX_ACTIVITY',{unit:'LOG_USD',min:0,description:'log1p aggregate visible liquidity across boosted DEX pairs'});
+define('research.dex.boostedVolumeH1Log','DEX_ACTIVITY',{unit:'LOG_USD',min:0,description:'log1p aggregate 1h volume across boosted DEX pairs'});
+define('research.dex.boostedBuySellImbalanceH1','DEX_ACTIVITY',{unit:'SIGNED_SHARE',min:-1,max:1,description:'1h buy minus sell transaction imbalance across boosted DEX pairs'});
+define('research.dex.trendingMetaLiquidityLog','DEX_ACTIVITY',{unit:'LOG_USD',min:0,description:'log1p aggregate liquidity across DEX Screener trending metas'});
+define('research.dex.trendingMetaVolumeLog','DEX_ACTIVITY',{unit:'LOG_USD',min:0,description:'log1p aggregate volume across DEX Screener trending metas'});
+define('research.dex.trendingMetaTokenCountLog','DEX_ACTIVITY',{unit:'LOG_COUNT',min:0,description:'log1p token breadth across DEX Screener trending metas'});
+
+define('research.defi.totalTvlLog','DEFI_LIQUIDITY',{unit:'LOG_USD',min:0,description:'log1p aggregate DeFi TVL across DefiLlama chains'});
+define('research.defi.chainTvlLog','DEFI_LIQUIDITY',{unit:'LOG_USD',min:0,description:'log1p mapped chain DeFi TVL from DefiLlama'});
+define('research.defi.chainTvlShare','DEFI_LIQUIDITY',{unit:'SHARE',min:0,max:1,description:'Mapped chain share of aggregate DefiLlama DeFi TVL'});
+define('research.defi.totalStablecoinSupplyLog','DEFI_LIQUIDITY',{unit:'LOG_USD',min:0,description:'log1p aggregate stablecoin supply across DefiLlama chains'});
+define('research.defi.chainStablecoinSupplyLog','DEFI_LIQUIDITY',{unit:'LOG_USD',min:0,description:'log1p mapped chain stablecoin supply from DefiLlama'});
+define('research.defi.chainStablecoinToTvlRatio','DEFI_LIQUIDITY',{unit:'RATIO',min:0,max:1000,description:'Mapped chain stablecoin supply divided by DeFi TVL'});
+
 for(const window of ['5m','15m']){
   define('research.entityflow.eth.netExternal'+window,'ENTITY_FLOW',{unit:'SIGNED_LOG_ETH',description:'Signed log1p verified entity external net flow'});
   define('research.entityflow.eth.grossExternal'+window,'ENTITY_FLOW',{unit:'LOG_ETH',min:0,description:'log1p verified entity gross external flow'});
