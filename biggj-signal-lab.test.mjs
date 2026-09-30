@@ -126,3 +126,81 @@ test('signal lab keyboard stays inside callback size limits',()=>{
   const kb=signalLabKeyboard('BTCUSDT','1h');
   for(const row of kb.inline_keyboard)for(const b of row)if(b.callback_data)assert.ok(Buffer.byteLength(b.callback_data,'utf8')<=64);
 });
+
+
+test('mode lenses filter structured evidence without recomputing the canonical forecast',()=>{
+  const base=issuance();
+  const withTrace={
+    ...base,
+    trace:{
+      evidence:[
+        {type:'DERIVATIVES',detail:'Funding negative while open interest expands'},
+        {type:'MACRO',detail:'Treasury yield pressure rising'}
+      ],
+      contradictions:[]
+    }
+  };
+  const flow=buildBiggjSignalLab({
+    symbol:'BTCUSDT',
+    issuance:withTrace,
+    setup:{status:'READY',direction:'UP',evidence:.82,eventRows:[{type:'BREAK_OF_STRUCTURE',detail:'higher high'}]},
+    risk:{status:'NORMAL',reasons:[]},
+    accuracy:accuracy(),
+    horizonId:'1h',
+    mode:'FLOW',
+    asOf:2_000
+  });
+  const structure=buildBiggjSignalLab({
+    symbol:'BTCUSDT',
+    issuance:withTrace,
+    setup:{status:'READY',direction:'UP',evidence:.82,eventRows:[{type:'BREAK_OF_STRUCTURE',detail:'higher high'}]},
+    risk:{status:'NORMAL',reasons:[]},
+    accuracy:accuracy(),
+    horizonId:'1h',
+    mode:'STRUCTURE',
+    asOf:2_000
+  });
+  assert.equal(flow.bias,structure.bias);
+  assert.equal(flow.probability.calibrated,structure.probability.calibrated);
+  assert.equal(flow.modeLens.semantics.includes('does not recompute'),true);
+  assert.ok(flow.modeLens.items.some(x=>/Funding|open interest/i.test(x.text)));
+  assert.ok(structure.modeLens.items.some(x=>/BREAK_OF_STRUCTURE|higher high/i.test(x.text)));
+  assert.equal(verifyBiggjSignalLab(flow).ok,true);
+  assert.match(renderBiggjSignalLab(flow),/MODE LENS · FLOW/);
+});
+
+test('proof lifecycle exposes live before-hash and marks learned only after aggregate learning inclusion',()=>{
+  const entries=[
+    {
+      id:'live-1',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,asOf:1_000,dueAt:3_601_000,startPrice:100,
+      regimeId:'RANGE',gate:'PASS',direction:'UP',probabilities:{up:.6,down:.2,flat:.2},
+      expectedReturn:.01,interval:{q10:-.01,q90:.03},operationalConfidence:.6,status:'PENDING'
+    },
+    {
+      id:'resolved-1',symbol:'BTCUSDT',horizonId:'1h',horizonMs:3600000,asOf:2_000,dueAt:3_602_000,startPrice:100,
+      regimeId:'RANGE',gate:'PASS',direction:'DOWN',probabilities:{up:.2,down:.7,flat:.1},
+      expectedReturn:-.01,interval:{q10:-.03,q90:.01},operationalConfidence:.7,status:'RESOLVED',
+      resolution:{resolvedAt:3_602_100,resolvedPrice:98,actualReturn:-.02,actualDirection:'DOWN',topCorrect:true,intervalMiss:false,brier:.12,logLoss:.3}
+    }
+  ];
+  const feed=buildBiggjProofFeed(entries,{
+    asOf:3_000_000,
+    learningSummary:{generatedAt:4_000_000,resolvedOutcomes:1,phase:'LEARNING'}
+  });
+  assert.equal(feed.liveRows.length,1);
+  assert.equal(feed.liveRows[0].currentStage,'LIVE');
+  assert.equal(feed.liveRows[0].outcomeHash,null);
+  assert.equal(feed.liveRows[0].beforeHash.length,64);
+
+  const later=buildBiggjProofFeed(entries,{
+    asOf:4_000_000,
+    learningSummary:{generatedAt:4_000_000,resolvedOutcomes:1,phase:'LEARNING'}
+  });
+  const learned=later.rows.find(x=>x.forecastId==='resolved-1');
+  assert.equal(learned.currentStage,'LEARNED');
+  assert.equal(learned.milestones.reviewed,true);
+  assert.equal(learned.milestones.learned,true);
+  assert.equal(later.learning.meaning.includes('does not mean skill promotion'),true);
+  assert.equal(verifyBiggjProofFeed(later).ok,true);
+  assert.match(renderBiggjProofFeed(later),/GENERATED → LIVE → MATURED → REVIEWED → LEARNED/);
+});
