@@ -9538,6 +9538,18 @@ function missionControlData(){
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
  };
+ const rulebookVerification=verifyBiggjRulebook();
+ const rulebookRuntime=evaluateBiggjRuntimeRulebook({
+  health,
+  newsEvents:health.globalIntel?.recent||[],
+  asOf:now
+ });
+ health.rulebook={
+  ...biggjRulebookSummary(),
+  verification:rulebookVerification,
+  runtime:rulebookRuntime
+ };
+ if(rulebookRuntime.state==='BLOCKED')health.ok=false;
  const rulebookRuntime=evaluateBiggjRuntimeRulebook({
    health,
    newsEvents:health.globalIntel?.recent||[],
@@ -9580,6 +9592,25 @@ const server = http.createServer((req,res) => {
   if (req.url === '/sw.js') {
     res.writeHead(200,{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'});
     res.end(biggjServiceWorker());
+    return;
+  }
+  if (req.url === '/rulebook.md') {
+    res.writeHead(200,{'content-type':'text/markdown; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+    res.end(renderBiggjRulebookMarkdown());
+    return;
+  }
+  if (req.url === '/rulebook.json') {
+    res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+    res.end(JSON.stringify({
+      version:BIGGJ_RULEBOOK_VERSION,
+      verification:verifyBiggjRulebook(),
+      summary:biggjRulebookSummary(),
+      runtime:evaluateBiggjRuntimeRulebook({
+        health:missionControlData().health,
+        newsEvents:missionControlData().health?.globalIntel?.recent||[],
+        asOf:Date.now()
+      })
+    }));
     return;
   }
   if (req.url === '/mission-control') {
