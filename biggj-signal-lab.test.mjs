@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { sha256 } from './institutional-kernel.mjs';
+
 import {
   buildBiggjSignalLab,
   verifyBiggjSignalLab,
@@ -303,4 +305,180 @@ test('restore quarantines tampered committed rows before learning rehydration',(
   assert.equal(restored.entries[0].status,'PROOF_INVALID');
   assert.equal(restored.entries[0].proofIntegrity,'MISMATCH');
   assert.equal(restored.proofIntegrityStats().invalid,1);
+});
+
+
+function auditLinkedFixture({auditOccurredAt=1_100}={}){
+  const horizon={
+    horizonId:'1h',
+    horizonMs:3_600_000,
+    gate:'PASS',
+    direction:'UP',
+    expectedReturn:.01,
+    probabilities:{up:.7,down:.2,flat:.1},
+    interval:{q10:-.01,q25:-.002,median:.01,q75:.02,q90:.03},
+    diagnostics:{operationalConfidence:.7}
+  };
+  const forecastCore={
+    schemaVersion:'TEST_FORECAST_V1',
+    forecastId:'BTCUSDT:1000',
+    symbol:'BTCUSDT',
+    generatedAt:1_100,
+    asOf:1_000,
+    price:100,
+    overallGate:'PASS',
+    scienceGate:'PASS',
+    horizons:[horizon],
+    path:null,
+    regimeTransition:null,
+    inputQuality:{dataQuality:1,regimeConfidence:.8,featureCount:1},
+    epistemic:{},
+    executionMode:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false
+  };
+  const forecast={...forecastCore,fingerprint:sha256(forecastCore)};
+  const issuanceCore={
+    version:'TEST_ISSUANCE_V1',
+    symbol:'BTCUSDT',
+    asOf:1_000,
+    generatedAt:1_100,
+    forecastFingerprint:forecast.fingerprint,
+    scienceFingerprint:'s'.repeat(64),
+    admissionFingerprint:'a'.repeat(64),
+    traceId:'trace-audit',
+    gate:'PASS',
+    researchDisposition:'RESEARCH_ALLOWED',
+    probabilityDisplayAllowed:true,
+    executionMode:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecute:false
+  };
+  const issuance={...issuanceCore,issuanceId:sha256(issuanceCore),forecast};
+  const row=committedRow({
+    id:'BTCUSDT:1000:1h',
+    symbol:'BTCUSDT',
+    horizonId:'1h',
+    horizonMs:3_600_000,
+    flatThreshold:0,
+    asOf:1_000,
+    dueAt:3_601_000,
+    startPrice:100,
+    regimeId:'RANGE',
+    features:{x:1},
+    dataQuality:1,
+    gate:'PASS',
+    direction:'UP',
+    probabilities:{up:.7,down:.2,flat:.1},
+    expectedReturn:.01,
+    interval:{q10:-.01,q90:.03},
+    rawInterval:{q10:-.01,q90:.03,median:.01},
+    operationalConfidence:.7,
+    models:[],
+    status:'RESOLVED',
+    resolution:{
+      resolvedAt:3_601_100,
+      resolvedPrice:102,
+      actualReturn:.02,
+      actualDirection:'UP',
+      topCorrect:true,
+      intervalMiss:false
+    }
+  });
+  const auditLedger={records:[{
+    kind:'TCX_INSTITUTIONAL_FORECAST_ISSUED',
+    seq:7,
+    occurredAt:auditOccurredAt,
+    recordHash:'b'.repeat(64),
+    payload:{
+      issuanceId:issuance.issuanceId,
+      forecastFingerprint:issuance.forecastFingerprint,
+      symbol:'BTCUSDT',
+      asOf:1_000
+    }
+  }]};
+  return {row,issuance,auditLedger};
+}
+
+test('proof feed adds institutional pre-outcome audit binding on top of forecast-time journal commitment',()=>{
+  const {row,issuance,auditLedger}=auditLinkedFixture();
+  const feed=buildBiggjProofFeed([row],{
+    asOf:4_000_000,
+    issuances:[issuance],
+    auditLedger
+  });
+  const proof=feed.rows[0];
+  assert.equal(proof.commitmentState,'VERIFIED');
+  assert.equal(proof.institutionalProof.status,'AUDIT_BOUND');
+  assert.equal(proof.institutionalProof.auditBacked,true);
+  assert.equal(proof.institutionalProof.auditPreOutcome,true);
+  assert.equal(proof.institutionalProof.auditSeq,7);
+  assert.equal(proof.institutionalProof.auditRecordHash,'b'.repeat(64));
+  assert.equal(proof.institutionalProof.bindingHash.length,64);
+  assert.equal(feed.counts.auditBacked,1);
+  assert.equal(feed.counts.issuanceLinked,1);
+  assert.equal(verifyBiggjProofFeed(feed).ok,true);
+  assert.match(renderBiggjProofFeed(feed),/FORECAST-TIME \+ AUDIT #7/);
+});
+
+test('audit record written after forecast due time is not presented as pre-outcome proof',()=>{
+  const {row,issuance,auditLedger}=auditLinkedFixture({auditOccurredAt:3_601_001});
+  const feed=buildBiggjProofFeed([row],{
+    asOf:4_000_000,
+    issuances:[issuance],
+    auditLedger
+  });
+  const proof=feed.rows[0];
+  assert.equal(proof.commitmentState,'VERIFIED');
+  assert.equal(proof.institutionalProof.status,'AUDIT_RECORDED_AFTER_DUE');
+  assert.equal(proof.institutionalProof.auditBacked,false);
+  assert.equal(proof.institutionalProof.bindingHash,null);
+  assert.equal(feed.counts.auditBacked,0);
+  assert.equal(verifyBiggjProofFeed(feed).ok,true);
+});
+
+test('proof summary counts full scoped outcomes even when display limit is smaller',()=>{
+  const mk=(n,hit)=>committedRow({
+    id:'scope-'+n,
+    symbol:'BTCUSDT',
+    horizonId:'1h',
+    horizonMs:3_600_000,
+    flatThreshold:0,
+    asOf:n*1_000,
+    dueAt:n*1_000+3_600_000,
+    startPrice:100,
+    regimeId:'RANGE',
+    features:{x:n},
+    dataQuality:1,
+    gate:'PASS',
+    direction:'UP',
+    probabilities:{up:.7,down:.2,flat:.1},
+    expectedReturn:.01,
+    interval:{q10:-.01,q90:.03},
+    rawInterval:{q10:-.01,q90:.03,median:.01},
+    operationalConfidence:.7,
+    models:[],
+    status:'RESOLVED',
+    resolution:{
+      resolvedAt:n*1_000+3_600_100,
+      resolvedPrice:hit?102:98,
+      actualReturn:hit?.02:-.02,
+      actualDirection:hit?'UP':'DOWN',
+      topCorrect:hit,
+      intervalMiss:false
+    }
+  });
+  const feed=buildBiggjProofFeed([mk(1,true),mk(2,false),mk(3,true)],{
+    asOf:8_000_000,
+    limit:1
+  });
+  assert.equal(feed.rows.length,1);
+  assert.equal(feed.counts.displayedResolved,1);
+  assert.equal(feed.counts.resolved,3);
+  assert.equal(feed.counts.hits,2);
+  assert.equal(feed.counts.misses,1);
+  assert.equal(feed.counts.verifiedHits,2);
+  assert.equal(feed.counts.verifiedMisses,1);
+  assert.equal(feed.policy.aggregateCountsUseFullScopedSet,true);
+  assert.equal(verifyBiggjProofFeed(feed).ok,true);
 });
