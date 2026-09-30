@@ -58,6 +58,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'discord-serial-dedupe-queue.mjs',
   'biggj-discord-observability.mjs',
   'autonomous-research-training-factory.mjs',
+  'biggj-research-leverage-engine.mjs',
   'runtime-release-registry.mjs',
   'package.json'
 ];
