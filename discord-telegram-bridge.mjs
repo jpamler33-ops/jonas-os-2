@@ -12,7 +12,7 @@ import {
   BIGGJ_EXPERIENCE_LAYOUT,
   buildBiggjExperiencePanelMap
 } from './biggj-experience-center.mjs';
-import { createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
+import { BIGGJ_CHANNEL_OPERATIONS_VERSION, createBiggjChannelManagerRuntime } from './biggj-channel-operations.mjs';
 import { createGermanTranslationProvider } from './biggj-german-translation.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_COMMAND_CENTER_V6';
