@@ -209,3 +209,41 @@ They may not:
 - ABSTAIN
 - canInfluencePrimary: false
 - canExecuteLive: false
+
+
+## Research Experiment Planner
+
+The validation harness identifies the next blocking research deficit. The Research Experiment Planner now compiles that deficit into a concrete preregistered shadow-research plan.
+
+Each plan freezes:
+
+- the discovered skill and protocol identity,
+- the current validation phase and blocking deficit,
+- the original preregistered hypothesis and falsifier,
+- unit of analysis,
+- discovery and control populations,
+- blocker-specific primary endpoints,
+- protocol primary and secondary endpoints,
+- negative controls,
+- subgroup plan,
+- stopping rules,
+- evidence and analysis policy,
+- dependency snapshot.
+
+The plan explicitly forbids optional stopping after a positive result. Negative and null results must be retained.
+
+Discovery evidence cannot be retrospectively relabelled as confirmatory evidence.
+
+A generated plan does not launch an experiment. It only makes the next scientific action explicit and reproducible.
+
+Authority remains:
+
+- automaticExperimentLaunchAllowed:false
+- automaticSkillStatusTransitionAllowed:false
+- automaticPromotionAllowed:false
+- automaticKillAllowed:false
+- primaryMutationAllowed:false
+- tradingPolicyMutationAllowed:false
+- SHADOW_ONLY
+- ABSTAIN
+- canExecuteLive:false
