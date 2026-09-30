@@ -236,6 +236,12 @@ import {
   appendInstitutionalForecastIssuanceAudit,
   appendResearchTraceEvaluationAudit
 } from './institutional-audit-binding.mjs';
+import {
+  createBiggjOpenAiBridge,
+  renderBiggjAiAdvisory,
+  isBiggjAiBridgeRequestAuthorized,
+  readSmallJsonRequest
+} from './biggj-openai-bridge.mjs';
 
 const persistenceDataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data';
 const storageWarnFreeBytes=Math.max(32*1024*1024,Number(process.env.TCX_STORAGE_WARN_FREE_BYTES||96*1024*1024));
@@ -331,6 +337,14 @@ const discordRefreshMs = Math.max(30000, Number(process.env.DISCORD_REFRESH_MS |
 const discordMarketRefreshMs = Math.max(60000, Number(process.env.DISCORD_MARKET_REFRESH_MS || 120000));
 const discordTradeSyncMs = Math.max(15000, Number(process.env.DISCORD_TRADE_SYNC_MS || 20000));
 let discordBridge = null;
+const biggjAiBridgeToken=String(process.env.BIGGJ_AI_BRIDGE_TOKEN||'').trim();
+const biggjOpenAiBridge=createBiggjOpenAiBridge({
+  apiKey:process.env.OPENAI_API_KEY||'',
+  model:process.env.BIGGJ_AI_MODEL||'gpt-5.6',
+  timeoutMs:Number(process.env.BIGGJ_AI_TIMEOUT_MS||30000),
+  maxRequestsPerMinute:Number(process.env.BIGGJ_AI_MAX_REQUESTS_PER_MINUTE||6),
+  reasoningEffort:process.env.BIGGJ_AI_REASONING_EFFORT||'medium'
+});
 
 const telegramApi = `https://api.telegram.org/bot${token}`;
 const configuredBinanceBases = process.env.TCX_BINANCE_REST_BASES || process.env.TCX_BINANCE_REST_BASE || '';
@@ -3315,6 +3329,7 @@ function helpText() {
     '/memory BTC – zeigen, was TCX aus ähnlichen Fällen gelernt hat',
     '/evidence BTC – Daten und Belege hinter der Einschätzung',
     '/validity BTC – prüfen, ob die Einschätzung noch aktuell ist',
+    '/ai <frage> – BIGGJ fragt den externen AI Advisor',
     '/alerts – aktive Alarme anzeigen',
     'Startmenü: 🐸 Memecoin-Radar und 🧭 Stimmung & Trends nutzen öffentliche Live-Quellen.','',
     'PROFI-FUNKTIONEN',
@@ -7104,6 +7119,68 @@ function parseAction(data='') {
 }
 
 
+function biggjAiContextSnapshot(extraContext=null){
+  const snapshot=missionControlData();
+  return {
+    capturedAt:Date.now(),
+    safety:{
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false,
+      abstainFirstClass:true,
+      pointInTimeRequired:true
+    },
+    system:{
+      operationalReadiness:snapshot?.health?.operationalReadiness||null,
+      institutionalKernel:snapshot?.health?.institutionalKernel||null,
+      institutionalForecastRuntime:snapshot?.health?.institutionalForecastRuntime||null,
+      autonomousResearchFactory:snapshot?.health?.autonomousResearchFactory||null,
+      autonomousOperator:snapshot?.health?.autonomousOperator||null,
+      governanceTriage:snapshot?.health?.governanceTriage||null,
+      researchCoverage:snapshot?.health?.researchCoverage||null,
+      marketRadar:snapshot?.health?.marketRadar||null,
+      biggjRulebook:snapshot?.health?.biggjRulebook||null,
+      biggjSignalLab:snapshot?.health?.biggjSignalLab||null,
+      claimAssumptionResearch:snapshot?.health?.claimAssumptionResearch||null
+    },
+    portfolio:snapshot?.portfolio||null,
+    discovery:snapshot?.discovery||null,
+    caller:extraContext||null
+  };
+}
+
+async function askBiggjAi(question,{source='BIGGJ_INTERNAL',extraContext=null}={}){
+  return biggjOpenAiBridge.ask({
+    question,
+    source,
+    context:biggjAiContextSnapshot(extraContext),
+    asOf:Date.now()
+  });
+}
+
+async function handleBiggjAiTelegram({chatId,args}){
+  const question=(args||[]).join(' ').trim();
+  if(!question){
+    await tg('sendMessage',{chat_id:chatId,text:'Beispiel: /ai Welche Forschungslücke blockiert BIGGJ gerade am stärksten?'});
+    return;
+  }
+  if(!biggjOpenAiBridge.snapshot().enabled){
+    await tg('sendMessage',{chat_id:chatId,text:'AI Advisor ist noch nicht konfiguriert. OPENAI_API_KEY fehlt. BIGGJ bleibt vollständig SHADOW_ONLY.'});
+    return;
+  }
+  const started=Date.now();
+  try{
+    const result=await askBiggjAi(question,{source:'TELEGRAM'});
+    recordOperation(observability,{name:'biggj_ai_advisor',ok:true,latencyMs:Date.now()-started,error:null});
+    await tg('sendMessage',{chat_id:chatId,text:renderBiggjAiAdvisory(result)});
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'command.ai',message:msg});
+    recordOperation(observability,{name:'biggj_ai_advisor',ok:false,latencyMs:Date.now()-started,error:msg});
+    await tg('sendMessage',{chat_id:chatId,text:('AI Advisor gerade nicht verfügbar: '+msg+'\nExecution: SHADOW_ONLY · canExecuteLive:false').slice(0,4096)});
+  }
+}
+
 const readCommandHandlers=createReadCommandHandlers({
   tg,
   helpText,
@@ -7181,7 +7258,10 @@ const mutationCommandHandlers=createMutationCommandHandlers({
 
 const telegramCommandHandlers={
   ...readCommandHandlers,
-  ...mutationCommandHandlers
+  ...mutationCommandHandlers,
+  '/ai':handleBiggjAiTelegram,
+  '/askai':handleBiggjAiTelegram,
+  '/chatgpt':handleBiggjAiTelegram
 };
 
 const routeTelegramCommand=createTelegramCommandRouter({
@@ -9703,6 +9783,7 @@ function missionControlData(){
    auditLedger
   }),
   biggjSignalLab:{version:BIGGJ_SIGNAL_LAB_VERSION,proofVersion:BIGGJ_PROOF_FEED_VERSION,modes:['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'],execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false},
+  aiAdvisor:biggjOpenAiBridge.snapshot(now),
   claimAssumptionResearch:claimAssumptionResearchLastSummary||{
     state:'NOT_EVALUATED',
     observations:0,
@@ -9897,6 +9978,54 @@ const server = http.createServer(async (req,res) => {
     }));
     return;
   }
+  if (req.url === '/ai/status.json') {
+    res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+    res.end(JSON.stringify(biggjOpenAiBridge.snapshot()));
+    return;
+  }
+  if (String(req.url||'').split('?')[0] === '/ai/ask') {
+    if(String(req.method||'GET').toUpperCase()!=='POST'){
+      res.writeHead(405,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','allow':'POST'});
+      res.end(JSON.stringify({ok:false,error:'METHOD_NOT_ALLOWED',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+      return;
+    }
+    if(!isBiggjAiBridgeRequestAuthorized(req,biggjAiBridgeToken)){
+      res.writeHead(401,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','www-authenticate':'Bearer'});
+      res.end(JSON.stringify({ok:false,error:'UNAUTHORIZED',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+      return;
+    }
+    if(!biggjOpenAiBridge.snapshot().enabled){
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      res.end(JSON.stringify({ok:false,error:'BIGGJ_AI_NOT_CONFIGURED',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+      return;
+    }
+    const started=Date.now();
+    try{
+      const body=await readSmallJsonRequest(req);
+      const result=await askBiggjAi(body?.question,{
+        source:'HTTP_AI_BRIDGE',
+        extraContext:body?.context||null
+      });
+      recordOperation(observability,{name:'biggj_ai_http_bridge',ok:true,latencyMs:Date.now()-started,error:null});
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify(result));
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      const status=Math.max(400,Math.min(599,Number(err?.status)||503));
+      recordError(observability,{scope:'http.ai_bridge',message:msg});
+      recordOperation(observability,{name:'biggj_ai_http_bridge',ok:false,latencyMs:Date.now()-started,error:msg});
+      res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      res.end(JSON.stringify({
+        ok:false,
+        error:err?.code||'BIGGJ_AI_ERROR',
+        message:msg.slice(0,700),
+        execution:'SHADOW_ONLY',
+        canExecute:false,
+        canExecuteLive:false
+      }));
+    }
+    return;
+  }
   if (String(req.url||'').startsWith('/signal-lab.json')) {
     try{
       const u=new URL(String(req.url||''),'http://localhost');
@@ -10011,6 +10140,7 @@ const server = http.createServer(async (req,res) => {
         longPollTimeoutMs:telegramLongPollTimeoutMs
       },
       discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'},
+      biggjAiBridge:biggjOpenAiBridge.snapshot(),
       alertEngine:{version:ALERT_ENGINE_VERSION,radarEntries:radarCache.size,researchCheckMs:researchAlertCheckMs},
       biggjRulebook:{
         version:BIGGJ_RULEBOOK_VERSION,

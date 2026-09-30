@@ -7,6 +7,7 @@ const GENESIS='0'.repeat(64);
 
 export const DEFAULT_RUNTIME_FILES=[
   'bot.mjs',
+  'biggj-openai-bridge.mjs',
   'state-store.mjs',
   'market-structure.mjs',
   'chart-renderer.mjs',
