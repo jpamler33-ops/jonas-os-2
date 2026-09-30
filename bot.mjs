@@ -3457,7 +3457,7 @@ function helpText() {
     'PROFI-FUNKTIONEN',
     '/intelligence BTC · /engine BTC · /witness BTC · /history BTC',
     '/audit · /fabric · /replay · /release · /obs · /chaos',
-    '/portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy · /coach · /league',
+    '/wallets · /portfolio · /trades · /stats · /daystats · /weekstats · /monthstats · /academy · /coach · /league',
     '/why_not_trade · zeigt die letzten Discovery-Gates und Blocker',
     '/oms · /sorstatus · /venuequality · /executionlab','',
     'Hinweis: TCX führt keine echten Orders aus. Systemmodus: ABSTAIN / SHADOW_ONLY.'
