@@ -820,6 +820,7 @@ function tradeContextLabel(position={}){
 }
 function tradeLaneLabel(position={}){
   const mode=String(position?.entryMode||'STANDARD').trim().toUpperCase();
+  if(mode==='LAB_UNCONSTRAINED') return 'LAB';
   return ['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION'].includes(mode)?'RESEARCH':'PRIMARY';
 }
 function virtualTradeSize(position={}){
