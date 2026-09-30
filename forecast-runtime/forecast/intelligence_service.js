@@ -109,6 +109,7 @@ export class ForecastIntelligenceService {
     all() { return this.tracker.all(); }
     stateIndex() { return this.tracker.stateIndex(); }
     thesisMemories() { return this.tracker.thesisMemories(); }
+    trackerStats() { return this.tracker.lightweightStats(); }
     auditTrail(limit = this.maxAuditEvents) {
         const n = Math.max(0, Math.floor(limit));
         return structuredClone(n ? this.audit.slice(-n) : []);
