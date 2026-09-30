@@ -107,6 +107,7 @@ export class ForecastIntelligenceService {
     }
     get(forecastId) { return this.tracker.get(forecastId); }
     all() { return this.tracker.all(); }
+    stateIndex() { return this.tracker.stateIndex(); }
     thesisMemories() { return this.tracker.thesisMemories(); }
     auditTrail(limit = this.maxAuditEvents) {
         const n = Math.max(0, Math.floor(limit));
