@@ -539,6 +539,10 @@ test('summary exposes agenda and skill graph without execution authority',()=>{
   assert.ok(summary.researchEvidence.skillCount>=1);
   assert.ok(summary.researchEvidence.evidenceTotal>=1);
   assert.equal(summary.researchEvidence.independentEpisodes,0);
+  assert.ok(summary.validationHarness);
+  assert.ok(summary.validationHarness.discoveredSkillCount>=1);
+  assert.equal(summary.validationHarness.automaticStatusTransitionAllowed,false);
+  assert.equal(summary.validationHarness.automaticExperimentLaunchAllowed,false);
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.automaticKill,false);
   assert.equal(summary.automaticExperimentLaunch,false);
