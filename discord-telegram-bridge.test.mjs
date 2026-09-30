@@ -116,3 +116,20 @@ test('refresh budgets are exposed in bridge source',async()=>{
   assert.match(source,/starterBudgetDeferred/);
   assert.match(source,/threadThesisBudgetDeferred/);
 });
+
+
+test('BIGGJ Discord V5 operator layer is wired into the bridge',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/BIGGJ_DISCORD_COMMAND_CENTER_V5/);
+  assert.match(source,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
+  assert.match(source,/name:'brain'/);
+  assert.match(source,/name:'research'/);
+  assert.match(source,/name:'skills'/);
+  assert.match(source,/name:'progress'/);
+  assert.match(source,/name:'changes'/);
+  assert.match(source,/name:'decisions'/);
+  assert.match(source,/refreshBiggjObservabilityPanels/);
+  assert.match(source,/observabilityPanelDigests/);
+  assert.match(source,/dc6:brain:/);
+});
