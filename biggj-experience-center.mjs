@@ -5,7 +5,8 @@ export const BIGGJ_EXPERIENCE_LAYOUT=Object.freeze([
   {category:'BIGGJ • DESK',channels:[
     {name:'biggj-needs',topic:'Was BIGGJ aktuell braucht, um effizienter, vollständiger und autonomer zu werden. Priorisiert und ohne erfundene Anforderungen.'},
     {name:'learned-playbook',topic:'Was BIGGJ bereits gelernt, validiert, verworfen oder als belastbare Arbeitsregel gespeichert hat.'},
-    {name:'learning-timeline',topic:'Chronologische Lern-, Review-, Protokoll- und Revisionsereignisse mit Aktivitätsfenstern.'}
+    {name:'learning-timeline',topic:'Chronologische Lern-, Review-, Protokoll- und Revisionsereignisse mit Aktivitätsfenstern.'},
+    {name:'mobile-app',topic:'Installierbares BIGGJ Mobile Command Center für iPhone/Startbildschirm.'}
   ]},
   {category:'BIGGJ • INTELLIGENCE',channels:[
     {name:'news-feed',topic:'Allgemeiner relevanter News-Feed aus BIGGJs verifizierten Global-Intel-Ereignissen.'},
