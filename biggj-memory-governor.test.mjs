@@ -43,12 +43,25 @@ test('GC request requires high heap, safe RSS/external and cooldown',()=>{
 
 test('governor executes bounded GC without deleting state',()=>{
   let calls=0;
-  const governor=createMemoryGovernor({gcFn:()=>{calls++;},cooldownMs:5_000,minReclaimedMb:1});
+  let afterGc=false;
+  const memoryUsageFn=()=>({
+    heapUsed:(afterGc?300:360)*1024*1024,
+    heapTotal:400*1024*1024,
+    rss:650*1024*1024,
+    external:8*1024*1024,
+    arrayBuffers:2*1024*1024
+  });
+  const governor=createMemoryGovernor({
+    gcFn:()=>{calls++;afterGc=true;},
+    memoryUsageFn,
+    cooldownMs:5_000,
+    minReclaimedMb:1
+  });
   const first=governor.maybeCollect({
     reason:'TEST',
-    triggerHeapMb:1,
-    maxRssMb:10_000,
-    maxExternalMb:10_000,
+    triggerHeapMb:330,
+    maxRssMb:900,
+    maxExternalMb:128,
     now:10_000
   });
   assert.equal(first.attempted,true);
@@ -57,9 +70,9 @@ test('governor executes bounded GC without deleting state',()=>{
 
   const second=governor.maybeCollect({
     reason:'TEST_COOLDOWN',
-    triggerHeapMb:1,
-    maxRssMb:10_000,
-    maxExternalMb:10_000,
+    triggerHeapMb:330,
+    maxRssMb:900,
+    maxExternalMb:128,
     now:12_000
   });
   assert.equal(second.executed,false);
@@ -72,12 +85,22 @@ test('governor executes bounded GC without deleting state',()=>{
 });
 
 test('governor fails safe when explicit GC is unavailable',()=>{
-  const governor=createMemoryGovernor({gcFn:null,cooldownMs:5_000});
+  const governor=createMemoryGovernor({
+    gcFn:null,
+    memoryUsageFn:()=>({
+      heapUsed:360*1024*1024,
+      heapTotal:400*1024*1024,
+      rss:650*1024*1024,
+      external:8*1024*1024,
+      arrayBuffers:2*1024*1024
+    }),
+    cooldownMs:5_000
+  });
   const x=governor.maybeCollect({
     reason:'NO_GC',
-    triggerHeapMb:1,
-    maxRssMb:10_000,
-    maxExternalMb:10_000,
+    triggerHeapMb:330,
+    maxRssMb:900,
+    maxExternalMb:128,
     now:10_000
   });
   assert.equal(x.attempted,true);
