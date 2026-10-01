@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   deriveCoverageCurriculumCandidates,
   coverageCurriculumSummary,
+  prioritizeCoverageCurriculumCandidates,
   DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
 
@@ -234,4 +235,48 @@ test('ESS-targeted curriculum prioritizes the largest class probability-bin defi
   // labels all three calibration classes, including the targeted DOWN bin.
   assert.equal(out.candidates[0].side,'BUY');
   assert.ok(out.candidates[0].coveragePriorityScore>out.candidates.find(c=>c.horizonId==='3h').coveragePriorityScore);
+});
+
+
+test('global scheduler selects the largest ESS deficit across coins, horizons, bins and classes',()=>{
+  const btc=issuance();
+  const eth=issuance();
+  eth.symbol='ETHUSDT';
+  eth.issuanceId='iss-eth';
+  eth.forecastFingerprint='e'.repeat(64);
+
+  const btc5=btc.forecast.horizons.find(h=>h.horizonId==='5m');
+  btc5.gate='ABSTAIN';
+  btc5.calibration={
+    status:'INSUFFICIENT',targetEffectiveSamples:40,bins:10,
+    perClass:{
+      up:{raw:.58,effectiveSamples:18,targetEffectiveSamples:40,probabilityBinIndex:5,probabilityBinLo:.5,probabilityBinHi:.6},
+      down:{raw:.30,effectiveSamples:20,targetEffectiveSamples:40,probabilityBinIndex:3,probabilityBinLo:.3,probabilityBinHi:.4},
+      flat:{raw:.12,effectiveSamples:22,targetEffectiveSamples:40,probabilityBinIndex:1,probabilityBinLo:.1,probabilityBinHi:.2}
+    }
+  };
+
+  const eth15=eth.forecast.horizons.find(h=>h.horizonId==='15m');
+  eth15.gate='ABSTAIN';
+  eth15.calibration={
+    status:'INSUFFICIENT',targetEffectiveSamples:40,bins:10,
+    perClass:{
+      up:{raw:.29,effectiveSamples:12,targetEffectiveSamples:40,probabilityBinIndex:2,probabilityBinLo:.2,probabilityBinHi:.3},
+      down:{raw:.59,effectiveSamples:3,targetEffectiveSamples:40,probabilityBinIndex:5,probabilityBinLo:.5,probabilityBinHi:.6},
+      flat:{raw:.12,effectiveSamples:21,targetEffectiveSamples:40,probabilityBinIndex:1,probabilityBinLo:.1,probabilityBinHi:.2}
+    }
+  };
+
+  const btcCandidates=deriveCoverageCurriculumCandidates(btc,{now:301_000}).candidates;
+  const ethCandidates=deriveCoverageCurriculumCandidates(eth,{now:301_000}).candidates;
+  const ranked=prioritizeCoverageCurriculumCandidates([...btcCandidates,...ethCandidates],{limit:1});
+
+  assert.equal(ranked.eligible,2);
+  assert.equal(ranked.candidates.length,1);
+  assert.equal(ranked.candidates[0].symbol,'ETHUSDT');
+  assert.equal(ranked.candidates[0].horizonId,'15m');
+  assert.equal(ranked.candidates[0].coverageTargetClass,'DOWN');
+  assert.equal(ranked.candidates[0].coverageTargetProbabilityBinIndex,5);
+  assert.equal(ranked.candidates[0].coverageTargetEffectiveSampleDeficit,37);
+  assert.equal(ranked.canExecuteLive,false);
 });
