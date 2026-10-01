@@ -60,7 +60,7 @@ export function createMemecoinSocialAttentionProvider({
   xBaseUrl='https://api.x.com',
   blueskyBaseUrl='https://public.api.bsky.app',
   blueskyEnabled=true,
-  blueskyQueries=['memecoin','pump.fun','token launch'],
+  blueskyQueries=['memecoin','meme coin','pump.fun'],
   timeoutMs=7000,
   cacheMs=60_000,
   now=()=>Date.now()
@@ -172,7 +172,10 @@ export function applyDirectSocialAttention(snapshot,social){
     const matches=seeds.filter(s=>{
       if(s.type==='SOLANA_ADDRESS')return String(row?.chainId||'').toLowerCase()==='solana'&&String(s.value||'')===String(row?.tokenAddress||'');
       if(s.type==='EVM_ADDRESS')return ['ethereum','base'].includes(String(row?.chainId||'').toLowerCase())&&String(s.value||'').toLowerCase()===address;
-      if(s.type==='CASHTAG')return symbol.length>=2&&String(s.value||'').toUpperCase()===symbol;
+      if(s.type==='CASHTAG'){
+        const strongEnough=Number(s?.uniqueAuthors||0)>=2||Number(s?.engagement||0)>=20;
+        return strongEnough&&symbol.length>=2&&String(s.value||'').toUpperCase()===symbol;
+      }
       return false;
     });
     const platforms=[...new Set(matches.flatMap(x=>Array.isArray(x.platforms)?x.platforms:[]))].sort();
