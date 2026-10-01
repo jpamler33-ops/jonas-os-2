@@ -1784,7 +1784,6 @@ if(evidenceHistoryBootWalRows>0){
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   }));
-  scheduleEvidenceHistoryCompaction(5_000);
 }
 
 async function persistForecastRuntime(reason='mutation',{force=false}={}) {
@@ -2037,6 +2036,7 @@ async function ingestResearchFabric(state,witnessReport) {
 
 let offset = 0;
 let running = true;
+if(evidenceHistoryBootWalRows>0) scheduleEvidenceHistoryCompaction(5_000);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const permitted = chatId => {
