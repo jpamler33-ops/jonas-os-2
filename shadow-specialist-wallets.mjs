@@ -223,7 +223,10 @@ export function applyPublicTraderCopySnapshot(input,snapshot,{
 function memePositionKey(row){return WALLET_4_MEME_SCOUT+':'+String(row?.chainId||'')+':'+String(row?.tokenAddress||'');}
 function severeMemeRisk(flags=[]){
   const set=new Set(Array.isArray(flags)?flags:[]);
-  return ['LIQUIDITY_UNKNOWN','LIQUIDITY_EXTREME_THIN','ONE_SIDED_NO_SELLS_OBSERVED'].some(x=>set.has(x));
+  return [
+    'LIQUIDITY_UNKNOWN','LIQUIDITY_EXTREME_THIN','ONE_SIDED_NO_SELLS_OBSERVED',
+    'M5_CRASH_EXTREME','DATA_ANOMALY_MCAP_LIQUIDITY','DATA_ANOMALY_FDV_LIQUIDITY'
+  ].some(x=>set.has(x));
 }
 function memeSecurityGate(row={}){
   return String(row?.security?.evidenceGate||'UNKNOWN').toUpperCase();
