@@ -63,6 +63,9 @@ test('market monitor uses the advanced first-party SuperChart',()=>{
   assert.match(html,/data-chart-mode/);
   assert.match(html,/data-chart-fullscreen/);
   assert.match(html,/chartShell\.fullscreen/);
+  assert.match(html,/fullscreen:false/);
+  assert.match(html,/CHART\.fullscreen=!CHART\.fullscreen/);
+  assert.match(html,/TAB==='markets'&&CHART\.fullscreen/);
   assert.match(html,/chartQuick/);
   assert.match(html,/marketInsight/);
   assert.match(html,/beobachtet ≠ garantiert/);
