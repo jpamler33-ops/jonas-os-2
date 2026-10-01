@@ -108,3 +108,28 @@ test('governor fails safe when explicit GC is unavailable',()=>{
   assert.equal(x.unavailable,true);
   assert.equal(governor.summary().gcAvailable,false);
 });
+
+
+test('heavy research can bypass cooldown only after a bounded heap overage',()=>{
+  const blocked=shouldCollectGarbage(
+    {heapUsedMb:345,rssMb:600,externalMb:8},
+    {triggerHeapMb:330,maxRssMb:900,maxExternalMb:128,cooldownMs:45_000,cooldownBypassOverageMb:30,lastAttemptAt:90_000,now:100_000}
+  );
+  assert.equal(blocked.cooldownReady,false);
+  assert.equal(blocked.cooldownBypassed,false);
+  assert.equal(blocked.shouldCollect,false);
+
+  const bypass=shouldCollectGarbage(
+    {heapUsedMb:372,rssMb:600,externalMb:8},
+    {triggerHeapMb:330,maxRssMb:900,maxExternalMb:128,cooldownMs:45_000,cooldownBypassOverageMb:30,lastAttemptAt:90_000,now:100_000}
+  );
+  assert.equal(bypass.cooldownReady,false);
+  assert.equal(bypass.cooldownBypassed,true);
+  assert.equal(bypass.shouldCollect,true);
+
+  const rssUnsafe=shouldCollectGarbage(
+    {heapUsedMb:400,rssMb:920,externalMb:8},
+    {triggerHeapMb:330,maxRssMb:900,maxExternalMb:128,cooldownMs:45_000,cooldownBypassOverageMb:30,lastAttemptAt:90_000,now:100_000}
+  );
+  assert.equal(rssUnsafe.shouldCollect,false);
+});
