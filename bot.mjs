@@ -41,7 +41,7 @@ import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independent-witness-network.mjs';
-import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { openAuditLedger, appendAuditRecord, findAuditRecordIdentity, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { rotateVerifiedAuditLedger, verifyAuditLedgerArchive, AUDIT_LEDGER_ROTATION_VERSION } from './audit-ledger-rotation.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
@@ -9164,6 +9164,26 @@ async function autoLearnForecastWatcher() {
       for(const symbol of autoLearnSymbols){
         if(!running) break;
         if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
+        const latest=latestInstitutionalForecast(forecastRuntime,symbol);
+        const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
+        if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
+          const auditBound=Boolean(
+            auditLedger.healthy&&
+            latest?.issuanceId&&
+            findAuditRecordIdentity(auditLedger,{
+              kind:'TCX_INSTITUTIONAL_FORECAST_ISSUED',
+              idField:'issuanceId',
+              id:latest.issuanceId
+            })
+          );
+          rememberCoverageIssuance(coverageIssuancePool,{
+            issuance:latest,
+            auditHealthy:auditBound,
+            now:Date.now()
+          });
+          skipped++;
+          continue;
+        }
         maybeCollectResearchGarbage('AUTOLEARN_PRE_ISSUE',{
           triggerHeapMb:autoLearnResumeHeapMb,
           cooldownBypassOverageMb:30
@@ -9200,12 +9220,6 @@ async function autoLearnForecastWatcher() {
           break;
         }
         try{
-          const latest=latestInstitutionalForecast(forecastRuntime,symbol);
-          const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
-          if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
-            skipped++;
-            continue;
-          }
           const result=await showForecast(null,symbol,null,{
             silent:true,
             source:'TCX_AUTOLEARN_V1',
