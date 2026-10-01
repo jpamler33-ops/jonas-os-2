@@ -66,6 +66,32 @@ test('keyless Bluesky public search supplies direct attention without X credenti
   assert.ok(x.seeds.some(s=>s.key==='symbol:BLUE'&&s.platforms.includes('BLUESKY')));
 });
 
+test('Bluesky falls back to alternate public AppView when primary is unavailable',async()=>{
+  let primaryCalls=0,fallbackCalls=0;
+  const p=createMemecoinSocialAttentionProvider({
+    bearerToken:'',blueskyEnabled:true,blueskyQueries:['memecoin'],now:()=>2500,
+    fetchImpl:async url=>{
+      const u=new URL(url);
+      if(u.hostname==='public.api.bsky.app'){
+        primaryCalls++;
+        return {ok:false,status:503,json:async()=>({})};
+      }
+      if(u.hostname==='api.bsky.app'){
+        fallbackCalls++;
+        return {ok:true,status:200,json:async()=>({posts:[]})};
+      }
+      throw new Error('unexpected '+url);
+    }
+  });
+  const x=await p.fetchDiscovery();
+  assert.equal(x.sourceReady,true);
+  assert.equal(x.bluesky.sourceReady,true);
+  assert.equal(x.bluesky.fallbackUsed,true);
+  assert.equal(x.bluesky.healthyQueries,1);
+  assert.ok(primaryCalls>=1);
+  assert.equal(fallbackCalls,1);
+});
+
 test('single weak cashtag does not contaminate same-symbol radar rows',()=>{
   const out=applyDirectSocialAttention({rows:[{chainId:'base',tokenAddress:'0xabc',symbol:'CAT'}]},{
     configured:true,sourceReady:true,capturedAt:10,source:'BLUESKY_PUBLIC_SEARCH',errors:[],
