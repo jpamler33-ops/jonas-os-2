@@ -72,7 +72,7 @@ test('public trader provider returns ranked metrics, open trades and inferred pr
     }
     if(u.pathname.endsWith('/public-subpositions-history')){
       if(code.startsWith('AAA'))return response([
-        {subPosId:'h1',instId:'BTC-USDT-SWAP',posSide:'long',lever:'5',openTime:'1790800000000',closeTime:'1790803600000',pnl:'20',pnlRatio:'0.02'},
+        {subPosId:'h1',instId:'BTC-USDT-SWAP',posSide:'long',lever:'5',openAvgPx:'100000',closeAvgPx:'102000',openTime:'1790800000000',closeTime:'1790803600000',pnl:'20',pnlRatio:'0.02'},
         {subPosId:'h2',instId:'ETH-USDT-SWAP',posSide:'short',lever:'4',openTime:'1790810000000',closeTime:'1790817200000',pnl:'-5',pnlRatio:'-0.01'}
       ]);
       if(code.startsWith('DDD'))return response([
@@ -114,6 +114,12 @@ test('public trader provider returns ranked metrics, open trades and inferred pr
   const cached=await p.fetchTopTraders({limit:2});
   assert.equal(cached,x);
   assert.equal(calls.length,count);
+
+  const tracked=await p.fetchTraderByCode('AAA111BBB222CCC3',{nickname:'Alpha tracked'});
+  assert.equal(tracked.providerRank,null);
+  assert.equal(tracked.trackedLifecycleOnly,true);
+  assert.equal(tracked.nickname,'Alpha tracked');
+  assert.equal(tracked.recentClosed[0].closeAvgPx,102000);
 });
 
 test('provider fails closed when public leaderboard is unavailable',async()=>{
