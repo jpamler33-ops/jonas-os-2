@@ -76,6 +76,29 @@ test('explicit approval or incident becomes a real escalation',()=>{
   assert.ok(s.critical.includes('ACTIVE_INCIDENTS'));
 });
 
+
+
+test('internal owner incidents are warnings until the operator exposes real human work',()=>{
+  const snapshot=healthySnapshot();
+  snapshot.health.autonomousOperator={
+    ...snapshot.health.autonomousOperator,
+    mode:'AUTO_MONITORING',
+    operatorNeeded:false,
+    approvalRequired:0,
+    activeIncidents:13,
+    internalIncidents:12,
+    waitingForData:false,
+    humanJobRemaining:'EXCEPTIONS_ONLY'
+  };
+  const s=buildBiggjAutopilotSupervisor(snapshot,{asOf:T0});
+  assert.equal(s.humanActionRequired,false);
+  assert.equal(s.shouldNotifyHuman,false);
+  assert.equal(s.state,'AUTOPILOT_DEGRADED');
+  assert.ok(s.warnings.includes('INTERNAL_INCIDENTS_ACTIVE'));
+  assert.ok(!s.critical.includes('ACTIVE_INCIDENTS'));
+  assert.equal(s.semantics.internalIncidentsDoNotImplyHumanAction,true);
+});
+
 test('manual or unowned research is treated as an exception, not silently ignored',()=>{
   const snapshot=healthySnapshot();
   snapshot.health.autonomousResearchFactory.manual=2;
