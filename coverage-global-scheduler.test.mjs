@@ -9,4 +9,7 @@ test('autolearn uses the global coverage sweep',async()=>{
   assert.match(source,/scope:'GLOBAL_ESS_SWEEP'/);
   assert.match(source,/TCX_COVERAGE_CURRICULUM_MAX_PER_SWEEP/);
   assert.match(source,/coverageGlobalWinners/);
+  assert.match(source,/coverageCurriculumRefreshPriority\(latest,\{now:sweepPlanNow\}\)/);
+  assert.match(source,/TCX_COVERAGE_REFRESH_PLAN/);
+  assert.match(source,/REFRESH_PRIORITY_ONLY/);
 });

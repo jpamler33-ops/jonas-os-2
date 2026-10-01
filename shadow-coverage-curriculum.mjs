@@ -271,6 +271,49 @@ export function deriveCoverageCurriculumCandidates(issuance,{
   });
 }
 
+export function coverageCurriculumRefreshPriority(issuance,{now=Date.now()}={}){
+  const symbol=String(issuance?.symbol||'').toUpperCase();
+  const generatedAt=finite(issuance?.generatedAt,finite(issuance?.asOf,0))||0;
+  const ageMs=generatedAt>0?Math.max(0,Number(now)-generatedAt):null;
+  if(!symbol||!issuance){
+    return freeze({
+      symbol,tier:6,score:6_000_000_000_000,reason:'NO_FORECAST',
+      horizonId:null,targetClass:null,effectiveSampleDeficit:null,
+      effectiveSampleDeficitRatio:null,ageMs,basis:'REFRESH_PRIORITY_ONLY'
+    });
+  }
+
+  let best=null;
+  for(const h of issuance?.forecast?.horizons||[]){
+    const policy=policyForHorizon(h);
+    if(!policy) continue;
+    const priority=coveragePriority(
+      String(h?.calibration?.status||'UNKNOWN').toUpperCase(),
+      String(h?.gate||'UNKNOWN').toUpperCase(),
+      policy.horizonMs,
+      h?.calibration
+    );
+    const row={
+      symbol,tier:priority.tier,score:priority.score,reason:priority.reason,
+      horizonId:policy.id,targetClass:priority.target?.class??null,
+      effectiveSampleDeficit:priority.target?.effectiveSampleDeficit??null,
+      effectiveSampleDeficitRatio:priority.target?.effectiveSampleDeficitRatio??null,
+      ageMs,basis:'REFRESH_PRIORITY_ONLY',horizonMs:policy.horizonMs
+    };
+    if(!best||row.score>best.score||(row.score===best.score&&row.horizonMs>best.horizonMs)) best=row;
+  }
+
+  if(!best){
+    return freeze({
+      symbol,tier:1,score:1_000_000_000_000,reason:'FORECAST_WITHOUT_SUPPORTED_HORIZON',
+      horizonId:null,targetClass:null,effectiveSampleDeficit:null,
+      effectiveSampleDeficitRatio:null,ageMs,basis:'REFRESH_PRIORITY_ONLY'
+    });
+  }
+  const {horizonMs,...out}=best;
+  return freeze(out);
+}
+
 export function prioritizeCoverageCurriculumCandidates(candidates,{limit=1}={}){
   const max=Math.max(1,Math.floor(Number(limit)||1));
   const seen=new Set();
