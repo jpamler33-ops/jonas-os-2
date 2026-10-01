@@ -66,6 +66,15 @@ test('keyless Bluesky public search supplies direct attention without X credenti
   assert.ok(x.seeds.some(s=>s.key==='symbol:BLUE'&&s.platforms.includes('BLUESKY')));
 });
 
+test('single weak cashtag does not contaminate same-symbol radar rows',()=>{
+  const out=applyDirectSocialAttention({rows:[{chainId:'base',tokenAddress:'0xabc',symbol:'CAT'}]},{
+    configured:true,sourceReady:true,capturedAt:10,source:'BLUESKY_PUBLIC_SEARCH',errors:[],
+    seeds:[{type:'CASHTAG',value:'CAT',posts:1,uniqueAuthors:1,engagement:2,maxAuthorFollowers:0,latestAt:9,attentionBand:'SINGLE_POST',platforms:['BLUESKY']}]
+  });
+  assert.equal(out.rows[0].directSocialAttention.posts,0);
+  assert.equal(out.rows[0].directSocialAttention.attentionBand,'NONE');
+});
+
 test('direct social evidence maps to existing radar rows without claiming causality',()=>{
   const out=applyDirectSocialAttention({rows:[{chainId:'solana',tokenAddress:'ABC',symbol:'CATX'}]},{
     configured:true,sourceReady:true,capturedAt:10,source:'X_RECENT_SEARCH',errors:[],
