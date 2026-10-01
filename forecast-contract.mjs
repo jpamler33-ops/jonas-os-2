@@ -55,6 +55,24 @@ function interval(x,name){
   return out;
 }
 function safeArray(v){return Array.isArray(v)?structuredClone(v):[];}
+function calibrationClassAudit(x){
+  if(!x||typeof x!=='object') return null;
+  const idx=Number(x.probabilityBinIndex);
+  return {
+    raw:finiteOrNull(x.raw),
+    calibrated:finiteOrNull(x.calibrated),
+    empirical:finiteOrNull(x.empirical),
+    meanPredicted:finiteOrNull(x.meanPredicted),
+    calibrationGap:finiteOrNull(x.calibrationGap),
+    sampleCount:Number(x.sampleCount??0),
+    effectiveSamples:finiteOrNull(x.effectiveSamples),
+    probabilityBinIndex:Number.isInteger(idx)&&idx>=0?idx:null,
+    probabilityBinLo:finiteOrNull(x.probabilityBinLo),
+    probabilityBinHi:finiteOrNull(x.probabilityBinHi),
+    targetEffectiveSamples:finiteOrNull(x.targetEffectiveSamples),
+    effectiveSampleDeficit:finiteOrNull(x.effectiveSampleDeficit)
+  };
+}
 
 function normalizeHorizon(h,asOf,scienceGate){
   const horizonGate=gate(h?.gate);
@@ -97,7 +115,14 @@ function normalizeHorizon(h,asOf,scienceGate){
       effectiveSamples:finiteOrNull(h?.calibration?.effectiveSamples),
       multiclassBrier:finiteOrNull(h?.calibration?.multiclassBrier),
       logLoss:finiteOrNull(h?.calibration?.logLoss),
-      maxClassGap:finiteOrNull(h?.calibration?.maxClassGap)
+      maxClassGap:finiteOrNull(h?.calibration?.maxClassGap),
+      targetEffectiveSamples:finiteOrNull(h?.calibration?.targetEffectiveSamples),
+      bins:Number.isInteger(Number(h?.calibration?.bins))?Number(h.calibration.bins):null,
+      perClass:{
+        up:calibrationClassAudit(h?.calibration?.perClass?.up),
+        down:calibrationClassAudit(h?.calibration?.perClass?.down),
+        flat:calibrationClassAudit(h?.calibration?.perClass?.flat)
+      }
     },
     reliability:{
       status:String(h?.localReliability?.status??'UNKNOWN'),

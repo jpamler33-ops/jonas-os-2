@@ -9,6 +9,12 @@ function normalize(p) {
     const s = up + down + flat;
     return s <= 1e-12 ? { up: 1 / 3, down: 1 / 3, flat: 1 / 3 } : { up: up / s, down: down / s, flat: flat / s };
 }
+function probabilityBin(raw, bins) {
+    const count = Math.max(3, Math.floor(bins));
+    const p = clamp(raw, 0, 1);
+    const index = Math.min(count - 1, Math.floor(p * count));
+    return { index, lo: index / count, hi: (index + 1) / count };
+}
 function actualDirection(r) {
     return r.actualReturn > r.flatThreshold ? 'UP' : r.actualReturn < -r.flatThreshold ? 'DOWN' : 'FLAT';
 }
@@ -86,8 +92,29 @@ export class ProbabilityCalibrationMemory {
             const legacy = this.calibrate({ symbol: params.symbol, horizonMs: params.horizonMs, regimeId: params.regimeId, rawUp: raw.up, asOf: params.asOf, options: params.options });
             const remain = 1 - legacy.calibratedUp, nonUp = Math.max(1e-12, raw.down + raw.flat);
             const calibrated = normalize({ up: legacy.calibratedUp, down: remain * raw.down / nonUp, flat: remain * raw.flat / nonUp });
-            const empty = (r, c) => ({ raw: r, calibrated: c, empirical: r, meanPredicted: r, calibrationGap: Math.abs(c - r), sampleCount: 0, effectiveSamples: 0 });
-            return { status: legacy.status, method: 'LEGACY_UP_ONLY', raw, calibrated, sampleCount: legacy.sampleCount, effectiveSamples: legacy.effectiveSamples, maxClassGap: legacy.calibrationGap, multiclassBrier: legacy.brierScore, perClass: { up: { raw: raw.up, calibrated: calibrated.up, empirical: legacy.empiricalUp, meanPredicted: raw.up, calibrationGap: legacy.calibrationGap, sampleCount: legacy.sampleCount, effectiveSamples: legacy.effectiveSamples }, down: empty(raw.down, calibrated.down), flat: empty(raw.flat, calibrated.flat) } };
+            const targetEffectiveSamples = Math.max(1, Number(params.options.minCases) || 1);
+            const withBin = (k, row) => {
+                const bin = probabilityBin(raw[k], bins);
+                return { ...row, probabilityBinIndex: bin.index, probabilityBinLo: bin.lo, probabilityBinHi: bin.hi, targetEffectiveSamples, effectiveSampleDeficit: Math.max(0, targetEffectiveSamples - Number(row.effectiveSamples || 0)) };
+            };
+            const empty = (k, r, c) => withBin(k, { raw: r, calibrated: c, empirical: r, meanPredicted: r, calibrationGap: Math.abs(c - r), sampleCount: 0, effectiveSamples: 0 });
+            return {
+                status: legacy.status,
+                method: 'LEGACY_UP_ONLY',
+                raw,
+                calibrated,
+                sampleCount: legacy.sampleCount,
+                effectiveSamples: legacy.effectiveSamples,
+                maxClassGap: legacy.calibrationGap,
+                multiclassBrier: legacy.brierScore,
+                targetEffectiveSamples,
+                bins,
+                perClass: {
+                    up: withBin('up', { raw: raw.up, calibrated: calibrated.up, empirical: legacy.empiricalUp, meanPredicted: raw.up, calibrationGap: legacy.calibrationGap, sampleCount: legacy.sampleCount, effectiveSamples: legacy.effectiveSamples }),
+                    down: empty('down', raw.down, calibrated.down),
+                    flat: empty('flat', raw.flat, calibrated.flat)
+                }
+            };
         }
         const classes = ['up', 'down', 'flat'];
         const ev = {};
@@ -109,7 +136,20 @@ export class ProbabilityCalibrationMemory {
             minEss = Math.min(minEss, ess);
             maxGap = Math.max(maxGap, gap);
             minSelected = Math.min(minSelected, selected.length);
-            ev[k] = { raw: rp, calibrated: c, empirical, meanPredicted: meanPred, calibrationGap: gap, sampleCount: selected.length, effectiveSamples: ess };
+            ev[k] = {
+                raw: rp,
+                calibrated: c,
+                empirical,
+                meanPredicted: meanPred,
+                calibrationGap: gap,
+                sampleCount: selected.length,
+                effectiveSamples: ess,
+                probabilityBinIndex: bin,
+                probabilityBinLo: lo,
+                probabilityBinHi: hi,
+                targetEffectiveSamples: Math.max(1, Number(params.options.minCases) || 1),
+                effectiveSampleDeficit: Math.max(0, Math.max(1, Number(params.options.minCases) || 1) - ess)
+            };
         }
         const calibrated = normalize(adjusted);
         for (const k of classes) {
@@ -123,6 +163,19 @@ export class ProbabilityCalibrationMemory {
         const multiclassBrier = globalRows.length ? weightedMean(briers, gws) : undefined, logLoss = globalRows.length ? weightedMean(logs, gws) : undefined;
         const ess = Number.isFinite(minEss) ? minEss : 0;
         const status = ess < params.options.minCases ? 'INSUFFICIENT' : (maxGap <= .12 && (multiclassBrier ?? 2) <= .75 ? 'CALIBRATED' : 'WATCH');
-        return { status, method: 'TRICLASS_EMPIRICAL', raw, calibrated, sampleCount: Number.isFinite(minSelected) ? minSelected : 0, effectiveSamples: ess, maxClassGap: maxGap, multiclassBrier, logLoss, perClass: { up: ev.up, down: ev.down, flat: ev.flat } };
+        return {
+            status,
+            method: 'TRICLASS_EMPIRICAL',
+            raw,
+            calibrated,
+            sampleCount: Number.isFinite(minSelected) ? minSelected : 0,
+            effectiveSamples: ess,
+            maxClassGap: maxGap,
+            multiclassBrier,
+            logLoss,
+            targetEffectiveSamples: Math.max(1, Number(params.options.minCases) || 1),
+            bins,
+            perClass: { up: ev.up, down: ev.down, flat: ev.flat }
+        };
     }
 }

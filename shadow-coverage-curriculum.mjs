@@ -49,21 +49,78 @@ function slotStart(now,horizonMs){
   return Math.floor(Number(now)/Number(horizonMs))*Number(horizonMs);
 }
 
-function coveragePriority(calibrationStatus,horizonGate,horizonMs){
+function bestEffectiveSampleDeficit(calibration){
+  const topTarget=finite(calibration?.targetEffectiveSamples);
+  if(topTarget==null||topTarget<=0) return null;
+  let best=null;
+  for(const klass of ['up','down','flat']){
+    const row=calibration?.perClass?.[klass];
+    if(!row||typeof row!=='object') continue;
+    const effectiveSamples=finite(row.effectiveSamples);
+    const targetEffectiveSamples=finite(row.targetEffectiveSamples,topTarget);
+    const probability=finite(row.raw);
+    const probabilityBinLo=finite(row.probabilityBinLo);
+    const probabilityBinHi=finite(row.probabilityBinHi);
+    const probabilityBinIndex=Number(row.probabilityBinIndex);
+    if(
+      effectiveSamples==null||
+      targetEffectiveSamples==null||targetEffectiveSamples<=0||
+      probability==null||
+      probabilityBinLo==null||probabilityBinHi==null||
+      !Number.isInteger(probabilityBinIndex)||probabilityBinIndex<0
+    ) continue;
+    const effectiveSampleDeficit=Math.max(0,targetEffectiveSamples-effectiveSamples);
+    const effectiveSampleDeficitRatio=effectiveSampleDeficit/targetEffectiveSamples;
+    const candidate={
+      class:klass.toUpperCase(),
+      probability,
+      probabilityBinIndex,
+      probabilityBinLo,
+      probabilityBinHi,
+      effectiveSamples,
+      targetEffectiveSamples,
+      effectiveSampleDeficit,
+      effectiveSampleDeficitRatio
+    };
+    if(
+      !best||
+      candidate.effectiveSampleDeficitRatio>best.effectiveSampleDeficitRatio||
+      (
+        candidate.effectiveSampleDeficitRatio===best.effectiveSampleDeficitRatio&&
+        candidate.effectiveSampleDeficit>best.effectiveSampleDeficit
+      )||
+      (
+        candidate.effectiveSampleDeficitRatio===best.effectiveSampleDeficitRatio&&
+        candidate.effectiveSampleDeficit===best.effectiveSampleDeficit&&
+        candidate.effectiveSamples<best.effectiveSamples
+      )
+    ) best=candidate;
+  }
+  return best;
+}
+
+function coveragePriority(calibrationStatus,horizonGate,horizonMs,calibrationEvidence=null){
   const calibration=String(calibrationStatus||'UNKNOWN').toUpperCase();
   const gate=String(horizonGate||'UNKNOWN').toUpperCase();
+  const target=bestEffectiveSampleDeficit(calibrationEvidence);
   let tier=0,reason='CALIBRATION_COVERAGE_SUFFICIENT';
-  if(['INSUFFICIENT','UNCALIBRATED','UNKNOWN','COLD_START'].includes(calibration)){
+  if(target&&target.effectiveSampleDeficit>0){
+    tier=5;reason='EFFECTIVE_SAMPLE_DEFICIT';
+  }else if(['INSUFFICIENT','UNCALIBRATED','UNKNOWN','COLD_START'].includes(calibration)){
     tier=4;reason='CALIBRATION_DEFICIT';
   }else if(calibration==='WATCH'){
     tier=3;reason='CALIBRATION_WATCH';
   }else if(calibration==='CALIBRATED'&&['ABSTAIN','INSUFFICIENT'].includes(gate)){
     tier=2;reason='NON_CALIBRATION_BLOCKER_RESEARCH';
   }
+  const deficitScore=target
+    ?Math.round(target.effectiveSampleDeficitRatio*1_000_000_000)+Math.round(target.effectiveSampleDeficit*1_000)
+    :0;
   return {
     tier,
-    score:tier*1_000_000_000+Math.max(0,Number(horizonMs)||0),
-    reason
+    score:tier*1_000_000_000_000+deficitScore+Math.max(0,Number(horizonMs)||0),
+    reason,
+    target
   };
 }
 
@@ -137,7 +194,7 @@ export function deriveCoverageCurriculumCandidates(issuance,{
     const coverageKey='cc_'+sha256(keyCore).slice(0,24);
     if(existing.has(coverageKey)) continue;
 
-    const priority=coveragePriority(calibrationStatus,horizonGate,policy.horizonMs);
+    const priority=coveragePriority(calibrationStatus,horizonGate,policy.horizonMs,h?.calibration);
     if(priority.tier<=0) continue;
 
     const side=sideFor(h,p);
@@ -167,6 +224,15 @@ export function deriveCoverageCurriculumCandidates(issuance,{
       coveragePriorityTier:priority.tier,
       coveragePriorityScore:priority.score,
       coveragePriorityReason:priority.reason,
+      coverageTargetClass:priority.target?.class??null,
+      coverageTargetProbability:priority.target?.probability??null,
+      coverageTargetProbabilityBinIndex:priority.target?.probabilityBinIndex??null,
+      coverageTargetProbabilityBinLo:priority.target?.probabilityBinLo??null,
+      coverageTargetProbabilityBinHi:priority.target?.probabilityBinHi??null,
+      coverageTargetEffectiveSamples:priority.target?.effectiveSamples??null,
+      coverageTargetEffectiveSamplesGoal:priority.target?.targetEffectiveSamples??null,
+      coverageTargetEffectiveSampleDeficit:priority.target?.effectiveSampleDeficit??null,
+      coverageTargetEffectiveSampleDeficitRatio:priority.target?.effectiveSampleDeficitRatio??null,
       assetClass:String(assetClass||'CORE').toUpperCase(),
       dataSafety:safety,
       issuanceId:String(issuance.issuanceId||''),
