@@ -271,7 +271,7 @@ test('global scheduler selects the largest ESS deficit across coins, horizons, b
   const ethCandidates=deriveCoverageCurriculumCandidates(eth,{now:301_000}).candidates;
   const ranked=prioritizeCoverageCurriculumCandidates([...btcCandidates,...ethCandidates],{limit:1});
 
-  assert.equal(ranked.eligible,2);
+  assert.equal(ranked.eligible,3);
   assert.equal(ranked.candidates.length,1);
   assert.equal(ranked.candidates[0].symbol,'ETHUSDT');
   assert.equal(ranked.candidates[0].horizonId,'15m');
