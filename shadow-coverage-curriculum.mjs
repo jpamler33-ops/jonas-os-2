@@ -271,6 +271,41 @@ export function deriveCoverageCurriculumCandidates(issuance,{
   });
 }
 
+export function prioritizeCoverageCurriculumCandidates(candidates,{limit=1}={}){
+  const max=Math.max(1,Math.floor(Number(limit)||1));
+  const seen=new Set();
+  const rows=[];
+  for(const candidate of Array.isArray(candidates)?candidates:[]){
+    if(
+      !candidate||
+      candidate.entryMode!=='COVERAGE_PROBE'||
+      candidate.execution!=='SHADOW_ONLY'||
+      candidate.canExecuteLive!==false
+    ) continue;
+    const key=String(candidate.coverageKey||'');
+    if(!key||seen.has(key)) continue;
+    seen.add(key);
+    rows.push(candidate);
+  }
+  rows.sort((a,b)=>
+    Number(b.coveragePriorityScore||0)-Number(a.coveragePriorityScore||0)||
+    Number(b.coverageTargetEffectiveSampleDeficitRatio||0)-Number(a.coverageTargetEffectiveSampleDeficitRatio||0)||
+    Number(b.coverageTargetEffectiveSampleDeficit||0)-Number(a.coverageTargetEffectiveSampleDeficit||0)||
+    String(a.symbol||'').localeCompare(String(b.symbol||''))||
+    String(a.horizonId||'').localeCompare(String(b.horizonId||''))
+  );
+  return freeze({
+    version:SHADOW_COVERAGE_CURRICULUM_VERSION,
+    candidates:rows.slice(0,max),
+    eligible:rows.length,
+    limit:max,
+    execution:'SHADOW_ONLY',
+    action:'ABSTAIN',
+    canExecuteLive:false,
+    meaning:'GLOBAL_COIN_HORIZON_PROBABILITY_BIN_CLASS_ESS_PRIORITY'
+  });
+}
+
 export function coverageCurriculumSummary(ledger,{symbols=[],horizons=DEFAULT_COVERAGE_HORIZONS}={}){
   const rows=(ledger?.positions||[]).filter(p=>
     String(p?.entryMode||'').toUpperCase()==='COVERAGE_PROBE'&&
