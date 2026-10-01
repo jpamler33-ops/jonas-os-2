@@ -102,7 +102,7 @@ import {
 } from './trade-discovery-diagnostics.mjs';
 import {
   deriveCoverageCurriculumCandidates, coverageCurriculumSummary,
-  prioritizeCoverageCurriculumCandidates,
+  prioritizeCoverageCurriculumCandidates, coverageCurriculumRefreshPriority,
   SHADOW_COVERAGE_CURRICULUM_VERSION, DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
 import {
@@ -9152,7 +9152,40 @@ async function autoLearnForecastWatcher() {
       if(!running) break;
       activeBackgroundResearchJob='autolearn';
       try{
-      for(const symbol of autoLearnSymbols){
+      const sweepPlanNow=Date.now();
+      const autoLearnSweepPlan=autoLearnSymbols.map((symbol,index)=>{
+        const latest=latestInstitutionalForecast(forecastRuntime,symbol);
+        const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
+        const due=!lastAt||sweepPlanNow-lastAt>=autoLearnForecastMs;
+        const coveragePriority=coverageCurriculumRefreshPriority(latest,{now:sweepPlanNow});
+        return {symbol,index,latest,lastAt,due,coveragePriority};
+      });
+      if(coverageCurriculumEnabled){
+        autoLearnSweepPlan.sort((a,b)=>
+          Number(b.due)-Number(a.due)||
+          Number(b.coveragePriority?.score||0)-Number(a.coveragePriority?.score||0)||
+          Number(b.coveragePriority?.ageMs||0)-Number(a.coveragePriority?.ageMs||0)||
+          a.index-b.index
+        );
+        console.log('[TCX_COVERAGE_REFRESH_PLAN]',JSON.stringify({
+          due:autoLearnSweepPlan.filter(x=>x.due).length,
+          total:autoLearnSweepPlan.length,
+          top:autoLearnSweepPlan.filter(x=>x.due).slice(0,5).map(x=>({
+            symbol:x.symbol,
+            reason:x.coveragePriority?.reason||'UNKNOWN',
+            horizonId:x.coveragePriority?.horizonId||null,
+            targetClass:x.coveragePriority?.targetClass||null,
+            effectiveSampleDeficit:x.coveragePriority?.effectiveSampleDeficit??null,
+            effectiveSampleDeficitRatio:x.coveragePriority?.effectiveSampleDeficitRatio??null,
+            ageMs:x.coveragePriority?.ageMs??null
+          })),
+          basis:'REFRESH_PRIORITY_ONLY',
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+      for(const planned of autoLearnSweepPlan){
+        const symbol=planned.symbol;
         if(!running) break;
         if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
         maybeCollectResearchGarbage('AUTOLEARN_PRE_ISSUE',{
@@ -9191,8 +9224,8 @@ async function autoLearnForecastWatcher() {
           break;
         }
         try{
-          const latest=latestInstitutionalForecast(forecastRuntime,symbol);
-          const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
+          const latest=planned.latest;
+          const lastAt=planned.lastAt;
           if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
             skipped++;
             continue;
