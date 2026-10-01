@@ -234,10 +234,10 @@ test("evidence WAL replays durable upserts over the compressed snapshot",async()
     closedAt:2000
   };
   const eth=createEvidenceRecord("ETHUSDT",ctx({capturedAt:2000}),null);
-  const appended=await appendEvidenceHistoryWal(file,[revised,eth],{walPath});
+  const appended=await appendEvidenceHistoryWal(file,[revised,eth],{walPath:wal});
   assert.equal(appended.appended,2);
 
-  const loaded=await loadEvidenceHistory(file,{walPath,maxPerSymbol:2000});
+  const loaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
   assert.equal(loaded.records.length,2);
   assert.equal(loaded.walRecords,2);
   assert.equal(loaded.records.find(x=>x.symbol==="BTCUSDT").closedAt,2000);
@@ -250,9 +250,9 @@ test("evidence WAL can recover records when no snapshot exists yet",async()=>{
   const file=path.join(dir,"history.json");
   const wal=evidenceHistoryWalPath(file);
   const one=createEvidenceRecord("BTCUSDT",ctx({capturedAt:3000}),null);
-  await appendEvidenceHistoryWal(file,[one],{walPath});
+  await appendEvidenceHistoryWal(file,[one],{walPath:wal});
 
-  const loaded=await loadEvidenceHistory(file,{walPath,maxPerSymbol:2000});
+  const loaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
   assert.equal(loaded.storageEncoding,null);
   assert.equal(loaded.records.length,1);
   assert.equal(loaded.records[0].fingerprint,one.fingerprint);
@@ -263,18 +263,18 @@ test("snapshot compaction preserves WAL evidence then clears the WAL",async()=>{
   const file=path.join(dir,"history.json");
   const wal=evidenceHistoryWalPath(file);
   const one=createEvidenceRecord("BTCUSDT",ctx({capturedAt:4000}),null);
-  await appendEvidenceHistoryWal(file,[one],{walPath});
-  const loaded=await loadEvidenceHistory(file,{walPath,maxPerSymbol:2000});
+  await appendEvidenceHistoryWal(file,[one],{walPath:wal});
+  const loaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
 
   const compacted=await compactEvidenceHistory(file,loaded.records,{
-    walPath,
+    walPath:wal,
     maxPerSymbol:2000,
     reuseCanonicalRecords:true
   });
   assert.equal(compacted.length,1);
   await assert.rejects(readFile(wal),err=>err?.code==="ENOENT");
 
-  const reloaded=await loadEvidenceHistory(file,{walPath,maxPerSymbol:2000});
+  const reloaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
   assert.equal(reloaded.records.length,1);
   assert.equal(reloaded.walRecords,0);
   assert.equal(reloaded.records[0].fingerprint,one.fingerprint);
