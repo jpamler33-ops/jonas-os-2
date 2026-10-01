@@ -59,9 +59,11 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   const now=2_000_000;
   const snap={sourceReady:true,rows:[
     {chainId:'solana',tokenAddress:'GOOD',symbol:'GOOD',priceUsd:.01,liquidityUsd:30_000,pairCreatedAt:now-10_000,
-      score:{stage:'NEW_NOW',researchPriorityScore:.72,attentionSignals:['NEW_PROFILE'],riskFlags:['ULTRA_NEW_PAIR']}},
+      score:{stage:'NEW_NOW',researchPriorityScore:.72,attentionSignals:['NEW_PROFILE'],riskFlags:['ULTRA_NEW_PAIR']},
+      security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true}}},
     {chainId:'solana',tokenAddress:'BAD',symbol:'BAD',priceUsd:.01,liquidityUsd:900,pairCreatedAt:now-10_000,
-      score:{stage:'RISK_ONLY',researchPriorityScore:.80,attentionSignals:['NEW_BOOST'],riskFlags:['LIQUIDITY_EXTREME_THIN']}}
+      score:{stage:'RISK_ONLY',researchPriorityScore:.80,attentionSignals:['NEW_BOOST'],riskFlags:['LIQUIDITY_EXTREME_THIN']},
+      security:{evidenceGate:'ABSTAIN',criticalRiskFlags:['HONEYPOT_FLAGGED'],warningFlags:[]}}
   ]};
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),snap,{now,minLiquidityUsd:10_000,minScore:.58});
   assert.equal(x.results.opened,1);
@@ -73,15 +75,40 @@ test('wallet 4 marks and closes a take-profit research episode from later public
   const now=2_000_000;
   let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'GOOD',symbol:'GOOD',priceUsd:1,liquidityUsd:30_000,
-    score:{stage:'NEW_NOW',researchPriorityScore:.72,attentionSignals:[],riskFlags:[]}
+    score:{stage:'NEW_NOW',researchPriorityScore:.72,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
   }]},{now}).state;
   const next=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'GOOD',symbol:'GOOD',priceUsd:2.6,liquidityUsd:40_000,
-    score:{stage:'EARLY',researchPriorityScore:.70,attentionSignals:[],riskFlags:[]}
+    score:{stage:'EARLY',researchPriorityScore:.70,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
   }]},{now:now+60_000,takeReturn:1.5});
   assert.equal(next.results.closed,1);
   assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
   assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].closed[0].closeReason,'MEME_TAKE_PROFIT');
+});
+
+test('wallet 4 refuses unknown security and exits when later evidence becomes critical',()=>{
+  const now=3_000_000;
+  const unknown=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'base',tokenAddress:'X',symbol:'X',priceUsd:1,liquidityUsd:40_000,
+    score:{stage:'NEW_NOW',researchPriorityScore:.80,attentionSignals:['X_POSTS_RECENT'],riskFlags:[]},
+    security:{evidenceGate:'UNKNOWN',criticalRiskFlags:[],warningFlags:['SECURITY_SOURCE_UNAVAILABLE']}
+  }]},{now});
+  assert.equal(unknown.results.opened,0);
+
+  let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'base',tokenAddress:'Y',symbol:'Y',priceUsd:1,liquidityUsd:40_000,
+    score:{stage:'NEW_NOW',researchPriorityScore:.80,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now}).state;
+  const closed=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
+    chainId:'base',tokenAddress:'Y',symbol:'Y',priceUsd:.95,liquidityUsd:35_000,
+    score:{stage:'EARLY',researchPriorityScore:.70,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'ABSTAIN',criticalRiskFlags:['HONEYPOT_FLAGGED'],warningFlags:[]}
+  }]},{now:now+60_000});
+  assert.equal(closed.results.closed,1);
+  assert.equal(closed.state.wallets[WALLET_4_MEME_SCOUT].closed[0].closeReason,'MEME_SECURITY_ABSTAIN');
 });
 
 test('summary keeps specialist wallets isolated and shadow-only',()=>{
