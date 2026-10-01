@@ -192,3 +192,46 @@ test('coverage curriculum fails closed instead of placing unlearnable probes',()
   assert.equal(out.candidates.some(c=>c.horizonId==='5m'),false);
   assert.ok(out.missingCalibrationMetadata>=1);
 });
+
+
+test('ESS-targeted curriculum prioritizes the largest class probability-bin deficit',()=>{
+  const x=issuance();
+  const five=x.forecast.horizons.find(h=>h.horizonId==='5m');
+  five.gate='ABSTAIN';
+  five.calibration={
+    status:'INSUFFICIENT',method:'TRICLASS_EMPIRICAL',
+    sampleCount:12,effectiveSamples:2,targetEffectiveSamples:40,bins:10,
+    perClass:{
+      up:{raw:.58,effectiveSamples:5,targetEffectiveSamples:40,probabilityBinIndex:5,probabilityBinLo:.5,probabilityBinHi:.6},
+      down:{raw:.30,effectiveSamples:2,targetEffectiveSamples:40,probabilityBinIndex:3,probabilityBinLo:.3,probabilityBinHi:.4},
+      flat:{raw:.12,effectiveSamples:39,targetEffectiveSamples:40,probabilityBinIndex:1,probabilityBinLo:.1,probabilityBinHi:.2}
+    }
+  };
+  const three=x.forecast.horizons.find(h=>h.horizonId==='3h');
+  three.gate='ABSTAIN';
+  three.calibration={
+    status:'INSUFFICIENT',method:'TRICLASS_EMPIRICAL',
+    sampleCount:35,effectiveSamples:30,targetEffectiveSamples:40,bins:10,
+    perClass:{
+      up:{raw:.29,effectiveSamples:30,targetEffectiveSamples:40,probabilityBinIndex:2,probabilityBinLo:.2,probabilityBinHi:.3},
+      down:{raw:.59,effectiveSamples:31,targetEffectiveSamples:40,probabilityBinIndex:5,probabilityBinLo:.5,probabilityBinHi:.6},
+      flat:{raw:.12,effectiveSamples:32,targetEffectiveSamples:40,probabilityBinIndex:1,probabilityBinLo:.1,probabilityBinHi:.2}
+    }
+  };
+
+  const out=deriveCoverageCurriculumCandidates(x,{now:301_000});
+  assert.equal(out.candidates[0].horizonId,'5m');
+  assert.equal(out.candidates[0].coveragePriorityReason,'EFFECTIVE_SAMPLE_DEFICIT');
+  assert.equal(out.candidates[0].coverageTargetClass,'DOWN');
+  assert.equal(out.candidates[0].coverageTargetProbabilityBinIndex,3);
+  assert.equal(out.candidates[0].coverageTargetProbabilityBinLo,.3);
+  assert.equal(out.candidates[0].coverageTargetProbabilityBinHi,.4);
+  assert.equal(out.candidates[0].coverageTargetEffectiveSamples,2);
+  assert.equal(out.candidates[0].coverageTargetEffectiveSamplesGoal,40);
+  assert.equal(out.candidates[0].coverageTargetEffectiveSampleDeficit,38);
+  assert.equal(out.candidates[0].coverageTargetEffectiveSampleDeficitRatio,.95);
+  // Trade direction remains the forecast direction; the matured price outcome
+  // labels all three calibration classes, including the targeted DOWN bin.
+  assert.equal(out.candidates[0].side,'BUY');
+  assert.ok(out.candidates[0].coveragePriorityScore>out.candidates.find(c=>c.horizonId==='3h').coveragePriorityScore);
+});
