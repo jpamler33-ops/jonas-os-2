@@ -36,6 +36,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-trade-quality-learner.mjs',
   'mandatory-shadow-discovery.mjs',
   'shadow-coverage-curriculum.mjs',
+  'coverage-issuance-pool.mjs',
   'learned-challenger-engine.mjs',
   'shadow-regime-brain.mjs',
   'adversarial-stress-lab.mjs',

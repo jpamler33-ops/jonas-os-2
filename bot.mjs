@@ -41,7 +41,7 @@ import { deriveChartDashboard } from './dashboard-state.mjs';
 import { loadEpisodeMemory, saveEpisodeMemory, createEpisode, shouldSampleEpisode, episodeVector, findSimilarEpisodes, summarizeSimilar, matureEpisode } from './episode-memory.mjs';
 import { runMechanismTransitionEngine } from './mechanism-transition-engine.mjs';
 import { fetchIndependentWitnesses, okxInstrument, krakenPair } from './independent-witness-network.mjs';
-import { openAuditLedger, appendAuditRecord, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
+import { openAuditLedger, appendAuditRecord, findAuditRecordIdentity, auditMarketSnapshot, auditWitnessReport, auditEngineResult, determineSafetyState, buildResearchEnvelope, replayEnvelopeIntegrity, ledgerTailSummary, sha256, INSTITUTIONAL_KERNEL_VERSION } from './institutional-kernel.mjs';
 import { rotateVerifiedAuditLedger, verifyAuditLedgerArchive, AUDIT_LEDGER_ROTATION_VERSION } from './audit-ledger-rotation.mjs';
 import { openMarketDataFabric, appendMarketEvents, createMarketEventInput, verifyMarketEventChain, marketFabricSummary, MARKET_DATA_FABRIC_VERSION } from './market-data-fabric.mjs';
 import { reconstructInstitutionalState, replaySummary, DETERMINISTIC_REPLAY_VERSION } from './deterministic-replay.mjs';
@@ -105,6 +105,10 @@ import {
   prioritizeCoverageCurriculumCandidates,
   SHADOW_COVERAGE_CURRICULUM_VERSION, DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
+import {
+  createCoverageIssuancePool, rememberCoverageIssuance, coverageIssuancePoolItems,
+  COVERAGE_ISSUANCE_POOL_VERSION
+} from './coverage-issuance-pool.mjs';
 import {
   buildLearnedChallengerLab, deriveLearnedChallengerTrades, learnedChallengerSummary,
   LEARNED_CHALLENGER_ENGINE_VERSION
@@ -544,6 +548,10 @@ const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
 const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || requestedSymbols.join(','))
   .split(',').map(x=>x.trim().toUpperCase()).filter(x=>requestedSymbols.includes(x));
+const coverageIssuancePool=createCoverageIssuancePool({
+  maxAgeMs:10*60_000,
+  maxEntries:Math.max(32,autoLearnSymbols.length*2)
+});
 const biggjWorldModelRefreshMs=Math.max(60_000,Number(process.env.TCX_BIGGJ_WORLD_MODEL_REFRESH_MS||300_000));
 const biggjWorldModelMaxSymbols=Math.max(3,Math.min(requestedSymbols.length,Number(process.env.TCX_BIGGJ_WORLD_MODEL_MAX_SYMBOLS||12)));
 const MEMECOIN_CEX_SYMBOLS=new Set(
@@ -9140,7 +9148,8 @@ async function autoLearnForecastWatcher() {
     let issued=0,skipped=0,failed=0,deferred=0;
     let memoryPressure=false;
     let transientPostIssuePressure=false;
-    const coverageSweepItems=[];
+    const coverageSweepIssued=[];
+    let coveragePoolItems=[];
     let coverageSweepRun=null;
     const researchAcceleration=currentResearchAccelerator(Date.now());
     const effectiveAutoLearnMaxIssuedPerSweep=Math.max(
@@ -9155,6 +9164,26 @@ async function autoLearnForecastWatcher() {
       for(const symbol of autoLearnSymbols){
         if(!running) break;
         if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
+        const latest=latestInstitutionalForecast(forecastRuntime,symbol);
+        const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
+        if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
+          const auditBound=Boolean(
+            auditLedger.healthy&&
+            latest?.issuanceId&&
+            findAuditRecordIdentity(auditLedger,{
+              kind:'TCX_INSTITUTIONAL_FORECAST_ISSUED',
+              idField:'issuanceId',
+              id:latest.issuanceId
+            })
+          );
+          rememberCoverageIssuance(coverageIssuancePool,{
+            issuance:latest,
+            auditHealthy:auditBound,
+            now:Date.now()
+          });
+          skipped++;
+          continue;
+        }
         maybeCollectResearchGarbage('AUTOLEARN_PRE_ISSUE',{
           triggerHeapMb:autoLearnResumeHeapMb,
           cooldownBypassOverageMb:30
@@ -9191,12 +9220,6 @@ async function autoLearnForecastWatcher() {
           break;
         }
         try{
-          const latest=latestInstitutionalForecast(forecastRuntime,symbol);
-          const lastAt=Math.max(Number(latest?.generatedAt||0),Number(latest?.asOf||0));
-          if(lastAt&&Date.now()-lastAt<autoLearnForecastMs){
-            skipped++;
-            continue;
-          }
           const result=await showForecast(null,symbol,null,{
             silent:true,
             source:'TCX_AUTOLEARN_V1',
@@ -9204,7 +9227,12 @@ async function autoLearnForecastWatcher() {
           });
           if(result?.ok){
             issued++;
-            coverageSweepItems.push({
+            rememberCoverageIssuance(coverageIssuancePool,{
+              issuance:result.issuance,
+              auditHealthy:result.auditHealthy===true,
+              now:Date.now()
+            });
+            coverageSweepIssued.push({
               issuance:result.issuance,
               auditHealthy:result.auditHealthy===true
             });
@@ -9310,11 +9338,14 @@ async function autoLearnForecastWatcher() {
         }
         await sleep(autoLearnInterIssueMs);
       }
-      if(coverageSweepItems.length){
+      coveragePoolItems=coverageIssuancePoolItems(coverageIssuancePool,{now:Date.now()});
+      if(coveragePoolItems.length){
         try{
-          coverageSweepRun=await maybePlaceCoverageCurriculumSweep(coverageSweepItems);
+          coverageSweepRun=await maybePlaceCoverageCurriculumSweep(coveragePoolItems);
           console.log('[TCX_COVERAGE_GLOBAL_ESS_SWEEP]',JSON.stringify({
-            issuances:coverageSweepItems.length,
+            freshIssuances:coverageSweepIssued.length,
+            pooledIssuances:coveragePoolItems.length,
+            poolVersion:COVERAGE_ISSUANCE_POOL_VERSION,
             eligible:Number(coverageSweepRun?.eligible||0),
             placed:Number(coverageSweepRun?.placed||0),
             reason:coverageSweepRun?.reason||null,
@@ -9355,6 +9386,8 @@ async function autoLearnForecastWatcher() {
         acceleratorMode:researchAcceleration.resource.mode,
         acceleratorPressure:researchAcceleration.resource.pressure,
         interIssueMs:autoLearnInterIssueMs,
+        coverageFreshIssuances:coverageSweepIssued.length,
+        coveragePooledIssuances:coveragePoolItems.length,
         coverageGlobalEligible:Number(coverageSweepRun?.eligible||0),
         coverageGlobalPlaced:Number(coverageSweepRun?.placed||0),
         coverageGlobalReason:coverageSweepRun?.reason||null,
