@@ -9148,6 +9148,7 @@ async function autoLearnForecastWatcher() {
     let issued=0,skipped=0,failed=0,deferred=0;
     let memoryPressure=false;
     let transientPostIssuePressure=false;
+    let postIssueGcAttempts=0,postIssueGcRescues=0,postIssueGcReclaimedMb=0;
     const coverageSweepIssued=[];
     let coveragePoolItems=[];
     let coverageSweepRun=null;
@@ -9301,12 +9302,11 @@ async function autoLearnForecastWatcher() {
           console.error('autolearn forecast error',symbol,msg,err instanceof Error?err.stack:'');
         }
         if(issued>0){
-          const postMemory=process.memoryUsage();
-          const postAdmission=evaluateAutoLearnMemoryAdmission({
-            phase:'ISSUE',
-            heapUsedMb:Math.round(postMemory.heapUsed/1024/1024),
-            rssMb:Math.round(postMemory.rss/1024/1024),
-            externalMb:Math.round(postMemory.external/1024/1024),
+          const admissionFor=(memory,phase='ISSUE')=>evaluateAutoLearnMemoryAdmission({
+            phase,
+            heapUsedMb:Math.round(memory.heapUsed/1024/1024),
+            rssMb:Math.round(memory.rss/1024/1024),
+            externalMb:Math.round(memory.external/1024/1024),
             issueHeapMb:autoLearnHeapHeadroomMb,
             issueRssMb:autoLearnRssHeadroomMb,
             issueExternalMb:autoLearnExternalHeadroomMb,
@@ -9314,26 +9314,66 @@ async function autoLearnForecastWatcher() {
             resumeRssMb:autoLearnResumeRssMb,
             resumeExternalMb:autoLearnResumeExternalMb
           });
+          let postAdmission=admissionFor(process.memoryUsage());
           if(!postAdmission.allowed){
-            deferred++;
             const heapOnlyPressure=
-              issued>0&&
               Array.isArray(postAdmission.exceeded)&&
               postAdmission.exceeded.length>0&&
               postAdmission.exceeded.every(x=>String(x)==='HEAP');
+
+            // Most post-issuance heap spikes are short-lived allocations from
+            // evidence/thesis serialization. Before sacrificing the rest of the
+            // sweep, run one bounded GC rescue and re-check the exact same
+            // admission gate. This does not raise any safety limit.
             if(heapOnlyPressure){
-              transientPostIssuePressure=true;
-            }else{
-              memoryPressure=true;
+              postIssueGcAttempts++;
+              const gc=maybeCollectResearchGarbage('AUTOLEARN_POST_ISSUE_RESCUE',{
+                triggerHeapMb:Math.max(240,autoLearnHeapHeadroomMb-20),
+                cooldownBypassOverageMb:10
+              });
+              postIssueGcReclaimedMb+=Number(gc?.reclaimedHeapMb||0);
+              const rescuedAdmission=admissionFor(process.memoryUsage());
+              if(rescuedAdmission.allowed){
+                postIssueGcRescues++;
+                console.log('autolearn post-issuance heap rescued',JSON.stringify({
+                  symbol,
+                  reclaimedHeapMb:Number(gc?.reclaimedHeapMb||0),
+                  gcExecuted:gc?.executed===true,
+                  cooldownBypassed:gc?.decision?.cooldownBypassed===true,
+                  before:postAdmission.memory,
+                  after:rescuedAdmission.memory,
+                  threshold:rescuedAdmission.limits,
+                  execution:'SHADOW_ONLY',
+                  canExecuteLive:false
+                }));
+                postAdmission=rescuedAdmission;
+              }else{
+                postAdmission=rescuedAdmission;
+              }
             }
-            console.warn('autolearn post-issuance memory pressure',JSON.stringify({
-              symbol,
-              transientPostIssuePressure:heapOnlyPressure,
-              ...postAdmission.memory,
-              exceeded:postAdmission.exceeded,
-              threshold:postAdmission.limits
-            }));
-            break;
+
+            if(!postAdmission.allowed){
+              deferred++;
+              const stillHeapOnly=
+                Array.isArray(postAdmission.exceeded)&&
+                postAdmission.exceeded.length>0&&
+                postAdmission.exceeded.every(x=>String(x)==='HEAP');
+              if(stillHeapOnly){
+                transientPostIssuePressure=true;
+              }else{
+                memoryPressure=true;
+              }
+              console.warn('autolearn post-issuance memory pressure',JSON.stringify({
+                symbol,
+                transientPostIssuePressure:stillHeapOnly,
+                ...postAdmission.memory,
+                exceeded:postAdmission.exceeded,
+                threshold:postAdmission.limits,
+                gcAttempted:heapOnlyPressure,
+                postIssueGcRescues
+              }));
+              break;
+            }
           }
         }
         await sleep(autoLearnInterIssueMs);
@@ -9386,6 +9426,9 @@ async function autoLearnForecastWatcher() {
         acceleratorMode:researchAcceleration.resource.mode,
         acceleratorPressure:researchAcceleration.resource.pressure,
         interIssueMs:autoLearnInterIssueMs,
+        postIssueGcAttempts,
+        postIssueGcRescues,
+        postIssueGcReclaimedMb,
         coverageFreshIssuances:coverageSweepIssued.length,
         coveragePooledIssuances:coveragePoolItems.length,
         coverageGlobalEligible:Number(coverageSweepRun?.eligible||0),
