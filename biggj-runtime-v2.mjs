@@ -54,10 +54,22 @@ http.createServer=(...args)=>{
       }
     }
     if(path==='/mission-control'){
-      const chunks=[];const end=res.end.bind(res);const write=res.write.bind(res);let statusArgs=null;
-      res.write=(chunk,...rest)=>{chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(String(chunk)));return true;};
-      res.end=(chunk,...rest)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(String(chunk)));const body=Buffer.concat(chunks).toString('utf8');const next=injectSuperChart(body);res.setHeader?.('content-length',Buffer.byteLength(next));return end(next,...rest);};
-      return listener(req,res);
+      const chunks=[];
+      const end=res.end.bind(res);
+      const write=res.write.bind(res);
+      const writeHead=res.writeHead.bind(res);
+      res.writeHead=(...headArgs)=>{writeHead(...headArgs);return res;};
+      res.write=(chunk,...rest)=>{if(chunk!==undefined&&chunk!==null)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(String(chunk)));return true;};
+      res.end=(chunk,...rest)=>{
+        if(chunk!==undefined&&chunk!==null)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(String(chunk)));
+        const body=Buffer.concat(chunks).toString('utf8');
+        const contentType=String(res.getHeader?.('content-type')||'');
+        const next=contentType.includes('text/html')||body.includes('/superchart.png')?injectSuperChart(body):body;
+        if(!res.headersSent)res.setHeader?.('content-length',Buffer.byteLength(next));
+        else res.removeHeader?.('content-length');
+        return end(next,...rest);
+      };
+      try{return await listener(req,res);}catch(err){res.write=write;res.end=end;throw err;}
     }
     return listener(req,res);
   }:undefined;
