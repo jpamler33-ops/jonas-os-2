@@ -4,7 +4,9 @@ import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobil
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION } from './biggj-public-trader-watch.mjs';
-import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
+import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, scoreEarlyMemecoin, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
+import { createMemecoinSecurityProvider, MEMECOIN_SECURITY_PROVIDER_VERSION } from './expansion-runtime/memecoin-security-provider.mjs';
+import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
 import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
 import { buildNewsResearchSnapshots, filterPreviouslyObservedNewsSnapshots, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
@@ -651,6 +653,20 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   geckoCacheMs:Math.max(45_000,Math.min(180_000,Number(process.env.TCX_MEMECOIN_GECKO_CACHE_MS||60_000))),
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
+});
+const memecoinSecurityChecksPerCycle=Math.max(2,Math.min(12,Number(process.env.TCX_MEME_SECURITY_CHECKS_PER_CYCLE||8)));
+const memecoinSecurityProvider=createMemecoinSecurityProvider({
+  fetchImpl:globalThis.fetch,
+  accessToken:String(process.env.TCX_GOPLUS_ACCESS_TOKEN||'').trim(),
+  timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_MEME_SECURITY_TIMEOUT_MS||7000))),
+  cacheMs:Math.max(60_000,Math.min(30*60_000,Number(process.env.TCX_MEME_SECURITY_CACHE_MS||5*60_000))),
+  minRequestGapMs:Math.max(2000,Number(process.env.TCX_MEME_SECURITY_REQUEST_GAP_MS||2100))
+});
+const memecoinSocialProvider=createMemecoinSocialAttentionProvider({
+  fetchImpl:globalThis.fetch,
+  bearerToken:String(process.env.TCX_X_BEARER_TOKEN||'').trim(),
+  timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_X_MEME_TIMEOUT_MS||7000))),
+  cacheMs:Math.max(30_000,Math.min(5*60_000,Number(process.env.TCX_X_MEME_CACHE_MS||60_000)))
 });
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
@@ -4554,6 +4570,9 @@ let memecoinExperienceLastError=null;
 let memecoinEarlySnapshot=null;
 let memecoinEarlyLastError=null;
 let memecoinEarlyLastRefreshAt=null;
+let memecoinSocialSnapshot=null;
+let memecoinSocialLastError=null;
+let memecoinSecurityLastError=null;
 let traderWatchExperienceSnapshot=null;
 let traderWatchExperienceLastError=null;
 let traderWatchExperienceLastRefreshAt=null;
