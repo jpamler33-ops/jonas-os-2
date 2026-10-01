@@ -27,4 +27,3 @@ jobs:
         run: |
           docker build --tag tcx-institutional-ci .
           docker run --rm --entrypoint node tcx-institutional-ci --input-type=module -e "import { access } from 'node:fs/promises'; import { institutionalRuntimeFiles } from './runtime-release-registry.mjs'; const missing=[]; for (const f of institutionalRuntimeFiles()) { try { await access('/app/'+f); } catch { missing.push(f); } } if (missing.length) { console.error('Missing runtime files in image:', missing); process.exit(1); } console.log('Runtime packaging closure OK:', institutionalRuntimeFiles().length);"
-
