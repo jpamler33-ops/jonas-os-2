@@ -133,13 +133,13 @@ test('measurable progress resets stagnation without losing queue age',()=>{
   assert.ok(second.tasks[0].leverage.queueAge>0);
 });
 
-test('eight no-progress source cycles mark research as stalled',()=>{
+test('stagnation requires both repeated no-progress cycles and a meaningful elapsed time',()=>{
   const t0=1_800_000_000_000;
   let memory={};
   let out=null;
   for(let i=0;i<9;i++){
     out=rankBiggjResearchTasks([task({taskId:'stuck',subject:'stuck'})],{
-      asOf:t0+i*60_000,
+      asOf:t0+i*5*60_000,
       taskMemory:memory
     });
     memory=out.taskMemory;
@@ -147,6 +147,34 @@ test('eight no-progress source cycles mark research as stalled',()=>{
   assert.equal(out.tasks[0].stalled,true);
   assert.equal(out.summary.stalledTaskCount,1);
   assert.ok(out.tasks[0].stagnantCycles>=8);
+  assert.ok(out.tasks[0].noProgressMs>=30*60_000);
+});
+
+test('passive PIT collection is waiting for data rather than stalled while global PIT flow is fresh',()=>{
+  const t0=1_800_000_000_000;
+  let memory={};
+  let out=null;
+  for(let i=0;i<20;i++){
+    out=rankBiggjResearchTasks([
+      task({
+        taskId:'pit-wait',
+        subject:'pit-wait',
+        type:'CONTINUE_SHADOW_MEASUREMENT',
+        dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+        autoHandler:'SHADOW_COMPETITION_WORKER'
+      })
+    ],{
+      asOf:t0+i*5*60_000,
+      taskMemory:memory,
+      historyStats:{rows:100,progressAt:t0},
+      researchDataPlaneSummary:{seq:500}
+    });
+    memory=out.taskMemory;
+  }
+  assert.equal(out.tasks[0].waitingForData,true);
+  assert.equal(out.tasks[0].stalled,false);
+  assert.equal(out.summary.stalledTaskCount,0);
+  assert.equal(out.summary.waitingForDataTaskCount,1);
 });
 
 test('manual review remains ahead of automatic research regardless of leverage score',()=>{
