@@ -6,6 +6,8 @@ test('autolearn global ESS sweep retains recent audit-bound issuances across cyc
   const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.match(source,/deferCoverageToSweep:true/);
   assert.match(source,/rememberCoverageIssuance\(coverageIssuancePool/);
+  assert.match(source,/findAuditRecordIdentity\(auditLedger/);
+  assert.match(source,/TCX_INSTITUTIONAL_FORECAST_ISSUED/);
   assert.match(source,/coverageIssuancePoolItems\(coverageIssuancePool/);
   assert.match(source,/maybePlaceCoverageCurriculumSweep\(coveragePoolItems\)/);
   assert.match(source,/scope:'GLOBAL_ESS_SWEEP'/);
