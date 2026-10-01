@@ -9170,9 +9170,16 @@ async function autoLearnForecastWatcher() {
       // not stale garbage left by the previous background job. GC remains
       // bounded/rate-limited and the accelerator can still only reduce the
       // configured maximum.
+      const autoLearnBudgetGcTriggerMb=Math.max(
+        240,
+        Math.floor(autoLearnHeapHeadroomMb*0.80)
+      );
       budgetGc=maybeCollectResearchGarbage('AUTOLEARN_BUDGET_PRECHECK',{
-        triggerHeapMb:autoLearnResumeHeapMb,
-        cooldownBypassOverageMb:15
+        // Align GC with the planner's CAUTIOUS boundary (~82% of issue
+        // headroom). Otherwise collectible heap in the 312-339 MB band can
+        // reduce a sweep to one forecast before GC is even attempted.
+        triggerHeapMb:autoLearnBudgetGcTriggerMb,
+        cooldownBypassOverageMb:10
       });
       researchAcceleration=currentResearchAccelerator(Date.now());
       effectiveAutoLearnMaxIssuedPerSweep=Math.max(
