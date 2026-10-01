@@ -61,6 +61,14 @@ test('market monitor uses the advanced first-party SuperChart',()=>{
   assert.match(html,/data-chart-symbol/);
   assert.match(html,/data-chart-interval/);
   assert.match(html,/data-chart-mode/);
+  assert.match(html,/data-chart-fullscreen/);
+  assert.match(html,/chartShell\.fullscreen/);
+  assert.match(html,/fullscreen:false/);
+  assert.match(html,/CHART\.fullscreen=!CHART\.fullscreen/);
+  assert.match(html,/TAB==='markets'&&CHART\.fullscreen/);
+  assert.match(html,/chartQuick/);
+  assert.match(html,/marketInsight/);
+  assert.match(html,/beobachtet ≠ garantiert/);
   assert.match(html,/\['PRO','FULL'\]/);
   assert.match(html,/30000/);
 });
@@ -70,6 +78,8 @@ test('progress view exposes measurable evidence and learning state',()=>{
   assert.match(html,/Scoreboard/);
   assert.match(html,/Learning Timeline/);
   assert.match(html,/Nächster Hebel/);
+  assert.match(html,/progressRing/);
+  assert.match(html,/BIGGJ WIRD <span class="cyan">BELASTBARER/);
   assert.match(html,/validationIndependentEpisodes/);
   assert.match(html,/maturityIndex/);
 });

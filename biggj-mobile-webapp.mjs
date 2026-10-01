@@ -127,7 +127,13 @@ button{font:inherit;color:inherit}
 .chartViewport{position:relative;aspect-ratio:1.46/1;background:#070a0f;display:grid;place-items:center;overflow:hidden}
 .chartViewport img{width:100%;height:100%;object-fit:contain;display:block}.chartLoading{position:absolute;inset:0;display:none;place-items:center;background:rgba(5,7,10,.42);backdrop-filter:blur(2px);font-size:10px;color:var(--soft);font-weight:800}.chartViewport.loading .chartLoading{display:grid}
 .chartError{display:none;padding:9px 12px;border-top:1px solid rgba(255,125,138,.16);background:rgba(255,125,138,.05);font-size:9px;color:#ffb0b8}.chartError.show{display:block}
+.chartTools{display:flex;align-items:center;gap:7px}.chartToolBtn{width:34px;height:34px;border:1px solid var(--line2);border-radius:11px;background:#0b111a;display:grid;place-items:center;padding:0}.chartToolBtn svg{width:16px;height:16px;stroke:var(--soft);fill:none}
+.chartQuick{display:flex;gap:5px;padding:8px 10px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;background:#090e15}.chartQuick::-webkit-scrollbar{display:none}.chartQuick button{flex:0 0 auto;border:1px solid var(--line);background:#0c121b;border-radius:9px;padding:7px 10px;font-size:8px;font-weight:850;color:#718096}.chartQuick button.active{color:var(--cyan);border-color:rgba(94,242,214,.34);background:rgba(94,242,214,.07)}
+.chartShell.fullscreen{position:fixed;z-index:200;inset:0;border:0;border-radius:0;background:#05070a;display:flex;flex-direction:column}.chartShell.fullscreen .chartTop{padding-top:calc(10px + env(safe-area-inset-top))}.chartShell.fullscreen .chartViewport{flex:1;aspect-ratio:auto;min-height:0}.chartShell.fullscreen .chartViewport img{object-fit:contain}.chartShell.fullscreen .chartError{flex:0 0 auto}
+body.chartFullscreen{overflow:hidden}.chartFullscreen .topbar,.chartFullscreen .bottomNav,.chartFullscreen .refreshError{display:none}
+.marketInsight{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}.insightCell{border:1px solid var(--line);border-radius:12px;background:#0a1018;padding:9px;min-width:0}.insightLabel{font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:#647387;font-weight:800}.insightValue{font-size:12px;font-weight:850;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .progressTrack{height:8px;border-radius:999px;background:#16202d;overflow:hidden;margin-top:10px}.progressTrack i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+.progressHero{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center}.progressRing{--p:0;width:104px;height:104px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--cyan) calc(var(--p)*1%),#172130 0);position:relative;box-shadow:0 0 38px rgba(94,242,214,.08)}.progressRing:before{content:"";position:absolute;inset:9px;border-radius:50%;background:#0b1018;border:1px solid var(--line)}.progressRing strong{position:relative;font-size:25px;letter-spacing:-.04em}.progressRing span{position:absolute;top:63px;font-size:7px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;font-weight:800}
 .timeline{position:relative;padding-left:23px}.timeline:before{content:"";position:absolute;left:13px;top:15px;bottom:15px;width:1px;background:#26364a}.timelineItem{position:relative;padding:0 0 14px}.timelineItem:last-child{padding-bottom:0}.timelineItem:before{content:"";position:absolute;left:-13px;top:5px;width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 4px rgba(94,242,214,.06)}.timelineTitle{font-size:11px;font-weight:800}.timelineBody{font-size:9.5px;color:#7f8da0;line-height:1.45;margin-top:3px}
 .bottomNav{grid-template-columns:repeat(4,1fr);width:min(calc(100% - 18px),640px)}
 .openMarket{cursor:pointer}
@@ -183,7 +189,7 @@ let CHART={
   symbol:localStorage.getItem('biggj.chart.symbol')||'BTCUSDT',
   interval:localStorage.getItem('biggj.chart.interval')||'5m',
   mode:localStorage.getItem('biggj.chart.mode')||'FULL',
-  lastUrl:null,lastLoadedAt:0,loading:false,error:null
+  lastUrl:null,lastLoadedAt:0,loading:false,error:null,fullscreen:false
 };
 
 const root=document.getElementById('root');
@@ -453,23 +459,32 @@ function chartUrl(){
   return '/superchart.png?'+q.toString();
 }
 function selectedUserMarket(){return userMarketRows().find(x=>String(x.symbol).toUpperCase()===CHART.symbol)||{symbol:CHART.symbol};}
+function marketNarrative(x={}){
+  const regime=String(x.regime||'').toUpperCase(),status=statusDE(x.status),w=N(x.witnessAgreement),support=N(x.support),score=Number.isFinite(Number(x.score))?CLAMP(x.score):w;
+  const state=/TREND|BULL|BEAR|UP|DOWN/.test(regime)?'gerichtete Marktstruktur':/RANGE|SIDE/.test(regime)?'Seitwärts-/Range-Struktur':'noch kein klarer Strukturzustand';
+  const evidence=support>=10||w>=.75?'breite beobachtete Unterstützung':support>=4||w>=.5?'mittlere beobachtete Unterstützung':'noch dünne beobachtete Unterstützung';
+  return {state,evidence,status,score};
+}
 function renderMarketMonitor(){
-  const rows=userMarketRows(),x=selectedUserMarket();
+  const rows=userMarketRows(),x=selectedUserMarket(),why=marketNarrative(x);
+  const quick=['1m','5m','15m','1h','4h'];
   let html='<section class="view '+(TAB==='markets'?'active':'')+'">';
-  html+='<div class="hero"><div class="overline">MARKET MONITOR</div><div class="userHeroTitle">SUPER<span class="cyan">CHART</span></div><div class="heroCopy">Candles + Struktur + Regime + Forecast-Pfade + Confluence + Liquidationen + Events. Ein Chart statt zehn getrennte Tools.</div><div class="heroFooter"><div class="badge">'+E(CHART.symbol.replace('USDT','/USDT'))+' <b>'+E(CHART.interval.toUpperCase())+'</b></div><div class="badge">View <b>'+E(CHART.mode)+'</b></div><div class="badge">Auto <b>30s</b></div></div></div>';
+  html+='<div class="hero"><div class="overline">MARKET MONITOR</div><div class="userHeroTitle">SUPER<span class="cyan">CHART</span></div><div class="heroCopy">Ein Chart für das komplette Bild: Candles, Struktur, Regime, Forecast-Pfade, Confluence, Liquidationen und Events.</div><div class="heroFooter"><div class="badge">'+E(CHART.symbol.replace('USDT','/USDT'))+' <b>'+E(CHART.interval.toUpperCase())+'</b></div><div class="badge">View <b>'+E(CHART.mode)+'</b></div><div class="badge">Refresh <b>30s</b></div></div></div>';
   html+=sectionHead('Markt wählen');
-  html+='<div class="signalSelectors">'+selectorRow(rows.map(r=>r.symbol),CHART.symbol,'data-chart-symbol',v=>v.replace('USDT',''))+selectorRow(['1m','5m','15m','1h','4h'],CHART.interval,'data-chart-interval',v=>v.toUpperCase())+selectorRow(['PRO','FULL'],CHART.mode,'data-chart-mode')+'</div>';
-  html+='<div class="chartShell"><div class="chartTop"><div><div class="chartSymbol">'+E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(CHART.interval.toUpperCase())+'</div><div class="chartMeta">Structure · Forecast · Liquidity · Confluence · Events</div></div><div class="chartLive">● LIVE</div></div><div class="chartViewport '+(CHART.loading?'loading':'')+'">'+(CHART.lastUrl?'<img src="'+E(CHART.lastUrl)+'" alt="BIGGJ SuperChart '+E(CHART.symbol)+'">':empty('SuperChart wird geladen …'))+'<div class="chartLoading">SUPERCHART WIRD AKTUALISIERT …</div></div><div class="chartError '+(CHART.error?'show':'')+'">'+E(CHART.error||'')+'</div></div>';
-  html+=sectionHead('Warum gerade wichtig?');
-  html+=panel(E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(x.regime||statusDE(x.status)),'Witness '+P(x.witnessAgreement)+' · Support '+N(x.support)+' · Score '+(Number.isFinite(Number(x.score))?Math.round(CLAMP(x.score)*100):'—')+'<br><br><span class="cyan">Der SuperChart trennt beobachtete Daten, abgeleitete Struktur und probabilistische Forecasts.</span>','NOW','userAction');
+  html+='<div class="signalSelectors">'+selectorRow(rows.map(r=>r.symbol),CHART.symbol,'data-chart-symbol',v=>v.replace('USDT',''))+selectorRow(quick,CHART.interval,'data-chart-interval',v=>v.toUpperCase())+selectorRow(['PRO','FULL'],CHART.mode,'data-chart-mode')+'</div>';
+  html+='<div class="chartShell '+(CHART.fullscreen?'fullscreen':'')+'" id="superchartShell"><div class="chartTop"><div><div class="chartSymbol">'+E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(CHART.interval.toUpperCase())+'</div><div class="chartMeta">Structure · Forecast · Liquidity · Confluence · Events</div></div><div class="chartTools"><div class="chartLive">● LIVE</div><button class="chartToolBtn" data-chart-fullscreen aria-label="'+(CHART.fullscreen?'SuperChart Vollbild schließen':'SuperChart Vollbild')+'"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div></div>';
+  html+='<div class="chartQuick">'+quick.map(v=>'<button class="'+(v===CHART.interval?'active':'')+'" data-chart-interval="'+v+'">'+v.toUpperCase()+'</button>').join('')+'<button class="'+(CHART.mode==='FULL'?'active':'')+'" data-chart-mode="FULL">FULL</button></div>';
+  html+='<div class="chartViewport '+(CHART.loading?'loading':'')+'">'+(CHART.lastUrl?'<img src="'+E(CHART.lastUrl)+'" alt="BIGGJ SuperChart '+E(CHART.symbol)+'">':empty('SuperChart wird geladen …'))+'<div class="chartLoading">SUPERCHART WIRD AKTUALISIERT …</div></div><div class="chartError '+(CHART.error?'show':'')+'">'+E(CHART.error||'')+'</div></div>';
+  html+=sectionHead('Warum gerade wichtig?','beobachtet ≠ garantiert');
+  html+=panel(E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(x.regime||statusDE(x.status)),E(why.state)+' · '+E(why.evidence)+'.<div class="marketInsight"><div class="insightCell"><div class="insightLabel">Score</div><div class="insightValue">'+Math.round(why.score*100)+'/100</div></div><div class="insightCell"><div class="insightLabel">Witness</div><div class="insightValue">'+P(x.witnessAgreement)+'</div></div><div class="insightCell"><div class="insightLabel">Support</div><div class="insightValue">'+N(x.support)+'</div></div></div><br><span class="cyan">Forecasts sind probabilistische Modellpfade; der Chart trennt sie sichtbar von beobachteten Marktdaten.</span>',E(why.status),'userAction');
   html+=sectionHead('Marktstatus',rows.length+' beobachtet');
   html+='<div class="marketRail">'+rows.slice(0,6).map(r=>{const score=Number.isFinite(Number(r.score))?CLAMP(r.score):CLAMP(r.witnessAgreement);return '<div class="market openMarket" data-open-market="'+E(r.symbol)+'"><div class="marketSymbol">'+E(String(r.symbol).replace('USDT','/USDT'))+'</div><div class="marketStatus">'+E(r.regime||statusDE(r.status))+'</div><div class="marketScore">'+Math.round(score*100)+'</div><div class="bar"><i style="width:'+Math.round(score*100)+'%"></i></div><div class="marketFoot"><span>'+E(statusDE(r.status))+'</span><span>'+N(r.support)+' support</span></div></div>'}).join('')+'</div>';
   return html+'</section>';
 }
 function renderProgress(){
-  const h=S.health||{},b=h.biggjObservability||{},frontier=(S.biggj||h.biggjMarketScienceOs||{}).science?.frontier||{},proof=h.biggjProofFeed||{},events=(b.learningTimeline?.events||[]).slice(0,8),revisions=(b.revisions||[]).slice(0,5),queue=(b.researchQueue||[]).slice(0,5),maturity=CLAMP(b.maturityIndex);
+  const h=S.health||{},b=h.biggjObservability||{},frontier=(S.biggj||h.biggjMarketScienceOs||{}).science?.frontier||{},proof=h.biggjProofFeed||{},events=(b.learningTimeline?.events||[]).slice(0,8),revisions=(b.revisions||[]).slice(0,5),queue=(b.researchQueue||[]).slice(0,5),maturity=CLAMP(b.maturityIndex),maturityPct=Math.round(maturity*100);
   let html='<section class="view '+(TAB==='progress'?'active':'')+'">';
-  html+='<div class="hero"><div class="overline">MESSBARER FORTSCHRITT</div><div class="userHeroTitle">'+Math.round(maturity*100)+'% <span class="cyan">MATURITY</span></div><div class="heroCopy">Nicht wie viel BIGGJ redet zählt, sondern was messbar hinzugekommen ist: Evidence, aufgelöste Forecasts, Experimente, Skills und Revisionen.</div><div class="progressTrack"><i style="width:'+Math.round(maturity*100)+'%"></i></div><div class="heroFooter"><div class="badge">24h <b>'+N(b.learningTimeline?.last24h?.total)+' Events</b></div><div class="badge">7d <b>'+N(b.learningTimeline?.last7d?.total)+' Events</b></div><div class="badge">Revision <b>'+N(b.runtimeRevision)+'</b></div></div></div>';
+  html+='<div class="hero"><div class="progressHero"><div><div class="overline">MESSBARER FORTSCHRITT</div><div class="userHeroTitle">BIGGJ WIRD <span class="cyan">BELASTBARER</span></div><div class="heroCopy">Fortschritt zählt nur, wenn Evidence, aufgelöste Forecasts, Experimente, Skills oder Revisionen messbar zunehmen.</div></div><div class="progressRing" style="--p:'+maturityPct+'"><strong>'+maturityPct+'%</strong><span>Maturity</span></div></div><div class="progressTrack"><i style="width:'+maturityPct+'%"></i></div><div class="heroFooter"><div class="badge">24h <b>'+N(b.learningTimeline?.last24h?.total)+' Events</b></div><div class="badge">7d <b>'+N(b.learningTimeline?.last7d?.total)+' Events</b></div><div class="badge">Revision <b>'+N(b.runtimeRevision)+'</b></div></div></div>';
   html+=sectionHead('Scoreboard','Qualität > Aktivität');
   html+='<div class="metricGrid">'+metric('Evidence',N(b.evidence?.evidenceTotal),N(b.evidence?.validationEvidenceTotal)+' validation','cyan')+metric('Forecasts',N(b.observedForecasts),N(proof.counts?.resolved)+' resolved')+metric('Trusted',N(b.trustedSkills),N(b.totalSkillNodes)+' skill nodes','good')+metric('Experimente',N(frontier.experiments),N(frontier.surprises)+' surprises',N(frontier.surprises)>0?'warn':'')+'</div>';
   html+=sectionHead('Learning Timeline',events.length+' neu');
@@ -541,6 +556,7 @@ function render(){
   badge.classList.toggle('stale',age>30000&&navigator.onLine);
   badge.classList.toggle('offline',!navigator.onLine);
   txt.textContent=!navigator.onLine?'OFFLINE':age>30000?'STALE '+AGE(gen):'LIVE '+AGE(gen);
+  document.body.classList.toggle('chartFullscreen',TAB==='markets'&&CHART.fullscreen);
 }
 
 async function refresh(){
@@ -560,19 +576,22 @@ async function refresh(){
 nav.addEventListener('click',e=>{
   const button=e.target.closest('button[data-tab]');if(!button)return;
   TAB=button.dataset.tab;
+  if(TAB!=='markets')CHART.fullscreen=false;
   for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x===button);
   render();window.scrollTo({top:0,behavior:'smooth'});
   if(TAB==='markets')setTimeout(()=>loadSuperchart(true),0);
 });
 root.addEventListener('click',e=>{
-  const open=e.target.closest('[data-open-market]');if(open){CHART.symbol=open.getAttribute('data-open-market');localStorage.setItem('biggj.chart.symbol',CHART.symbol);TAB='markets';for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x.dataset.tab==='markets');render();setTimeout(()=>loadSuperchart(true),0);return;}
+  const open=e.target.closest('[data-open-market]');if(open){CHART.symbol=open.getAttribute('data-open-market');CHART.fullscreen=false;localStorage.setItem('biggj.chart.symbol',CHART.symbol);TAB='markets';for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x.dataset.tab==='markets');render();setTimeout(()=>loadSuperchart(true),0);return;}
   const symbol=e.target.closest('[data-chart-symbol]');if(symbol){CHART.symbol=symbol.getAttribute('data-chart-symbol');CHART.lastUrl=null;localStorage.setItem('biggj.chart.symbol',CHART.symbol);render();loadSuperchart(true);return;}
   const interval=e.target.closest('[data-chart-interval]');if(interval){CHART.interval=interval.getAttribute('data-chart-interval');CHART.lastUrl=null;localStorage.setItem('biggj.chart.interval',CHART.interval);render();loadSuperchart(true);return;}
-  const mode=e.target.closest('[data-chart-mode]');if(mode){CHART.mode=mode.getAttribute('data-chart-mode');CHART.lastUrl=null;localStorage.setItem('biggj.chart.mode',CHART.mode);render();loadSuperchart(true);}
+  const mode=e.target.closest('[data-chart-mode]');if(mode){CHART.mode=mode.getAttribute('data-chart-mode');CHART.lastUrl=null;localStorage.setItem('biggj.chart.mode',CHART.mode);render();loadSuperchart(true);return;}
+  const full=e.target.closest('[data-chart-fullscreen]');if(full){CHART.fullscreen=!CHART.fullscreen;render();return;}
 });
 document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='markets')loadSuperchart(true);});
 window.addEventListener('online',()=>{render();refresh();if(TAB==='markets')loadSuperchart(true);});
 window.addEventListener('offline',render);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&CHART.fullscreen){CHART.fullscreen=false;render();}});
 render();
 setInterval(refresh,10000);
 setInterval(()=>{if(TAB==='markets')loadSuperchart(false);},30000);
