@@ -7,12 +7,13 @@ const observabilitySource=readFileSync(new URL('./biggj-discord-observability.mj
 const experienceSource=readFileSync(new URL('./biggj-experience-center.mjs',import.meta.url),'utf8');
 const scienceSource=readFileSync(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
 
-test('BIGGJ Discord V12 is user-first while deep intelligence remains callable',()=>{
+test('BIGGJ Discord V13 is user-first while deep intelligence remains callable',()=>{
   assert.ok(source.includes('BIGGJ_DISCORD_MARKET_SCIENCE_V7'));
-  assert.ok(source.includes('BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST'));
-  assert.ok(source.includes("category:'BIGGJ • DASHBOARD'"));
+  assert.ok(source.includes('BIGGJ_DISCORD_CHANNEL_UX_V13_FOCUSED'));
+  assert.ok(source.includes("category:'BIGGJ • HOME'"));
+  assert.ok(source.includes("category:'BIGGJ • INTELLIGENCE'"));
   assert.ok(source.includes("category:'BIGGJ • TRADING'"));
-  for(const name of ['start-here','progress','market-overview','chart-desk','news-feed','mobile-app','trade-cockpit','performance','live-trades','closed-trades','alerts']){
+  for(const name of ['start-here','progress','market-overview','news-feed','memecoins','trader-watch','academy','trade-cockpit','live-trades','closed-trades']){
     assert.ok(source.includes("{name:'"+name+"'"),name);
   }
   assert.ok(source.includes("name:'science'"));
@@ -140,7 +141,7 @@ test('BIGGJ V6 academy keeps the current panel at the bottom and lesson actions 
 });
 
 
-test('BIGGJ V12 exposes one-tap user commands and SuperCharts',()=>{
+test('BIGGJ V13 keeps one-tap commands and SuperCharts available on demand',()=>{
   for(const required of [
     "name:'signal'",
     "name:'proof'",
@@ -152,22 +153,22 @@ test('BIGGJ V12 exposes one-tap user commands and SuperCharts',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST',
+    'BIGGJ_DISCORD_CHANNEL_UX_V13_FOCUSED',
     'BTC SuperChart',
     'ETH SuperChart',
     'SOL SuperChart'
   ]) assert.ok(source.includes(required),required);
 });
-test('BIGGJ V12 manages only the curated visible surfaces and keeps deep supervisors on demand',()=>{
+test('BIGGJ V13 manages only ten curated visible surfaces and keeps deep supervisors on demand',()=>{
   const layoutBlock=source.slice(
     source.indexOf('const SERVER_LAYOUT=Object.freeze(['),
-    source.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY=')
+    source.indexOf('const BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY=')
   );
   const visible=[...layoutBlock.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
-  assert.equal(visible.length,11);
+  assert.equal(visible.length,10);
   assert.equal(new Set(visible).size,visible.length);
-  for(const required of ['progress','market-overview','chart-desk','trade-cockpit','performance','alerts'])assert.ok(visible.includes(required));
-  for(const hidden of ['channel-supervisor','channel-improvements','errors','rulebook','science-home','research-queue'])assert.ok(!visible.includes(hidden),hidden);
+  for(const required of ['progress','market-overview','memecoins','trader-watch','academy','trade-cockpit'])assert.ok(visible.includes(required));
+  for(const hidden of ['chart-desk','performance','mobile-app','alerts','channel-supervisor','channel-improvements','errors','rulebook','science-home','research-queue'])assert.ok(!visible.includes(hidden),hidden);
   for(const required of [
     'createBiggjChannelManagerRuntime',
     'refreshChannelSupervisor',
