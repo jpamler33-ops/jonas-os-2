@@ -102,6 +102,7 @@ import {
 } from './trade-discovery-diagnostics.mjs';
 import {
   deriveCoverageCurriculumCandidates, coverageCurriculumSummary,
+  prioritizeCoverageCurriculumCandidates,
   SHADOW_COVERAGE_CURRICULUM_VERSION, DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
 import {
@@ -492,6 +493,7 @@ const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_C
 const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
 const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
 const coverageCurriculumMaxPerIssuance = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_PER_ISSUANCE || 1) || 1));
+const coverageCurriculumMaxPerSweep = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_PER_SWEEP || 1) || 1));
 const forecastJournalMaxEntries = Math.max(1000, Math.min(3000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 1500) || 1500)));
 const forecastAuditMaxEvents = Math.max(200, Math.floor(Number(process.env.TCX_FORECAST_AUDIT_MAX_EVENTS || 1000) || 1000));
 const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_ISSUANCES || 1500) || 1500));
@@ -2644,13 +2646,24 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
 }
 
 
-async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfolioPrepared=false}={}){
+function coverageCurriculumExistingKeys(){
+  return [
+    ...shadowOrders.map(o=>o?.strategyMeta?.coverageKey).filter(Boolean),
+    ...(shadowPortfolioLedger.positions||[]).map(p=>p?.coverageKey).filter(Boolean)
+  ];
+}
+
+async function placeCoverageCurriculumCandidates(candidates,{
+  portfolioPrepared=false,
+  maxPlacements=coverageCurriculumMaxPerIssuance,
+  scope='ISSUANCE'
+}={}){
   const now=Date.now();
   if(!coverageCurriculumEnabled){
-    return {placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
+    return {placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_DISABLED',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
   }
-  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
-    return {placed:0,eligible:0,reason:'COVERAGE_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
+  if(!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:0,eligible:0,reason:'COVERAGE_RUNTIME_UNHEALTHY',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
   }
 
   if(!portfolioPrepared){
@@ -2661,18 +2674,11 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
     }
   }
 
-  const existingCoverageKeys=[
-    ...shadowOrders.map(o=>o?.strategyMeta?.coverageKey).filter(Boolean),
-    ...(shadowPortfolioLedger.positions||[]).map(p=>p?.coverageKey).filter(Boolean)
-  ];
-  const derived=deriveCoverageCurriculumCandidates(issuance,{
-    now,
-    notionalQuote:coverageCurriculumNotional,
-    existingCoverageKeys,
-    assetClass:assetClassForSymbol(issuance?.symbol)
+  const ranked=prioritizeCoverageCurriculumCandidates(candidates,{
+    limit:Math.max(1,Array.isArray(candidates)?candidates.length:1)
   });
-  if(!derived.candidates.length){
-    return {placed:0,eligible:0,reason:derived.reason,execution:'SHADOW_ONLY',canExecuteLive:false};
+  if(!ranked.candidates.length){
+    return {placed:0,eligible:0,reason:'COVERAGE_NO_ELIGIBLE_CANDIDATES',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
   }
 
   const openCoverage=(shadowPortfolioLedger.positions||[]).filter(p=>
@@ -2680,24 +2686,32 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
   );
   let remaining=Math.max(0,coverageCurriculumMaxOpenTotal-openCoverage.length);
   if(remaining<=0){
-    return {placed:0,eligible:derived.candidates.length,reason:'COVERAGE_GLOBAL_OPEN_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
+    return {placed:0,eligible:ranked.eligible,reason:'COVERAGE_GLOBAL_OPEN_CAP',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
   }
 
+  const existingCoverageKeys=new Set(coverageCurriculumExistingKeys().map(String));
+  const targetPlacements=Math.max(1,Math.floor(Number(maxPlacements)||1));
   let placed=0;
   const results=[];
-  for(const candidate of derived.candidates.slice(0,coverageCurriculumMaxPerIssuance)){
-    if(remaining<=0) break;
+  for(const candidate of ranked.candidates){
+    if(remaining<=0||placed>=targetPlacements) break;
     const laneOpen=openCoverage.filter(p=>
       p.symbol===candidate.symbol&&String(p.horizonId)===candidate.horizonId
     ).length+results.filter(x=>
       x.placed===true&&x.symbol===candidate.symbol&&x.horizonId===candidate.horizonId
     ).length;
     if(laneOpen>=coverageCurriculumMaxOpenPerLane){
-      results.push({coverageKey:candidate.coverageKey,placed:false,reason:'COVERAGE_LANE_OPEN_CAP'});
+      results.push({
+        coverageKey:candidate.coverageKey,placed:false,reason:'COVERAGE_LANE_OPEN_CAP',
+        symbol:candidate.symbol,horizonId:candidate.horizonId
+      });
       continue;
     }
-    if(shadowOrders.some(o=>o?.strategyMeta?.coverageKey===candidate.coverageKey)){
-      results.push({coverageKey:candidate.coverageKey,placed:false,reason:'COVERAGE_SLOT_ALREADY_TRADED'});
+    if(existingCoverageKeys.has(String(candidate.coverageKey))){
+      results.push({
+        coverageKey:candidate.coverageKey,placed:false,reason:'COVERAGE_SLOT_ALREADY_TRADED',
+        symbol:candidate.symbol,horizonId:candidate.horizonId
+      });
       continue;
     }
 
@@ -2713,6 +2727,7 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
         assetClass:candidate.assetClass,
         strategyLane:['COVERAGE',candidate.symbol,candidate.horizonId].join(':'),
         coverageCurriculumVersion:SHADOW_COVERAGE_CURRICULUM_VERSION,
+        coverageSchedulerScope:String(scope),
         coverageKey:candidate.coverageKey,
         coverageSlotStart:candidate.slotStart,
         coverageSlotEnd:candidate.slotEnd,
@@ -2748,41 +2763,117 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
         generatedAt:candidate.generatedAt
       }
     });
-    placed++;remaining--;
+    placed++;
+    remaining--;
+    existingCoverageKeys.add(String(candidate.coverageKey));
     results.push({
       coverageKey:candidate.coverageKey,placed:true,orderId:order.id,
       symbol:candidate.symbol,horizonId:candidate.horizonId,side:candidate.side,
       notionalQuote:candidate.notionalQuote,
       targetClass:candidate.coverageTargetClass,
       targetBin:candidate.coverageTargetProbabilityBinIndex,
-      targetEssDeficit:candidate.coverageTargetEffectiveSampleDeficit
+      targetEssDeficit:candidate.coverageTargetEffectiveSampleDeficit,
+      targetEssDeficitRatio:candidate.coverageTargetEffectiveSampleDeficitRatio,
+      priorityScore:candidate.coveragePriorityScore
     });
   }
 
   if(placed){
     recordOperation(observability,{name:'coverage_curriculum_entries',ok:true,latencyMs:0,error:null});
-    console.log('coverage curriculum entries',JSON.stringify({
-      symbol:String(issuance?.symbol||''),
-      eligible:derived.candidates.length,
+    console.log('[TCX_COVERAGE_CURRICULUM]',JSON.stringify({
+      scope:String(scope),
+      eligible:ranked.eligible,
       placed,
-      horizons:results.filter(x=>x.placed).map(x=>x.horizonId),
-      targets:results.filter(x=>x.placed).map(x=>({
+      winners:results.filter(x=>x.placed).map(x=>({
         symbol:x.symbol,horizonId:x.horizonId,class:x.targetClass,
-        probabilityBin:x.targetBin,effectiveSampleDeficit:x.targetEssDeficit
+        probabilityBin:x.targetBin,effectiveSampleDeficit:x.targetEssDeficit,
+        effectiveSampleDeficitRatio:x.targetEssDeficitRatio,priorityScore:x.priorityScore
       })),
-      maxPerIssuance:coverageCurriculumMaxPerIssuance,
       execution:'SHADOW_ONLY',
       canExecuteLive:false
     }));
   }
   return {
     placed,
-    eligible:derived.candidates.length,
+    eligible:ranked.eligible,
     reason:placed?'COVERAGE_SLOTS_PLACED':'COVERAGE_SLOTS_BLOCKED',
+    scope:String(scope),
     results,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
+}
+
+async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfolioPrepared=false}={}){
+  const now=Date.now();
+  if(!coverageCurriculumEnabled){
+    return {placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_DISABLED',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:0,eligible:0,reason:'COVERAGE_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const derived=deriveCoverageCurriculumCandidates(issuance,{
+    now,
+    notionalQuote:coverageCurriculumNotional,
+    existingCoverageKeys:coverageCurriculumExistingKeys(),
+    assetClass:assetClassForSymbol(issuance?.symbol)
+  });
+  if(!derived.candidates.length){
+    return {placed:0,eligible:0,reason:derived.reason,execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  return placeCoverageCurriculumCandidates(derived.candidates,{
+    portfolioPrepared,
+    maxPlacements:coverageCurriculumMaxPerIssuance,
+    scope:'ISSUANCE'
+  });
+}
+
+async function maybePlaceCoverageCurriculumSweep(items){
+  const now=Date.now();
+  if(!coverageCurriculumEnabled){
+    return {placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_DISABLED',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+  if(!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
+    return {placed:0,eligible:0,reason:'COVERAGE_RUNTIME_UNHEALTHY',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const eligibleItems=(Array.isArray(items)?items:[]).filter(x=>x?.auditHealthy===true&&x?.issuance);
+  if(!eligibleItems.length){
+    return {placed:0,eligible:0,reason:'GLOBAL_ESS_NO_AUDIT_BOUND_ISSUANCES',results:[],execution:'SHADOW_ONLY',canExecuteLive:false};
+  }
+
+  const existingCoverageKeys=coverageCurriculumExistingKeys();
+  const candidates=[];
+  const derivations=[];
+  for(const item of eligibleItems){
+    const issuance=item.issuance;
+    const derived=deriveCoverageCurriculumCandidates(issuance,{
+      now,
+      notionalQuote:coverageCurriculumNotional,
+      existingCoverageKeys,
+      assetClass:assetClassForSymbol(issuance?.symbol)
+    });
+    derivations.push({
+      symbol:String(issuance?.symbol||''),
+      reason:derived.reason,
+      eligible:derived.candidates.length
+    });
+    candidates.push(...derived.candidates);
+  }
+  if(!candidates.length){
+    return {
+      placed:0,eligible:0,reason:'GLOBAL_ESS_NO_CANDIDATES',derivations,
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    };
+  }
+
+  const result=await placeCoverageCurriculumCandidates(candidates,{
+    portfolioPrepared:false,
+    maxPlacements:coverageCurriculumMaxPerSweep,
+    scope:'GLOBAL_ESS_SWEEP'
+  });
+  return {...result,derivations,symbols:eligibleItems.length};
 }
 
 async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,regimeContext=null,portfolioPrepared=false}={}){
@@ -6537,6 +6628,7 @@ async function showIntelligence(chatId,symbol){
 async function showForecast(chatId,symbol,messageId=null,options={}){
   const started=Date.now();
   const silent=options?.silent===true;
+  const deferCoverageToSweep=options?.deferCoverageToSweep===true;
   const issuanceSource=String(options?.source||'TCX_TELEGRAM_INSTITUTIONAL_FORECAST');
   const forecastMemoryTrace=issuanceSource==='TCX_AUTOLEARN_V1'?[]:null;
   const markForecastMemory=(phase)=>{
@@ -7171,13 +7263,20 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   }
   let coverageCurriculumRun=null;
   if(issuanceSource==='TCX_AUTOLEARN_V1'){
-    try{
-      coverageCurriculumRun=await maybePlaceCoverageCurriculum(issuance,{auditHealthy:auditHealthyAfter,portfolioPrepared:shadowActionPortfolioPrepared});
-    }catch(err){
-      const msg=err instanceof Error?err.message:String(err);
-      coverageCurriculumRun={placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_ERROR'};
-      recordError(observability,{scope:'coverage_curriculum.entry',message:msg});
-      console.error('coverage curriculum error',symbol,msg);
+    if(deferCoverageToSweep){
+      coverageCurriculumRun={
+        placed:0,eligible:0,reason:'COVERAGE_DEFERRED_TO_GLOBAL_ESS_SWEEP',
+        execution:'SHADOW_ONLY',canExecuteLive:false
+      };
+    }else{
+      try{
+        coverageCurriculumRun=await maybePlaceCoverageCurriculum(issuance,{auditHealthy:auditHealthyAfter,portfolioPrepared:shadowActionPortfolioPrepared});
+      }catch(err){
+        const msg=err instanceof Error?err.message:String(err);
+        coverageCurriculumRun={placed:0,eligible:0,reason:'COVERAGE_CURRICULUM_ERROR'};
+        recordError(observability,{scope:'coverage_curriculum.entry',message:msg});
+        console.error('coverage curriculum error',symbol,msg);
+      }
     }
   }
   let mandatoryDiscoveryRun=null;
@@ -9041,6 +9140,8 @@ async function autoLearnForecastWatcher() {
     let issued=0,skipped=0,failed=0,deferred=0;
     let memoryPressure=false;
     let transientPostIssuePressure=false;
+    const coverageSweepItems=[];
+    let coverageSweepRun=null;
     const researchAcceleration=currentResearchAccelerator(Date.now());
     const effectiveAutoLearnMaxIssuedPerSweep=Math.max(
       1,
@@ -9096,9 +9197,17 @@ async function autoLearnForecastWatcher() {
             skipped++;
             continue;
           }
-          const result=await showForecast(null,symbol,null,{silent:true,source:'TCX_AUTOLEARN_V1'});
+          const result=await showForecast(null,symbol,null,{
+            silent:true,
+            source:'TCX_AUTOLEARN_V1',
+            deferCoverageToSweep:true
+          });
           if(result?.ok){
             issued++;
+            coverageSweepItems.push({
+              issuance:result.issuance,
+              auditHealthy:result.auditHealthy===true
+            });
             console.log('autolearn forecast issued',JSON.stringify({
               symbol,
               gate:result.issuance?.gate||'UNKNOWN',
@@ -9201,6 +9310,30 @@ async function autoLearnForecastWatcher() {
         }
         await sleep(autoLearnInterIssueMs);
       }
+      if(coverageSweepItems.length){
+        try{
+          coverageSweepRun=await maybePlaceCoverageCurriculumSweep(coverageSweepItems);
+          console.log('[TCX_COVERAGE_GLOBAL_ESS_SWEEP]',JSON.stringify({
+            issuances:coverageSweepItems.length,
+            eligible:Number(coverageSweepRun?.eligible||0),
+            placed:Number(coverageSweepRun?.placed||0),
+            reason:coverageSweepRun?.reason||null,
+            winners:(coverageSweepRun?.results||[]).filter(x=>x.placed).map(x=>({
+              symbol:x.symbol,horizonId:x.horizonId,class:x.targetClass,
+              probabilityBin:x.targetBin,effectiveSampleDeficit:x.targetEssDeficit,
+              effectiveSampleDeficitRatio:x.targetEssDeficitRatio
+            })),
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
+        }catch(err){
+          const msg=err instanceof Error?err.message:String(err);
+          coverageSweepRun={placed:0,eligible:0,reason:'GLOBAL_ESS_SWEEP_ERROR'};
+          failed++;
+          recordError(observability,{scope:'coverage_curriculum.global_sweep',message:msg});
+          console.error('coverage global ESS sweep error',msg);
+        }
+      }
       }finally{
         if(activeBackgroundResearchJob==='autolearn') activeBackgroundResearchJob=null;
       }
@@ -9222,6 +9355,13 @@ async function autoLearnForecastWatcher() {
         acceleratorMode:researchAcceleration.resource.mode,
         acceleratorPressure:researchAcceleration.resource.pressure,
         interIssueMs:autoLearnInterIssueMs,
+        coverageGlobalEligible:Number(coverageSweepRun?.eligible||0),
+        coverageGlobalPlaced:Number(coverageSweepRun?.placed||0),
+        coverageGlobalReason:coverageSweepRun?.reason||null,
+        coverageGlobalWinners:(coverageSweepRun?.results||[]).filter(x=>x.placed).map(x=>({
+          symbol:x.symbol,horizonId:x.horizonId,class:x.targetClass,
+          probabilityBin:x.targetBin,effectiveSampleDeficit:x.targetEssDeficit
+        })),
         memory:(()=>{const m=process.memoryUsage();return {
           heapUsedMb:Math.round(m.heapUsed/1024/1024),
           heapTotalMb:Math.round(m.heapTotal/1024/1024),
