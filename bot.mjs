@@ -1798,13 +1798,21 @@ if(evidenceHistoryBootWalRows>0){
   }));
 }
 
-async function persistForecastRuntime(reason='mutation',{force=false}={}) {
+async function persistForecastRuntime(reason='mutation',{force=false,defer=false}={}) {
   forecastRuntimePersistDirty=true;
   forecastRuntimePersistReason=reason;
   if(force){
     if(forecastRuntimePersistTimer){clearTimeout(forecastRuntimePersistTimer);forecastRuntimePersistTimer=null;}
     if(forecastRuntimePersistRunning) await forecastRuntimePersistRunning;
     return flushForecastRuntimePersistence(true);
+  }
+  if(defer){
+    // Forecast issuance/revision is already held in the in-memory runtime.
+    // Keep expensive gzip/archive persistence out of the AutoLearn latency path;
+    // shutdown and existing periodic persistence still force durable snapshots.
+    const elapsed=Math.max(0,Date.now()-forecastRuntimePersistLastAt);
+    scheduleForecastRuntimePersist(Math.max(1_000,30_000-elapsed));
+    return true;
   }
   if(forecastRuntimePersistRunning) return forecastRuntimePersistRunning;
   if(Date.now()-forecastRuntimePersistLastAt>=30000) return flushForecastRuntimePersistence();
@@ -7150,7 +7158,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     liveObservation.resolved.length||
     liveObservation.evaluations.length
   ){
-    await persistForecastRuntime('forecast-live-observation');
+    await persistForecastRuntime('forecast-live-observation',{defer:issuanceSource==='TCX_AUTOLEARN_V1'});
   }
   markForecastMemory('live-observation');
   if(observationAuditFailures||!auditLedger.healthy){
@@ -7226,7 +7234,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       forecastRevisions:liveObservation.revisions
     });
     if(thesisRevisionObservation.changed>0||thesisRevisionObservation.initialized>0){
-      await persistForecastRuntime('forecast-thesis-revision');
+      await persistForecastRuntime('forecast-thesis-revision',{defer:issuanceSource==='TCX_AUTOLEARN_V1'});
     }
     if(thesisRevisionObservation.changed>0){
       await refreshBiggjLivingResearch('thesis-revision');
@@ -7356,7 +7364,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
   });
 
   const auditRecord=await appendForecastIssuanceAuditQueued(issued.issuance);
-  await persistForecastRuntime('forecast-issued');
+  await persistForecastRuntime('forecast-issued',{defer:issuanceSource==='TCX_AUTOLEARN_V1'});
   markForecastMemory('forecast-issued');
 
   const issuance=issued.issuance;
