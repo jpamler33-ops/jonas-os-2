@@ -7237,7 +7237,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       await persistForecastRuntime('forecast-thesis-revision',{defer:issuanceSource==='TCX_AUTOLEARN_V1'});
     }
     if(thesisRevisionObservation.changed>0){
-      await refreshBiggjLivingResearch('thesis-revision');
+      if(issuanceSource==='TCX_AUTOLEARN_V1'){
+        void refreshBiggjLivingResearch('thesis-revision');
+      }else{
+        await refreshBiggjLivingResearch('thesis-revision');
+      }
       console.log('[TCX_THESIS_REVISION]',JSON.stringify({
         symbol,
         examined:thesisRevisionObservation.examined,
