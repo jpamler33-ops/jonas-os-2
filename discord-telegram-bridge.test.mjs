@@ -7,6 +7,16 @@ import {
   encodeDiscordCallbackCustomId
 } from './discord-component-ids.mjs';
 import { createSerialDedupeQueue, mapWithConcurrency, refreshDueFromTimestamps } from './discord-serial-dedupe-queue.mjs';
+import { isBiggjDiscordManagedCategoryNamespace } from './discord-telegram-bridge.mjs';
+
+
+test('empty legacy category namespace includes old TCX and BIGGJ groups but not normal Discord groups',()=>{
+  for(const name of [
+    'TCX • CONTROL','TCX • MARKETS','TCX • INTELLIGENCE','TCX • SHADOW','TCX • SYSTEM',
+    'BIGGJ • DESK','BIGGJ • ARCHIVE · TECH'
+  ]) assert.equal(isBiggjDiscordManagedCategoryNamespace(name),true,name);
+  for(const name of ['Text Channels','Voice channels','general','Friends'])assert.equal(isBiggjDiscordManagedCategoryNamespace(name),false,name);
+});
 
 test('duplicate Telegram callbacks receive unique reversible Discord custom ids',()=>{
   const action='superchart:BTCUSDT:FULL:5m';
@@ -174,6 +184,7 @@ test('channel manager runtime supervises the focused dashboard and prunes obsole
   for(const removed of ['chart-desk','performance','mobile-app','alerts'])assert.ok(!names.includes(removed),removed);
   assert.match(bridge,/BIGGJ • ARCHIVE · TECH/);
   assert.match(bridge,/LEGACY_MANAGED_CHANNEL_NAMES/);
+  assert.match(bridge,/isBiggjDiscordManagedCategoryNamespace\(name\)/);
   assert.match(bridge,/channel\.delete\('BIGGJ Discord V13 prune obsolete managed Discord surface/);
   assert.match(bridge,/remove empty legacy category after managed-channel prune/);
   assert.match(bridge,/prunedLegacyChannels/);
