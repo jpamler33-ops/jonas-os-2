@@ -58,7 +58,7 @@ export function createMemecoinSocialAttentionProvider({
   fetchImpl=globalThis.fetch,
   bearerToken='',
   xBaseUrl='https://api.x.com',
-  blueskyBaseUrl='https://public.api.bsky.app',
+  blueskyBaseUrls=['https://api.bsky.app','https://public.api.bsky.app'],
   blueskyEnabled=true,
   blueskyQueries=['memecoin','meme coin','pump.fun'],
   timeoutMs=7000,
@@ -107,32 +107,41 @@ export function createMemecoinSocialAttentionProvider({
   }
 
   async function fetchBluesky(maxResults){
-    if(!blueskyEnabled)return {ok:false,missing:true,posts:[],error:null};
-    const settled=await Promise.allSettled((Array.isArray(blueskyQueries)?blueskyQueries:[]).slice(0,4).map(async q=>{
-      const u=new URL(String(blueskyBaseUrl).replace(/\/+$/,'')+'/xrpc/app.bsky.feed.searchPosts');
-      u.searchParams.set('q',String(q));
-      u.searchParams.set('limit',String(Math.max(10,Math.min(100,Number(maxResults)||100))));
-      u.searchParams.set('sort','latest');
-      return requestJson(u.toString());
-    }));
-    const postsById=new Map();
+    if(!blueskyEnabled)return {ok:false,missing:true,posts:[],error:null,sourceBase:null};
+    const bases=(Array.isArray(blueskyBaseUrls)?blueskyBaseUrls:[blueskyBaseUrls]).map(x=>String(x||'').replace(/\/+$/,'')).filter(Boolean);
     const errors=[];
-    for(const r of settled){
-      if(r.status!=='fulfilled'){errors.push('BLUESKY_'+(r.reason instanceof Error?r.reason.message:String(r.reason)));continue;}
-      for(const p of Array.isArray(r.value?.posts)?r.value.posts:[]){
-        const body=p?.record?.text??p?.value?.text??'';
-        const created=p?.record?.createdAt??p?.value?.createdAt??p?.indexedAt;
-        const author=p?.author||{};
-        const normalized=freeze({
-          platform:'BLUESKY',id:String(p?.uri||p?.cid||''),createdAt:Date.parse(created||'')||null,
-          text:text(body,500),authorId:String(author?.did||author?.handle||''),username:text(author?.handle,120),
-          authorFollowers:finite(author?.followersCount),authorVerified:false,
-          engagement:bskyEngagement(p),possiblySensitive:false,seeds:extractSeeds(body)
-        });
-        if(normalized.id)postsById.set(normalized.id,normalized);
+    for(const base of bases){
+      const settled=await Promise.allSettled((Array.isArray(blueskyQueries)?blueskyQueries:[]).slice(0,4).map(async q=>{
+        const u=new URL(base+'/xrpc/app.bsky.feed.searchPosts');
+        u.searchParams.set('q',String(q));
+        u.searchParams.set('limit',String(Math.max(10,Math.min(100,Number(maxResults)||100))));
+        u.searchParams.set('sort','latest');
+        return requestJson(u.toString());
+      }));
+      const postsById=new Map();
+      let successes=0;
+      for(const r of settled){
+        if(r.status!=='fulfilled'){
+          errors.push('BLUESKY_'+new URL(base).hostname+'_'+(r.reason instanceof Error?r.reason.message:String(r.reason)));
+          continue;
+        }
+        successes++;
+        for(const p of Array.isArray(r.value?.posts)?r.value.posts:[]){
+          const body=p?.record?.text??p?.value?.text??'';
+          const created=p?.record?.createdAt??p?.value?.createdAt??p?.indexedAt;
+          const author=p?.author||{};
+          const normalized=freeze({
+            platform:'BLUESKY',id:String(p?.uri||p?.cid||''),createdAt:Date.parse(created||'')||null,
+            text:text(body,500),authorId:String(author?.did||author?.handle||''),username:text(author?.handle,120),
+            authorFollowers:finite(author?.followersCount),authorVerified:false,
+            engagement:bskyEngagement(p),possiblySensitive:false,seeds:extractSeeds(body)
+          });
+          if(normalized.id)postsById.set(normalized.id,normalized);
+        }
       }
+      if(successes>0)return {ok:true,missing:false,posts:[...postsById.values()],error:errors.length?errors.join(' | '):null,sourceBase:base};
     }
-    return {ok:settled.some(x=>x.status==='fulfilled'),missing:false,posts:[...postsById.values()],error:errors.length?errors.join(' | '):null};
+    return {ok:false,missing:false,posts:[],error:errors.length?errors.join(' | '):'BLUESKY_NO_WORKING_APPVIEW',sourceBase:null};
   }
 
   async function fetchDiscovery({force=false,maxResults=100}={}){
@@ -154,7 +163,7 @@ export function createMemecoinSocialAttentionProvider({
       sourceReady,capturedAt:t,queryClass:'MEME_LAUNCH_DISCOVERY',
       posts,seeds:aggregateSeeds(posts),errors,missingSources,
       x:{configured:xConfigured,sourceReady:x.ok,error:x.error},
-      bluesky:{enabled:Boolean(blueskyEnabled),sourceReady:bsky.ok,error:bsky.error},
+      bluesky:{enabled:Boolean(blueskyEnabled),sourceReady:bsky.ok,error:bsky.error,sourceBase:bsky.sourceBase||null},
       epistemic:'PUBLIC_POST_ATTENTION_NOT_PRICE_CAUSALITY'
     });
     cache={at:t,value};

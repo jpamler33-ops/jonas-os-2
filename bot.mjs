@@ -4795,10 +4795,15 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       },
       social:{
         version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
+        source:memecoinSocialSnapshot?.source||'NO_DIRECT_SOCIAL_SOURCE',
         configured:memecoinSocialSnapshot?.configured===true,
         sourceReady:memecoinSocialSnapshot?.sourceReady===true,
         posts:memecoinSocialSnapshot?.posts?.length||0,
-        seeds:memecoinSocialSnapshot?.seeds?.length||0
+        seeds:memecoinSocialSnapshot?.seeds?.length||0,
+        x:memecoinSocialSnapshot?.x||null,
+        bluesky:memecoinSocialSnapshot?.bluesky||null,
+        missingSources:memecoinSocialSnapshot?.missingSources||[],
+        errors:memecoinSocialSnapshot?.errors||[]
       },
       wallet4:{
         opened:walletUpdate.results.opened,
