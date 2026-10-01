@@ -11044,34 +11044,70 @@ function missionControlData(){
     privacy:'PUBLIC_DATA_ONLY'
   },
   memecoinRadar:{
-    version:DEXSCREENER_PUBLIC_PROVIDER_VERSION,
-    sourceReady:Boolean(memecoinExperienceSnapshot?.rows?.length||memecoinExperienceSnapshot?.metas?.length)&&!memecoinExperienceLastError,
-    capturedAt:memecoinExperienceSnapshot?.capturedAt||null,
-    source:memecoinExperienceSnapshot?.source||'DEXSCREENER_PUBLIC_API',
-    lastError:memecoinExperienceLastError,
-    rows:(memecoinExperienceSnapshot?.rows||[]).slice(0,8).map(x=>({
+    version:MEMECOIN_EARLY_RADAR_VERSION,
+    sourceReady:Boolean(memecoinEarlySnapshot?.sourceReady&&memecoinEarlySnapshot?.rows?.length)&&
+      Number(memecoinEarlySnapshot?.capturedAt||0)>Date.now()-10*60_000,
+    capturedAt:memecoinEarlySnapshot?.capturedAt||memecoinExperienceSnapshot?.capturedAt||null,
+    lastRefreshAt:memecoinEarlyLastRefreshAt,
+    source:memecoinEarlySnapshot?.source||'DEXSCREENER_PLUS_GECKOTERMINAL_KEYLESS',
+    lastError:memecoinEarlyLastError||memecoinExperienceLastError,
+    ranking:'EARLY_RESEARCH_PRIORITY_NOT_MARKET_CAP_OR_PROFIT_PROBABILITY',
+    refreshMs:memecoinEarlyRefreshMs,
+    rows:(memecoinEarlySnapshot?.rows||[]).slice(0,12).map(x=>({
+      chainId:x?.chainId||null,
+      tokenAddress:x?.tokenAddress||null,
+      pairAddress:x?.pairAddress||null,
+      symbol:x?.symbol||null,
+      name:x?.name||null,
+      url:x?.url||null,
+      priceUsd:x?.priceUsd??null,
+      liquidityUsd:x?.liquidityUsd??null,
+      volumeM5:x?.volumeM5??null,
+      volumeH1:x?.volumeH1??null,
+      volumeH24:x?.volumeH24??null,
+      buysM5:x?.buysM5??0,
+      sellsM5:x?.sellsM5??0,
+      buysH1:x?.buysH1??0,
+      sellsH1:x?.sellsH1??0,
+      priceChangeM5:x?.priceChangeM5??null,
+      priceChangeH1:x?.priceChangeH1??null,
+      marketCap:x?.marketCap??null,
+      fdv:x?.fdv??null,
+      pairCreatedAt:x?.pairCreatedAt??null,
+      firstSeenAt:x?.firstSeenAt??null,
+      xLinked:x?.xLinked===true,
+      links:Array.isArray(x?.links)?x.links.slice(0,8):[],
+      externalAttention:Array.isArray(x?.externalAttention)?x.externalAttention.slice(0,5):[],
+      score:x?.score||null
+    })),
+    boostedFallbackRows:(memecoinExperienceSnapshot?.rows||[]).slice(0,6).map(x=>({
       chainId:x?.chainId||null,
       tokenAddress:x?.tokenAddress||null,
       source:x?.source||'DEXSCREENER_PUBLIC_API',
-      pair:x?.pair?{
-        symbol:x.pair?.baseToken?.symbol||null,
-        name:x.pair?.baseToken?.name||null,
-        url:x.pair?.url||x?.boost?.url||null,
-        priceUsd:x.pair?.priceUsd??null,
-        liquidityUsd:x.pair?.liquidityUsd??null,
-        volumeH1:x.pair?.volumeH1??null,
-        volumeH24:x.pair?.volumeH24??null,
-        priceChangeH1:x.pair?.priceChangeH1??null,
-        priceChangeH24:x.pair?.priceChangeH24??null,
-        buysH1:x.pair?.buysH1??0,
-        sellsH1:x.pair?.sellsH1??0,
-        marketCap:x.pair?.marketCap??null,
-        pairCreatedAt:x.pair?.pairCreatedAt??null,
-        activeBoosts:x.pair?.activeBoosts??0
-      }:null
+      symbol:x?.pair?.baseToken?.symbol||null,
+      liquidityUsd:x?.pair?.liquidityUsd??null,
+      volumeH1:x?.pair?.volumeH1??null
     })),
     metas:(memecoinExperienceSnapshot?.metas||[]).slice(0,8),
-    epistemic:'LIVE_DEX_ACTIVITY_NOT_PRICE_PROBABILITY'
+    safety:memecoinEarlySnapshot?.safety||{
+      honeypotVerified:false,
+      holderConcentrationVerified:false,
+      mintFreezeAuthorityVerified:false,
+      lpLockVerified:false
+    },
+    social:{
+      directXPostStream:false,
+      xLinkedProfilesDetected:true,
+      externalPublicMentionMatching:true
+    },
+    epistemic:'EARLY_RESEARCH_PRIORITY_NOT_PRICE_PROBABILITY'
+  },
+  specialistWallets:{
+    ...specialistWalletSummary(specialistWalletState,{asOf:now}),
+    version:SPECIALIST_SHADOW_WALLETS_VERSION,
+    healthy:specialistWalletHealthy,
+    lastError:specialistWalletLastError,
+    file:specialistWalletFile
   },
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
