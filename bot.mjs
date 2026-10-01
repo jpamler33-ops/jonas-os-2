@@ -4523,6 +4523,9 @@ let newsResearchLastResult=null;
 let newsResearchLastError=null;
 let memecoinExperienceSnapshot=null;
 let memecoinExperienceLastError=null;
+let memecoinEarlySnapshot=null;
+let memecoinEarlyLastError=null;
+let memecoinEarlyLastRefreshAt=null;
 let traderWatchExperienceSnapshot=null;
 let traderWatchExperienceLastError=null;
 let traderWatchExperienceLastRefreshAt=null;
@@ -4542,6 +4545,89 @@ function replaceGlobalIntelEvents(rows=[]){
     .slice(-250);
   globalIntelEvents.splice(0,globalIntelEvents.length,...next);
   return next.length;
+}
+
+async function refreshMemecoinEarlyRadar(reason='periodic'){
+  const started=Date.now();
+  const force=reason==='startup'||reason==='manual';
+  try{
+    let snapshot=await memecoinEarlyProvider.fetchEarlyRadar({limit:20,force});
+    snapshot=applyExternalMemecoinAttention(snapshot,globalIntelSnapshot());
+
+    const displayKeys=new Set((snapshot.rows||[]).map(x=>String(x?.chainId||'')+':'+String(x?.tokenAddress||'')));
+    const tracked=(specialistWalletState?.wallets?.[WALLET_4_MEME_SCOUT]?.positions||[])
+      .filter(x=>!displayKeys.has(String(x?.chainId||'')+':'+String(x?.tokenAddress||'')))
+      .slice(0,12);
+    const marked=[];
+    for(const p of tracked){
+      try{
+        const row=await memecoinEarlyProvider.fetchTokenSnapshot(p.chainId,p.tokenAddress,{force});
+        if(row)marked.push(row);
+      }catch(err){
+        recordError(observability,{scope:'memecoin_early.track',message:err instanceof Error?err.message:String(err)});
+      }
+    }
+    const walletInput={...snapshot,rows:[...(snapshot.rows||[]),...marked]};
+    const walletUpdate=applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
+      now:Date.now(),
+      marginQuote:Math.max(1,Number(process.env.TCX_W4_MEME_MARGIN_QUOTE||100)),
+      minScore:Math.max(0,Math.min(1,Number(process.env.TCX_W4_MEME_MIN_SCORE||.58))),
+      minLiquidityUsd:Math.max(1000,Number(process.env.TCX_W4_MEME_MIN_LIQUIDITY_USD||10_000)),
+      maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W4_MEME_MAX_OPEN||30))),
+      horizonMs:Math.max(30*60_000,Number(process.env.TCX_W4_MEME_HORIZON_MS||12*60*60_000)),
+      stopReturn:Math.max(-.95,Math.min(-.05,Number(process.env.TCX_W4_MEME_STOP_RETURN||-.45))),
+      takeReturn:Math.max(.10,Number(process.env.TCX_W4_MEME_TAKE_RETURN||1.50))
+    });
+    specialistWalletState=walletUpdate.state;
+    if(walletUpdate.results.opened||walletUpdate.results.closed)await persistSpecialistWallets('memecoin-early:'+reason);
+
+    memecoinEarlySnapshot=snapshot;
+    memecoinEarlyLastRefreshAt=Date.now();
+    memecoinEarlyLastError=(snapshot.errors||[]).length?snapshot.errors.slice(0,8).join(' | '):null;
+    if(memecoinExperienceSnapshot){
+      memecoinExperienceSnapshot={...memecoinExperienceSnapshot,
+        earlyVersion:MEMECOIN_EARLY_RADAR_VERSION,
+        earlyRows:snapshot.rows||[],
+        earlyCapturedAt:snapshot.capturedAt,
+        earlySource:snapshot.source
+      };
+    }
+    const walletSummary=specialistWalletSummary(specialistWalletState,{asOf:Date.now()});
+    console.log('[BIGGJ_MEMECOIN_EARLY]',JSON.stringify({
+      reason,
+      version:MEMECOIN_EARLY_RADAR_VERSION,
+      source:snapshot.source,
+      rows:snapshot.rows?.length||0,
+      newNow:(snapshot.rows||[]).filter(x=>x?.score?.stage==='NEW_NOW').length,
+      early:(snapshot.rows||[]).filter(x=>x?.score?.stage==='EARLY').length,
+      attention:(snapshot.rows||[]).filter(x=>x?.score?.stage==='ATTENTION').length,
+      sourceErrors:snapshot.errors?.length||0,
+      wallet4:{
+        opened:walletUpdate.results.opened,
+        closed:walletUpdate.results.closed,
+        active:walletSummary.wallets?.[WALLET_4_MEME_SCOUT]?.openPositions||0,
+        netPnlQuote:walletSummary.wallets?.[WALLET_4_MEME_SCOUT]?.netPnlQuote||0
+      },
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+    recordOperation(observability,{name:'memecoin_early_radar',ok:true,latencyMs:Date.now()-started,error:memecoinEarlyLastError});
+    return {ok:true,snapshot,walletUpdate};
+  }catch(err){
+    memecoinEarlyLastError=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'memecoin_early_radar',message:memecoinEarlyLastError});
+    recordOperation(observability,{name:'memecoin_early_radar',ok:false,latencyMs:Date.now()-started,error:memecoinEarlyLastError});
+    console.error('[BIGGJ_MEMECOIN_EARLY_ERROR]',reason,memecoinEarlyLastError);
+    return {ok:false,error:memecoinEarlyLastError};
+  }
+}
+
+async function memecoinEarlyWatcher(){
+  while(running){
+    await sleep(memecoinEarlyRefreshMs);
+    if(!running)break;
+    await refreshMemecoinEarlyRadar('periodic');
+  }
 }
 
 async function refreshPublicExperienceIntel(reason='periodic'){
