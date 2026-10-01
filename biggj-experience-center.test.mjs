@@ -117,8 +117,27 @@ test('trader watch renders provider-ranked public traders, inferred behavior and
         holdingStyle:'INTRADAY',
         directionalBias:'TWO_WAY',
         leverageStyle:'MODERATE_LEVERAGE',
+        lossHandling:'CUTS_LOSERS_FASTER',
+        edgeShape:'BALANCED_EDGE',
+        observedClosedTrades:50,
+        realizedWinRate:.62,
+        payoffRatio:1.5,
+        profitFactor:1.8,
+        expectancyPnlRatio:.012,
+        medianHoldMs:4*60*60_000,
         topSymbols:[{symbol:'BTC-USDT-SWAP',count:10},{symbol:'ETH-USDT-SWAP',count:4}],
         inferred:true
+      },
+      cohortComparison:{
+        sampleQuality:'MODERATE',
+        top:{traders:5,observedClosedTrades:220},
+        lowerProfit:{traders:3,observedClosedTrades:120},
+        observations:[
+          {key:'win_rate',top:62,lower:45,interpretation:'TOP_SAMPLE_FAVORABLE'},
+          {key:'payoff',top:1.5,lower:.9,interpretation:'TOP_SAMPLE_FAVORABLE'},
+          {key:'leverage',top:4,lower:9,interpretation:'DESCRIPTIVE_ONLY'},
+          {key:'loser_hold',top:.7,lower:1.6,interpretation:'TOP_SAMPLE_FAVORABLE'}
+        ]
       },
       openPositions:[{
         instId:'BTC-USDT-SWAP',side:'LONG',leverage:5,openAvgPx:100000,markPx:101000,uplRatio:.01,protectedFields:false
@@ -129,9 +148,14 @@ test('trader watch renders provider-ranked public traders, inferred behavior and
   const text=JSON.stringify(p);
   assert.match(text,/TOP TRADER WATCH/);
   assert.match(text,/Alpha/);
-  assert.match(text,/OKX-Overview-Ranking/);
-  assert.match(text,/Verhaltensprofil/);
+  assert.match(text,/OKX_OVERVIEW/);
+  assert.match(text,/Wie er handelt/);
   assert.match(text,/Intraday/);
+  assert.match(text,/WAS MACHEN DIE TOP-TRADER ANDERS/);
+  assert.match(text,/62\.0%/);
+  assert.match(text,/45\.0%/);
+  assert.match(text,/DESKRIPTIV, NICHT KAUSAL/);
+  assert.match(text,/Verlierer schneller raus/);
   assert.match(text,/LONG BTC-USDT-SWAP/);
   assert.match(text,/UPL \+1\.0%/);
   assert.match(text,/keine echten Orders/i);
