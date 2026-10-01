@@ -59,6 +59,13 @@ function securityGate({criticalRiskFlags=[],coverage={}}={}){
   const required=['tradeRestrictionKnown','adminAuthorityKnown','holderConcentrationKnown'];
   return required.every(k=>coverage?.[k]===true)?'PASS':'UNKNOWN';
 }
+function coverageGapCodes(coverage={}){
+  const out=[];
+  if(coverage?.tradeRestrictionKnown!==true)out.push('TRADE_RESTRICTION_EVIDENCE_MISSING');
+  if(coverage?.adminAuthorityKnown!==true)out.push('ADMIN_AUTHORITY_EVIDENCE_MISSING');
+  if(coverage?.holderConcentrationKnown!==true)out.push('HOLDER_CONCENTRATION_EVIDENCE_MISSING');
+  return out;
+}
 function evmNormalize(raw={},meta={}){
   const holders=topHolderStats(raw?.holders);
   const locked=lpLockedShare(raw?.lp_holders);
@@ -108,6 +115,8 @@ function evmNormalize(raw={},meta={}){
     openSourceKnown:openSource!=null
   };
   const critical=[...new Set(flags)];
+  const gate=securityGate({criticalRiskFlags:critical,coverage});
+  const unknownReasonCodes=gate==='UNKNOWN'?coverageGapCodes(coverage):[];
   return freeze({
     version:MEMECOIN_SECURITY_PROVIDER_VERSION,
     source:'GOPLUS_TOKEN_SECURITY',
@@ -115,7 +124,8 @@ function evmNormalize(raw={},meta={}){
     chainId:meta.chainId,
     tokenAddress:meta.tokenAddress,
     sourceReady:true,
-    evidenceGate:securityGate({criticalRiskFlags:critical,coverage}),
+    evidenceGate:gate,
+    unknownReasonCodes,
     criticalRiskFlags:critical,
     warningFlags:[...new Set(warnings)],
     tokenState:{
@@ -178,6 +188,8 @@ function solanaNormalize(raw={},meta={}){
     creatorRiskKnown:Array.isArray(raw?.creator)||raw?.creator!=null
   };
   const critical=[...new Set(flags)];
+  const gate=securityGate({criticalRiskFlags:critical,coverage});
+  const unknownReasonCodes=gate==='UNKNOWN'?coverageGapCodes(coverage):[];
   return freeze({
     version:MEMECOIN_SECURITY_PROVIDER_VERSION,
     source:'GOPLUS_SOLANA_TOKEN_SECURITY',
@@ -185,7 +197,8 @@ function solanaNormalize(raw={},meta={}){
     chainId:meta.chainId,
     tokenAddress:meta.tokenAddress,
     sourceReady:true,
-    evidenceGate:securityGate({criticalRiskFlags:critical,coverage}),
+    evidenceGate:gate,
+    unknownReasonCodes,
     criticalRiskFlags:critical,
     warningFlags:[...new Set(warnings)],
     tokenState:{
@@ -259,7 +272,7 @@ export function createMemecoinSecurityProvider({
       url=base+'/api/v1/solana/token_security?contract_addresses='+encodeURIComponent(address);
     }else{
       const gid=chainIdForGoPlus(chain);
-      if(!gid)return freeze({version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS_TOKEN_SECURITY',capturedAt:t,chainId:chain,tokenAddress:address,sourceReady:false,evidenceGate:'UNKNOWN',criticalRiskFlags:[],warningFlags:['CHAIN_UNSUPPORTED'],coverage:{},epistemic:'NO_SECURITY_EVIDENCE'});
+      if(!gid)return freeze({version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS_TOKEN_SECURITY',capturedAt:t,chainId:chain,tokenAddress:address,sourceReady:false,evidenceGate:'UNKNOWN',unknownReasonCodes:['CHAIN_UNSUPPORTED'],criticalRiskFlags:[],warningFlags:['CHAIN_UNSUPPORTED'],coverage:{},epistemic:'NO_SECURITY_EVIDENCE'});
       url=base+'/api/v1/token_security/'+gid+'?contract_addresses='+encodeURIComponent(address);
     }
     const body=await getJson(url);
@@ -286,14 +299,25 @@ export function createMemecoinSecurityProvider({
           security=freeze({
             version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS_TOKEN_SECURITY',capturedAt:Number(now()),
             chainId:normChain(row?.chainId),tokenAddress:String(row?.tokenAddress||''),sourceReady:false,
-            evidenceGate:'UNKNOWN',criticalRiskFlags:[],warningFlags:['SECURITY_SOURCE_UNAVAILABLE'],
+            evidenceGate:'UNKNOWN',unknownReasonCodes:['SECURITY_SOURCE_UNAVAILABLE'],
+            criticalRiskFlags:[],warningFlags:['SECURITY_SOURCE_UNAVAILABLE'],
             coverage:{},epistemic:'NO_SECURITY_EVIDENCE'
           });
         }
       }
       out.push(freeze({...row,security}));
     }
-    return freeze({...snapshot,rows:out,securityProvider:{version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS',attempted,errors,freeRateLimitAware:true}});
+    const unknownReasonCounts={};
+    for(const row of out){
+      if(row?.security?.evidenceGate!=='UNKNOWN')continue;
+      for(const code of row?.security?.unknownReasonCodes||['UNKNOWN_EVIDENCE_GAP']){
+        unknownReasonCounts[code]=(unknownReasonCounts[code]||0)+1;
+      }
+    }
+    return freeze({...snapshot,rows:out,securityProvider:{
+      version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS',attempted,errors,
+      unknownReasonCounts,freeRateLimitAware:true
+    }});
   }
   return freeze({version:MEMECOIN_SECURITY_PROVIDER_VERSION,fetchTokenSecurity,enrichSnapshot});
 }
