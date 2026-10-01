@@ -118,6 +118,7 @@ function riskFlags(row,ageMin){
 }
 function attentionSignals(row){
   const s=[];
+  if(row?.signalNewPool)s.push('NEW_POOL');
   if(row?.signalProfile)s.push('NEW_PROFILE');
   if(row?.signalBoost)s.push('NEW_BOOST');
   if(row?.signalTakeover)s.push('COMMUNITY_TAKEOVER');
@@ -129,6 +130,7 @@ function attentionSignals(row){
 }
 function attentionScore(row){
   let s=0;
+  if(row?.signalNewPool)s+=.08;
   if(row?.signalProfile)s+=.22;
   if(row?.signalBoost)s+=.26;
   if(row?.signalTakeover)s+=.22;
