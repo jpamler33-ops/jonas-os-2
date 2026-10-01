@@ -273,12 +273,12 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
     'BIGGJ // TOP TRADER WATCH',
     reason,
     [
-      ...(comparison?safeField('WAS MACHEN DIE TOP-TRADER ANDERS?',[
+      ...(comparison?[safeField('WAS MACHEN DIE TOP-TRADER ANDERS?',[
         'Top-Sample '+String(comparison?.top?.traders??'—')+' Trader / '+String(comparison?.top?.observedClosedTrades??'—')+' Recent Trades',
         'Lower-PnL-Sample '+String(comparison?.lowerProfit?.traders??'—')+' Trader / '+String(comparison?.lowerProfit?.observedClosedTrades??'—')+' Recent Trades',
         ...comparisonLines,
         'Qualität '+clip(comparison?.sampleQuality||'LIMITED',18)+' · **DESKRIPTIV, NICHT KAUSAL**'
-      ].join('\n')):[]),
+      ].join('\n'))]:[]),
       ...traderFields,
       safeField('SOURCE / FRESHNESS',[
         'Quelle '+clip(t?.source||'OKX_PUBLIC_COPY_TRADING_API',80),
