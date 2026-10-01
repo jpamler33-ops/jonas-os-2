@@ -304,7 +304,12 @@ function mergeCandidate(base={},extra={}){
     pairCreatedAt:pick(extra.pairCreatedAt,base.pairCreatedAt),
     links:[...compactLinks(base.links),...compactLinks(extra.links)].filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i).slice(0,12),
     xLinked:Boolean(base.xLinked||extra.xLinked),
-    websiteLinked:Boolean(base.websiteLinked||extra.websiteLinked)
+    websiteLinked:Boolean(base.websiteLinked||extra.websiteLinked),
+    signalNewPool:Boolean(base.signalNewPool||extra.signalNewPool),
+    signalProfile:Boolean(base.signalProfile||extra.signalProfile),
+    signalBoost:Boolean(base.signalBoost||extra.signalBoost),
+    signalTakeover:Boolean(base.signalTakeover||extra.signalTakeover),
+    signalAd:Boolean(base.signalAd||extra.signalAd)
   };
 }
 
