@@ -179,3 +179,18 @@ test('runtime gives heavy research GC priority after shared-slot waits',async()=
   assert.match(bot,/triggerHeapMb:forecastPersistenceHeapHeadroomMb/);
   assert.doesNotMatch(bot,/triggerHeapMb:Math\.max\(280,forecastPersistenceHeapHeadroomMb-10\)/);
 });
+
+
+test('autolearn resource budget is measured after bounded GC precheck',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  const gcAt=bot.indexOf("AUTOLEARN_BUDGET_PRECHECK");
+  const budgetAt=bot.indexOf("researchAcceleration=currentResearchAccelerator(Date.now())");
+  assert.ok(gcAt>=0);
+  assert.ok(budgetAt>gcAt);
+  assert.match(bot,/triggerHeapMb:autoLearnResumeHeapMb/);
+  assert.match(bot,/cooldownBypassOverageMb:15/);
+  assert.match(bot,/budgetGcExecuted/);
+  assert.match(bot,/budgetGcReclaimedMb/);
+  assert.match(bot,/Math\.min\(autoLearnMaxIssuedPerSweep,researchAcceleration\.resource\.autoLearnIssueBudget\)/);
+});
