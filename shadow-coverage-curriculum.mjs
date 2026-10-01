@@ -118,7 +118,10 @@ function coveragePriority(calibrationStatus,horizonGate,horizonMs,calibrationEvi
     :0;
   return {
     tier,
-    score:tier*1_000_000_000_000+deficitScore+Math.max(0,Number(horizonMs)||0),
+    // Rank evidence deficit first. Maturity speed is handled as an explicit
+    // tie-breaker below so equal deficits prefer faster observed outcomes
+    // instead of accidentally preferring the longest horizon.
+    score:tier*1_000_000_000_000+deficitScore,
     reason,
     target
   };
@@ -257,6 +260,7 @@ export function deriveCoverageCurriculumCandidates(issuance,{
 
   candidates.sort((a,b)=>
     Number(b.coveragePriorityScore||0)-Number(a.coveragePriorityScore||0)||
+    Number(a.horizonMs||Number.POSITIVE_INFINITY)-Number(b.horizonMs||Number.POSITIVE_INFINITY)||
     String(a.horizonId).localeCompare(String(b.horizonId))
   );
 
@@ -291,6 +295,7 @@ export function prioritizeCoverageCurriculumCandidates(candidates,{limit=1}={}){
     Number(b.coveragePriorityScore||0)-Number(a.coveragePriorityScore||0)||
     Number(b.coverageTargetEffectiveSampleDeficitRatio||0)-Number(a.coverageTargetEffectiveSampleDeficitRatio||0)||
     Number(b.coverageTargetEffectiveSampleDeficit||0)-Number(a.coverageTargetEffectiveSampleDeficit||0)||
+    Number(a.horizonMs||Number.POSITIVE_INFINITY)-Number(b.horizonMs||Number.POSITIVE_INFINITY)||
     String(a.symbol||'').localeCompare(String(b.symbol||''))||
     String(a.horizonId||'').localeCompare(String(b.horizonId||''))
   );
@@ -302,7 +307,7 @@ export function prioritizeCoverageCurriculumCandidates(candidates,{limit=1}={}){
     execution:'SHADOW_ONLY',
     action:'ABSTAIN',
     canExecuteLive:false,
-    meaning:'GLOBAL_COIN_HORIZON_PROBABILITY_BIN_CLASS_ESS_PRIORITY'
+    meaning:'GLOBAL_COIN_HORIZON_PROBABILITY_BIN_CLASS_ESS_PRIORITY_WITH_TIME_TO_INFORMATION_TIEBREAK'
   });
 }
 
