@@ -225,6 +225,12 @@ function severeMemeRisk(flags=[]){
   const set=new Set(Array.isArray(flags)?flags:[]);
   return ['LIQUIDITY_UNKNOWN','LIQUIDITY_EXTREME_THIN','ONE_SIDED_NO_SELLS_OBSERVED'].some(x=>set.has(x));
 }
+function memeSecurityGate(row={}){
+  return String(row?.security?.evidenceGate||'UNKNOWN').toUpperCase();
+}
+function memeSecurityCritical(row={}){
+  return Array.isArray(row?.security?.criticalRiskFlags)&&row.security.criticalRiskFlags.length>0;
+}
 
 export function applyMemecoinScoutSnapshot(input,snapshot,{
   now=Date.now(),
@@ -256,6 +262,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       else if(ret!=null&&ret>=takeReturn)reason='MEME_TAKE_PROFIT';
       else if(Number(now)-Number(p.openedAt||now)>=Math.max(60_000,Number(horizonMs)||12*60*60_000))reason='MEME_HORIZON';
       else if(liq!=null&&liq<3_000)reason='MEME_LIQUIDITY_COLLAPSE';
+      else if(memeSecurityGate(row)==='ABSTAIN'||memeSecurityCritical(row))reason='MEME_SECURITY_ABSTAIN';
       if(reason){closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});results.closed++;}
     }
   }
@@ -266,7 +273,8 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     const liq=finite(row?.liquidityUsd,0);
     const px=finite(row?.priceUsd);
     const flags=row?.score?.riskFlags||[];
-    const eligible=['NEW_NOW','EARLY'].includes(stage)&&score>=minScore&&liq>=minLiquidityUsd&&px>0&&!severeMemeRisk(flags);
+    const securityGate=memeSecurityGate(row);
+    const eligible=['NEW_NOW','EARLY'].includes(stage)&&score>=minScore&&liq>=minLiquidityUsd&&px>0&&!severeMemeRisk(flags)&&securityGate==='PASS'&&!memeSecurityCritical(row);
     if(!eligible)continue;
     results.eligible++;
     if(wallet.positions.length>=maxOpenOperational)break;
@@ -283,6 +291,10 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       entryResearchPriorityScore:score,entryStage:stage,
       entryAttentionSignals:clone(row?.score?.attentionSignals||[]),
       entryRiskFlags:clone(flags),
+      entrySecurityGate:securityGate,
+      entrySecurityCriticalRiskFlags:clone(row?.security?.criticalRiskFlags||[]),
+      entrySecurityWarningFlags:clone(row?.security?.warningFlags||[]),
+      entrySecurityCoverage:clone(row?.security?.coverage||{}),
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
       status:'OPEN',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
       epistemic:'EARLY_RESEARCH_SCORE_NOT_PROFIT_PROBABILITY'
