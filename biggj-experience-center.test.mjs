@@ -95,8 +95,46 @@ test('learned panel keeps maturity and uncertainty visible',()=>{
 test('trader watch fails honestly when no public profit source exists',()=>{
   const p=buildBiggjTraderWatchPayload(snapshot());
   const text=JSON.stringify(p);
-  assert.match(text,/kein belastbarer öffentlicher PnL/i);
+  assert.match(text,/erfindet keine Positionen oder Rankings/i);
   assert.match(text,/SOURCE REQUIRED/);
+});
+
+test('trader watch renders provider-ranked public traders, inferred behavior and open positions',()=>{
+  const x=snapshot();
+  x.health.traderWatch={
+    sourceReady:true,
+    source:'OKX_PUBLIC_COPY_TRADING_API',
+    capturedAt:Date.now()-60_000,
+    rankingMethod:'OKX_OVERVIEW',
+    nextNeed:'second independent source',
+    entityRegistry:{entityCount:12},
+    entityFlow:{observationCount:33},
+    traders:[{
+      providerRank:1,
+      nickname:'Alpha',
+      metrics:{pnl90d:12000,pnlRatio90d:.42,winRatio:.64,aum:500000,copyTraderNum:200,leadDays:420},
+      strategy:{
+        holdingStyle:'INTRADAY',
+        directionalBias:'TWO_WAY',
+        leverageStyle:'MODERATE_LEVERAGE',
+        topSymbols:[{symbol:'BTC-USDT-SWAP',count:10},{symbol:'ETH-USDT-SWAP',count:4}],
+        inferred:true
+      },
+      openPositions:[{
+        instId:'BTC-USDT-SWAP',side:'LONG',leverage:5,openAvgPx:100000,markPx:101000,uplRatio:.01,protectedFields:false
+      }]
+    }]
+  };
+  const p=buildBiggjTraderWatchPayload(x);
+  const text=JSON.stringify(p);
+  assert.match(text,/TOP TRADER WATCH/);
+  assert.match(text,/Alpha/);
+  assert.match(text,/OKX-Overview-Ranking/);
+  assert.match(text,/Verhaltensprofil/);
+  assert.match(text,/Intraday/);
+  assert.match(text,/LONG BTC-USDT-SWAP/);
+  assert.match(text,/UPL \+1\.0%/);
+  assert.match(text,/keine echten Orders/i);
 });
 
 test('trade cockpit remains shadow-only',()=>{
