@@ -21,6 +21,17 @@ function geckoNetwork(chain){
   const c=normChain(chain);
   return c==='ethereum'?'eth':c;
 }
+const OBVIOUS_NON_MEME_SYMBOLS=new Set([
+  'USDC','USDT','DAI','USDE','FDUSD','USDS','TUSD','PYUSD',
+  'WETH','ETH','WBTC','BTC','WSOL','SOL','WBNB','BNB','WAVAX','AVAX',
+  'STETH','WSTETH','CBETH','WEETH','EZETH','RETH'
+]);
+function obviousNonMeme(row={}){
+  const symbol=String(row?.symbol||'').toUpperCase();
+  if(OBVIOUS_NON_MEME_SYMBOLS.has(symbol))return true;
+  const name=String(row?.name||'').toLowerCase();
+  return /^(wrapped |bridged |tether usd|usd coin|dai stablecoin|wrapped bitcoin|wrapped ether|wrapped sol|liquid staked)/.test(name);
+}
 function tokenKey(chain,address){
   const c=normChain(chain),a=String(address||'').trim();
   if(!c||!a)return '';
@@ -464,7 +475,7 @@ export function createMemecoinEarlyRadarProvider({
       }
     });
 
-    const rows=[...map.values()].map(row=>{
+    const rows=[...map.values()].filter(row=>!obviousNonMeme(row)).map(row=>{
       const links=compactLinks(row.links);
       const normalized={...row,links,xLinked:Boolean(row.xLinked||xLinked(links)),websiteLinked:Boolean(row.websiteLinked||websiteLinked(links))};
       return Object.freeze({...normalized,score:scoreEarlyMemecoin(normalized,{now:capturedAt})});
