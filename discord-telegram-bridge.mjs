@@ -519,20 +519,18 @@ export function buildDiscordSystemPayload(snapshot={}){
 }
 
 export function buildDiscordPerformancePayload(snapshot={}){
-  const p=snapshot?.portfolio||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance getrennt von Research/Probes · keine echten Orders**',fields:[
-    {name:'Primary Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},
-    {name:'Primary Return',value:percent(p?.returnPct),inline:true},
-    {name:'Primary Open',value:String(p?.openPositions??0),inline:true},
-    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},
-    {name:'Primary Winrate',value:percent(p?.winRate),inline:true},
-    {name:'Research Open',value:String(research?.openPositions??0),inline:true},
-    {name:'Research Closed',value:String(research?.closedTrades??0),inline:true},
-    {name:'Research PnL',value:money(research?.netPnlQuote),inline:true},
+  const p=snapshot?.portfolio||{};
+  return {embeds:[{title:'BIGGJ // SHADOW PERFORMANCE',description:'**Das Ergebnis auf einen Blick.** Research-/Probe-Trades bleiben aus diesen PRIMARY-Zahlen getrennt.',fields:[
+    {name:'Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Net PnL',value:money(p?.netPnlQuote),inline:true},
+    {name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Offen',value:String(p?.openPositions??0),inline:true},
+    {name:'Geschlossen',value:String(p?.closedTrades??0),inline:true},
+    {name:'Winrate',value:percent(p?.winRate),inline:true},
     {name:'Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
     {name:'Expectancy',value:money(p?.expectancyQuote),inline:true},
-    {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
+    {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true},
+    {name:'Safety',value:'SHADOW_ONLY · keine echten Orders',inline:false}
   ],footer:{text:MARKERS.performance},timestamp:new Date().toISOString()}],components:[
     {type:1,components:[
       {type:2,style:2,label:'Tag',custom_id:'dc3:home:stats_day'},
@@ -543,6 +541,7 @@ export function buildDiscordPerformancePayload(snapshot={}){
     marketSelectRow()
   ],allowedMentions:{parse:[]}};
 }
+
 export function buildDiscordMarketOverviewPayload(snapshot={}){
   const p=snapshot?.portfolio||{},h=snapshot?.health||{},research=p?.researchActivity||{},radar=h?.marketRadar?.rows||[];
   const top=radar.slice(0,5).map(x=>'• **'+String(x.symbol||'—').replace('USDT','/USDT')+'** · '+String(x.regime||x.status||'WATCH')+' · '+Math.round(Number(x.score??x.witnessAgreement??0)*100)+'/100').join('\n')||'Radar sammelt gerade neue Marktstates.';
