@@ -10,6 +10,7 @@ function horizon(extra={}){
     gate:'PASS',
     direction:'UP',
     expectedReturn:.003,
+    flatThreshold:.001,
     probabilities:{up:.6,down:.2,flat:.2},
     interval:{q10:-.01,q25:-.003,median:.002,q75:.006,q90:.012},
     scenarios:[],
@@ -55,6 +56,7 @@ test('calibrated admissible horizon may expose probabilities',()=>{
   assert.equal(f.horizons[0].display.probabilityDisplayAllowed,true);
   assert.deepEqual(f.horizons[0].display.probabilities,{up:.6,down:.2,flat:.2});
   assert.equal(f.horizons[0].display.probabilityEpistemic,'CALIBRATED_PROBABILITY');
+  assert.equal(f.horizons[0].flatThreshold,.001);
   assert.equal(verifyCanonicalForecast(f).ok,true);
 });
 
