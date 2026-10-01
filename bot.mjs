@@ -4022,7 +4022,8 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
     const signalLabel={
       NEW_POOL:'neuer Pool',NEW_PROFILE:'neues Token-Profil',NEW_BOOST:'neuer Boost',
       COMMUNITY_TAKEOVER:'Community Takeover',DEX_AD:'DEX Ad',X_LINKED_PROFILE:'X-Profil verknüpft',
-      WEBSITE:'Website',EXTERNAL_MENTION:'öffentliche Erwähnung'
+      WEBSITE:'Website',EXTERNAL_MENTION:'öffentliche Erwähnung',X_POSTS_RECENT:'direkte X-Posts',
+      X_ATTENTION_SPIKE:'X-Attention Spike',X_HIGH_REACH_AUTHOR:'X-Account mit hoher Reichweite'
     };
     const riskLabel={
       LIQUIDITY_UNKNOWN:'Liquidität unbekannt',LIQUIDITY_EXTREME_THIN:'extrem dünne Liquidität',
@@ -4039,12 +4040,19 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       const signals=(row?.score?.attentionSignals||[]).slice(0,5).map(x=>signalLabel[x]||x).join(' · ')||'kein Attention-Signal';
       const risks=(row?.score?.riskFlags||[]).slice(0,4).map(x=>riskLabel[x]||x).join(' · ')||'keine sichtbare Radar-Warnung';
       const buys=row?.buysM5??'—',sells=row?.sellsM5??'—';
+      const securityGate=String(row?.security?.evidenceGate||'UNKNOWN').toUpperCase();
+      const securityIcon=securityGate==='PASS'?'✅':securityGate==='ABSTAIN'?'⛔':'❔';
+      const securityFlags=[
+        ...(row?.security?.criticalRiskFlags||[]),
+        ...(row?.security?.warningFlags||[])
+      ].slice(0,3).join(' · ')||'keine kritische Security-Evidenz im aktuellen Check';
       return [
         (i+1)+'. **'+name+'** · '+String(row?.chainId||'').toUpperCase()+' · '+(stageLabel[row?.score?.stage]||row?.score?.stage||'WATCH')+' · Priority '+score+'/100',
         '   '+age+' · Preis '+compactUsd(row?.priceUsd)+' · Liq '+compactUsd(row?.liquidityUsd)+' · MC '+compactUsd(row?.marketCap??row?.fdv),
         '   5m: Vol '+compactUsd(row?.volumeM5)+' · Buy/Sell '+buys+'/'+sells+' · '+signedPercent(row?.priceChangeM5),
         '   Attention: '+signals,
-        '   Risiko: '+risks
+        '   Radar: '+risks,
+        '   Security: '+securityIcon+' '+securityGate+' · '+securityFlags
       ];
     });
     const wallets=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets||{};
@@ -4056,18 +4064,20 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       ...(rows.length?rows:['Keine frühen Kandidaten im aktuellen Snapshot.']),'',
       'WALLET 4 · EARLY MEME SCOUT',
       'Open '+Number(w4.openPositions||0)+' · Closed '+Number(w4.closedTrades||0)+' · Shadow PnL '+compactUsd(w4.netPnlQuote),
-      'Entry nur NEW_NOW/EARLY + Mindestliquidität + keine schweren sichtbaren Risiko-Flags.','',
+      'Entry nur NEW_NOW/EARLY + Mindestliquidität + **Security PASS**. UNKNOWN/ABSTAIN eröffnet keinen neuen Trade.','',
       'WALLET 5 · MEME COPY',
       'Open '+Number(w5.openPositions||0)+' · Closed '+Number(w5.closedTrades||0)+' · Shadow PnL '+compactUsd(w5.netPnlQuote),
       'Kopiert öffentlich sichtbare Memecoin-Positionen qualifizierter OKX Lead-Trader.','',
       'ATTENTION-QUELLEN',
       '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
-      '• X_LINKED_PROFILE = Projekt verlinkt ein X-Profil; **noch kein direkter X-Post-/Viralitätsstream**.',
-      '• öffentliche News-Erwähnungen werden als Zusatzsignal gematcht.','',
-      'NOCH NICHT VERIFIZIERT',
-      'Holder-Konzentration · Honeypot/Transfer-Sperren · Mint/Freeze-Rechte · LP-Lock.',
-      'Darum bleibt alles SHADOW_ONLY / canExecuteLive:false.','',
-      'Quelle: DEX Screener + GeckoTerminal Public Data',
+      '• öffentliche News-Erwähnungen + X-verknüpfte Projektprofile.',
+      '• Direct X Recent Search: '+(memecoinSocialSnapshot?.sourceReady?'LIVE':memecoinSocialSnapshot?.configured?'DEGRADED':'TOKEN FEHLT')+'.','',
+      'ON-CHAIN SECURITY',
+      '• GoPlus: Honeypot/Trade-Sperren · Mint/Freeze/Admin-Rechte · Holder-Konzentration · LP-Lock-Evidenz.',
+      '• Kritische Evidenz => ABSTAIN; fehlende Evidenz => UNKNOWN und kein neuer Wallet-4-Entry.',
+      '• Security-Flags sind Evidenzfelder, **keine Rug-Pull-Wahrscheinlichkeit**.','',
+      'Alles bleibt SHADOW_ONLY / canExecuteLive:false.','',
+      'Quellen: DEX Screener + GeckoTerminal + GoPlus'+(memecoinSocialSnapshot?.sourceReady?' + X Recent Search':''),
       memecoinEarlyLastError?'Degraded: '+String(memecoinEarlyLastError).slice(0,280):'Source: LIVE'
     ].join('\n');
     recordOperation(observability,{name:'memecoin_radar',ok:true,latencyMs:Date.now()-started});
