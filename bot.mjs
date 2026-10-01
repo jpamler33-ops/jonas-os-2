@@ -3999,37 +3999,66 @@ function pairAgeText(createdAt,now=Date.now()){
 async function showMemecoinRadar(chatId,messageId,{force=false}={}){
   const started=Date.now();
   try{
-    const radar=await dexScreenerProvider.fetchMemecoinRadar({limit:6,chainIds:['solana','base','ethereum'],force});
-    const rows=[];
-    radar.rows.forEach((item,i)=>{
-      const p=item.pair;
-      const risk=memecoinRisk(p,radar.capturedAt);
-      const name=p?.baseToken?.symbol||p?.baseToken?.name||item.tokenAddress.slice(0,8)+'…';
-      rows.push(
-        (i+1)+'. '+name+' · '+String(item.chainId||'').toUpperCase(),
-        '   Preis '+compactUsd(p?.priceUsd)+' · 1h '+signedPercent(p?.priceChangeH1)+' · Vol '+compactUsd(p?.volumeH1),
-        '   Liquidität '+compactUsd(p?.liquidityUsd)+' · Käufe/Verkäufe 1h '+(p?.buysH1??'—')+'/'+(p?.sellsH1??'—')+' · '+pairAgeText(p?.pairCreatedAt,radar.capturedAt),
-        '   Risikoindikator: '+risk.label
-      );
+    const stale=!memecoinEarlySnapshot||Date.now()-Number(memecoinEarlyLastRefreshAt||0)>Math.max(20_000,memecoinEarlyRefreshMs*2);
+    if(force||stale)await refreshMemecoinEarlyRadar(force?'manual':'panel-stale');
+    const radar=memecoinEarlySnapshot;
+    if(!radar?.rows)throw new Error(memecoinEarlyLastError||'MEMECOIN_EARLY_RADAR_NOT_READY');
+    const signalLabel={
+      NEW_POOL:'neuer Pool',NEW_PROFILE:'neues Token-Profil',NEW_BOOST:'neuer Boost',
+      COMMUNITY_TAKEOVER:'Community Takeover',DEX_AD:'DEX Ad',X_LINKED_PROFILE:'X-Profil verknüpft',
+      WEBSITE:'Website',EXTERNAL_MENTION:'öffentliche Erwähnung'
+    };
+    const riskLabel={
+      LIQUIDITY_UNKNOWN:'Liquidität unbekannt',LIQUIDITY_EXTREME_THIN:'extrem dünne Liquidität',
+      LIQUIDITY_VERY_THIN:'sehr dünne Liquidität',LIQUIDITY_THIN:'dünne Liquidität',
+      LOW_M5_ACTIVITY:'kaum 5m-Aktivität',ONE_SIDED_NO_SELLS_OBSERVED:'keine Verkäufe im 5m-Fenster gesehen',
+      FDV_LIQUIDITY_STRETCHED:'FDV/Liquidität gestreckt',MCAP_LIQUIDITY_STRETCHED:'MC/Liquidität gestreckt',
+      M5_CHASE_RISK:'5m-Pump/Chase-Risiko',EXTREME_TURNOVER:'extremer Turnover',ULTRA_NEW_PAIR:'ultra-neuer Pool'
+    };
+    const stageLabel={NEW_NOW:'🆕 NEW NOW',EARLY:'⚡ EARLY',ATTENTION:'👀 ATTENTION',WATCH:'◌ WATCH',RISK_ONLY:'⚠️ RISK ONLY'};
+    const rows=(radar.rows||[]).slice(0,7).flatMap((row,i)=>{
+      const score=Math.round(Number(row?.score?.researchPriorityScore||0)*100);
+      const age=row?.score?.ageMinutes==null?'Alter ?':row.score.ageMinutes<60?Math.max(1,Math.round(row.score.ageMinutes))+'m alt':(row.score.ageMinutes/60).toFixed(1)+'h alt';
+      const name=row?.symbol||row?.name||String(row?.tokenAddress||'').slice(0,8)+'…';
+      const signals=(row?.score?.attentionSignals||[]).slice(0,5).map(x=>signalLabel[x]||x).join(' · ')||'kein Attention-Signal';
+      const risks=(row?.score?.riskFlags||[]).slice(0,4).map(x=>riskLabel[x]||x).join(' · ')||'keine sichtbare Radar-Warnung';
+      const buys=row?.buysM5??'—',sells=row?.sellsM5??'—';
+      return [
+        (i+1)+'. **'+name+'** · '+String(row?.chainId||'').toUpperCase()+' · '+(stageLabel[row?.score?.stage]||row?.score?.stage||'WATCH')+' · Priority '+score+'/100',
+        '   '+age+' · Preis '+compactUsd(row?.priceUsd)+' · Liq '+compactUsd(row?.liquidityUsd)+' · MC '+compactUsd(row?.marketCap??row?.fdv),
+        '   5m: Vol '+compactUsd(row?.volumeM5)+' · Buy/Sell '+buys+'/'+sells+' · '+signedPercent(row?.priceChangeM5),
+        '   Attention: '+signals,
+        '   Risiko: '+risks
+      ];
     });
+    const wallets=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets||{};
+    const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{};
     const text=[
-      '🐸 MEMECOIN-RADAR · LIVE','',
-      'TCX zeigt aktuell stark beworbene/auffällige Tokens aus öffentlichen DEX-Daten.',
-      'Das ist KEIN Ranking nach Kaufchance.','',
-      ...(rows.length?rows:['Keine verwertbaren Tokens aus der Live-Quelle erhalten.']),'',
-      ...(radar.errors.length?['⚠️ '+radar.errors.length+' Token-Abfragen konnten nicht geladen werden.']:[]),
-      'WICHTIGE DATENLÜCKEN',
-      '• Holder-Konzentration wird hier noch nicht verifiziert.',
-      '• LP-Lock/Mint-/Freeze-Rechte werden durch DEX-Daten allein nicht bewiesen.',
-      '• Der Risikoindikator nutzt nur sichtbare Liquidität und Pair-Alter.','',
-      'Quelle: DEX Screener Public API',
-      'Systemmodus: ABSTAIN / SHADOW_ONLY'
+      '🐸 BIGGJ MEMECOIN EARLY RADAR','',
+      '**Ziel: neue Aufmerksamkeit erkennen, bevor Market Cap/Trending groß werden.**',
+      'Sortierung = Early Research Priority, NICHT Market Cap und NICHT Gewinnwahrscheinlichkeit.','',
+      ...(rows.length?rows:['Keine frühen Kandidaten im aktuellen Snapshot.']),'',
+      'WALLET 4 · EARLY MEME SCOUT',
+      'Open '+Number(w4.openPositions||0)+' · Closed '+Number(w4.closedTrades||0)+' · Shadow PnL '+compactUsd(w4.netPnlQuote),
+      'Entry nur NEW_NOW/EARLY + Mindestliquidität + keine schweren sichtbaren Risiko-Flags.','',
+      'WALLET 5 · MEME COPY',
+      'Open '+Number(w5.openPositions||0)+' · Closed '+Number(w5.closedTrades||0)+' · Shadow PnL '+compactUsd(w5.netPnlQuote),
+      'Kopiert öffentlich sichtbare Memecoin-Positionen qualifizierter OKX Lead-Trader.','',
+      'ATTENTION-QUELLEN',
+      '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
+      '• X_LINKED_PROFILE = Projekt verlinkt ein X-Profil; **noch kein direkter X-Post-/Viralitätsstream**.',
+      '• öffentliche News-Erwähnungen werden als Zusatzsignal gematcht.','',
+      'NOCH NICHT VERIFIZIERT',
+      'Holder-Konzentration · Honeypot/Transfer-Sperren · Mint/Freeze-Rechte · LP-Lock.',
+      'Darum bleibt alles SHADOW_ONLY / canExecuteLive:false.','',
+      'Quelle: DEX Screener + GeckoTerminal Public Data',
+      memecoinEarlyLastError?'Degraded: '+String(memecoinEarlyLastError).slice(0,280):'Source: LIVE'
     ].join('\n');
     recordOperation(observability,{name:'memecoin_radar',ok:true,latencyMs:Date.now()-started});
     return deliverTelegramTextCard(tg,chatId,messageId,{
       text:text.slice(0,4096),
       reply_markup:{inline_keyboard:[
-        [{text:'🔄 Aktualisieren',callback_data:'home:memecoins'},{text:'🧭 Stimmung & Trends',callback_data:'home:trends'}],
+        [{text:'🔄 Early Scan',callback_data:'home:memecoins'},{text:'🧭 Trends',callback_data:'home:trends'}],
         [{text:'🏠 Start',callback_data:'home'}]
       ]}
     });
@@ -4038,12 +4067,11 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
     recordError(observability,{scope:'memecoin_radar',message});
     recordOperation(observability,{name:'memecoin_radar',ok:false,latencyMs:Date.now()-started,error:message});
     return deliverTelegramTextCard(tg,chatId,messageId,{
-      text:['🐸 MEMECOIN-RADAR','','Live-Quelle gerade nicht verfügbar.','TCX zeigt deshalb keine erfundenen Token-Daten.','','Quelle: DEX Screener Public API','Systemmodus: ABSTAIN / SHADOW_ONLY'].join('\n'),
+      text:['🐸 BIGGJ MEMECOIN EARLY RADAR','','Early-Discovery-Quellen gerade nicht verfügbar.','BIGGJ zeigt deshalb keine erfundenen Coins oder Scores.','','Systemmodus: ABSTAIN / SHADOW_ONLY'].join('\n'),
       reply_markup:{inline_keyboard:[[{text:'🔄 Nochmal versuchen',callback_data:'home:memecoins'},{text:'🏠 Start',callback_data:'home'}]]}
     });
   }
 }
-
 function sentimentLabel(value,classification){
   const n=Number(value);
   if(!Number.isFinite(n)) return '⚪ unbekannt';
