@@ -422,6 +422,7 @@ const autoLearnResumeHeapMb = Math.max(240, Math.min(autoLearnHeapHeadroomMb-20,
 const autoLearnResumeRssMb = Math.max(450, Math.min(autoLearnRssHeadroomMb-40, Number(process.env.TCX_AUTOLEARN_RESUME_RSS_MB || 620)));
 const autoLearnResumeExternalMb = Math.max(16, Math.min(autoLearnExternalHeadroomMb-8, Number(process.env.TCX_AUTOLEARN_RESUME_EXTERNAL_MB || 48)));
 const autoLearnMemoryBackoffMs = Math.max(30000, Math.min(180000, Number(process.env.TCX_AUTOLEARN_MEMORY_BACKOFF_MS || 90000)));
+const autoLearnPostIssueSettleMs = Math.max(30000, Math.min(60000, Number(process.env.TCX_AUTOLEARN_POST_ISSUE_SETTLE_MS || 45000)));
 const servingGuardHeapMb = Math.max(260, Math.min(380, Number(process.env.TCX_SERVING_GUARD_HEAP_MB || 330)));
 const servingGuardRssMb = Math.max(550, Math.min(900, Number(process.env.TCX_SERVING_GUARD_RSS_MB || 720)));
 const servingGuardExternalMb = Math.max(24, Math.min(160, Number(process.env.TCX_SERVING_GUARD_EXTERNAL_MB || 64)));
@@ -8974,6 +8975,7 @@ async function autoLearnForecastWatcher() {
     const started=Date.now();
     let issued=0,skipped=0,failed=0,deferred=0;
     let memoryPressure=false;
+    let transientPostIssuePressure=false;
     const researchAcceleration=currentResearchAccelerator(Date.now());
     const effectiveAutoLearnMaxIssuedPerSweep=Math.max(
       1,
@@ -9109,9 +9111,19 @@ async function autoLearnForecastWatcher() {
           });
           if(!postAdmission.allowed){
             deferred++;
-            memoryPressure=true;
+            const heapOnlyPressure=
+              issued>0&&
+              Array.isArray(postAdmission.exceeded)&&
+              postAdmission.exceeded.length>0&&
+              postAdmission.exceeded.every(x=>String(x)==='HEAP');
+            if(heapOnlyPressure){
+              transientPostIssuePressure=true;
+            }else{
+              memoryPressure=true;
+            }
             console.warn('autolearn post-issuance memory pressure',JSON.stringify({
               symbol,
+              transientPostIssuePressure:heapOnlyPressure,
               ...postAdmission.memory,
               exceeded:postAdmission.exceeded,
               threshold:postAdmission.limits
@@ -9151,6 +9163,21 @@ async function autoLearnForecastWatcher() {
           forecastJournalRows:forecastRuntime.journal.entries.length
         };})()
       }));
+    }
+    if(transientPostIssuePressure&&!memoryPressure){
+      const before=process.memoryUsage();
+      console.log('autolearn transient post-issue settle',JSON.stringify({
+        delayMs:autoLearnPostIssueSettleMs,
+        reason:'SUCCESSFUL_ISSUANCE_HEAP_SPIKE',
+        heapUsedMb:Math.round(before.heapUsed/1024/1024),
+        rssMb:Math.round(before.rss/1024/1024),
+        externalMb:Math.round(before.external/1024/1024),
+        nextAction:'GC_GUARDED_RECHECK',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+      await sleep(autoLearnPostIssueSettleMs);
+      continue;
     }
     if(memoryPressure){
       const before=process.memoryUsage();

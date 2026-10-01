@@ -156,3 +156,16 @@ test('runtime throughput tuning uses lightweight pending rows and bounded adapti
   assert.match(bot,/maxHardHeapMb:370/);
   assert.match(bot,/minWorkerHeapMb:128/);
 });
+
+
+test('successful issuance heap spikes use bounded settle instead of full memory-failure backoff',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(bot,/TCX_AUTOLEARN_POST_ISSUE_SETTLE_MS \|\| 45000/);
+  assert.match(bot,/let transientPostIssuePressure=false/);
+  assert.match(bot,/postAdmission\.exceeded\.every\(x=>String\(x\)==='HEAP'\)/);
+  assert.match(bot,/autolearn transient post-issue settle/);
+  assert.match(bot,/reason:'SUCCESSFUL_ISSUANCE_HEAP_SPIKE'/);
+  assert.match(bot,/nextAction:'GC_GUARDED_RECHECK'/);
+  assert.match(bot,/if\(transientPostIssuePressure&&!memoryPressure\)/);
+});
