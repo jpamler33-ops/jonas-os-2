@@ -137,6 +137,9 @@ function attentionSignals(row){
   if(row?.xLinked)s.push('X_LINKED_PROFILE');
   if(row?.websiteLinked)s.push('WEBSITE');
   if(Number(row?.externalAttentionCount||0)>0)s.push('EXTERNAL_MENTION');
+  if(Number(row?.xDirectAttention?.posts||0)>0)s.push('X_POSTS_RECENT');
+  if(String(row?.xDirectAttention?.attentionBand||'')==='SPIKING')s.push('X_ATTENTION_SPIKE');
+  if(Number(row?.xDirectAttention?.maxAuthorFollowers||0)>=10_000)s.push('X_HIGH_REACH_AUTHOR');
   return s;
 }
 function attentionScore(row){
@@ -149,6 +152,11 @@ function attentionScore(row){
   if(row?.xLinked)s+=.12;
   if(row?.websiteLinked)s+=.04;
   if(Number(row?.externalAttentionCount||0)>0)s+=Math.min(.16,.05*Number(row.externalAttentionCount));
+  const xp=Math.max(0,Number(row?.xDirectAttention?.posts||0));
+  const xa=Math.max(0,Number(row?.xDirectAttention?.uniqueAuthors||0));
+  const xe=Math.max(0,Number(row?.xDirectAttention?.engagement||0));
+  if(xp>0)s+=Math.min(.22,.05*xp+.025*xa+Math.min(.07,Math.log1p(xe)/100));
+  if(String(row?.xDirectAttention?.attentionBand||'')==='SPIKING')s+=.10;
   return clamp(s);
 }
 
