@@ -369,6 +369,21 @@ export function createMemecoinEarlyRadarProvider({
     },{force});
   }
 
+  async function fetchTokenSnapshot(chainId,tokenAddress,{force=false}={}){
+    const capturedAt=Number(now());
+    const pairs=await dexPairs(chainId,tokenAddress,{force});
+    const best=pairs.slice().sort((a,b)=>{
+      const la=finite(a?.liquidityUsd)??-1,lb=finite(b?.liquidityUsd)??-1;
+      if(lb!==la)return lb-la;
+      return (finite(b?.volumeM5)??-1)-(finite(a?.volumeM5)??-1);
+    })[0]||null;
+    if(!best)return null;
+    const key=tokenKey(chainId,tokenAddress);
+    if(!firstSeen.has(key))firstSeen.set(key,capturedAt);
+    const row={...best,firstSeenAt:firstSeen.get(key),signalProfile:false,signalBoost:false,signalTakeover:false,signalAd:false};
+    return Object.freeze({...row,score:scoreEarlyMemecoin(row,{now:capturedAt})});
+  }
+
   async function fetchEarlyRadar({limit=12,force=false}={}){
     const capturedAt=Number(now());
     const [profilesR,boostsR,takeoversR,adsR,...poolRs]=await Promise.allSettled([
@@ -480,5 +495,5 @@ export function createMemecoinEarlyRadarProvider({
     });
   }
 
-  return Object.freeze({version:MEMECOIN_EARLY_RADAR_VERSION,fetchEarlyRadar});
+  return Object.freeze({version:MEMECOIN_EARLY_RADAR_VERSION,fetchEarlyRadar,fetchTokenSnapshot});
 }
