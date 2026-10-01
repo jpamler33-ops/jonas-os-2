@@ -108,3 +108,74 @@ test('governor fails safe when explicit GC is unavailable',()=>{
   assert.equal(x.unavailable,true);
   assert.equal(governor.summary().gcAvailable,false);
 });
+
+
+test('collectThenEvaluate admits work from a fresh post-GC snapshot',()=>{
+  let afterGc=false;
+  let samples=0;
+  const memoryUsageFn=()=>{
+    samples++;
+    return {
+      heapUsed:(afterGc?300:360)*1024*1024,
+      heapTotal:400*1024*1024,
+      rss:(afterGc?610:650)*1024*1024,
+      external:8*1024*1024,
+      arrayBuffers:2*1024*1024
+    };
+  };
+  const governor=createMemoryGovernor({
+    gcFn:()=>{afterGc=true;},
+    memoryUsageFn,
+    cooldownMs:5_000,
+    minReclaimedMb:1
+  });
+  const result=governor.collectThenEvaluate({
+    reason:'POST_GC_ADMISSION',
+    triggerHeapMb:330,
+    maxRssMb:900,
+    maxExternalMb:128,
+    now:10_000,
+    evaluate:snapshot=>({
+      allowed:snapshot.heapUsedMb<330&&snapshot.rssMb<620,
+      reason:snapshot.heapUsedMb<330&&snapshot.rssMb<620?'MEMORY_HEADROOM_AVAILABLE':'MEMORY_PRESSURE',
+      memory:snapshot
+    })
+  });
+
+  assert.equal(result.collection.executed,true);
+  assert.equal(result.collection.before.heapUsedMb,360);
+  assert.equal(result.postCollection.heapUsedMb,300);
+  assert.equal(result.postCollection.rssMb,610);
+  assert.equal(result.admission.allowed,true);
+  assert.ok(samples>=3);
+  assert.equal(governor.summary().semantics.postCollectionAdmissionRemeasured,true);
+  assert.equal(BIGGJ_MEMORY_GOVERNOR_VERSION,'BIGGJ_MEMORY_GOVERNOR_V2');
+});
+
+test('collectThenEvaluate remeasures even when GC is unavailable',()=>{
+  let currentHeap=360;
+  const governor=createMemoryGovernor({
+    gcFn:null,
+    memoryUsageFn:()=>({
+      heapUsed:currentHeap*1024*1024,
+      heapTotal:400*1024*1024,
+      rss:650*1024*1024,
+      external:8*1024*1024,
+      arrayBuffers:2*1024*1024
+    }),
+    cooldownMs:5_000
+  });
+
+  const result=governor.collectThenEvaluate({
+    reason:'NO_GC_POST_SAMPLE',
+    triggerHeapMb:330,
+    maxRssMb:900,
+    maxExternalMb:128,
+    now:10_000,
+    evaluate:snapshot=>({allowed:snapshot.heapUsedMb<330,memory:snapshot})
+  });
+
+  assert.equal(result.collection.unavailable,true);
+  assert.equal(result.postCollection.heapUsedMb,360);
+  assert.equal(result.admission.allowed,false);
+});
