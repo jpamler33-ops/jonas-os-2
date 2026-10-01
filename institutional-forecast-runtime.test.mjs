@@ -10,6 +10,7 @@ import { selectIndependenceAwareAnalogs } from './forecast-runtime/forecast/engi
 import { evaluateScientificValidity } from './scientific-validity.mjs';
 import { verifyInstitutionalForecastIssuance } from './institutional-forecast-issuance.mjs';
 import { buildForecastThesisDeclarations } from './forecast-thesis-declarations.mjs';
+import { deriveCoverageCurriculumCandidates } from './shadow-coverage-curriculum.mjs';
 import {
   openInstitutionalForecastRuntime,
   saveInstitutionalForecastRuntime,
@@ -632,6 +633,55 @@ test('cold-start issuance remains serializable and fail-closed',async()=>{
   assert.doesNotThrow(()=>JSON.stringify(out.issuance));
   const serialized=JSON.stringify(out.issuance);
   assert.doesNotMatch(serialized,/Infinity|NaN/);
+});
+
+test('issued forecast can round-trip through coverage candidate into bootstrap calibration',async()=>{
+  const r=await runtime();
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  const derived=deriveCoverageCurriculumCandidates(issued.issuance,{now:inp.asOf+101});
+  const candidate=derived.candidates.find(x=>x.coverageEvidenceTier==='BOOTSTRAP_RAW_FORECAST'&&x.horizonGate!=='INSUFFICIENT');
+  assert.ok(candidate);
+  assert.equal(candidate.referencePrice,inp.price);
+  assert.equal(candidate.forecastAsOf,inp.asOf);
+  assert.ok(Number.isFinite(candidate.flatThreshold));
+
+  const closedAt=candidate.forecastAsOf+candidate.horizonMs;
+  const position={
+    entryMode:'COVERAGE_PROBE',
+    coverageEvidenceTier:candidate.coverageEvidenceTier,
+    coverageDataSafety:candidate.dataSafety,
+    horizonOnlyExit:true,
+    coverageHorizonGate:candidate.horizonGate,
+    coverageKey:candidate.coverageKey,
+    symbol:candidate.symbol,
+    status:'CLOSED',
+    closeReason:'HORIZON_EXIT',
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false,
+    coverageProbabilityVector:candidate.probabilityVector,
+    coverageFlatThreshold:candidate.flatThreshold,
+    coverageForecastAsOf:candidate.forecastAsOf,
+    coverageRegimeId:candidate.regimeId,
+    horizonMs:candidate.horizonMs,
+    coverageReferencePrice:candidate.referencePrice,
+    closedAt
+  };
+  const learned=recordCoverageProbeCalibration(r,{
+    position,
+    closeReason:'HORIZON_EXIT',
+    resolvedPrice:inp.price*1.001
+  });
+  assert.equal(learned.recorded,true);
+  assert.equal(r.engine.calibration.rows.at(-1).source,'SHADOW_COVERAGE_RAW_BOOTSTRAP');
 });
 
 test('only matured raw horizon coverage outcomes feed the bootstrap calibrator',async()=>{
