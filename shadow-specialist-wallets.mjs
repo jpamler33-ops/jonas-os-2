@@ -167,7 +167,9 @@ export function applyPublicTraderCopySnapshot(input,snapshot,{
 
   if(sourceReady){
     for(const trader of traders){
+      const copyEligible=trader?.copyEligible!==false&&trader?.trackedLifecycleOnly!==true;
       for(const pos of Array.isArray(trader?.openPositions)?trader.openPositions:[]){
+        if(!copyEligible)continue;
         if(pos?.protectedFields||!(finite(pos?.markPx)>0)||!['LONG','SHORT'].includes(String(pos?.side||'').toUpperCase()))continue;
         const leverage=Math.max(1,Math.min(50,finite(pos?.leverage,1)));
         const common={
