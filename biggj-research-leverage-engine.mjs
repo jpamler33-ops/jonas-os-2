@@ -25,6 +25,17 @@ const DATA_REPAIR_TYPES=new Set([
   'CONTINUE_SHADOW_MEASUREMENT'
 ]);
 
+const PASSIVE_DATA_NEEDS=new Set([
+  'MORE_POINT_IN_TIME_DATA',
+  'FORWARD_SHADOW_OBSERVATIONS',
+  'LABELLED_FORWARD_OUTCOMES',
+  'POINT_IN_TIME_FORWARD_OBSERVATIONS',
+  'FRESH_FORWARD_EVIDENCE',
+  'INDEPENDENT_EPISODES'
+]);
+const MIN_STALL_AGE_MS=30*60*1000;
+const PASSIVE_DATA_FRESHNESS_MS=6*60*60*1000;
+
 const COST_BY_TYPE=Object.freeze({
   RESEARCH_DEFINITION:.15,
   COLLECT_FORWARD_DATA:.20,
@@ -195,14 +206,32 @@ function memoryForTask(previous,task,asOf,progressContext={}){
   const firstSeenAt=finite(prior?.firstSeenAt,asOf);
   const seenCycles=Math.max(1,finite(prior?.seenCycles,0)+1);
   const stagnantCycles=sameProgress?Math.max(0,finite(prior?.stagnantCycles,0)+1):0;
+  const lastProgressAt=sameProgress
+    ?finite(prior?.lastProgressAt,firstSeenAt)
+    :asOf;
   return Object.freeze({
     taskId:id,
     firstSeenAt,
     lastSeenAt:asOf,
+    lastProgressAt,
     seenCycles,
     stagnantCycles,
     progressSignature:sig
   });
+}
+
+function isPassiveDataWait(task){
+  const needs=arr(task?.dataNeeds).map(String);
+  return DATA_REPAIR_TYPES.has(String(task?.type||''))&&
+    task?.automaticShadowEligible!==false&&
+    needs.length>0&&
+    needs.every(need=>PASSIVE_DATA_NEEDS.has(need));
+}
+
+function passiveDataFlowFresh(progressContext,asOf){
+  const lastHistoryProgressAt=optionalFinite(progressContext?.historyProgressAt);
+  if(lastHistoryProgressAt==null) return false;
+  return Math.max(0,asOf-lastHistoryProgressAt)<=PASSIVE_DATA_FRESHNESS_MS;
 }
 
 function weightedScore(task,levers){
@@ -255,6 +284,10 @@ export function rankBiggjResearchTasks(tasks,{
     nextMemory[row.taskId]=memory;
     const evidence=evidenceScores(row);
     const ageMs=Math.max(0,t-memory.firstSeenAt);
+    const noProgressMs=Math.max(0,t-memory.lastProgressAt);
+    const passiveDataWait=isPassiveDataWait(row);
+    const waitingForFreshData=passiveDataWait&&passiveDataFlowFresh(progressContext,t);
+    const stalled=!waitingForFreshData&&memory.stagnantCycles>=8&&noProgressMs>=MIN_STALL_AGE_MS;
     const levers=Object.freeze({
       uncertaintyGain:clamp(row?.uncertainty),
       informationGain:clamp(row?.informationValue),
@@ -275,9 +308,12 @@ export function rankBiggjResearchTasks(tasks,{
       leverage:levers,
       topLevers:topLeverIds(levers),
       queueAgeMs:ageMs,
+      noProgressMs,
+      lastProgressAt:memory.lastProgressAt,
       seenCycles:memory.seenCycles,
       stagnantCycles:memory.stagnantCycles,
-      stalled:memory.stagnantCycles>=8,
+      waitingForData:waitingForFreshData,
+      stalled,
       progressSignature:memory.progressSignature
     }));
   }
@@ -312,6 +348,7 @@ export function rankBiggjResearchTasks(tasks,{
     .sort((a,b)=>b.taskCount-a.taskCount||a.dataNeed.localeCompare(b.dataNeed));
 
   const stalled=ranked.filter(x=>x.stalled);
+  const waitingForData=ranked.filter(x=>x.waitingForData);
   const summary=Object.freeze({
     version:BIGGJ_RESEARCH_LEVERAGE_ENGINE_VERSION,
     leverCount:BIGGJ_RESEARCH_LEVERS.length,
@@ -322,12 +359,15 @@ export function rankBiggjResearchTasks(tasks,{
     batchOpportunityCount:bundles.length,
     topBundles:bundles.slice(0,8),
     stalledTaskCount:stalled.length,
+    waitingForDataTaskCount:waitingForData.length,
     stalledTasks:stalled.slice(0,8).map(x=>({
       taskId:x.taskId,
       type:x.type,
       subject:x.subject,
       stagnantCycles:x.stagnantCycles,
       queueAgeMs:x.queueAgeMs,
+      noProgressMs:x.noProgressMs,
+      lastProgressAt:x.lastProgressAt,
       effectivePriority:x.effectivePriority
     })),
     topTasks:ranked.slice(0,8).map(x=>({
