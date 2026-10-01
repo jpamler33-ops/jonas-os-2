@@ -1,1 +1,0 @@
-Primary and research shadow performance remain separated. Live execution remains disabled.
