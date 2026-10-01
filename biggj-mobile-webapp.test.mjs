@@ -75,5 +75,6 @@ test('mobile hero translates human action codes and keeps internal incidents non
   const internalHtml=renderBiggjMobileApp(internal);
   assert.match(internalHtml,/BIGGJ ARBEITET FÜR DICH/);
   assert.match(internalHtml,/Keine Aktion von dir nötig/);
-  assert.doesNotMatch(internalHtml,/DEINE AKTION IST NÖTIG/);
+  assert.match(internalHtml,/internal=N\(op\.internalIncidents\|\|0\)/);
+  assert.match(internalHtml,/human\?E\(HUMAN_ACTION\(op\.humanJobRemaining\)\):E\(autonomousText\)/);
 });
