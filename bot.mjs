@@ -4725,6 +4725,48 @@ async function refreshPublicExperienceIntel(reason='periodic'){
       ?traderResult.value.errors.join(' | ')
       :null;
     traderWatchExperienceLastRefreshAt=Date.now();
+
+    const topTraders=Array.isArray(traderResult.value?.traders)?traderResult.value.traders:[];
+    const topCodes=new Set(topTraders.map(x=>String(x?.uniqueCode||'')).filter(Boolean));
+    const trackedCodes=[...new Set([
+      ...(specialistWalletState?.wallets?.[WALLET_3_TRADER_COPY]?.positions||[]),
+      ...(specialistWalletState?.wallets?.[WALLET_5_MEME_COPY]?.positions||[])
+    ].map(x=>String(x?.sourceTraderCode||'')).filter(x=>x&&!topCodes.has(x)))].slice(0,8);
+    const lifecycleTraders=[];
+    for(const code of trackedCodes){
+      try{
+        const prior=[
+          ...(specialistWalletState?.wallets?.[WALLET_3_TRADER_COPY]?.positions||[]),
+          ...(specialistWalletState?.wallets?.[WALLET_5_MEME_COPY]?.positions||[])
+        ].find(x=>String(x?.sourceTraderCode||'')===code);
+        const tracked=await traderWatchProvider.fetchTraderByCode(code,{nickname:prior?.sourceTraderName||'Tracked Public Lead Trader'});
+        if(tracked)lifecycleTraders.push({...tracked,copyEligible:false,trackedLifecycleOnly:true});
+      }catch(err){
+        recordError(observability,{scope:'specialist_wallets.trader_lifecycle',message:err instanceof Error?err.message:String(err)});
+      }
+    }
+    const copyUpdate=applyPublicTraderCopySnapshot(specialistWalletState,{
+      ...traderResult.value,
+      traders:[...topTraders,...lifecycleTraders]
+    },{
+      now:Date.now(),
+      wallet3MarginQuote:Math.max(1,Number(process.env.TCX_W3_TRADER_COPY_MARGIN_QUOTE||500)),
+      wallet5MarginQuote:Math.max(1,Number(process.env.TCX_W5_MEME_COPY_MARGIN_QUOTE||150)),
+      maxOpenOperational:Math.max(10,Math.min(250,Number(process.env.TCX_SPECIALIST_COPY_MAX_OPEN||120)))
+    });
+    specialistWalletState=copyUpdate.state;
+    if(copyUpdate.results.openedW3||copyUpdate.results.openedW5||copyUpdate.results.closedW3||copyUpdate.results.closedW5){
+      await persistSpecialistWallets('trader-copy:'+reason);
+    }
+    console.log('[BIGGJ_SPECIALIST_COPY]',JSON.stringify({
+      reason,
+      trackedLifecycleTraders:lifecycleTraders.length,
+      ...copyUpdate.results,
+      wallet3Open:specialistWalletState?.wallets?.[WALLET_3_TRADER_COPY]?.positions?.length||0,
+      wallet5Open:specialistWalletState?.wallets?.[WALLET_5_MEME_COPY]?.positions?.length||0,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
   }else{
     traderWatchExperienceLastError=traderResult.reason instanceof Error?traderResult.reason.message:String(traderResult.reason);
   }
