@@ -7,15 +7,19 @@ import {
   encodeDiscordCallbackCustomId
 } from './discord-component-ids.mjs';
 import { createSerialDedupeQueue, mapWithConcurrency, refreshDueFromTimestamps } from './discord-serial-dedupe-queue.mjs';
-import { isBiggjDiscordManagedCategoryNamespace } from './discord-telegram-bridge.mjs';
 
 
-test('empty legacy category namespace includes old TCX and BIGGJ groups but not normal Discord groups',()=>{
+test('empty legacy category namespace includes old TCX and BIGGJ groups but not normal Discord groups',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  const match=source.match(/export function isBiggjDiscordManagedCategoryNamespace\(name\)\{[\s\S]*?\n\}/);
+  assert.ok(match,'category namespace helper missing');
+  const helper=new Function(match[0].replace(/^export /,'')+'; return isBiggjDiscordManagedCategoryNamespace;')();
   for(const name of [
     'TCX • CONTROL','TCX • MARKETS','TCX • INTELLIGENCE','TCX • SHADOW','TCX • SYSTEM',
     'BIGGJ • DESK','BIGGJ • ARCHIVE · TECH'
-  ]) assert.equal(isBiggjDiscordManagedCategoryNamespace(name),true,name);
-  for(const name of ['Text Channels','Voice channels','general','Friends'])assert.equal(isBiggjDiscordManagedCategoryNamespace(name),false,name);
+  ]) assert.equal(helper(name),true,name);
+  for(const name of ['Text Channels','Voice channels','general','Friends'])assert.equal(helper(name),false,name);
 });
 
 test('duplicate Telegram callbacks receive unique reversible Discord custom ids',()=>{
