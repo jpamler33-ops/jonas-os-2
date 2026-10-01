@@ -48,6 +48,7 @@ export function shouldCollectGarbage(snapshot,{
 
 export function createMemoryGovernor({
   gcFn=typeof globalThis.gc==='function'?globalThis.gc:null,
+  memoryUsageFn=()=>process.memoryUsage(),
   cooldownMs=45_000,
   minReclaimedMb=4
 }={}){
@@ -65,7 +66,7 @@ export function createMemoryGovernor({
     maxExternalMb=128,
     now=Date.now()
   }={}){
-    const before=memorySnapshot();
+    const before=memorySnapshot(memoryUsageFn());
     const decision=shouldCollectGarbage(before,{
       triggerHeapMb,maxRssMb,maxExternalMb,cooldownMs,lastAttemptAt,now
     });
@@ -104,7 +105,7 @@ export function createMemoryGovernor({
     try{
       gcFn();
       executed++;
-      const after=memorySnapshot();
+      const after=memorySnapshot(memoryUsageFn());
       const reclaimed=Math.max(0,before.heapUsedMb-after.heapUsedMb);
       totalReclaimedHeapMb+=reclaimed;
       lastResult=Object.freeze({
@@ -127,7 +128,7 @@ export function createMemoryGovernor({
         reason:String(reason),
         decision,
         before,
-        after:memorySnapshot(),
+        after:memorySnapshot(memoryUsageFn()),
         reclaimedHeapMb:0,
         useful:false,
         error:error instanceof Error?error.message:String(error)
