@@ -10540,6 +10540,47 @@ const server = http.createServer(async (req,res) => {
     }
     return;
   }
+  if (requestPath === '/market-ticker.json') {
+    const started=Date.now();
+    try{
+      const u=new URL(String(req.url||''),'http://localhost');
+      const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase();
+      if(!symbolOk(symbol)){
+        res.writeHead(400,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+        res.end(JSON.stringify({ok:false,error:'INVALID_MARKET_TICKER_REQUEST',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+        return;
+      }
+      const market=await snapshot(symbol);
+      recordOperation(observability,{name:'mobile_market_ticker',ok:true,latencyMs:Date.now()-started,error:null});
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({
+        ok:true,
+        symbol,
+        price:Number.isFinite(Number(market.price))?Number(market.price):null,
+        change24hPct:Number.isFinite(Number(market.changePct))?Number(market.changePct):null,
+        open:Number.isFinite(Number(market.open))?Number(market.open):null,
+        high:Number.isFinite(Number(market.high))?Number(market.high):null,
+        low:Number.isFinite(Number(market.low))?Number(market.low):null,
+        quoteVolume:Number.isFinite(Number(market.volumeQuote))?Number(market.volumeQuote):null,
+        bid:Number.isFinite(Number(market.bid))?Number(market.bid):null,
+        ask:Number.isFinite(Number(market.ask))?Number(market.ask):null,
+        spreadBps:Number.isFinite(Number(market.spreadBps))?Number(market.spreadBps):null,
+        imbalance:Number.isFinite(Number(market.imbalance))?Number(market.imbalance):null,
+        availableAt:Number(market.availableAt)||Date.now(),
+        source:market.source||'BINANCE_PUBLIC_REST',
+        execution:'SHADOW_ONLY',
+        canExecute:false,
+        canExecuteLive:false
+      }));
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'mobile_market_ticker',message:msg});
+      recordOperation(observability,{name:'mobile_market_ticker',ok:false,latencyMs:Date.now()-started,error:msg});
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({ok:false,error:'MARKET_TICKER_UNAVAILABLE',message:msg.slice(0,300),execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+    }
+    return;
+  }
   if (requestPath === '/rulebook.md') {
     res.writeHead(200,{'content-type':'text/markdown; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
     res.end(renderBiggjRulebookMarkdown());
