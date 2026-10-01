@@ -10203,7 +10203,8 @@ function currentResearchAccelerator(now=Date.now()){
     memory:{
       heapUsedMb:Math.round(memory.heapUsed/1024/1024),
       rssMb:Math.round(memory.rss/1024/1024),
-      externalMb:Math.round(memory.external/1024/1024)
+      externalMb:Math.round(memory.external/1024/1024),
+      arrayBuffersMb:Math.round((memory.arrayBuffers||0)/1024/1024)
     },
     limits:{
       heapMb:autoLearnHeapHeadroomMb,

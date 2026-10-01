@@ -74,10 +74,16 @@ export function buildResearchResourceBudget({
   const heap=finite(memory?.heapUsedMb);
   const rss=finite(memory?.rssMb);
   const external=finite(memory?.externalMb);
+  const arrayBuffers=Math.max(0,finite(memory?.arrayBuffersMb));
+  // Node reports ArrayBuffer/Buffer backing stores inside external memory.
+  // Persistence can leave a short-lived compressed-buffer tail after the
+  // write has completed. Exclude that tail from *planning* pressure only;
+  // per-issuance admission continues to use full external memory.
+  const planningExternal=Math.max(0,external-arrayBuffers);
   const heapLimit=Math.max(1,finite(limits?.heapMb,320));
   const rssLimit=Math.max(1,finite(limits?.rssMb,720));
   const externalLimit=Math.max(1,finite(limits?.externalMb,64));
-  const pressure=Math.max(heap/heapLimit,rss/rssLimit,external/externalLimit);
+  const pressure=Math.max(heap/heapLimit,rss/rssLimit,planningExternal/externalLimit);
   const configuredIssue=Math.max(1,Math.min(3,Math.floor(finite(configuredMaxIssuedPerSweep,1))));
   const configuredRows=Math.max(500,Math.floor(finite(configuredHistoryRows,1200)));
 
@@ -108,14 +114,22 @@ export function buildResearchResourceBudget({
   return freeze({
     mode,
     pressure,
-    memory:{heapUsedMb:heap,rssMb:rss,externalMb:external},
+    memory:{
+      heapUsedMb:heap,
+      rssMb:rss,
+      externalMb:external,
+      arrayBuffersMb:arrayBuffers,
+      planningExternalMb:planningExternal
+    },
     limits:{heapMb:heapLimit,rssMb:rssLimit,externalMb:externalLimit},
     autoLearnIssueBudget:issueBudget,
     shadowReplayHistoryRows:replayRows,
     semantics:{
       budgetCanOnlyReduceConfiguredLimits:true,
       memoryProtectionOverridesAcceleration:true,
-      balancedIssueBudgetReliesOnSequentialAdmissionGuards:true
+      balancedIssueBudgetReliesOnSequentialAdmissionGuards:true,
+      arrayBufferBackedExternalExcludedFromPlanningPressure:true,
+      perIssueAdmissionMustUseFullExternalMemory:true
     }
   });
 }

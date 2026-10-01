@@ -66,6 +66,31 @@ test('balanced memory state can use configured sequential issue budget',()=>{
   assert.equal(balanced.semantics.balancedIssueBudgetReliesOnSequentialAdmissionGuards,true);
 });
 
+test('resource planner does not mistake completed persistence ArrayBuffers for live external pressure',()=>{
+  const tail=buildResearchResourceBudget({
+    memory:{heapUsedMb:277,rssMb:603,externalMb:57,arrayBuffersMb:51},
+    limits:{heapMb:380,rssMb:780,externalMb:64},
+    configuredMaxIssuedPerSweep:3,
+    configuredHistoryRows:1200
+  });
+  assert.equal(tail.mode,'BALANCED');
+  assert.equal(tail.autoLearnIssueBudget,3);
+  assert.equal(tail.memory.externalMb,57);
+  assert.equal(tail.memory.arrayBuffersMb,51);
+  assert.equal(tail.memory.planningExternalMb,6);
+  assert.equal(tail.semantics.arrayBufferBackedExternalExcludedFromPlanningPressure,true);
+  assert.equal(tail.semantics.perIssueAdmissionMustUseFullExternalMemory,true);
+
+  const realExternal=buildResearchResourceBudget({
+    memory:{heapUsedMb:277,rssMb:603,externalMb:57,arrayBuffersMb:0},
+    limits:{heapMb:380,rssMb:780,externalMb:64},
+    configuredMaxIssuedPerSweep:3,
+    configuredHistoryRows:1200
+  });
+  assert.equal(realExternal.mode,'CAUTIOUS');
+  assert.equal(realExternal.autoLearnIssueBudget,1);
+});
+
 test('bundle plan exposes fan-out without pretending observations are independent',()=>{
   const p=buildResearchBundlePlan({
     leverage:{topBundles:[
@@ -162,6 +187,7 @@ test('runtime throughput tuning uses lightweight pending rows and bounded adapti
   assert.match(bot,/TCX_AUTOLEARN_HEAP_HEADROOM_MB \|\| 350/);
   assert.match(bot,/function pendingForecastOutcomeRows\(\)/);
   assert.match(bot,/pendingForecasts:pendingForecastOutcomeRows\(\)/);
+  assert.match(bot,/arrayBuffersMb:Math\.round\(\(memory\.arrayBuffers\|\|0\)\/1024\/1024\)/);
   assert.match(bot,/const pending=pendingForecastOutcomeRows\(\)/);
   assert.match(bot,/adaptiveShadowHardHeapMb/);
   assert.match(bot,/effectiveShadowWorkerHeapMb/);
