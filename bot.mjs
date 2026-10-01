@@ -2099,6 +2099,10 @@ function buildResearchAlertContext(state,witnessReport,{engineOverride=null,safe
     capturedAt:Date.now(),
     market:{
       price:Number(state.market.price),
+      open:Number(state.market.open),
+      high:Number(state.market.high),
+      low:Number(state.market.low),
+      volumeQuote:Number(state.market.volumeQuote),
       spreadBps:Number(state.market.spreadBps),
       change24hPct:Number(state.market.changePct),
       availableAt:Number(state.market.availableAt)
@@ -2142,6 +2146,10 @@ function updateRadarCache(symbol,ctx) {
   radarCache.set(symbol,{
     capturedAt:Number(ctx.capturedAt||Date.now()),
     price:Number(ctx.market?.price),
+    open:Number(ctx.market?.open),
+    high:Number(ctx.market?.high),
+    low:Number(ctx.market?.low),
+    quoteVolume:Number(ctx.market?.volumeQuote),
     change24hPct:Number(ctx.market?.change24hPct),
     status:String(ctx.safety?.state||'UNKNOWN'),
     regime:String(ctx.state?.regime||'UNKNOWN'),
@@ -3442,6 +3450,7 @@ async function snapshot(symbol) {
     symbol,
     price:Number(ticker.lastPrice),
     changePct:Number(ticker.priceChangePercent),
+    open:Number(ticker.openPrice),
     high:Number(ticker.highPrice),
     low:Number(ticker.lowPrice),
     volumeQuote:Number(ticker.quoteVolume),
@@ -10631,13 +10640,13 @@ const server = http.createServer(async (req,res) => {
   }
   if (requestPath === '/mission-control') {
     const snapshot=missionControlData();
-    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'"});
     res.end(renderBiggjMobileApp(snapshot));
     return;
   }
   if (requestPath === '/mission-control/legacy') {
     const snapshot=missionControlData();
-    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'"});
     res.end(renderMissionControlHtml(snapshot));
     return;
   }
