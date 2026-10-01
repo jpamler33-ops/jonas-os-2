@@ -33,7 +33,7 @@ export function shouldCollectGarbage(snapshot,{
   const heapHigh=heapUsed>=heapTrigger;
   const rssSafe=finite(snapshot?.rssMb)<rssCeiling;
   const externalSafe=finite(snapshot?.externalMb)<externalCeiling;
-  const bypassDelta=Number.isFinite(Number(cooldownBypassOverageMb))
+  const bypassDelta=cooldownBypassOverageMb!=null&&Number.isFinite(Number(cooldownBypassOverageMb))
     ?Math.max(5,Number(cooldownBypassOverageMb))
     :null;
   const cooldownBypassed=
