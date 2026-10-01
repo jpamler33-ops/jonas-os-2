@@ -58,25 +58,18 @@ http.createServer=(...args)=>{
       const end=res.end.bind(res);
       const write=res.write.bind(res);
       const writeHead=res.writeHead.bind(res);
-      let pendingHead=null;
-      res.writeHead=(...headArgs)=>{pendingHead=headArgs;return res;};
+      res.writeHead=(...headArgs)=>{writeHead(...headArgs);return res;};
       res.write=(chunk,...rest)=>{if(chunk!==undefined&&chunk!==null)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(String(chunk)));return true;};
       res.end=(chunk,...rest)=>{
         if(chunk!==undefined&&chunk!==null)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(String(chunk)));
         const body=Buffer.concat(chunks).toString('utf8');
-        const contentType=String(res.getHeader?.('content-type')||pendingHead?.[1]?.['content-type']||pendingHead?.[1]?.['Content-Type']||'');
+        const contentType=String(res.getHeader?.('content-type')||'');
         const next=contentType.includes('text/html')||body.includes('/superchart.png')?injectSuperChart(body):body;
-        res.setHeader?.('content-length',Buffer.byteLength(next));
-        if(pendingHead){
-          const [statusCode,statusMessageOrHeaders,maybeHeaders]=pendingHead;
-          const headers=(typeof statusMessageOrHeaders==='string'?maybeHeaders:statusMessageOrHeaders)||{};
-          const safeHeaders={...headers,'content-length':String(Buffer.byteLength(next))};
-          if(typeof statusMessageOrHeaders==='string')writeHead(statusCode,statusMessageOrHeaders,safeHeaders);
-          else writeHead(statusCode,safeHeaders);
-        }
+        if(!res.headersSent)res.setHeader?.('content-length',Buffer.byteLength(next));
+        else res.removeHeader?.('content-length');
         return end(next,...rest);
       };
-      try{return await listener(req,res);}catch(err){res.write=write;res.end=end;res.writeHead=writeHead;throw err;}
+      try{return await listener(req,res);}catch(err){res.write=write;res.end=end;throw err;}
     }
     return listener(req,res);
   }:undefined;
