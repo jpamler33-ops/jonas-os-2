@@ -40,3 +40,4 @@ jobs:
           git add biggj-mobile-webapp.mjs
           git commit -m 'fix(web): remove duplicate renderOverview boot wrapper'
           git push origin HEAD:main
+# trigger: 2026-10-01T04:28Z
