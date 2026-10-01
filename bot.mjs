@@ -4,6 +4,8 @@ import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobil
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION } from './biggj-public-trader-watch.mjs';
+import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
+import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
 import { buildNewsResearchSnapshots, filterPreviouslyObservedNewsSnapshots, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
@@ -641,6 +643,15 @@ const marketDataProvider=createMarketDataProvider({
   onOperation:event=>recordOperation(observability,event)
 });
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
+const memecoinEarlyRefreshMs=Math.max(15_000,Math.min(120_000,Number(process.env.TCX_MEMECOIN_EARLY_REFRESH_MS||15_000)));
+const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
+  fetchImpl:globalThis.fetch,
+  timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_MEMECOIN_EARLY_TIMEOUT_MS||7000))),
+  dexCacheMs:Math.max(10_000,Math.min(60_000,Number(process.env.TCX_MEMECOIN_DEX_CACHE_MS||15_000))),
+  geckoCacheMs:Math.max(45_000,Math.min(180_000,Number(process.env.TCX_MEMECOIN_GECKO_CACHE_MS||60_000))),
+  networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
+  pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
+});
 const publicMarketContextProvider=createPublicMarketContextProvider({fetchImpl:globalThis.fetch});
 const researchProviderTimeoutMs=Math.max(2000,Math.min(12000,Number(process.env.TCX_RESEARCH_PROVIDER_TIMEOUT_MS||6000)));
 const cftcCotResearchProvider=createCftcCotPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
