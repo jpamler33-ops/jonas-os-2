@@ -11247,6 +11247,8 @@ function missionControlData(){
       xLinked:x?.xLinked===true,
       links:Array.isArray(x?.links)?x.links.slice(0,8):[],
       externalAttention:Array.isArray(x?.externalAttention)?x.externalAttention.slice(0,5):[],
+      directSocialAttention:x?.directSocialAttention||null,
+      security:x?.security||null,
       score:x?.score||null
     })),
     boostedFallbackRows:(memecoinExperienceSnapshot?.rows||[]).slice(0,6).map(x=>({
@@ -11258,16 +11260,31 @@ function missionControlData(){
       volumeH1:x?.pair?.volumeH1??null
     })),
     metas:(memecoinExperienceSnapshot?.metas||[]).slice(0,8),
-    safety:memecoinEarlySnapshot?.safety||{
-      honeypotVerified:false,
-      holderConcentrationVerified:false,
-      mintFreezeAuthorityVerified:false,
-      lpLockVerified:false
+    security:{
+      version:MEMECOIN_SECURITY_PROVIDER_VERSION,
+      provider:'GOPLUS',
+      checksPerCycle:memecoinSecurityChecksPerCycle,
+      lastError:memecoinSecurityLastError,
+      sourceErrors:memecoinEarlySnapshot?.securityProvider?.errors||[],
+      checked:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security).length,
+      pass:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security?.evidenceGate==='PASS').length,
+      abstain:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security?.evidenceGate==='ABSTAIN').length,
+      unknown:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security?.evidenceGate==='UNKNOWN').length,
+      truthBoundary:'THIRD_PARTY_SECURITY_EVIDENCE_NOT_RUG_PROBABILITY'
     },
     social:{
-      directXPostStream:false,
+      version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
+      source:memecoinSocialSnapshot?.source||'NO_DIRECT_SOCIAL_SOURCE',
+      sourceReady:memecoinSocialSnapshot?.sourceReady===true,
+      x:memecoinSocialSnapshot?.x||{configured:false,sourceReady:false,error:null},
+      bluesky:memecoinSocialSnapshot?.bluesky||{enabled:true,sourceReady:false,error:null},
+      posts:memecoinSocialSnapshot?.posts?.length||0,
+      seeds:memecoinSocialSnapshot?.seeds?.length||0,
+      missingSources:memecoinSocialSnapshot?.missingSources||[],
+      lastError:memecoinSocialLastError,
       xLinkedProfilesDetected:true,
-      externalPublicMentionMatching:true
+      externalPublicMentionMatching:true,
+      epistemic:'PUBLIC_POST_ATTENTION_NOT_PRICE_CAUSALITY'
     },
     epistemic:'EARLY_RESEARCH_PRIORITY_NOT_PRICE_PROBABILITY'
   },
