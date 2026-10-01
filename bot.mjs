@@ -125,7 +125,7 @@ import { homeText as productHomeText, homeKeyboard as productHomeKeyboard, marke
 import { buildCommandMarketRows, deliverTelegramTextCard } from './telegram-ui-runtime.mjs';
 import { createTelegramChatLifecycle, TELEGRAM_CHAT_LIFECYCLE_VERSION } from './telegram-chat-lifecycle.mjs';
 import { createAlert, evaluateAlert, formatAlert, requiredContext, ALERT_ENGINE_VERSION } from './alert-engine.mjs';
-import { loadEvidenceHistory, saveEvidenceHistory, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION } from './evidence-history.mjs';
+import { loadEvidenceHistory, appendEvidenceHistoryWal, compactEvidenceHistory, evidenceHistoryWalPath, evidenceHistoryFor, EVIDENCE_HISTORY_VERSION, EVIDENCE_HISTORY_WAL_VERSION } from './evidence-history.mjs';
 import { formatValidityReason, STATE_VALIDITY_VERSION, DEFAULT_STATE_VALIDITY_CONFIG } from './state-validity.mjs';
 import { latestEvidenceSnapshot, currentEvidenceLifecycle, advanceEvidenceLifecycle, compactValidity, RESEARCH_LIFECYCLE_VERSION } from './research-lifecycle.mjs';
 import { createMarketDataProvider, MARKET_DATA_PROVIDER_VERSION } from './market-data-provider.mjs';
@@ -1205,9 +1205,16 @@ const autonomousOperatorRefreshMs=Math.max(30_000,Math.min(300_000,Number(proces
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
 let featureResearchState = await loadFeatureResearch(featureResearchFile);
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
-let loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile);
+const evidenceHistoryWalFile = process.env.TCX_EVIDENCE_HISTORY_WAL_FILE || evidenceHistoryWalPath(evidenceHistoryFile);
+let loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile,{
+  walPath:evidenceHistoryWalFile,
+  maxPerSymbol:2000
+});
 let evidenceRecords = loadedEvidenceHistory.records;
 const evidenceHistoryRecoveredFromCorrupt=loadedEvidenceHistory.recoveredFromCorrupt===true;
+const evidenceHistoryWalRecoveredFromCorrupt=loadedEvidenceHistory.recoveredWalFromCorrupt===true;
+const evidenceHistoryBootWalRows=Math.max(0,Number(loadedEvidenceHistory.walRecords||0));
+const evidenceHistoryBootWalBytes=Math.max(0,Number(loadedEvidenceHistory.walBytes||0));
 loadedEvidenceHistory=null;
 const auditFile = process.env.TCX_AUDIT_LEDGER_FILE || '/data/tcx-audit-ledger.jsonl';
 const auditLedger = await openAuditLedger(auditFile,{
@@ -1464,6 +1471,13 @@ let episodePersistenceQueue = Promise.resolve();
 let evidenceHistoryHealthy = true;
 let evidenceHistoryLastError = null;
 let evidenceHistoryQueue = Promise.resolve();
+let evidenceHistoryCompactionTimer=null;
+let evidenceHistoryWalRows=evidenceHistoryBootWalRows;
+let evidenceHistoryWalBytes=evidenceHistoryBootWalBytes;
+let evidenceHistoryLastCompactedAt=Date.now();
+const evidenceHistoryCompactMs=Math.max(15_000,Math.min(5*60_000,Number(process.env.TCX_EVIDENCE_COMPACT_MS||60_000)));
+const evidenceHistoryCompactRows=Math.max(10,Math.min(500,Math.floor(Number(process.env.TCX_EVIDENCE_COMPACT_ROWS||50))));
+const evidenceHistoryMaxDeferralMs=Math.max(evidenceHistoryCompactMs,Math.min(15*60_000,Number(process.env.TCX_EVIDENCE_MAX_COMPACT_DEFERRAL_MS||5*60_000)));
 let persistenceHealthy = true;
 let persistenceLastError = null;
 let persistenceQueue = Promise.resolve();
@@ -1667,27 +1681,110 @@ async function persistEpisodeMemory(reason='mutation') {
   return episodePersistenceHealthy;
 }
 
-async function persistEvidenceHistory(reason='mutation') {
-  evidenceHistoryQueue = evidenceHistoryQueue.then(async () => {
-    try {
-      evidenceRecords = await saveEvidenceHistory(evidenceHistoryFile,evidenceRecords,{
+function scheduleEvidenceHistoryCompaction(delayMs=evidenceHistoryCompactMs){
+  if(evidenceHistoryCompactionTimer) return;
+  const delay=Math.max(1_000,Math.floor(Number(delayMs)||evidenceHistoryCompactMs));
+  evidenceHistoryCompactionTimer=setTimeout(()=>{
+    evidenceHistoryCompactionTimer=null;
+    if(!running) return;
+    const overdue=Date.now()-evidenceHistoryLastCompactedAt>=evidenceHistoryMaxDeferralMs;
+    if(!overdue&&(activeBackgroundResearchJob||servingMemoryPressure().pressured)){
+      scheduleEvidenceHistoryCompaction(Math.min(15_000,evidenceHistoryCompactMs));
+      return;
+    }
+    void compactEvidenceHistoryQueued('batch');
+  },delay);
+  evidenceHistoryCompactionTimer.unref?.();
+}
+
+async function compactEvidenceHistoryQueued(reason='batch'){
+  evidenceHistoryQueue=evidenceHistoryQueue.then(async()=>{
+    const walRowsBefore=evidenceHistoryWalRows;
+    const walBytesBefore=evidenceHistoryWalBytes;
+    try{
+      evidenceRecords=await compactEvidenceHistory(evidenceHistoryFile,evidenceRecords,{
+        walPath:evidenceHistoryWalFile,
         maxPerSymbol:2000,
-        // Runtime records are created by the canonical lifecycle or sanitized on
-        // load. Reuse those validated objects instead of duplicating the entire
-        // evidence history before every streamed gzip persistence.
         reuseCanonicalRecords:true
       });
-      evidenceHistoryHealthy = true;
-      evidenceHistoryLastError = null;
-    } catch (err) {
-      evidenceHistoryHealthy = false;
-      evidenceHistoryLastError = err instanceof Error ? err.message : String(err);
-      recordError(observability,{scope:'evidence_history.persistence',message:evidenceHistoryLastError});
-      console.error('evidence history persistence error',reason,evidenceHistoryLastError);
+      evidenceHistoryWalRows=0;
+      evidenceHistoryWalBytes=0;
+      evidenceHistoryLastCompactedAt=Date.now();
+      evidenceHistoryHealthy=true;
+      evidenceHistoryLastError=null;
+      if(walRowsBefore>0){
+        console.info('[TCX_EVIDENCE_WAL_COMPACTED]',JSON.stringify({
+          version:EVIDENCE_HISTORY_WAL_VERSION,
+          reason,
+          walRows:walRowsBefore,
+          walBytes:walBytesBefore,
+          records:evidenceRecords.length,
+          execution:'SHADOW_ONLY',
+          canExecuteLive:false
+        }));
+      }
+    }catch(err){
+      evidenceHistoryHealthy=false;
+      evidenceHistoryLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'evidence_history.compaction',message:evidenceHistoryLastError});
+      console.error('evidence history compaction error',reason,evidenceHistoryLastError);
     }
   });
   await evidenceHistoryQueue;
   return evidenceHistoryHealthy;
+}
+
+async function persistEvidenceHistory(reason='mutation',{walRecords=[],forceSnapshot=false}={}){
+  const rows=Array.isArray(walRecords)?walRecords.filter(Boolean):[];
+  if(rows.length){
+    evidenceHistoryQueue=evidenceHistoryQueue.then(async()=>{
+      try{
+        const appended=await appendEvidenceHistoryWal(evidenceHistoryFile,rows,{
+          walPath:evidenceHistoryWalFile,
+          sync:true
+        });
+        evidenceHistoryWalRows+=Number(appended.appended||0);
+        evidenceHistoryWalBytes+=Number(appended.bytes||0);
+        evidenceHistoryHealthy=true;
+        evidenceHistoryLastError=null;
+      }catch(err){
+        evidenceHistoryHealthy=false;
+        evidenceHistoryLastError=err instanceof Error?err.message:String(err);
+        recordError(observability,{scope:'evidence_history.wal',message:evidenceHistoryLastError});
+        console.error('evidence history WAL error',reason,evidenceHistoryLastError);
+      }
+    });
+    await evidenceHistoryQueue;
+  }
+
+  if(forceSnapshot){
+    if(evidenceHistoryCompactionTimer){
+      clearTimeout(evidenceHistoryCompactionTimer);
+      evidenceHistoryCompactionTimer=null;
+    }
+    return compactEvidenceHistoryQueued(reason);
+  }
+
+  if(evidenceHistoryHealthy&&evidenceHistoryWalRows>0){
+    const elapsed=Date.now()-evidenceHistoryLastCompactedAt;
+    const delay=evidenceHistoryWalRows>=evidenceHistoryCompactRows
+      ?1_000
+      :Math.max(1_000,evidenceHistoryCompactMs-elapsed);
+    scheduleEvidenceHistoryCompaction(delay);
+  }
+  return evidenceHistoryHealthy;
+}
+
+if(evidenceHistoryBootWalRows>0){
+  console.info('[TCX_EVIDENCE_WAL_REPLAYED]',JSON.stringify({
+    version:EVIDENCE_HISTORY_WAL_VERSION,
+    walRows:evidenceHistoryBootWalRows,
+    walBytes:evidenceHistoryBootWalBytes,
+    recoveredFromCorrupt:evidenceHistoryWalRecoveredFromCorrupt,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  }));
+  scheduleEvidenceHistoryCompaction(5_000);
 }
 
 async function persistForecastRuntime(reason='mutation',{force=false}={}) {
@@ -1754,7 +1851,10 @@ function appendEvidenceFromContext(symbol,context) {
   });
   evidenceRecords=result.records;
   updateRadarValidity(symbol,result.validity);
-  return result;
+  const walRecords=[];
+  if(result.lifecycleChanged&&result.previous) walRecords.push(result.previous);
+  if(result.appended&&result.record) walRecords.push(result.record);
+  return {...result,walRecords};
 }
 
 async function appendInstitutionalAudit(kind,payload) {
@@ -6842,7 +6942,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     safetyOverride:safety
   });
   const evidenceAppend=appendEvidenceFromContext(symbol,evidenceContext);
-  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state');
+  if(evidenceAppend.changed) await persistEvidenceHistory('forecast-state',{walRecords:evidenceAppend.walRecords});
   markForecastMemory('evidence-history');
 
   const episodeExtraFeatures=episodeVectorExtraFeatures(
@@ -10037,6 +10137,7 @@ async function episodeWatcher() {
     try{
     let changed=false;
     let evidenceChanged=false;
+    const evidenceWalRecords=[];
     for(const symbol of requestedSymbols) {
       if(!running) break;
       try {
@@ -10051,7 +10152,10 @@ async function episodeWatcher() {
           researchAlertContextCache.set(symbol,{at:Date.now(),context});
           updateRadarCache(symbol,context);
           const evidenceAppend=appendEvidenceFromContext(symbol,context);
-          if(evidenceAppend.changed) evidenceChanged=true;
+          if(evidenceAppend.changed){
+            evidenceChanged=true;
+            evidenceWalRecords.push(...evidenceAppend.walRecords);
+          }
         } catch(radarErr) {
           console.error("radar refresh error",symbol,radarErr instanceof Error?radarErr.message:String(radarErr));
         }
@@ -10061,7 +10165,7 @@ async function episodeWatcher() {
       await sleep(250);
     }
     if(changed) await persistEpisodeMemory("sweep");
-    if(evidenceChanged) await persistEvidenceHistory("sweep");
+    if(evidenceChanged) await persistEvidenceHistory("sweep",{walRecords:evidenceWalRecords});
     }finally{
       if(activeBackgroundResearchJob==='episode-sweep') activeBackgroundResearchJob=null;
     }
@@ -11235,7 +11339,8 @@ async function gracefulShutdown(signal) {
   console.log('shutdown', signal);
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
-  await persistEvidenceHistory(`shutdown:${signal}`);
+  if(evidenceHistoryCompactionTimer){clearTimeout(evidenceHistoryCompactionTimer);evidenceHistoryCompactionTimer=null;}
+  await persistEvidenceHistory(`shutdown:${signal}`,{forceSnapshot:true});
   await persistForecastRuntime(`shutdown:${signal}`,{force:true});
   await saveAutonomousResearchTrainingFactory(autonomousResearchFactoryFile,autonomousResearchFactoryState).catch(err=>{
     console.error('[TCX_AUTONOMOUS_RESEARCH_FACTORY_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
