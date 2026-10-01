@@ -195,6 +195,15 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
   const holdingLabel=x=>({SCALP:'Scalp',INTRADAY:'Intraday',SWING:'Swing',POSITION:'Position',UNRESOLVED:'unklar'}[String(x||'').toUpperCase()]||clip(x,24));
   const biasLabel=x=>({LONG_BIAS:'Long-Bias',SHORT_BIAS:'Short-Bias',TWO_WAY:'Long/Short',UNRESOLVED:'unklar'}[String(x||'').toUpperCase()]||clip(x,24));
   const leverageLabel=x=>({HIGH_LEVERAGE:'hoher Hebel',MODERATE_LEVERAGE:'mittlerer Hebel',LOW_LEVERAGE:'niedriger Hebel',UNRESOLVED:'Hebel unklar'}[String(x||'').toUpperCase()]||clip(x,28));
+  const lossLabel=x=>({CUTS_LOSERS_FASTER:'Verlierer schneller raus',HOLDS_LOSERS_LONGER:'Verlierer länger gehalten',BALANCED_HOLD_TIME:'ähnliche Haltedauer',UNRESOLVED:'Loss-Handling unklar'}[String(x||'').toUpperCase()]||clip(x,34));
+  const edgeLabel=x=>({BALANCED_EDGE:'Winrate + Payoff',PAYOFF_DRIVEN:'Payoff-getrieben',HIT_RATE_DRIVEN:'Trefferquote-getrieben',NO_CLEAR_EDGE_SHAPE:'kein klares Muster',UNRESOLVED:'unklar'}[String(x||'').toUpperCase()]||clip(x,28));
+  const duration=v=>{
+    const ms=n(v);if(ms==null)return '—';
+    if(ms<60*60_000)return Math.round(ms/60_000)+'m';
+    if(ms<48*60*60_000)return (ms/3_600_000).toFixed(ms<10*3_600_000?1:0)+'h';
+    return (ms/86_400_000).toFixed(1)+'d';
+  };
+  const ratio=v=>{const x=n(v);return x==null?'—':x.toFixed(2)+'x';};
   const traderFields=traders.map((trader,index)=>{
     const m=trader?.metrics||{},strategy=trader?.strategy||{};
     const positions=arr(trader?.openPositions).slice(0,3);
@@ -214,24 +223,62 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
       leverageLabel(strategy?.leverageStyle),
       'Fokus '+focus
     ].join(' · ');
+    const edge=[
+      'Recent '+String(strategy?.observedClosedTrades??0)+' Trades',
+      'WR '+sp(strategy?.realizedWinRate),
+      'Payoff '+ratio(strategy?.payoffRatio),
+      'PF '+ratio(strategy?.profitFactor),
+      'Ø '+sp(strategy?.expectancyPnlRatio)
+    ].join(' · ');
     return safeField(
       '#'+String(trader?.providerRank||index+1)+' · '+clip(trader?.nickname||'Public Lead Trader',70),
       [
         '90T ROI '+sp(m?.pnlRatio90d)+' · Win '+sp(m?.winRatio)+' · PnL '+compactMoney(m?.pnl90d)+' USDT',
         'AUM '+compactMoney(m?.aum)+' USDT · Copier '+(n(m?.copyTraderNum)??'—')+' · Lead '+(n(m?.leadDays)??'—')+'d',
-        '**Verhaltensprofil (abgeleitet):** '+inferred,
+        '**Wie er handelt:** '+inferred,
+        '**Recent Edge-Sample:** '+edge,
+        '**Trade-Management:** '+lossLabel(strategy?.lossHandling)+' · '+edgeLabel(strategy?.edgeShape)+' · Median '+duration(strategy?.medianHoldMs),
         '**Offene Trades:**',
         ...openLines
       ].join('\n')
     );
   });
+  const comparison=traders[0]?.cohortComparison||null;
+  const cmpValue=(key,value)=>{
+    const x=n(value);if(x==null)return '—';
+    if(['win_rate','expectancy','concentration'].includes(key))return (x*100).toFixed(1)+'%';
+    if(key==='hold_time')return duration(x);
+    if(key==='leverage')return x.toFixed(1)+'x';
+    if(key==='frequency')return x.toFixed(1)+'/Tag';
+    return x.toFixed(2)+'x';
+  };
+  const comparisonLines=comparison?.observations?.length?comparison.observations.slice(0,7).map(o=>{
+    const key=String(o?.key||'');
+    const topRaw=key==='win_rate'||key==='expectancy'||key==='concentration' ? n(o?.top)/100 :
+      key==='hold_time'?n(o?.top):key==='leverage'||key==='frequency'?n(o?.top):n(o?.top);
+    const lowRaw=key==='win_rate'||key==='expectancy'||key==='concentration' ? n(o?.lower)/100 :
+      key==='hold_time'?n(o?.lower):key==='leverage'||key==='frequency'?n(o?.lower):n(o?.lower);
+    const labels={
+      win_rate:'Winrate recent',payoff:'Gewinner/Verlierer',profit_factor:'Profit Factor',
+      expectancy:'Ø Trade-Return',leverage:'Median-Hebel',hold_time:'Haltedauer',
+      loser_hold:'Loss/Winner-Haltezeit',concentration:'Top-Markt-Anteil',frequency:'Trade-Frequenz'
+    };
+    const interpretation=o?.interpretation==='TOP_SAMPLE_FAVORABLE'?' ✓':o?.interpretation==='TOP_SAMPLE_UNFAVORABLE'?' !':'';
+    return '• '+(labels[key]||clip(o?.label,40))+': **'+cmpValue(key,topRaw)+'** vs '+cmpValue(key,lowRaw)+interpretation;
+  }):[];
   const reason=sourceReady
-    ?'Live aus **OKX Public Copy Trading**. Reihenfolge = OKX-Overview-Ranking; Strategieprofile werden nur aus beobachteten öffentlichen Trades abgeleitet.'
+    ?'Live aus **OKX Public Copy Trading**. BIGGJ zeigt zusätzlich, welche Handelsmuster sich im aktuellen Top-Sample von einem niedrigeren-PnL-Sample unterscheiden.'
     :'Trader-Quelle aktuell nicht frisch/verfügbar. BIGGJ erfindet keine Positionen oder Rankings.';
   return payload(
     'BIGGJ // TOP TRADER WATCH',
     reason,
     [
+      ...(comparison?[safeField('WAS MACHEN DIE TOP-TRADER ANDERS?',[
+        'Top-Sample '+String(comparison?.top?.traders??'—')+' Trader / '+String(comparison?.top?.observedClosedTrades??'—')+' Recent Trades',
+        'Lower-PnL-Sample '+String(comparison?.lowerProfit?.traders??'—')+' Trader / '+String(comparison?.lowerProfit?.observedClosedTrades??'—')+' Recent Trades',
+        ...comparisonLines,
+        'Qualität '+clip(comparison?.sampleQuality||'LIMITED',18)+' · **DESKRIPTIV, NICHT KAUSAL**'
+      ].join('\n'))]:[]),
       ...traderFields,
       safeField('SOURCE / FRESHNESS',[
         'Quelle '+clip(t?.source||'OKX_PUBLIC_COPY_TRADING_API',80),
@@ -242,7 +289,8 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
       ].join('\n')),
       safeField('METHOD',[
         '„Strategie“ = INFERRED, nicht Selbstauskunft.',
-        'Basis: Haltedauer, Long/Short-Verteilung, Hebel und Markt-Fokus der öffentlich sichtbaren Positionen/Historie.',
+        'Basis pro Trader: Haltedauer, Long/Short, Hebel, Markt-Fokus, Recent-Winrate, Winner/Loss-Größe, Profit Factor, Trade-Frequenz und Loss-Haltedauer.',
+        'Vergleichsgruppe = niedrigere-PnL-Trader aus demselben OKX-Overview-Snapshot; das beweist **keine Ursache** für Profitabilität.',
         'Kein automatisches Copy-Trading · keine echten Orders.'
       ].join('\n')),
       safeField('CROSS-CHECK',clip(t?.nextNeed||'Zweite unabhängige öffentliche Traderquelle für Cross-Validation.',700)),
