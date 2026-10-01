@@ -9158,15 +9158,28 @@ async function autoLearnForecastWatcher() {
     const coverageSweepIssued=[];
     let coveragePoolItems=[];
     let coverageSweepRun=null;
-    const researchAcceleration=currentResearchAccelerator(Date.now());
-    const effectiveAutoLearnMaxIssuedPerSweep=Math.max(
-      1,
-      Math.min(autoLearnMaxIssuedPerSweep,researchAcceleration.resource.autoLearnIssueBudget)
-    );
+    let budgetGc=null;
+    let researchAcceleration=null;
+    let effectiveAutoLearnMaxIssuedPerSweep=1;
     if(autoLearnEnabled&&forecastRuntime.healthy){
       while(running&&activeBackgroundResearchJob) await sleep(250);
       if(!running) break;
       activeBackgroundResearchJob='autolearn';
+
+      // Resource budgeting must observe the collectible post-workload state,
+      // not stale garbage left by the previous background job. GC remains
+      // bounded/rate-limited and the accelerator can still only reduce the
+      // configured maximum.
+      budgetGc=maybeCollectResearchGarbage('AUTOLEARN_BUDGET_PRECHECK',{
+        triggerHeapMb:autoLearnResumeHeapMb,
+        cooldownBypassOverageMb:15
+      });
+      researchAcceleration=currentResearchAccelerator(Date.now());
+      effectiveAutoLearnMaxIssuedPerSweep=Math.max(
+        1,
+        Math.min(autoLearnMaxIssuedPerSweep,researchAcceleration.resource.autoLearnIssueBudget)
+      );
+
       try{
       for(const symbol of autoLearnSymbols){
         if(!running) break;
@@ -9429,8 +9442,10 @@ async function autoLearnForecastWatcher() {
         forecastIntervalMs:autoLearnForecastMs,
         maxIssuedPerSweep:autoLearnMaxIssuedPerSweep,
         effectiveMaxIssuedPerSweep:effectiveAutoLearnMaxIssuedPerSweep,
-        acceleratorMode:researchAcceleration.resource.mode,
-        acceleratorPressure:researchAcceleration.resource.pressure,
+        acceleratorMode:researchAcceleration?.resource?.mode||'UNAVAILABLE',
+        acceleratorPressure:Number(researchAcceleration?.resource?.pressure||0),
+        budgetGcExecuted:budgetGc?.executed===true,
+        budgetGcReclaimedMb:Number(budgetGc?.reclaimedHeapMb||0),
         interIssueMs:autoLearnInterIssueMs,
         postIssueGcAttempts,
         postIssueGcRescues,
