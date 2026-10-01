@@ -193,3 +193,59 @@ test('task memory is bounded and drops long-dead tasks',()=>{
   assert.ok(out.taskMemory.live);
   assert.equal(Object.keys(out.taskMemory).some(x=>x.startsWith('old-')),false);
 });
+
+
+test('new PIT history resets stagnation for data-collection research tasks',()=>{
+  const t0=1_800_000_000_000;
+  const first=rankBiggjResearchTasks([
+    task({taskId:'pit',subject:'pit',type:'CONTINUE_SHADOW_MEASUREMENT',dataNeeds:['MORE_POINT_IN_TIME_DATA']})
+  ],{
+    asOf:t0,
+    historyStats:{rows:100,progressAt:t0-10_000},
+    researchDataPlaneSummary:{seq:500}
+  });
+  const stale=rankBiggjResearchTasks([
+    task({taskId:'pit',subject:'pit',type:'CONTINUE_SHADOW_MEASUREMENT',dataNeeds:['MORE_POINT_IN_TIME_DATA']})
+  ],{
+    asOf:t0+60_000,
+    taskMemory:first.taskMemory,
+    historyStats:{rows:100,progressAt:t0-10_000},
+    researchDataPlaneSummary:{seq:500}
+  });
+  assert.equal(stale.tasks[0].stagnantCycles,1);
+
+  const advanced=rankBiggjResearchTasks([
+    task({taskId:'pit',subject:'pit',type:'CONTINUE_SHADOW_MEASUREMENT',dataNeeds:['MORE_POINT_IN_TIME_DATA']})
+  ],{
+    asOf:t0+120_000,
+    taskMemory:stale.taskMemory,
+    historyStats:{rows:104,progressAt:t0+90_000},
+    researchDataPlaneSummary:{seq:520}
+  });
+  assert.equal(advanced.tasks[0].stagnantCycles,0);
+  assert.equal(advanced.summary.progressContext.historyRows,104);
+  assert.equal(advanced.summary.progressContext.historyProgressAt,t0+90_000);
+  assert.equal(advanced.summary.progressContext.researchDataPlaneSeq,520);
+});
+
+test('global PIT growth does not fake progress for unrelated non-data research',()=>{
+  const t0=1_800_000_000_000;
+  const nonData=task({
+    taskId:'model',
+    subject:'model',
+    type:'GENERATE_NEXT_CHALLENGER_GENERATION',
+    dataNeeds:[]
+  });
+  const first=rankBiggjResearchTasks([nonData],{
+    asOf:t0,
+    historyStats:{rows:100,progressAt:t0-10_000},
+    researchDataPlaneSummary:{seq:500}
+  });
+  const second=rankBiggjResearchTasks([nonData],{
+    asOf:t0+60_000,
+    taskMemory:first.taskMemory,
+    historyStats:{rows:130,progressAt:t0+50_000},
+    researchDataPlaneSummary:{seq:800}
+  });
+  assert.equal(second.tasks[0].stagnantCycles,1);
+});

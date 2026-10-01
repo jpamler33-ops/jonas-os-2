@@ -83,8 +83,16 @@ function statusCount(summary,key){
 function researchCost(type){
   return clamp(COST_BY_TYPE[String(type)]??.55);
 }
-function progressSignature(task){
+function progressSignature(task,progressContext={}){
   const m=task?.metadata||{};
+  const type=String(task?.type||'');
+  const dataProgress=DATA_REPAIR_TYPES.has(type)
+    ?{
+        historyRows:optionalFinite(progressContext?.historyRows),
+        historyProgressAt:optionalFinite(progressContext?.historyProgressAt),
+        researchDataPlaneSeq:optionalFinite(progressContext?.researchDataPlaneSeq)
+      }
+    :null;
   return sha256({
     type:task?.type??null,
     subject:task?.subject??null,
@@ -99,7 +107,8 @@ function progressSignature(task){
     open:m.open??null,
     closed:m.closed??null,
     validationReadinessScore:m.validationReadinessScore??null,
-    nextGate:m.nextGate??null
+    nextGate:m.nextGate??null,
+    dataProgress
   });
 }
 
@@ -178,10 +187,10 @@ function dataReadinessScore(task,dataState){
   return repair?clamp(.30+.70*gap):clamp(.25+.75*dataState.readiness);
 }
 
-function memoryForTask(previous,task,asOf){
+function memoryForTask(previous,task,asOf,progressContext={}){
   const id=String(task.taskId);
   const prior=previous?.[id]||null;
-  const sig=progressSignature(task);
+  const sig=progressSignature(task,progressContext);
   const sameProgress=prior?.progressSignature===sig;
   const firstSeenAt=finite(prior?.firstSeenAt,asOf);
   const seenCycles=Math.max(1,finite(prior?.seenCycles,0)+1);
@@ -225,17 +234,24 @@ export function rankBiggjResearchTasks(tasks,{
   taskMemory={},
   livingResearchState=null,
   researchCoverageSummary=null,
-  researchDataGovernanceSummary=null
+  researchDataGovernanceSummary=null,
+  researchDataPlaneSummary=null,
+  historyStats=null
 }={}){
   const t=finite(asOf,Date.now());
   const rows=arr(tasks);
   const needCounts=dataNeedCounts(rows);
   const dataState=globalDataState(researchCoverageSummary||{},researchDataGovernanceSummary||{});
+  const progressContext=Object.freeze({
+    historyRows:finite(historyStats?.rows,null),
+    historyProgressAt:finite(historyStats?.progressAt,null),
+    researchDataPlaneSeq:finite(researchDataPlaneSummary?.seq,null)
+  });
   const nextMemory={...(taskMemory||{})};
   const ranked=[];
 
   for(const row of rows){
-    const memory=memoryForTask(taskMemory,row,t);
+    const memory=memoryForTask(taskMemory,row,t,progressContext);
     nextMemory[row.taskId]=memory;
     const evidence=evidenceScores(row);
     const ageMs=Math.max(0,t-memory.firstSeenAt);
@@ -302,6 +318,7 @@ export function rankBiggjResearchTasks(tasks,{
     levers:BIGGJ_RESEARCH_LEVERS,
     weights:WEIGHTS,
     dataState,
+    progressContext,
     batchOpportunityCount:bundles.length,
     topBundles:bundles.slice(0,8),
     stalledTaskCount:stalled.length,

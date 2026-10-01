@@ -393,7 +393,7 @@ test('factory stops claiming data-only when an owned research task is persistent
           validationIndependentEpisodes:1
         }]
       }),
-      historyStats:{rows:100+i,progressAt:1000+i},
+      historyStats:{rows:100,progressAt:1000},
       asOf:2000+i*1000
     }).state;
   }
@@ -458,4 +458,32 @@ test('only PROMOTE_CANDIDATE produces explicit human model approval',()=>{
   assert.equal(review.manualReviewRequired,true);
   assert.equal(review.automaticShadowEligible,false);
   assert.equal(refreshed.state.mode,'MANUAL_REVIEW_REQUIRED');
+});
+
+
+test('factory does not call active PIT collection stalled while history is advancing',()=>{
+  let state=createAutonomousResearchTrainingFactory({asOf:1000});
+  for(let i=0;i<12;i++){
+    state=refreshAutonomousResearchTrainingFactory(state,{
+      livingResearchState:baseLivingResearch({
+        revision:30+i,
+        fingerprint:'living-pit-progress-'+i,
+        canonicalResearchQueue:[{
+          skillId:'collecting-skill',
+          nextGate:'FORWARD_SHADOW',
+          priority:.7,
+          uncertainty:.8,
+          validationEvidenceTotal:2,
+          validationIndependentEpisodes:1
+        }]
+      }),
+      researchDataPlaneSummary:{seq:1000+i},
+      historyStats:{rows:100+i,progressAt:2000+i*60_000},
+      asOf:3000+i*60_000
+    }).state;
+  }
+  assert.equal(state.leverage.stalledTaskCount,0);
+  assert.notEqual(state.mode,'RESEARCH_STALLED');
+  assert.equal(state.queue[0].stagnantCycles,0);
+  assert.equal(state.queue[0].stalled,false);
 });
