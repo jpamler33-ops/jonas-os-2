@@ -3,6 +3,7 @@ import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSI
 import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobileApp, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
+import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION } from './biggj-public-trader-watch.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
 import { buildNewsResearchSnapshots, filterPreviouslyObservedNewsSnapshots, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
@@ -697,6 +698,17 @@ const biggjPublicNewsProvider=createBiggjPublicNewsProvider({
   secondaryTimeoutMs:globalNewsSecondaryTimeoutMs,
   gdeltCooldownMs:globalNewsGdeltCooldownMs,
   cacheTtlMs:Math.min(globalNewsRefreshMs,120_000)
+});
+const traderWatchLimit=Math.max(3,Math.min(8,Math.floor(Number(process.env.TCX_TRADER_WATCH_LIMIT||5)||5)));
+const traderWatchProvider=createBiggjPublicTraderWatchProvider({
+  fetchImpl:globalThis.fetch,
+  baseUrls:String(process.env.TCX_OKX_PUBLIC_BASES||'https://www.okx.com,https://eea.okx.com,https://openapi.okx.com')
+    .split(',').map(x=>x.trim()).filter(Boolean),
+  timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_TRADER_WATCH_TIMEOUT_MS||5000))),
+  cacheTtlMs:Math.max(2*60_000,Math.min(15*60_000,Number(process.env.TCX_TRADER_WATCH_CACHE_MS||5*60_000))),
+  minRequestGapMs:Math.max(400,Math.min(1000,Number(process.env.TCX_TRADER_WATCH_REQUEST_GAP_MS||450))),
+  defaultLimit:traderWatchLimit,
+  minLeadDays:String(process.env.TCX_TRADER_WATCH_MIN_LEAD_DAYS||'2')
 });
 const derivativesResearchProvider=createDerivativesPublicProvider({fetchImpl:globalThis.fetch,timeoutMs:researchProviderTimeoutMs});
 const externalResearchProvider=createExternalResearchProvider({
@@ -4448,6 +4460,9 @@ let newsResearchLastResult=null;
 let newsResearchLastError=null;
 let memecoinExperienceSnapshot=null;
 let memecoinExperienceLastError=null;
+let traderWatchExperienceSnapshot=null;
+let traderWatchExperienceLastError=null;
+let traderWatchExperienceLastRefreshAt=null;
 
 function globalIntelSnapshot(){return globalIntelEvents.slice(-250);}
 
@@ -4469,10 +4484,11 @@ function replaceGlobalIntelEvents(rows=[]){
 async function refreshPublicExperienceIntel(reason='periodic'){
   const started=Date.now();
   const force=reason==='startup'||reason==='manual';
-  const [newsResult,memeResult,trendResult]=await Promise.allSettled([
+  const [newsResult,memeResult,trendResult,traderResult]=await Promise.allSettled([
     biggjPublicNewsProvider.fetchFeed({force}),
     dexScreenerProvider.fetchMemecoinRadar({limit:8,force}),
-    dexScreenerProvider.fetchTrendingMetas({limit:8,force})
+    dexScreenerProvider.fetchTrendingMetas({limit:8,force}),
+    traderWatchProvider.fetchTopTraders({limit:traderWatchLimit,force})
   ]);
   if(newsResult.status==='fulfilled'){
     const feed=newsResult.value;
@@ -4554,14 +4570,23 @@ async function refreshPublicExperienceIntel(reason='periodic'){
       trendResult.reason instanceof Error?trendResult.reason.message:String(trendResult.reason)
     ].join(' | ');
   }
-  const ok=newsResult.status==='fulfilled'||memeResult.status==='fulfilled'||trendResult.status==='fulfilled';
+  if(traderResult.status==='fulfilled'){
+    traderWatchExperienceSnapshot=traderResult.value;
+    traderWatchExperienceLastError=(traderResult.value?.errors||[]).length
+      ?traderResult.value.errors.join(' | ')
+      :null;
+    traderWatchExperienceLastRefreshAt=Date.now();
+  }else{
+    traderWatchExperienceLastError=traderResult.reason instanceof Error?traderResult.reason.message:String(traderResult.reason);
+  }
+  const ok=newsResult.status==='fulfilled'||memeResult.status==='fulfilled'||trendResult.status==='fulfilled'||traderResult.status==='fulfilled';
   recordOperation(observability,{
     name:'biggj_public_experience_intel',
     ok,
     latencyMs:Date.now()-started,
-    error:ok?null:[globalIntelLastError,memecoinExperienceLastError].filter(Boolean).join(' | ')
+    error:ok?null:[globalIntelLastError,memecoinExperienceLastError,traderWatchExperienceLastError].filter(Boolean).join(' | ')
   });
-  if(!ok)recordError(observability,{scope:'biggj_public_experience_intel',message:[globalIntelLastError,memecoinExperienceLastError].filter(Boolean).join(' | ')});
+  if(!ok)recordError(observability,{scope:'biggj_public_experience_intel',message:[globalIntelLastError,memecoinExperienceLastError,traderWatchExperienceLastError].filter(Boolean).join(' | ')});
   console.log('[BIGGJ_PUBLIC_INTEL]',JSON.stringify({
     reason,
     newsEvents:globalIntelEvents.length,
@@ -4578,10 +4603,13 @@ async function refreshPublicExperienceIntel(reason='periodic'){
     memecoins:memecoinExperienceSnapshot?.rows?.length||0,
     metas:memecoinExperienceSnapshot?.metas?.length||0,
     memecoinError:memecoinExperienceLastError,
+    topTraders:traderWatchExperienceSnapshot?.traders?.length||0,
+    traderWatchSource:traderWatchExperienceSnapshot?.source||null,
+    traderWatchError:traderWatchExperienceLastError,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   }));
-  return {news:newsResult.status==='fulfilled',memecoins:memeResult.status==='fulfilled',trends:trendResult.status==='fulfilled'};
+  return {news:newsResult.status==='fulfilled',memecoins:memeResult.status==='fulfilled',trends:trendResult.status==='fulfilled',traders:traderResult.status==='fulfilled'};
 }
 
 async function publicExperienceIntelWatcher(){
@@ -10769,8 +10797,24 @@ function missionControlData(){
       }))
   },
   traderWatch:{
-    sourceReady:false,
-    nextNeed:'Öffentliche, Point-in-Time erfassbare Trader-/Wallet-Performancequelle mit stabiler Identität, realisierter PnL-Historie und mehreren unabhängigen Trades.',
+    version:BIGGJ_PUBLIC_TRADER_WATCH_VERSION,
+    sourceReady:Boolean(traderWatchExperienceSnapshot?.sourceReady&&traderWatchExperienceSnapshot?.traders?.length)&&
+      Number(traderWatchExperienceSnapshot?.capturedAt||0)>Date.now()-20*60_000,
+    source:traderWatchExperienceSnapshot?.source||'OKX_PUBLIC_COPY_TRADING_API',
+    capturedAt:traderWatchExperienceSnapshot?.capturedAt||null,
+    lastRefreshAt:traderWatchExperienceLastRefreshAt,
+    lastError:traderWatchExperienceLastError,
+    rankingMethod:traderWatchExperienceSnapshot?.rankingMethod||'OKX_OVERVIEW',
+    dataVersion:traderWatchExperienceSnapshot?.dataVersion||null,
+    traders:(traderWatchExperienceSnapshot?.traders||[]).slice(0,traderWatchLimit),
+    limitations:traderWatchExperienceSnapshot?.limitations||{
+      publicDataOnly:true,
+      naturalPersonIdentity:false,
+      strategyIsBehavioralInference:true
+    },
+    nextNeed:traderWatchExperienceSnapshot?.traders?.length
+      ?'Zweite unabhängige öffentliche Traderquelle für Cross-Validation und venueübergreifende Robustheit.'
+      :'Öffentliche, Point-in-Time erfassbare Trader-/Wallet-Performancequelle mit stabiler Identität, realisierter PnL-Historie und mehreren unabhängigen Trades.',
     entityRegistry:entityRegistryServingSummary,
     entityFlow:entityFlowMemorySummary(entityFlowMemory),
     configuredPublicWalletCohorts:walletCohortResearchProvider.configuredCohorts,
