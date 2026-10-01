@@ -37,7 +37,10 @@ export function buildBiggjAutopilotSupervisor(snapshot={}, {asOf=Date.now()}={})
   if(readiness?.ready!==true)critical.push('OPERATIONAL_READINESS_NOT_READY');
   if(operator?.operatorNeeded===true)critical.push('OPERATOR_REQUIRED');
   if(finite(operator?.approvalRequired)>0)critical.push('APPROVAL_REQUIRED');
-  if(finite(operator?.activeIncidents)>0)critical.push('ACTIVE_INCIDENTS');
+  if(finite(operator?.activeIncidents)>0){
+    if(operator?.operatorNeeded===true)critical.push('ACTIVE_INCIDENTS');
+    else warnings.push('INTERNAL_INCIDENTS_ACTIVE');
+  }
   if(rulebook?.state&&String(rulebook.state).toUpperCase()!=='PASS')critical.push('RULEBOOK_NOT_PASS');
   if(world?.healthy===false)critical.push('WORLD_MODEL_UNHEALTHY');
   if(epistemic?.healthy===false)critical.push('EPISTEMIC_KERNEL_UNHEALTHY');
@@ -116,6 +119,7 @@ export function buildBiggjAutopilotSupervisor(snapshot={}, {asOf=Date.now()}={})
       waitingForDataIsNotFailure:true,
       stalledResearchIsNotHumanWorkByDefault:true,
       humanEscalationOnlyForExplicitExceptions:true,
+      internalIncidentsDoNotImplyHumanAction:true,
       supervisorDoesNotPromoteModelsOrTheories:true
     }
   };
