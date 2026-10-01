@@ -1,0 +1,484 @@
+export const MEMECOIN_EARLY_RADAR_VERSION='BIGGJ_MEMECOIN_EARLY_RADAR_V1';
+
+function finite(v){
+  if(v==null||v==='')return null;
+  const n=Number(v);
+  return Number.isFinite(n)?n:null;
+}
+function text(v,max=500){
+  const s=String(v??'').replace(/\s+/g,' ').trim();
+  return s.length<=max?s:s.slice(0,max-1)+'…';
+}
+function clamp(v,a=0,b=1){return Math.max(a,Math.min(b,Number(v)||0));}
+function normChain(v){
+  const x=String(v||'').trim().toLowerCase();
+  if(x==='ethereum'||x==='eth')return 'ethereum';
+  if(x==='base')return 'base';
+  if(x==='solana'||x==='sol')return 'solana';
+  return x;
+}
+function geckoNetwork(chain){
+  const c=normChain(chain);
+  return c==='ethereum'?'eth':c;
+}
+function tokenKey(chain,address){
+  const c=normChain(chain),a=String(address||'').trim();
+  if(!c||!a)return '';
+  return c+':'+(c==='solana'?a:a.toLowerCase());
+}
+function ratio(a,b){return Number.isFinite(Number(a))&&Number(b)>0?Number(a)/Number(b):null;}
+function compactLinks(links=[]){
+  return (Array.isArray(links)?links:[]).map(x=>({
+    type:text(x?.type,30).toLowerCase(),
+    label:text(x?.label,60),
+    url:text(x?.url,500)
+  })).filter(x=>x.url).slice(0,12);
+}
+function xLinked(links=[]){
+  return compactLinks(links).some(x=>x.type==='twitter'||x.type==='x'||/https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//i.test(x.url));
+}
+function websiteLinked(links=[]){
+  return compactLinks(links).some(x=>!/(?:x\.com|twitter\.com|t\.me|telegram\.me|discord\.gg)/i.test(x.url));
+}
+function ageMinutes(createdAt,now){
+  const t=finite(createdAt);
+  return t==null?null:Math.max(0,(now-t)/60_000);
+}
+function recencyScore(ageMin){
+  if(ageMin==null)return .25;
+  if(ageMin<=5)return 1;
+  if(ageMin<=15)return .95;
+  if(ageMin<=60)return .80;
+  if(ageMin<=360)return .55;
+  if(ageMin<=1440)return .25;
+  return .05;
+}
+function liquidityScore(liq){
+  const x=finite(liq);
+  if(x==null||x<=0)return 0;
+  if(x<2_000)return .05;
+  if(x<5_000)return .18;
+  if(x<10_000)return .32;
+  if(x<25_000)return .50;
+  if(x<75_000)return .72;
+  if(x<250_000)return .88;
+  return 1;
+}
+function microcapScore(mcap,fdv){
+  const x=finite(mcap)??finite(fdv);
+  if(x==null)return .45;
+  if(x<20_000)return .30;
+  if(x<=2_000_000)return 1;
+  if(x<=10_000_000)return .65;
+  if(x<=50_000_000)return .35;
+  return .10;
+}
+function momentumScore(pct){
+  const x=finite(pct);
+  if(x==null)return .35;
+  if(x<-35)return .05;
+  if(x<0)return .25;
+  if(x<=10)return .55+x/10*.15;
+  if(x<=40)return .70+(x-10)/30*.20;
+  if(x<=100)return .90-(x-40)/60*.20;
+  return .45;
+}
+function activityScore(buys,sells){
+  const n=Math.max(0,finite(buys)??0)+Math.max(0,finite(sells)??0);
+  return clamp(Math.log1p(n)/Math.log(61));
+}
+function buyPressureScore(buys,sells){
+  const b=Math.max(0,finite(buys)??0),s=Math.max(0,finite(sells)??0),n=b+s;
+  if(n<3)return .35;
+  const imbalance=(b-s)/n;
+  return clamp(.5+.5*imbalance);
+}
+function volumeLiquidityScore(volume,liquidity){
+  const r=ratio(volume,liquidity);
+  return r==null?0:clamp(r/.50);
+}
+function riskFlags(row,ageMin){
+  const liq=finite(row?.liquidityUsd);
+  const buys=Math.max(0,finite(row?.buysM5)??0),sells=Math.max(0,finite(row?.sellsM5)??0);
+  const fdv=finite(row?.fdv),mcap=finite(row?.marketCap);
+  const v5=finite(row?.volumeM5),p5=finite(row?.priceChangeM5);
+  const out=[];
+  if(liq==null||liq<=0)out.push('LIQUIDITY_UNKNOWN');
+  else if(liq<3_000)out.push('LIQUIDITY_EXTREME_THIN');
+  else if(liq<10_000)out.push('LIQUIDITY_VERY_THIN');
+  else if(liq<25_000)out.push('LIQUIDITY_THIN');
+  if(buys+sells<3)out.push('LOW_M5_ACTIVITY');
+  if(buys>=8&&sells===0)out.push('ONE_SIDED_NO_SELLS_OBSERVED');
+  if(liq>0&&fdv!=null&&fdv/liq>120)out.push('FDV_LIQUIDITY_STRETCHED');
+  if(liq>0&&mcap!=null&&mcap/liq>120)out.push('MCAP_LIQUIDITY_STRETCHED');
+  if(p5!=null&&p5>100)out.push('M5_CHASE_RISK');
+  if(v5!=null&&liq>0&&v5/liq>4)out.push('EXTREME_TURNOVER');
+  if(ageMin!=null&&ageMin<10)out.push('ULTRA_NEW_PAIR');
+  return out;
+}
+function attentionSignals(row){
+  const s=[];
+  if(row?.signalProfile)s.push('NEW_PROFILE');
+  if(row?.signalBoost)s.push('NEW_BOOST');
+  if(row?.signalTakeover)s.push('COMMUNITY_TAKEOVER');
+  if(row?.signalAd)s.push('DEX_AD');
+  if(row?.xLinked)s.push('X_LINKED_PROFILE');
+  if(row?.websiteLinked)s.push('WEBSITE');
+  if(Number(row?.externalAttentionCount||0)>0)s.push('EXTERNAL_MENTION');
+  return s;
+}
+function attentionScore(row){
+  let s=0;
+  if(row?.signalProfile)s+=.22;
+  if(row?.signalBoost)s+=.26;
+  if(row?.signalTakeover)s+=.22;
+  if(row?.signalAd)s+=.10;
+  if(row?.xLinked)s+=.12;
+  if(row?.websiteLinked)s+=.04;
+  if(Number(row?.externalAttentionCount||0)>0)s+=Math.min(.16,.05*Number(row.externalAttentionCount));
+  return clamp(s);
+}
+
+export function scoreEarlyMemecoin(row,{now=Date.now()}={}){
+  const ageMin=ageMinutes(row?.pairCreatedAt,now);
+  const components={
+    recency:recencyScore(ageMin),
+    attention:attentionScore(row),
+    activity:activityScore(row?.buysM5,row?.sellsM5),
+    buyPressure:buyPressureScore(row?.buysM5,row?.sellsM5),
+    volumeLiquidity:volumeLiquidityScore(row?.volumeM5,row?.liquidityUsd),
+    momentum:momentumScore(row?.priceChangeM5),
+    liquidity:liquidityScore(row?.liquidityUsd),
+    microcap:microcapScore(row?.marketCap,row?.fdv)
+  };
+  const flags=riskFlags(row,ageMin);
+  let penalty=0;
+  for(const f of flags){
+    if(f==='LIQUIDITY_EXTREME_THIN'||f==='LIQUIDITY_UNKNOWN')penalty+=.26;
+    else if(f==='LIQUIDITY_VERY_THIN')penalty+=.16;
+    else if(f==='LIQUIDITY_THIN')penalty+=.07;
+    else if(f==='ONE_SIDED_NO_SELLS_OBSERVED')penalty+=.16;
+    else if(f==='FDV_LIQUIDITY_STRETCHED'||f==='MCAP_LIQUIDITY_STRETCHED')penalty+=.08;
+    else if(f==='M5_CHASE_RISK')penalty+=.08;
+    else if(f==='LOW_M5_ACTIVITY')penalty+=.05;
+  }
+  const raw=
+    .24*components.recency+
+    .19*components.attention+
+    .17*components.activity+
+    .12*components.buyPressure+
+    .09*components.volumeLiquidity+
+    .08*components.momentum+
+    .07*components.liquidity+
+    .04*components.microcap;
+  const score=clamp(raw-penalty);
+  let stage='WATCH';
+  if(ageMin!=null&&ageMin<=60&&score>=.56)stage='NEW_NOW';
+  else if(ageMin!=null&&ageMin<=360&&score>=.46)stage='EARLY';
+  else if(components.attention>=.45&&score>=.38)stage='ATTENTION';
+  if(flags.includes('LIQUIDITY_EXTREME_THIN')||flags.includes('LIQUIDITY_UNKNOWN'))stage='RISK_ONLY';
+  return Object.freeze({
+    researchPriorityScore:Number(score.toFixed(4)),
+    stage,
+    ageMinutes:ageMin==null?null:Number(ageMin.toFixed(1)),
+    components:Object.freeze(Object.fromEntries(Object.entries(components).map(([k,v])=>[k,Number(v.toFixed(4))]))),
+    attentionSignals:Object.freeze(attentionSignals(row)),
+    riskFlags:Object.freeze(flags),
+    epistemic:'RESEARCH_PRIORITY_NOT_PROFIT_PROBABILITY'
+  });
+}
+
+function normalizeDexPair(pair={}){
+  const m5=pair?.txns?.m5||{},h1=pair?.txns?.h1||{};
+  const socials=(Array.isArray(pair?.info?.socials)?pair.info.socials:[]).map(x=>({
+    type:text(x?.platform||x?.type,30).toLowerCase(),
+    label:text(x?.handle||x?.label,80),
+    url:text(x?.url||(
+      String(x?.platform||'').toLowerCase()==='twitter'&&x?.handle?'https://x.com/'+String(x.handle).replace(/^@/,''):''
+    ),500)
+  })).filter(x=>x.url||x.label);
+  const websites=(Array.isArray(pair?.info?.websites)?pair.info.websites:[]).map(x=>({type:'website',label:'website',url:text(x?.url,500)})).filter(x=>x.url);
+  return {
+    chainId:normChain(pair?.chainId),
+    tokenAddress:text(pair?.baseToken?.address,200),
+    pairAddress:text(pair?.pairAddress,200),
+    dexId:text(pair?.dexId,80),
+    url:text(pair?.url,500),
+    symbol:text(pair?.baseToken?.symbol,80),
+    name:text(pair?.baseToken?.name,120),
+    quoteSymbol:text(pair?.quoteToken?.symbol,80),
+    priceUsd:finite(pair?.priceUsd),
+    liquidityUsd:finite(pair?.liquidity?.usd),
+    volumeM5:finite(pair?.volume?.m5),
+    volumeH1:finite(pair?.volume?.h1),
+    volumeH24:finite(pair?.volume?.h24),
+    buysM5:Math.max(0,Math.floor(finite(m5?.buys)??0)),
+    sellsM5:Math.max(0,Math.floor(finite(m5?.sells)??0)),
+    buysH1:Math.max(0,Math.floor(finite(h1?.buys)??0)),
+    sellsH1:Math.max(0,Math.floor(finite(h1?.sells)??0)),
+    priceChangeM5:finite(pair?.priceChange?.m5),
+    priceChangeH1:finite(pair?.priceChange?.h1),
+    marketCap:finite(pair?.marketCap),
+    fdv:finite(pair?.fdv),
+    pairCreatedAt:finite(pair?.pairCreatedAt),
+    links:[...socials,...websites],
+    xLinked:xLinked([...socials,...websites]),
+    websiteLinked:websiteLinked([...socials,...websites])
+  };
+}
+
+function normalizeGeckoPool(row={},includedMap=new Map(),network=''){
+  const a=row?.attributes||{};
+  const rel=row?.relationships||{};
+  const baseId=rel?.base_token?.data?.id;
+  const quoteId=rel?.quote_token?.data?.id;
+  const base=includedMap.get(baseId)?.attributes||{};
+  const quote=includedMap.get(quoteId)?.attributes||{};
+  const tx5=a?.transactions?.m5||{},tx1=a?.transactions?.h1||{};
+  const created=Date.parse(a?.pool_created_at||'');
+  return {
+    chainId:normChain(network),
+    tokenAddress:text(base?.address||baseId?.split('_').slice(1).join('_'),200),
+    pairAddress:text(a?.address||row?.id?.split('_').slice(1).join('_'),200),
+    dexId:text(rel?.dex?.data?.id,80),
+    url:'',
+    symbol:text(base?.symbol||a?.name?.split(' / ')[0],80),
+    name:text(base?.name||a?.name?.split(' / ')[0],120),
+    quoteSymbol:text(quote?.symbol||a?.name?.split(' / ')[1],80),
+    priceUsd:finite(a?.base_token_price_usd),
+    liquidityUsd:finite(a?.reserve_in_usd),
+    volumeM5:finite(a?.volume_usd?.m5),
+    volumeH1:finite(a?.volume_usd?.h1),
+    volumeH24:finite(a?.volume_usd?.h24),
+    buysM5:Math.max(0,Math.floor(finite(tx5?.buys)??0)),
+    sellsM5:Math.max(0,Math.floor(finite(tx5?.sells)??0)),
+    buysH1:Math.max(0,Math.floor(finite(tx1?.buys)??0)),
+    sellsH1:Math.max(0,Math.floor(finite(tx1?.sells)??0)),
+    priceChangeM5:finite(a?.price_change_percentage?.m5),
+    priceChangeH1:finite(a?.price_change_percentage?.h1),
+    marketCap:finite(a?.market_cap_usd),
+    fdv:finite(a?.fdv_usd),
+    pairCreatedAt:Number.isFinite(created)?created:null,
+    links:[],
+    xLinked:false,
+    websiteLinked:false
+  };
+}
+
+function mergeCandidate(base={},extra={}){
+  const pick=(a,b)=>a!=null&&a!==''?a:b;
+  return {
+    ...base,
+    ...extra,
+    chainId:pick(extra.chainId,base.chainId),
+    tokenAddress:pick(extra.tokenAddress,base.tokenAddress),
+    pairAddress:pick(extra.pairAddress,base.pairAddress),
+    symbol:pick(extra.symbol,base.symbol),
+    name:pick(extra.name,base.name),
+    priceUsd:pick(extra.priceUsd,base.priceUsd),
+    liquidityUsd:pick(extra.liquidityUsd,base.liquidityUsd),
+    volumeM5:pick(extra.volumeM5,base.volumeM5),
+    volumeH1:pick(extra.volumeH1,base.volumeH1),
+    volumeH24:pick(extra.volumeH24,base.volumeH24),
+    buysM5:pick(extra.buysM5,base.buysM5),
+    sellsM5:pick(extra.sellsM5,base.sellsM5),
+    buysH1:pick(extra.buysH1,base.buysH1),
+    sellsH1:pick(extra.sellsH1,base.sellsH1),
+    priceChangeM5:pick(extra.priceChangeM5,base.priceChangeM5),
+    priceChangeH1:pick(extra.priceChangeH1,base.priceChangeH1),
+    marketCap:pick(extra.marketCap,base.marketCap),
+    fdv:pick(extra.fdv,base.fdv),
+    pairCreatedAt:pick(extra.pairCreatedAt,base.pairCreatedAt),
+    links:[...compactLinks(base.links),...compactLinks(extra.links)].filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i).slice(0,12),
+    xLinked:Boolean(base.xLinked||extra.xLinked),
+    websiteLinked:Boolean(base.websiteLinked||extra.websiteLinked)
+  };
+}
+
+export function applyExternalMemecoinAttention(snapshot,events=[]){
+  const rows=(Array.isArray(snapshot?.rows)?snapshot.rows:[]).map(row=>{
+    const symbol=String(row?.symbol||'').trim();
+    const name=String(row?.name||'').trim();
+    const needles=[
+      name.length>=5?name.toLowerCase():null,
+      symbol.length>=4?'$'+symbol.toLowerCase():null
+    ].filter(Boolean);
+    const matches=(Array.isArray(events)?events:[]).filter(event=>{
+      const hay=(String(event?.title||'')+' '+String(event?.summary||event?.description||'')).toLowerCase();
+      return needles.some(n=>hay.includes(n));
+    }).slice(-5);
+    const enriched={...row,externalAttentionCount:matches.length,externalAttention:matches.map(x=>({
+      title:text(x?.title,180),url:text(x?.url,500),source:text(x?.source,80),availableAt:finite(x?.availableAt||x?.timestamp)
+    }))};
+    return Object.freeze({...enriched,score:scoreEarlyMemecoin(enriched,{now:snapshot?.capturedAt||Date.now()})});
+  }).sort((a,b)=>Number(b?.score?.researchPriorityScore||0)-Number(a?.score?.researchPriorityScore||0));
+  return Object.freeze({...snapshot,rows:Object.freeze(rows)});
+}
+
+export function createMemecoinEarlyRadarProvider({
+  fetchImpl=globalThis.fetch,
+  dexBase='https://api.dexscreener.com',
+  geckoBase='https://api.geckoterminal.com/api/v2',
+  timeoutMs=7000,
+  dexCacheMs=15000,
+  geckoCacheMs=60000,
+  networks=['solana','base','ethereum'],
+  pairLookupLimit=10,
+  now=()=>Date.now()
+}={}){
+  if(typeof fetchImpl!=='function')throw new Error('fetch implementation required');
+  const cache=new Map();
+  const firstSeen=new Map();
+  const dex=String(dexBase).replace(/\/+$/,'');
+  const gecko=String(geckoBase).replace(/\/+$/,'');
+
+  async function getJson(url){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||7000));
+    try{
+      const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 early-memecoin-research'},signal:controller.signal});
+      if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN')+' '+url);
+      return await res.json();
+    }finally{clearTimeout(timer);}
+  }
+  async function cached(key,ttl,fn,{force=false}={}){
+    const t=Number(now()),hit=cache.get(key);
+    if(!force&&hit&&t-hit.at<ttl)return hit.value;
+    const value=await fn();
+    cache.set(key,{at:t,value});
+    return value;
+  }
+  async function dexList(path,{force=false}={}){
+    return cached('dex:'+path,dexCacheMs,async()=>{
+      const body=await getJson(dex+path);
+      return Array.isArray(body)?body:[];
+    },{force});
+  }
+  async function dexPairs(chain,address,{force=false}={}){
+    return cached('pair:'+tokenKey(chain,address),dexCacheMs,async()=>{
+      const body=await getJson(dex+'/token-pairs/v1/'+encodeURIComponent(chain)+'/'+encodeURIComponent(address));
+      return (Array.isArray(body)?body:[]).map(normalizeDexPair);
+    },{force});
+  }
+  async function geckoNewPools(network,{force=false}={}){
+    const n=geckoNetwork(network);
+    return cached('gecko:'+n,geckoCacheMs,async()=>{
+      const body=await getJson(gecko+'/networks/'+encodeURIComponent(n)+'/new_pools?include=base_token%2Cquote_token&page=1');
+      const included=new Map((Array.isArray(body?.included)?body.included:[]).map(x=>[x?.id,x]));
+      return (Array.isArray(body?.data)?body.data:[]).map(x=>normalizeGeckoPool(x,included,network)).filter(x=>x.tokenAddress);
+    },{force});
+  }
+
+  async function fetchEarlyRadar({limit=12,force=false}={}){
+    const capturedAt=Number(now());
+    const [profilesR,boostsR,takeoversR,adsR,...poolRs]=await Promise.allSettled([
+      dexList('/token-profiles/latest/v1',{force}),
+      dexList('/token-boosts/latest/v1',{force}),
+      dexList('/community-takeovers/latest/v1',{force}),
+      dexList('/ads/latest/v1',{force}),
+      ...networks.map(n=>geckoNewPools(n,{force}))
+    ]);
+    const errors=[];
+    const map=new Map();
+    const put=(chain,address,patch)=>{
+      const key=tokenKey(chain,address);if(!key)return;
+      if(!firstSeen.has(key))firstSeen.set(key,capturedAt);
+      map.set(key,mergeCandidate(map.get(key)||{
+        chainId:normChain(chain),tokenAddress:String(address),firstSeenAt:firstSeen.get(key),
+        signalProfile:false,signalBoost:false,signalTakeover:false,signalAd:false,links:[]
+      },patch));
+    };
+    const consumeDex=(result,type)=>{
+      if(result.status!=='fulfilled'){errors.push(type+':'+(result.reason instanceof Error?result.reason.message:String(result.reason)));return;}
+      for(const x of result.value){
+        const chain=normChain(x?.chainId),address=text(x?.tokenAddress,200);
+        if(!networks.map(normChain).includes(chain)||!address)continue;
+        const links=compactLinks(x?.links);
+        put(chain,address,{
+          description:text(x?.description,500),
+          links,
+          xLinked:xLinked(links),
+          websiteLinked:websiteLinked(links),
+          signalProfile:type==='profile',
+          signalBoost:type==='boost',
+          signalTakeover:type==='takeover',
+          signalAd:type==='ad',
+          boostAmount:type==='boost'?finite(x?.amount):null,
+          boostTotalAmount:type==='boost'?finite(x?.totalAmount):null,
+          takeoverClaimDate:type==='takeover'?text(x?.claimDate,80):'',
+          adDate:type==='ad'?text(x?.date,80):''
+        });
+      }
+    };
+    consumeDex(profilesR,'profile');
+    consumeDex(boostsR,'boost');
+    consumeDex(takeoversR,'takeover');
+    consumeDex(adsR,'ad');
+
+    poolRs.forEach((r,i)=>{
+      if(r.status!=='fulfilled'){
+        errors.push('gecko:'+String(networks[i])+':'+(r.reason instanceof Error?r.reason.message:String(r.reason)));
+        return;
+      }
+      for(const pool of r.value)put(pool.chainId,pool.tokenAddress,{...pool,signalNewPool:true});
+    });
+
+    const signalCandidates=[...map.values()]
+      .filter(x=>x.signalProfile||x.signalBoost||x.signalTakeover||x.signalAd)
+      .sort((a,b)=>Number(b.firstSeenAt||0)-Number(a.firstSeenAt||0))
+      .slice(0,Math.max(1,Math.min(20,Number(pairLookupLimit)||10)));
+    const pairSettled=await Promise.allSettled(signalCandidates.map(async x=>{
+      const pairs=await dexPairs(x.chainId,x.tokenAddress,{force});
+      const best=pairs.slice().sort((a,b)=>{
+        const aa=finite(a?.pairCreatedAt)??Infinity,bb=finite(b?.pairCreatedAt)??Infinity;
+        const ageA=Math.abs(capturedAt-aa),ageB=Math.abs(capturedAt-bb);
+        const scoreA=(ageA<=24*60*60_000?1:0)+(finite(a?.liquidityUsd)??0)/1e7;
+        const scoreB=(ageB<=24*60*60_000?1:0)+(finite(b?.liquidityUsd)??0)/1e7;
+        return scoreB-scoreA;
+      })[0];
+      return {key:tokenKey(x.chainId,x.tokenAddress),pair:best};
+    }));
+    pairSettled.forEach((r,i)=>{
+      if(r.status==='fulfilled'&&r.value?.pair){
+        const prior=map.get(r.value.key)||{};
+        map.set(r.value.key,mergeCandidate(prior,r.value.pair));
+      }else if(r.status==='rejected'){
+        errors.push('pair:'+String(signalCandidates[i]?.tokenAddress||'')+':'+(r.reason instanceof Error?r.reason.message:String(r.reason)));
+      }
+    });
+
+    const rows=[...map.values()].map(row=>{
+      const links=compactLinks(row.links);
+      const normalized={...row,links,xLinked:Boolean(row.xLinked||xLinked(links)),websiteLinked:Boolean(row.websiteLinked||websiteLinked(links))};
+      return Object.freeze({...normalized,score:scoreEarlyMemecoin(normalized,{now:capturedAt})});
+    }).filter(x=>{
+      const age=x?.score?.ageMinutes;
+      return age==null||age<=48*60;
+    }).sort((a,b)=>{
+      const stageRank={NEW_NOW:4,EARLY:3,ATTENTION:2,WATCH:1,RISK_ONLY:0};
+      const d=(stageRank[b?.score?.stage]??0)-(stageRank[a?.score?.stage]??0);
+      return d||Number(b?.score?.researchPriorityScore||0)-Number(a?.score?.researchPriorityScore||0);
+    }).slice(0,Math.max(1,Math.min(30,Number(limit)||12)));
+
+    return Object.freeze({
+      version:MEMECOIN_EARLY_RADAR_VERSION,
+      capturedAt,
+      rows:Object.freeze(rows),
+      errors:Object.freeze(errors),
+      source:'DEXSCREENER_PLUS_GECKOTERMINAL_KEYLESS',
+      sourceReady:rows.length>0,
+      ranking:'EARLY_RESEARCH_PRIORITY_NOT_MARKET_CAP',
+      safety:Object.freeze({
+        honeypotVerified:false,
+        holderConcentrationVerified:false,
+        mintFreezeAuthorityVerified:false,
+        lpLockVerified:false
+      }),
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false
+    });
+  }
+
+  return Object.freeze({version:MEMECOIN_EARLY_RADAR_VERSION,fetchEarlyRadar});
+}
