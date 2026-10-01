@@ -278,9 +278,9 @@ export function buildBiggjChartDeskPayload(snapshot={}){
   ).join('\n')||'Radar-Kandidaten erscheinen hier, sobald Discovery-State verfügbar ist.';
   const components=[
     {type:1,components:[
-      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:PRO:5m'},
-      {type:2,style:1,label:'ETH SuperChart',custom_id:'dc3:superchart:ETHUSDT:PRO:5m'},
-      {type:2,style:1,label:'SOL SuperChart',custom_id:'dc3:superchart:SOLUSDT:PRO:5m'}
+      {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:FULL:5m'},
+      {type:2,style:1,label:'ETH SuperChart',custom_id:'dc3:superchart:ETHUSDT:FULL:5m'},
+      {type:2,style:1,label:'SOL SuperChart',custom_id:'dc3:superchart:SOLUSDT:FULL:5m'}
     ]},
     {type:1,components:[
       {type:2,style:2,label:'Super Radar',custom_id:'dc3:terminal:radar'},
@@ -290,7 +290,7 @@ export function buildBiggjChartDeskPayload(snapshot={}){
   ];
   return payload(
     'BIGGJ // CHART DESK',
-    '**Charts ohne Command-Suche.** Markt öffnen → Struktur → Forecast → Thesis → Risiko. Die Buttons führen direkt in BIGGJs bestehende Live-Visuals.',
+    '**FULL SuperCharts ohne Command-Suche.** Markt öffnen → Struktur → Forecast → Liquidität/Confluence → Events/Flow → Thesis → Risiko.',
     [
       safeField('QUICK START','BTC · ETH · SOL SuperChart direkt öffnen. Weitere Märkte über das Market-Menü im Command Center.'),
       safeField('RADAR NOW',top),

@@ -22,7 +22,7 @@ import { createGermanTranslationProvider } from './biggj-german-translation.mjs'
 import { renderBiggjProofFeed } from './biggj-signal-lab.mjs';
 
 export const DISCORD_TELEGRAM_BRIDGE_VERSION='BIGGJ_DISCORD_MARKET_SCIENCE_V7';
-export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST';
+export const BIGGJ_DISCORD_CHANNEL_UX_VERSION='BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST';
 
 const COMMANDS=[
   {name:'start',description:'TCX Command Center öffnen'},
@@ -92,52 +92,42 @@ const COMMANDS=[
 
 
 const SERVER_LAYOUT=Object.freeze([
-  ...BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT,
-  ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT,
-  ...BIGGJ_EXPERIENCE_LAYOUT,
-  {category:'BIGGJ • MARKET INPUTS',channels:[
-    {name:'market-overview',topic:'Beobachtete Märkte als Reality/World-Model Input; keine autonome Trade-Empfehlung.'},
-    {name:'btc',topic:'BTC/USDT Live-Marktpanel als Downstream-Marktansicht.'},
-    {name:'eth',topic:'ETH/USDT Live-Marktpanel als Downstream-Marktansicht.'},
-    {name:'sol',topic:'SOL/USDT Live-Marktpanel als Downstream-Marktansicht.'},
-    {name:'memecoins',topic:'Memecoin Reality/Research Input: DEX Trends, Liquidität, Risikoindikatoren und Datenlücken. SHADOW_ONLY.'}
+  {category:'BIGGJ • DASHBOARD',channels:[
+    {name:'start-here',topic:'Startpunkt: aktueller Zustand, wichtigste Shortcuts und nur das, was du wirklich brauchst.'},
+    {name:'progress',topic:'Messbarer BIGGJ-Fortschritt: Maturity, Evidence, Forecasts, Learning und nächste Research-Gates.'},
+    {name:'market-overview',topic:'Kompakter Marktüberblick und direkter Einstieg in BIGGJ SuperCharts.'},
+    {name:'chart-desk',topic:'One-Tap SuperCharts für Märkte. Struktur, Forecast, Liquidität, Confluence und Events.'},
+    {name:'news-feed',topic:'Nur relevante Live-News und Markt-Events, dedupliziert und deutsch.'},
+    {name:'mobile-app',topic:'Direkter Link zur BIGGJ Webapp / iPhone-Command-Center.'}
   ]},
-  {category:'BIGGJ • DECISION APPLICATIONS',channels:[
-    {name:'tcx-terminal',topic:'Legacy/technical TCX Mission Control. TCX ist Decision Application, nicht BIGGJs Identität.'},
-    {name:'signal-lab',topic:'Downstream Signal Lab: Markt → Horizont → Bias/ABSTAIN mit Calibration-Gate.'},
-    {name:'proof-feed',topic:'Forecast BEFORE → commitment → Outcome AFTER → Learning ohne Cherry-Picking.'},
-    {name:'forecasts',topic:'Probabilistische Forecasts und Invalidation als Downstream Decision Intelligence.'},
-    {name:'anomalies',topic:'Anomalien und Regimewechsel als Research-/Decision-Hinweise.'},
-    {name:'global-intel',topic:'Legacy Global-Intel Oberfläche; kanonische Reality-Flächen sind #news-feed und #world-watch.'},
-    {name:'theses',topic:'Living Theses und Trade DNA für aktive Shadow-Trades; keine wissenschaftliche Autorität.'}
-  ]},
-  {category:'BIGGJ • SHADOW TRADING',channels:[
-    {name:'live-trades',topic:'Offene BIGGJ Shadow-Trades. Trading ist Downstream Application; keine echten Orders.'},
-    {name:'closed-trades',topic:'Abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund. Research-Probes bleiben getrennt.'},
-    {name:'performance',topic:'Shadow-Performance als Application-Metrik; PnL darf keine Theorie promoten.'},
-    {name:'trade-replay',topic:'Trade-Replays und Post-Trade-Lernen mit Point-in-Time Kontext.'}
-  ]},
-  {category:'BIGGJ • TRADING ACADEMY',channels:[
-    {name:'academy-start',topic:'Startpunkt für Trading lernen mit BIGGJ. Paper/Shadow only.'},
-    {name:'academy-roadmap',topic:'Klarer Lernpfad von Grundlagen bis Trade Review.'},
-    {name:'academy-lessons',topic:'Trading-Lektionen in einfacher Reihenfolge.'},
-    {name:'academy-chart-training',topic:'Charts lesen und Struktur üben, ohne echte Orders.'},
-    {name:'academy-challenges',topic:'Paper-/Shadow-Challenges und praktische Übungen.'},
-    {name:'academy-glossary',topic:'Trading-Begriffe kurz und verständlich erklärt.'},
-    {name:'academy-progress',topic:'Lernfortschritt, Meilensteine und Checkliste.'},
-    {name:'academy-questions',topic:'Fragen stellen mit sauberem Analyse-Template.'}
-  ]},
-  {category:'BIGGJ • OPERATIONS',channels:[
-    {name:'alerts',topic:'Nur relevante Zustandsänderungen und echte Ausnahmen; keine normale passive Wartezeit als Alarm.'},
-    {name:'channel-supervisor',topic:'Meta-Überwachung aller Channel-Manager: Zustand, Freshness, Fehler, Entscheidungen und Auto-Reparaturen.'},
-    {name:'channel-improvements',topic:'Priorisierte Verbesserungsvorschläge der Channel-Manager mit Ursache, Handlung und Status.'}
-  ]},
-  {category:'BIGGJ • SYSTEM',channels:[
-    {name:'system-status',topic:'Runtime-, Science-, Daten- und Sicherheitsstatus.'},
-    {name:'data-health',topic:'Provider-, Datenqualitäts- und Pipeline-Status.'},
-    {name:'errors',topic:'Technische Warnungen und Fehlerdiagnostik.'},
-    {name:'rulebook',topic:'Kanonisches BIGGJ Rulebook: Soll, Nicht-Soll, HARD-Regeln, Runtime-Verstöße und Coverage.'}
+  {category:'BIGGJ • TRADING',channels:[
+    {name:'trade-cockpit',topic:'Offene Shadow-Trades, Thesis, Risiko und schneller Chart-Zugriff.'},
+    {name:'performance',topic:'Shadow-Performance kompakt: Equity, PnL, Winrate, Profit Factor und Drawdown.'},
+    {name:'live-trades',topic:'Neue und laufende PRIMARY Shadow-Trades. Keine echten Orders.'},
+    {name:'closed-trades',topic:'Abgeschlossene PRIMARY Shadow-Trades mit Ergebnis und Exit-Grund.'},
+    {name:'alerts',topic:'Nur echte relevante Zustandsänderungen, Ausnahmen und notwendige Aktionen.'}
   ]}
+]);
+
+const BIGGJ_TECH_ARCHIVE_CATEGORY='BIGGJ • ARCHIVE · TECH';
+const DESIRED_DISCORD_CHANNEL_NAMES=new Set(SERVER_LAYOUT.flatMap(section=>section.channels.map(x=>x.name)));
+const DESIRED_DISCORD_CATEGORY_NAMES=new Set(SERVER_LAYOUT.map(section=>section.category));
+const LEGACY_MANAGED_CHANNEL_NAMES=new Set([
+  ...BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT.flatMap(section=>section.channels.map(x=>x.name)),
+  ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.flatMap(section=>section.channels.map(x=>x.name)),
+  ...BIGGJ_EXPERIENCE_LAYOUT.flatMap(section=>section.channels.map(x=>x.name)),
+  'market-overview','btc','eth','sol','memecoins',
+  'tcx-terminal','signal-lab','proof-feed','forecasts','anomalies','global-intel','theses',
+  'live-trades','closed-trades','performance','trade-replay',
+  'academy-start','academy-roadmap','academy-lessons','academy-chart-training','academy-challenges','academy-glossary','academy-progress','academy-questions',
+  'alerts','channel-supervisor','channel-improvements','system-status','data-health','errors','rulebook'
+]);
+const LEGACY_MANAGED_CATEGORY_NAMES=new Set([
+  ...BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT.map(section=>section.category),
+  ...BIGGJ_DISCORD_OBSERVABILITY_LAYOUT.map(section=>section.category),
+  ...BIGGJ_EXPERIENCE_LAYOUT.map(section=>section.category),
+  'BIGGJ • MARKET INPUTS','BIGGJ • DECISION APPLICATIONS','BIGGJ • SHADOW TRADING',
+  'BIGGJ • TRADING ACADEMY','BIGGJ • OPERATIONS','BIGGJ • SYSTEM'
 ]);
 
 const CHANNEL_PROFILE_GROUPS=Object.freeze({
@@ -489,33 +479,23 @@ function academyStaticPayload(kind){
 }
 
 function hasMarker(message,marker){return Array.isArray(message?.embeds)&&message.embeds.some(e=>String(e?.footer?.text||'')===marker);}
-function startPayload(){return {embeds:[{title:'BIGGJ // MARKET SCIENCE OS · DISCORD V11',description:[
-  '**BIGGJ ist jetzt Science-first.** Trading ist nur eine nachgelagerte Anwendung.',
+function startPayload(){return {embeds:[{title:'BIGGJ // USER COMMAND CENTER · V12',description:[
+  '**Nur das, was du als Benutzer wirklich brauchst.** Tiefe Science-, Debug- und Systemansichten bleiben per Slash-Command verfügbar, aber liegen nicht mehr permanent im Weg.',
   '',
-  '**DEIN 90%-PFAD**',
-  '#science-home · aktueller Wissensstand + nächste Forschungsfrage',
-  '#world-model · globale Market States, Topology, Forecastability',
-  '#science-lab · Experimente, Widersprüche, Missing Variables',
-  '#autopilot-supervisor · zeigt nur, ob du wirklich etwas tun musst',
+  '**DEIN DASHBOARD**',
+  '#progress · was BIGGJ messbar gelernt und verbessert hat',
+  '#market-overview · Marktstatus und schneller Einstieg',
+  '#chart-desk · SuperCharts mit Struktur, Forecast, Liquidität, Confluence und Events',
+  '#news-feed · relevante Markt-/Welt-Events',
+  '#trade-cockpit + #performance · Shadow-Trades und Ergebnis',
+  '#alerts · nur wenn wirklich etwas wichtig ist',
+  '#mobile-app · komplette iPhone/Webapp',
   '',
-  '**DANACH ERST APPLICATIONS**',
-  '#decision-intelligence · TCX/RIFT + Forecast Proof',
-  '#signal-lab + #proof-feed · Decision Tools',
-  '#trade-cockpit + #live-trades · Shadow Trading',
+  '**DEEP DIVE BEI BEDARF**',
+  '/science · /worldmodel · /lab · /research · /evidence_log · /system · /rulebook',
   '',
-  '**REALITY & EVIDENCE**',
-  '#news-feed + #world-watch · Live-Reality Feed',
-  '#research-queue + #evidence-ledger · wissenschaftliche Arbeit',
-  '',
-  '**NUR WENN ETWAS KAPUTT IST**',
-  '#alerts · echte Exception/Recovery',
-  '#channel-supervisor · Discord-Selbstreparatur',
-  '#errors · technische Diagnose',
-  '',
-  '**Shortcuts** · /science · /worldmodel · /lab · /autopilot · /decision_intel',
-  '',
-  '**SHADOW_ONLY · UNKNOWN IST GÜLTIG · ECHTE ORDERS BLOCKIERT**'
-].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:buildBiggjDiscordMarketSciencePayload('science',{}).components,allowedMentions:{parse:[]}};}
+  '**SHADOW_ONLY · ABSTAIN IST GÜLTIG · ECHTE ORDERS BLOCKIERT**'
+].join('\n'),footer:{text:MARKERS.start+' · '+BIGGJ_DISCORD_CHANNEL_UX_VERSION},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};}
 
 export function buildDiscordTerminalPayload(snapshot={}){
   const h=snapshot?.health||{},p=snapshot?.portfolio||{},r=h?.operationalReadiness||{},f=h?.institutionalForecastRuntime||{},research=p?.researchActivity||{};
@@ -539,20 +519,18 @@ export function buildDiscordSystemPayload(snapshot={}){
 }
 
 export function buildDiscordPerformancePayload(snapshot={}){
-  const p=snapshot?.portfolio||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // SHADOW PERFORMANCE',description:'**Primary Performance getrennt von Research/Probes · keine echten Orders**',fields:[
-    {name:'Primary Equity',value:money(p?.equityQuote),inline:true},
-    {name:'Primary PnL',value:money(p?.netPnlQuote),inline:true},
-    {name:'Primary Return',value:percent(p?.returnPct),inline:true},
-    {name:'Primary Open',value:String(p?.openPositions??0),inline:true},
-    {name:'Primary Closed',value:String(p?.closedTrades??0),inline:true},
-    {name:'Primary Winrate',value:percent(p?.winRate),inline:true},
-    {name:'Research Open',value:String(research?.openPositions??0),inline:true},
-    {name:'Research Closed',value:String(research?.closedTrades??0),inline:true},
-    {name:'Research PnL',value:money(research?.netPnlQuote),inline:true},
+  const p=snapshot?.portfolio||{};
+  return {embeds:[{title:'BIGGJ // SHADOW PERFORMANCE',description:'**Das Ergebnis auf einen Blick.** Research-/Probe-Trades bleiben aus diesen PRIMARY-Zahlen getrennt.',fields:[
+    {name:'Equity',value:money(p?.equityQuote),inline:true},
+    {name:'Net PnL',value:money(p?.netPnlQuote),inline:true},
+    {name:'Return',value:percent(p?.returnPct),inline:true},
+    {name:'Offen',value:String(p?.openPositions??0),inline:true},
+    {name:'Geschlossen',value:String(p?.closedTrades??0),inline:true},
+    {name:'Winrate',value:percent(p?.winRate),inline:true},
     {name:'Profit Factor',value:Number.isFinite(Number(p?.profitFactor))?Number(p.profitFactor).toFixed(2):'—',inline:true},
     {name:'Expectancy',value:money(p?.expectancyQuote),inline:true},
-    {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true}
+    {name:'Max Drawdown',value:percent(p?.maxDrawdownPct),inline:true},
+    {name:'Safety',value:'SHADOW_ONLY · keine echten Orders',inline:false}
   ],footer:{text:MARKERS.performance},timestamp:new Date().toISOString()}],components:[
     {type:1,components:[
       {type:2,style:2,label:'Tag',custom_id:'dc3:home:stats_day'},
@@ -563,9 +541,11 @@ export function buildDiscordPerformancePayload(snapshot={}){
     marketSelectRow()
   ],allowedMentions:{parse:[]}};
 }
+
 export function buildDiscordMarketOverviewPayload(snapshot={}){
-  const p=snapshot?.portfolio||{},h=snapshot?.health||{},research=p?.researchActivity||{};
-  return {embeds:[{title:'TCX // MARKET DESK',description:['**17 Märkte · ein Research-Core**','','BTC · ETH · SOL als permanente Live-Panels.','Weitere Coins über Dropdown oder Slash Commands.','','Primary offen: **'+String(p?.openPositions??0)+'**','Research offen: **'+String(research?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+  const p=snapshot?.portfolio||{},h=snapshot?.health||{},research=p?.researchActivity||{},radar=h?.marketRadar?.rows||[];
+  const top=radar.slice(0,5).map(x=>'• **'+String(x.symbol||'—').replace('USDT','/USDT')+'** · '+String(x.regime||x.status||'WATCH')+' · '+Math.round(Number(x.score??x.witnessAgreement??0)*100)+'/100').join('\n')||'Radar sammelt gerade neue Marktstates.';
+  return {embeds:[{title:'BIGGJ // MARKET OVERVIEW',description:['**Märkte beobachten ohne Informationsmüll.**','',''+top,'','Offene PRIMARY Shadow-Trades: **'+String(p?.openPositions??0)+'**','Research/Probes offen: **'+String(research?.openPositions??0)+'**','Market Fabric: **'+(h?.marketDataFabric?.healthy?'HEALTHY':'CHECK')+'**','Forecast Runtime: **'+yesNo(h?.institutionalForecastRuntime?.healthy??(h?.institutionalForecastRuntime?.status==='HEALTHY'))+'**','','SuperChart öffnen → Struktur + Forecast + Liquidität + Confluence + Events.'].join('\n'),footer:{text:MARKERS.overview},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 export function buildDiscordDataHealthPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{},coverage=h?.researchCoverage||{};
@@ -893,16 +873,15 @@ function normalizeDiscordSymbol(value=''){const raw=String(value||'').toUpperCas
 function marketSelectRow(){return {type:1,components:[{type:3,custom_id:'dc3:market-select',placeholder:'Markt öffnen …',min_values:1,max_values:1,options:V3_SYMBOLS.map(x=>({label:x+'/USDT',value:x+'USDT',description:'TCX '+x+' Research'}))}]};}
 function commandCenterComponents(){return [
   {type:1,components:[
-    {type:2,style:1,label:'BTC',custom_id:'dc3:market:BTCUSDT'},
-    {type:2,style:1,label:'ETH',custom_id:'dc3:market:ETHUSDT'},
-    {type:2,style:1,label:'SOL',custom_id:'dc3:market:SOLUSDT'},
-    {type:2,style:2,label:'Super Radar',custom_id:'dc3:terminal:radar'}
+    {type:2,style:1,label:'BTC SuperChart',custom_id:'dc3:superchart:BTCUSDT:FULL:5m'},
+    {type:2,style:1,label:'ETH SuperChart',custom_id:'dc3:superchart:ETHUSDT:FULL:5m'},
+    {type:2,style:1,label:'SOL SuperChart',custom_id:'dc3:superchart:SOLUSDT:FULL:5m'}
   ]},
   {type:1,components:[
     {type:2,style:2,label:'Portfolio',custom_id:'dc3:home:portfolio'},
     {type:2,style:2,label:'Performance',custom_id:'dc3:home:stats_day'},
-    {type:2,style:2,label:'Global Intel',custom_id:'dc3:home:news'},
-    {type:2,style:2,label:'Data Health',custom_id:'dc3:home:data'}
+    {type:2,style:2,label:'News',custom_id:'dc3:home:news'},
+    {type:2,style:2,label:'Radar',custom_id:'dc3:terminal:radar'}
   ]},
   marketSelectRow()
 ];}
@@ -1154,14 +1133,14 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const created=[]; channelCache.clear();
     for(const section of SERVER_LAYOUT){
       let category=g.channels.cache.find(c=>c.type===ChannelType.GuildCategory&&c.name===section.category);
-      if(!category){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');category=await g.channels.create({name:section.category,type:ChannelType.GuildCategory,reason:'TCX Discord V2 setup'});created.push(section.category);}
+      if(!category){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');category=await g.channels.create({name:section.category,type:ChannelType.GuildCategory,reason:'BIGGJ Discord V12 user-first setup'});created.push(section.category);}
       for(const spec of section.channels){
         const desiredTopic=decoratedChannelTopic(spec);
         let channel=g.channels.cache.find(c=>c.type===ChannelType.GuildText&&c.name===spec.name);
-        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:desiredTopic,reason:'BIGGJ Discord V7 channel UX setup'});created.push('#'+spec.name);}
+        if(!channel){if(!canManage)throw new Error('MANAGE_CHANNELS_REQUIRED');channel=await g.channels.create({name:spec.name,type:ChannelType.GuildText,parent:category.id,topic:desiredTopic,reason:'BIGGJ Discord V12 user-first setup'});created.push('#'+spec.name);}
         else if(canManage){
-          if(channel.parentId!==category.id)await channel.setParent(category.id,{lockPermissions:false,reason:'BIGGJ Discord V7 layout reconciliation'});
-          if(String(channel.topic||'')!==String(desiredTopic||''))await channel.setTopic(desiredTopic||null,'BIGGJ Discord V7 topic reconciliation');
+          if(channel.parentId!==category.id)await channel.setParent(category.id,{lockPermissions:false,reason:'BIGGJ Discord V12 user-first reconciliation'});
+          if(String(channel.topic||'')!==String(desiredTopic||''))await channel.setTopic(desiredTopic||null,'BIGGJ Discord V12 user-first topic');
         }
         channelCache.set(spec.name,channel);
         channelManagers.observe(spec.name,{
@@ -1171,8 +1150,46 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
         });
       }
     }
-    state.channels=channelCache.size; state.setupStatus='READY'; state.setupError=null;
-    return {ok:true,created,channels:channelCache.size};
+
+    let archivedChannels=0,removedLegacyCategories=0;
+    if(canManage){
+      await g.channels.fetch();
+      const deprecated=[...g.channels.cache.values()].filter(c=>
+        c?.type===ChannelType.GuildText &&
+        LEGACY_MANAGED_CHANNEL_NAMES.has(String(c.name||'')) &&
+        !DESIRED_DISCORD_CHANNEL_NAMES.has(String(c.name||''))
+      );
+      let archive=null;
+      if(deprecated.length){
+        archive=g.channels.cache.find(c=>c.type===ChannelType.GuildCategory&&c.name===BIGGJ_TECH_ARCHIVE_CATEGORY);
+        if(!archive){
+          archive=await g.channels.create({name:BIGGJ_TECH_ARCHIVE_CATEGORY,type:ChannelType.GuildCategory,reason:'BIGGJ V12 preserves deep technical history outside the user dashboard'});
+          created.push(BIGGJ_TECH_ARCHIVE_CATEGORY);
+        }
+        for(const channel of deprecated){
+          if(String(channel.parentId||'')!==String(archive.id||'')){
+            await channel.setParent(archive.id,{lockPermissions:false,reason:'BIGGJ V12 archive technical surface'});
+            archivedChannels++;
+          }
+        }
+      }
+
+      await g.channels.fetch();
+      for(const category of [...g.channels.cache.values()].filter(c=>c?.type===ChannelType.GuildCategory)){
+        const name=String(category.name||'');
+        if(name===BIGGJ_TECH_ARCHIVE_CATEGORY||DESIRED_DISCORD_CATEGORY_NAMES.has(name)||!LEGACY_MANAGED_CATEGORY_NAMES.has(name))continue;
+        const hasChildren=[...g.channels.cache.values()].some(c=>String(c?.parentId||'')===String(category.id||''));
+        if(!hasChildren){
+          await category.delete('BIGGJ V12 remove empty legacy category after safe archive');
+          removedLegacyCategories++;
+        }
+      }
+    }
+    state.channels=channelCache.size;
+    state.archivedChannels=archivedChannels;
+    state.removedLegacyCategories=removedLegacyCategories;
+    state.setupStatus='READY';state.setupError=null;
+    return {ok:true,created,channels:channelCache.size,archivedChannels,removedLegacyCategories};
   }
   async function findMarked(channel,marker){try{const messages=await channel.messages.fetch({limit:50});return messages.find(m=>m.author?.id===client.user?.id&&hasMarker(m,marker))||null;}catch{return null;}}
   async function upsertMarked(channel,marker,payload){let m=await findMarked(channel,marker);return m?m.edit(payload):channel.send(payload);}

@@ -5106,9 +5106,14 @@ async function showMtfMatrix(chatId,messageId,symbol){
   });
 }
 
-async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=null,edit=false,live=true}={}){
+const WEB_SUPERCHART_TTL_MS=20_000;
+const WEB_SUPERCHART_CACHE_LIMIT=24;
+const webSuperchartCache=new Map();
+const webSuperchartInflight=new Map();
+
+async function buildSuperchartAsset(symbol,{mode='PRO',interval='5m',capture=false}={}){
   const state=await researchState(symbol,interval);
-  await captureEpisodeFromState(state,{persist:true});
+  if(capture)await captureEpisodeFromState(state,{persist:true});
   const [book,derivatives,external,onchain,walletCohort]=await Promise.all([
     fetchExecutionBook(symbol),
     derivativesResearchProvider.fetchSnapshot(symbol,{cacheMs:15000}).catch(()=>null),
@@ -5147,6 +5152,29 @@ async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=
     .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
   const tradeOverlay=activeTrade?tradeOverlayFromPosition(activeTrade,{asOf:state.availableAt}):null;
   const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1200,height:820,dashboard:state.dashboard,forecastOverlay,superchart:intel,tradeOverlay});
+  return Object.freeze({png,intel,forecastOverlay,state,tradeOverlay,generatedAt:Date.now()});
+}
+
+async function webSuperchartAsset(symbol,{mode='FULL',interval='5m'}={}){
+  const key=[symbol,interval,mode].join('|');
+  const cached=webSuperchartCache.get(key);
+  if(cached&&Date.now()-cached.generatedAt<WEB_SUPERCHART_TTL_MS)return cached;
+  if(webSuperchartInflight.has(key))return webSuperchartInflight.get(key);
+  const pending=buildSuperchartAsset(symbol,{mode,interval,capture:false}).then(asset=>{
+    webSuperchartCache.set(key,asset);
+    while(webSuperchartCache.size>WEB_SUPERCHART_CACHE_LIMIT){
+      const oldest=[...webSuperchartCache.entries()].sort((a,b)=>Number(a[1]?.generatedAt||0)-Number(b[1]?.generatedAt||0))[0]?.[0];
+      if(!oldest)break;
+      webSuperchartCache.delete(oldest);
+    }
+    return asset;
+  }).finally(()=>webSuperchartInflight.delete(key));
+  webSuperchartInflight.set(key,pending);
+  return pending;
+}
+
+async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=null,edit=false,live=true}={}){
+  const {png,intel,forecastOverlay}=await buildSuperchartAsset(symbol,{mode,interval,capture:true});
   const caption=[
     '🧠 TCX SUPERCHART · '+symbol.replace('USDT','/USDT')+' · '+String(interval).toUpperCase()+' · '+intel.mode,
     'Struktur + Forecast + Confluence + Liquidationen'+(intel.mode==='FULL'?' + Flow + Accuracy + Chain':''),
@@ -10450,6 +10478,40 @@ const server = http.createServer(async (req,res) => {
   if (req.url === '/sw.js') {
     res.writeHead(200,{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'});
     res.end(biggjServiceWorker());
+    return;
+  }
+  if (String(req.url||'').split('?')[0] === '/superchart.png') {
+    const started=Date.now();
+    try{
+      const u=new URL(String(req.url||''),'http://localhost');
+      const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase();
+      const interval=String(u.searchParams.get('interval')||'5m').toLowerCase();
+      const mode=String(u.searchParams.get('mode')||'FULL').toUpperCase();
+      if(!symbolOk(symbol)||!['1m','5m','15m','1h','4h'].includes(interval)||!['PRO','FULL'].includes(mode)){
+        res.writeHead(400,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+        res.end(JSON.stringify({ok:false,error:'INVALID_SUPERCHART_REQUEST',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+        return;
+      }
+      const asset=await webSuperchartAsset(symbol,{interval,mode});
+      recordOperation(observability,{name:'mobile_superchart',ok:true,latencyMs:Date.now()-started,error:null});
+      res.writeHead(200,{
+        'content-type':'image/png',
+        'cache-control':'no-store',
+        'x-content-type-options':'nosniff',
+        'x-biggj-chart-symbol':symbol,
+        'x-biggj-chart-interval':interval,
+        'x-biggj-chart-mode':mode,
+        'x-biggj-chart-generated-at':String(asset.generatedAt),
+        'x-biggj-execution':'SHADOW_ONLY'
+      });
+      res.end(asset.png);
+    }catch(err){
+      const msg=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'mobile_superchart',message:msg});
+      recordOperation(observability,{name:'mobile_superchart',ok:false,latencyMs:Date.now()-started,error:msg});
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({ok:false,error:'SUPERCHART_UNAVAILABLE',message:msg.slice(0,300),execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+    }
     return;
   }
   if (req.url === '/rulebook.md') {

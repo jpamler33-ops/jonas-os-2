@@ -134,7 +134,7 @@ test('chart desk exposes one-tap charts without execution authority',()=>{
   const p=buildBiggjChartDeskPayload(snapshot());
   const text=JSON.stringify(p);
   assert.match(text,/CHART DESK/);
-  assert.match(text,/dc3:superchart:BTCUSDT:PRO:5m/);
+  assert.match(text,/dc3:superchart:BTCUSDT:FULL:5m/);
   assert.match(text,/dc3:terminal:radar/);
   assert.match(text,/keine garantierte Kursbahn/i);
 });
