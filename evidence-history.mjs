@@ -11,7 +11,9 @@ import { createStateFingerprint, validateStateFingerprint } from "./state-validi
 
 export const EVIDENCE_HISTORY_VERSION="TCX_EVIDENCE_HISTORY_V2";
 export const EVIDENCE_HISTORY_SCHEMA_VERSION=1;
+export const EVIDENCE_HISTORY_WAL_VERSION="TCX_EVIDENCE_HISTORY_WAL_V1";
 const SCHEMA_VERSION=EVIDENCE_HISTORY_SCHEMA_VERSION;
+const DEFAULT_MAX_WAL_BYTES=32*1024*1024;
 const SYMBOL_RE=/^[A-Z0-9]{2,18}USDT$/;
 const DEFAULT_MAX_LOGICAL_BYTES=128*1024*1024;
 
@@ -257,29 +259,156 @@ function sanitizeRecord(r){
   };
 }
 
-export async function loadEvidenceHistory(filePath,{maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES}={}){
+function evidenceRecordIdentity(record){
+  const r=record||{};
+  return [String(r.symbol||""),Number(r.capturedAt)||0,String(r.fingerprint||"")].join("|");
+}
+
+function mergeEvidenceWalRecords(baseRecords,walRecords,{maxPerSymbol=2000}={}){
+  const byIdentity=new Map();
+  for(const raw of Array.isArray(baseRecords)?baseRecords:[]){
+    const record=canonicalEvidenceRecordSafe(raw)?raw:sanitizeRecord(raw);
+    if(record) byIdentity.set(evidenceRecordIdentity(record),record);
+  }
+  for(const raw of Array.isArray(walRecords)?walRecords:[]){
+    const record=canonicalEvidenceRecordSafe(raw)?raw:sanitizeRecord(raw);
+    if(record) byIdentity.set(evidenceRecordIdentity(record),record);
+  }
+  return normalizedEvidenceRecords([...byIdentity.values()],{
+    maxPerSymbol:Math.max(1,Math.floor(Number(maxPerSymbol)||2000)),
+    reuseCanonicalRecords:true
+  });
+}
+
+export function evidenceHistoryWalPath(filePath){
+  return String(filePath)+".wal.jsonl";
+}
+
+export async function appendEvidenceHistoryWal(filePath,records,{
+  walPath=evidenceHistoryWalPath(filePath),
+  maxWalBytes=DEFAULT_MAX_WAL_BYTES,
+  sync=true
+}={}){
+  await mkdir(path.dirname(walPath),{recursive:true});
+  const clean=[];
+  const seen=new Set();
+  for(const raw of Array.isArray(records)?records:[]){
+    const record=canonicalEvidenceRecordSafe(raw)?raw:sanitizeRecord(raw);
+    if(!record) continue;
+    const key=evidenceRecordIdentity(record);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    clean.push(record);
+  }
+  if(!clean.length) return {appended:0,bytes:0,walPath};
+
+  const payload=clean.map(record=>JSON.stringify({
+    schemaVersion:SCHEMA_VERSION,
+    version:EVIDENCE_HISTORY_WAL_VERSION,
+    op:"UPSERT",
+    record
+  })+"\n").join("");
+  const bytes=Buffer.byteLength(payload,"utf8");
+  const maxBytes=Math.max(1024*1024,Number(maxWalBytes)||DEFAULT_MAX_WAL_BYTES);
+  const fh=await openFile(walPath,"a",0o600);
+  try{
+    const info=await fh.stat();
+    if(Number(info.size||0)+bytes>maxBytes) throw new Error("evidence history WAL exceeds configured safety limit");
+    await fh.writeFile(payload,{encoding:"utf8"});
+    if(sync) await fh.sync();
+  }finally{
+    await fh.close();
+  }
+  return {appended:clean.length,bytes,walPath};
+}
+
+export async function clearEvidenceHistoryWal(filePath,{walPath=evidenceHistoryWalPath(filePath)}={}){
+  await unlink(walPath).catch(err=>{if(err?.code!=="ENOENT") throw err;});
+  return true;
+}
+
+async function readEvidenceHistoryWal(walPath,{maxWalBytes=DEFAULT_MAX_WAL_BYTES}={}){
+  try{
+    const stored=await readFile(walPath);
+    const maxBytes=Math.max(1024*1024,Number(maxWalBytes)||DEFAULT_MAX_WAL_BYTES);
+    if(stored.length>maxBytes) throw new Error("evidence history WAL exceeds configured read safety limit");
+    const rows=[];
+    let recoveredFromCorrupt=false;
+    for(const line of stored.toString("utf8").split("\n")){
+      if(!line.trim()) continue;
+      try{
+        const entry=JSON.parse(line);
+        if(
+          Number(entry?.schemaVersion)!==SCHEMA_VERSION||
+          entry?.version!==EVIDENCE_HISTORY_WAL_VERSION||
+          entry?.op!=="UPSERT"
+        ) throw new Error("unsupported evidence WAL entry");
+        const record=sanitizeRecord(entry.record);
+        if(!record) throw new Error("invalid evidence WAL record");
+        rows.push(record);
+      }catch{
+        // Preserve all complete valid rows before a torn/corrupt tail. A later
+        // snapshot compaction will canonicalize those recovered rows.
+        recoveredFromCorrupt=true;
+        break;
+      }
+    }
+    if(recoveredFromCorrupt){
+      try{await rename(walPath,walPath+".corrupt-"+Date.now());}catch{}
+    }
+    return {records:rows,bytes:stored.length,recoveredFromCorrupt};
+  }catch(err){
+    if(err?.code==="ENOENT") return {records:[],bytes:0,recoveredFromCorrupt:false};
+    try{await rename(walPath,walPath+".corrupt-"+Date.now());}catch{}
+    return {records:[],bytes:0,recoveredFromCorrupt:true};
+  }
+}
+
+export async function loadEvidenceHistory(filePath,{
+  maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES,
+  walPath=evidenceHistoryWalPath(filePath),
+  maxWalBytes=DEFAULT_MAX_WAL_BYTES,
+  maxPerSymbol=2000
+}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
+
+  let snapshotRecords=[];
+  let recoveredFromCorrupt=false;
+  let storageEncoding=null;
+  let storageBytes=0;
+  let logicalBytes=0;
   try{
     const stored=await readFile(filePath);
-    const encoding=isGzipBuffer(stored)?"gzip":"json";
-    const logical=encoding==="gzip"?await gunzip(stored):stored;
+    storageEncoding=isGzipBuffer(stored)?"gzip":"json";
+    const logical=storageEncoding==="gzip"?await gunzip(stored):stored;
     if(logical.length>Math.max(1024,Number(maxLogicalBytes)||DEFAULT_MAX_LOGICAL_BYTES)){
       throw new Error("evidence history exceeds configured logical safety limit");
     }
     const parsed=JSON.parse(logical.toString("utf8"));
     if(parsed?.schemaVersion!==SCHEMA_VERSION) throw new Error("unsupported evidence history schema");
-    return {
-      records:(Array.isArray(parsed.records)?parsed.records:[]).map(sanitizeRecord).filter(Boolean),
-      recoveredFromCorrupt:false,
-      storageEncoding:encoding,
-      storageBytes:stored.length,
-      logicalBytes:logical.length
-    };
+    snapshotRecords=(Array.isArray(parsed.records)?parsed.records:[]).map(sanitizeRecord).filter(Boolean);
+    storageBytes=stored.length;
+    logicalBytes=logical.length;
   }catch(err){
-    if(err?.code==="ENOENT") return {records:[],recoveredFromCorrupt:false,storageEncoding:null,storageBytes:0,logicalBytes:0};
-    try{await rename(filePath,filePath+".corrupt-"+Date.now());}catch{}
-    return {records:[],recoveredFromCorrupt:true,storageEncoding:null,storageBytes:0,logicalBytes:0};
+    if(err?.code!=="ENOENT"){
+      try{await rename(filePath,filePath+".corrupt-"+Date.now());}catch{}
+      recoveredFromCorrupt=true;
+    }
   }
+
+  const wal=await readEvidenceHistoryWal(walPath,{maxWalBytes});
+  const records=mergeEvidenceWalRecords(snapshotRecords,wal.records,{maxPerSymbol});
+  return {
+    records,
+    recoveredFromCorrupt,
+    recoveredWalFromCorrupt:wal.recoveredFromCorrupt===true,
+    storageEncoding,
+    storageBytes,
+    logicalBytes,
+    walBytes:wal.bytes,
+    walRecords:wal.records.length,
+    walPath
+  };
 }
 
 async function* evidenceHistoryJsonChunks(clean,{updatedAt,maxBytes}){
@@ -332,6 +461,17 @@ export async function saveEvidenceHistory(filePath,records,{
     await unlink(tmp).catch(()=>{});
     throw err;
   }
+  return clean;
+}
+
+export async function compactEvidenceHistory(filePath,records,{
+  walPath=evidenceHistoryWalPath(filePath),
+  ...options
+}={}){
+  const clean=await saveEvidenceHistory(filePath,records,options);
+  // Snapshot rename happens before WAL removal. If the process dies between
+  // these operations, replaying the WAL is idempotent and cannot lose rows.
+  await clearEvidenceHistoryWal(filePath,{walPath});
   return clean;
 }
 
