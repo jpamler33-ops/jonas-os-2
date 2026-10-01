@@ -169,3 +169,13 @@ test('successful issuance heap spikes use bounded settle instead of full memory-
   assert.match(bot,/nextAction:'GC_GUARDED_RECHECK'/);
   assert.match(bot,/if\(transientPostIssuePressure&&!memoryPressure\)/);
 });
+
+
+test('runtime gives heavy research GC priority after shared-slot waits',async()=>{
+  const fs=await import('node:fs/promises');
+  const bot=await fs.readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(bot,/SHADOW_REPLAY_POST_WAIT/);
+  assert.match(bot,/cooldownBypassOverageMb:30/);
+  assert.match(bot,/triggerHeapMb:forecastPersistenceHeapHeadroomMb/);
+  assert.doesNotMatch(bot,/triggerHeapMb:Math\.max\(280,forecastPersistenceHeapHeadroomMb-10\)/);
+});
