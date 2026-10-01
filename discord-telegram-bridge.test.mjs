@@ -118,35 +118,29 @@ test('refresh budgets are exposed in bridge source',async()=>{
 });
 
 
-test('BIGGJ Discord V11 is science-first and keeps TCX downstream',async()=>{
+test('BIGGJ Discord V12 keeps a small user dashboard and deep tools on demand',async()=>{
   const fs=await import('node:fs/promises');
   const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
   const science=await fs.readFile(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
   assert.match(source,/BIGGJ_DISCORD_MARKET_SCIENCE_V7/);
-  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST/);
-  assert.match(source,/\.\.\.BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT/);
-  assert.match(source,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
-  assert.match(source,/\.\.\.BIGGJ_EXPERIENCE_LAYOUT/);
+  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST/);
+  const layout=source.slice(source.indexOf('const SERVER_LAYOUT=Object.freeze(['),source.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY='));
+  assert.doesNotMatch(layout,/\.\.\.BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT/);
+  assert.doesNotMatch(layout,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
+  assert.doesNotMatch(layout,/\.\.\.BIGGJ_EXPERIENCE_LAYOUT/);
+  assert.match(layout,/BIGGJ • DASHBOARD/);
+  assert.match(layout,/BIGGJ • TRADING/);
   assert.match(source,/name:'science'/);
   assert.match(source,/name:'worldmodel'/);
   assert.match(source,/name:'lab'/);
   assert.match(source,/name:'autopilot'/);
   assert.match(source,/name:'decision_intel'/);
   assert.match(source,/refreshMarketSciencePanels/);
-  assert.match(source,/marketSciencePanelDigests/);
-  assert.match(source,/dc7:science:/);
-  assert.match(source,/BIGGJ • DECISION APPLICATIONS/);
-  assert.match(source,/BIGGJ • SHADOW TRADING/);
-  assert.doesNotMatch(source,/category:'TCX • CONTROL'/);
-  assert.doesNotMatch(source,/category:'TCX • SHADOW'/);
-  assert.match(science,/science-home/);
-  assert.match(science,/world-model/);
-  assert.match(science,/science-lab/);
-  assert.match(science,/autopilot-supervisor/);
+  assert.match(source,/refreshBiggjObservabilityPanels/);
+  assert.match(source,/refreshExperiencePanels/);
   assert.match(science,/Trading ist nur eine nachgelagerte Anwendung/);
   assert.match(science,/PnL kann keine Theorie promoten/);
 });
-
 test('deduplicated news event stream uses stable markers and separates world families',async()=>{
   const fs=await import('node:fs/promises');
   const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
@@ -159,42 +153,26 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/slice\(0,12\)/);
 });
 
-test('channel manager supervisor is wired across all declared channels without runtime dependencies',async()=>{
+test('channel manager runtime supervises the curated dashboard and archives legacy technical surfaces',async()=>{
   const fs=await import('node:fs/promises');
   const bridge=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
-  const experience=await fs.readFile(new URL('./biggj-experience-center.mjs',import.meta.url),'utf8');
-  const observability=await fs.readFile(new URL('./biggj-discord-observability.mjs',import.meta.url),'utf8');
-
-  const extractLayoutNames=(source,start,end)=>{
-    const a=source.indexOf(start),b=source.indexOf(end,a+start.length);
-    assert.ok(a>=0&&b>a,start);
-    const block=source.slice(a,b);
-    return [...block.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
-  };
-
-  const direct=extractLayoutNames(bridge,'const SERVER_LAYOUT=Object.freeze([','const CHANNEL_PROFILE_GROUPS=');
-  const exp=extractLayoutNames(experience,'export const BIGGJ_EXPERIENCE_LAYOUT=Object.freeze([','export const BIGGJ_EXPERIENCE_MARKERS=');
-  const obs=extractLayoutNames(observability,'export const BIGGJ_DISCORD_OBSERVABILITY_LAYOUT=Object.freeze([','export const BIGGJ_DISCORD_OBSERVABILITY_MARKERS=');
-  const declared=[...direct,...exp,...obs];
-  const unique=[...new Set(declared)];
-
-  assert.equal(unique.length,declared.length);
-  assert.ok(unique.length>=49);
-
-  const profileBlock=bridge.slice(
-    bridge.indexOf('const CHANNEL_PROFILE_GROUPS='),
-    bridge.indexOf('const MARKET_PANELS=',bridge.indexOf('const CHANNEL_PROFILE_GROUPS='))
-  );
-  for(const name of unique)assert.ok(profileBlock.includes("'"+name+"'"),'missing manager profile: '+name);
-
+  const a=bridge.indexOf('const SERVER_LAYOUT=Object.freeze([');
+  const b=bridge.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY=',a);
+  assert.ok(a>=0&&b>a);
+  const block=bridge.slice(a,b);
+  const names=[...block.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
+  assert.equal(names.length,11);
+  assert.equal(new Set(names).size,names.length);
+  for(const name of ['start-here','progress','market-overview','chart-desk','news-feed','mobile-app','trade-cockpit','performance','live-trades','closed-trades','alerts'])assert.ok(names.includes(name),name);
+  assert.match(bridge,/BIGGJ • ARCHIVE · TECH/);
+  assert.match(bridge,/LEGACY_MANAGED_CHANNEL_NAMES/);
+  assert.match(bridge,/archive technical surface/);
+  assert.match(bridge,/remove empty legacy category after safe archive/);
   assert.match(bridge,/auditBiggjDiscordChannelLayout/);
   assert.match(bridge,/createBiggjChannelManagerRuntime/);
   assert.match(bridge,/channel-supervisor/);
   assert.match(bridge,/channel-improvements/);
-  assert.match(bridge,/DEDUPED LIVE FEED/);
-  assert.match(bridge,/eventDriven:true/);
 });
-
 test('previously empty operational channels now have live builders',async()=>{
   const fs=await import('node:fs/promises');
   const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
