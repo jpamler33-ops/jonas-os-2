@@ -626,7 +626,9 @@ export function refreshAutonomousResearchTrainingFactory(state,{
     taskMemory:base.taskMemory||{},
     livingResearchState,
     researchCoverageSummary,
-    researchDataGovernanceSummary
+    researchDataGovernanceSummary,
+    researchDataPlaneSummary,
+    historyStats
   });
   const tasks=applyBudget(leverage.tasks,effectivePolicy);
 
