@@ -19,7 +19,7 @@ test('embedded state cannot inject a script tag',()=>{
   assert.match(html,/"x":"\\u003cscript>"/);
 });
 
-test('mobile control plane exposes science world lab decisions trading and system tabs',()=>{
+test('mobile control plane exposes the curated user command center',()=>{
   const s=missionControlSnapshot({
     health:{
       autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false,automationCoverage:1},
@@ -29,19 +29,25 @@ test('mobile control plane exposes science world lab decisions trading and syste
       biggjObservability:{
         maturityIndex:.6,
         trustedSkills:2,
+        evidence:{evidenceTotal:40,validationIndependentEpisodes:8},
+        revisions:[],
         knowledge:[{skillId:'s1',title:'Structure',status:'VALIDATED',uncertainty:.2}],
         researchQueue:[{skillId:'s2',title:'Liquidity',nextGate:'FORWARD_SHADOW',priority:.7,uncertainty:.4}],
-        learningTimeline:{events:[]}
+        learningTimeline:{last24h:{total:3},last7d:{total:10},events:[]}
       },
       experienceNeeds:[{priority:2,label:'Mehr Live Data',detail:'coverage gap'}],
+      marketRadar:{rows:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:8,score:.7}]},
       globalIntel:{eventCount:0,recent:[]},
       traderWatch:{sourceReady:false,nextNeed:'PIT public performance source'}
     },
     portfolio:{equityQuote:1000,openPositions:0,closedTrades:0,netPnlQuote:0,positions:[],recentClosed:[]}
   });
   const html=renderMissionControlHtml(s);
-  for(const x of ['data-tab="science"','data-tab="world"','data-tab="lab"','data-tab="decisions"','data-tab="trading"','data-tab="system"','Knowledge Frontier','Epistemic Firewall']){
+  for(const x of ['data-tab="today"','data-tab="markets"','data-tab="progress"','data-tab="trading"','SUPER<span class="cyan">CHART','MESSBARER FORTSCHRITT']){
     assert.match(html,new RegExp(x));
+  }
+  for(const hidden of ['data-tab="science"','data-tab="world"','data-tab="lab"','data-tab="decisions"','data-tab="system"']){
+    assert.doesNotMatch(html,new RegExp(hidden));
   }
   assert.match(html,/app\.webmanifest/);
   assert.match(html,/serviceWorker/);
