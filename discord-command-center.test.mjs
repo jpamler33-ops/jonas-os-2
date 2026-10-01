@@ -7,16 +7,21 @@ const observabilitySource=readFileSync(new URL('./biggj-discord-observability.mj
 const experienceSource=readFileSync(new URL('./biggj-experience-center.mjs',import.meta.url),'utf8');
 const scienceSource=readFileSync(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
 
-test('BIGGJ Discord V11 is release-bound, science-first and interactive',()=>{
+test('BIGGJ Discord V12 is user-first while deep intelligence remains callable',()=>{
   assert.ok(source.includes('BIGGJ_DISCORD_MARKET_SCIENCE_V7'));
-  assert.ok(source.includes('BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST'));
-  assert.ok(source.includes('BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT'));
-  assert.ok(source.includes('dc3:market-select'));
-  assert.ok(source.includes('dc4:thesis:'));
+  assert.ok(source.includes('BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST'));
+  assert.ok(source.includes("category:'BIGGJ • DASHBOARD'"));
+  assert.ok(source.includes("category:'BIGGJ • TRADING'"));
+  for(const name of ['start-here','progress','market-overview','chart-desk','news-feed','mobile-app','trade-cockpit','performance','live-trades','closed-trades','alerts']){
+    assert.ok(source.includes("{name:'"+name+"'"),name);
+  }
+  assert.ok(source.includes("name:'science'"));
+  assert.ok(source.includes("name:'worldmodel'"));
+  assert.ok(source.includes("name:'lab'"));
+  assert.ok(source.includes("name:'research'"));
   assert.ok(source.includes('commandCenterComponents'));
   assert.ok(source.includes('marketActionComponents'));
 });
-
 test('BIGGJ V6 keeps execution safety explicit',()=>{
   assert.ok(source.includes('SHADOW_ONLY'));
   assert.ok(source.includes('REAL ORDERS BLOCKED'));
@@ -73,17 +78,8 @@ test('BIGGJ V6 exposes governed operator observability navigation',()=>{
 });
 
 
-test('BIGGJ Trading Academy is provisioned with curriculum and practice routing',()=>{
+test('BIGGJ Trading Academy remains available on demand without permanent channel clutter',()=>{
   for(const required of [
-    'BIGGJ • TRADING ACADEMY',
-    'academy-start',
-    'academy-roadmap',
-    'academy-lessons',
-    'academy-chart-training',
-    'academy-challenges',
-    'academy-glossary',
-    'academy-progress',
-    'academy-questions',
     'academyLessonPayload',
     'academyLessonComponents',
     'ensureAcademy',
@@ -93,9 +89,10 @@ test('BIGGJ Trading Academy is provisioned with curriculum and practice routing'
   ]) assert.ok(source.includes(required),required);
   assert.ok(source.includes('PAPER / SHADOW ONLY'));
   assert.ok(source.includes('keine echten Orders'));
+  const layout=source.slice(source.indexOf('const SERVER_LAYOUT=Object.freeze(['),source.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY='));
+  assert.ok(!layout.includes("category:'BIGGJ • TRADING ACADEMY'"));
+  assert.ok(!layout.includes("{name:'academy-start'"));
 });
-
-
 test('BIGGJ V6 exposes the unified user experience surfaces',()=>{
   for(const required of [
     'BIGGJ_EXPERIENCE_LAYOUT',
@@ -143,13 +140,10 @@ test('BIGGJ V6 academy keeps the current panel at the bottom and lesson actions 
 });
 
 
-test('BIGGJ V6.1 exposes one-tap user commands',()=>{
+test('BIGGJ V12 exposes one-tap user commands and SuperCharts',()=>{
   for(const required of [
     "name:'signal'",
     "name:'proof'",
-    "signalModeOption",
-    "LIQUIDITY",
-    "MACRO",
     "name:'charts'",
     "name:'news'",
     "name:'world'",
@@ -158,17 +152,23 @@ test('BIGGJ V6.1 exposes one-tap user commands',()=>{
     "liveSurfaceCallbacks",
     "charts:'chart-desk'",
     "app:'mobile-app'",
-    'BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST'
+    'BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST',
+    'BTC SuperChart',
+    'ETH SuperChart',
+    'SOL SuperChart'
   ]) assert.ok(source.includes(required),required);
 });
-
-test('BIGGJ V8 channel managers cover every Discord surface and supervise themselves',()=>{
+test('BIGGJ V12 manages only the curated visible surfaces and keeps deep supervisors on demand',()=>{
+  const layoutBlock=source.slice(
+    source.indexOf('const SERVER_LAYOUT=Object.freeze(['),
+    source.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY=')
+  );
+  const visible=[...layoutBlock.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
+  assert.equal(visible.length,11);
+  assert.equal(new Set(visible).size,visible.length);
+  for(const required of ['progress','market-overview','chart-desk','trade-cockpit','performance','alerts'])assert.ok(visible.includes(required));
+  for(const hidden of ['channel-supervisor','channel-improvements','errors','rulebook','science-home','research-queue'])assert.ok(!visible.includes(hidden),hidden);
   for(const required of [
-    'BIGGJ_DISCORD_CHANNEL_UX_V11_SCIENCE_FIRST',
-    'BIGGJ • OPERATIONS',
-    'BIGGJ • CONTROL ROOM',
-    'channel-supervisor',
-    'channel-improvements',
     'createBiggjChannelManagerRuntime',
     'refreshChannelSupervisor',
     'repairManagerProblem',
@@ -182,7 +182,6 @@ test('BIGGJ V8 channel managers cover every Discord surface and supervise themse
     'buildErrorDeskPayload'
   ]) assert.ok(source.includes(required)||scienceSource.includes(required),required);
 });
-
 test('BIGGJ V7 incoming news is German-first and strict on translation failure',()=>{
   for(const required of [
     'createGermanTranslationProvider',
@@ -195,19 +194,16 @@ test('BIGGJ V7 incoming news is German-first and strict on translation failure',
 });
 
 
-test('BIGGJ V7 exposes the canonical rulebook as a managed Discord surface',()=>{
+test('BIGGJ V12 keeps rulebook available on demand but out of the permanent user dashboard',()=>{
   for(const required of [
     "name:'rulebook'",
-    "category:'BIGGJ • SYSTEM'",
-    "{name:'rulebook',topic:",
-    "rulebook:'BIGGJ_RULEBOOK_PANEL_V1'",
     'buildRulebookPayload',
     'refreshRulebookPanel',
-    "if(name==='rulebook')",
-    "addTimer(refreshRulebookPanel,60000)"
+    "if(name==='rulebook')"
   ]) assert.ok(source.includes(required),required);
+  const layout=source.slice(source.indexOf('const SERVER_LAYOUT=Object.freeze(['),source.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY='));
+  assert.ok(!layout.includes("{name:'rulebook'"));
 });
-
 test('BIGGJ trade cards expose primary lane and virtual size explicitly',()=>{
   for(const required of ['tradeLaneLabel','virtualTradeSize','VIRTUAL SIZE','Abgeschlossene PRIMARY Shadow-Trades']) assert.ok(source.includes(required),required);
 });
