@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-09-30T20:47:00.539Z",
+  "updatedAt": "2026-10-01T00:31:46.613Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -105,7 +105,7 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
+      "status": "CLOSED",
       "outcomes": {
         "h1": {
           "observedAt": "2026-09-30T02:03:57.416Z",
@@ -117,6 +117,12 @@
           "observedAt": "2026-09-30T08:28:31.521Z",
           "price": 83129.6,
           "return": -0.005440016845268736,
+          "direction": -1
+        },
+        "h24": {
+          "observedAt": "2026-10-01T00:31:46.613Z",
+          "price": 83443.5,
+          "return": -0.0016845268788516776,
           "direction": -1
         }
       },
@@ -211,22 +217,51 @@
       },
       "evidenceClassification": "OBSERVED_DERIVED",
       "status": "OPEN",
-      "outcomes": {},
+      "outcomes": {
+        "h1": {
+          "observedAt": "2026-10-01T00:31:46.613Z",
+          "price": 83443.5,
+          "return": -0.002320726563172615,
+          "direction": -1
+        }
+      },
       "caseId": "9492b9ada561fa90fbccd99de6dfd63cb2797bf4842e832dde5b340519edc822"
+    },
+    {
+      "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
+      "openedAt": "2026-10-01T00:31:46.613Z",
+      "entryPrice": 83443.5,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "evidenceFeatures": {
+        "fundingMedian": 0.8152388459861389,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 83443.5
+      },
+      "evidenceGuards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "evidenceClassification": "OBSERVED_DERIVED",
+      "status": "OPEN",
+      "outcomes": {},
+      "caseId": "a1c9d24673c4dc18073b756020d4931d3592034fddf19411280c1f8bc48bcc45"
     }
   ],
   "summary": {
     "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
-    "totalCases": 6,
-    "eligibleCases": 6,
+    "totalCases": 7,
+    "eligibleCases": 7,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 6,
+        "cases": 7,
         "horizons": {
           "h1": {
-            "n": 5,
-            "meanReturn": 0.00031764366229716237,
-            "positiveRate": 0.4
+            "n": 6,
+            "meanReturn": -0.00012208470861446719,
+            "positiveRate": 0.3333333333333333
           },
           "h4": {
             "n": 5,
@@ -234,9 +269,9 @@
             "positiveRate": 0.4
           },
           "h24": {
-            "n": 2,
-            "meanReturn": -0.0014925412623221779,
-            "positiveRate": 0.5
+            "n": 3,
+            "meanReturn": -0.001556536467832011,
+            "positiveRate": 0.3333333333333333
           }
         }
       }
@@ -251,16 +286,16 @@
       "minN": 30,
       "validationN": 100
     },
-    "eligibleCases": 6,
+    "eligibleCases": 7,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 6,
+        "cases": 7,
         "horizons": {
           "h1": {
-            "n": 5,
-            "meanReturn": 0.00031764366229716237,
-            "hitRate": 0.4,
-            "wilsonLower95": 0.11761823115925325,
+            "n": 6,
+            "meanReturn": -0.00012208470861446719,
+            "hitRate": 0.3333333333333333,
+            "wilsonLower95": 0.09676933255921684,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
@@ -273,10 +308,10 @@
             "claimAllowed": false
           },
           "h24": {
-            "n": 2,
-            "meanReturn": -0.0014925412623221779,
-            "hitRate": 0.5,
-            "wilsonLower95": 0.09452865480086611,
+            "n": 3,
+            "meanReturn": -0.001556536467832011,
+            "hitRate": 0.3333333333333333,
+            "wilsonLower95": 0.061490315276160515,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           }
