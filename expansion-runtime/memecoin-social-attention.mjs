@@ -59,6 +59,7 @@ export function createMemecoinSocialAttentionProvider({
   bearerToken='',
   xBaseUrl='https://api.x.com',
   blueskyBaseUrl='https://public.api.bsky.app',
+  blueskyFallbackBaseUrl='https://api.bsky.app',
   blueskyEnabled=true,
   blueskyQueries=['memecoin','meme coin','pump.fun'],
   timeoutMs=7000,
@@ -70,14 +71,31 @@ export function createMemecoinSocialAttentionProvider({
   const xConfigured=Boolean(token);
   let cache=null;
 
-  async function requestJson(url,{headers={}}={}){
-    const c=new AbortController();
-    const timer=setTimeout(()=>c.abort(),Math.max(1000,Number(timeoutMs)||7000));
-    try{
-      const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 meme-social',...headers},signal:c.signal});
-      if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN'));
-      return await res.json();
-    }finally{clearTimeout(timer);}
+  async function requestJson(url,{headers={},attempts=2}={}){
+    let lastError=null;
+    const maxAttempts=Math.max(1,Math.min(3,Number(attempts)||1));
+    for(let attempt=1;attempt<=maxAttempts;attempt++){
+      const c=new AbortController();
+      const timer=setTimeout(()=>c.abort(),Math.max(1000,Number(timeoutMs)||7000));
+      try{
+        const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 meme-social',...headers},signal:c.signal});
+        if(!res?.ok){
+          const err=new Error('HTTP_'+String(res?.status??'UNKNOWN'));
+          err.httpStatus=Number(res?.status);
+          throw err;
+        }
+        return await res.json();
+      }catch(err){
+        lastError=err;
+        const status=Number(err?.httpStatus);
+        const retryable=err?.name==='AbortError'||status===429||(Number.isFinite(status)&&status>=500);
+        if(attempt>=maxAttempts||!retryable)throw err;
+        await new Promise(r=>setTimeout(r,Math.min(800,150*attempt)));
+      }finally{
+        clearTimeout(timer);
+      }
+    }
+    throw lastError||new Error('REQUEST_FAILED');
   }
 
   async function fetchX(maxResults){
@@ -107,19 +125,35 @@ export function createMemecoinSocialAttentionProvider({
   }
 
   async function fetchBluesky(maxResults){
-    if(!blueskyEnabled)return {ok:false,missing:true,posts:[],error:null};
-    const settled=await Promise.allSettled((Array.isArray(blueskyQueries)?blueskyQueries:[]).slice(0,4).map(async q=>{
-      const u=new URL(String(blueskyBaseUrl).replace(/\/+$/,'')+'/xrpc/app.bsky.feed.searchPosts');
-      u.searchParams.set('q',String(q));
-      u.searchParams.set('limit',String(Math.max(10,Math.min(100,Number(maxResults)||100))));
-      u.searchParams.set('sort','latest');
-      return requestJson(u.toString());
+    if(!blueskyEnabled)return {ok:false,missing:true,posts:[],error:null,attemptedQueries:0,healthyQueries:0,failedQueries:0,fallbackUsed:false};
+    const queries=(Array.isArray(blueskyQueries)?blueskyQueries:[]).slice(0,4);
+    const primary=String(blueskyBaseUrl).replace(/\/+$/,'');
+    const fallback=String(blueskyFallbackBaseUrl||'').replace(/\/+$/,'');
+    const settled=await Promise.allSettled(queries.map(async q=>{
+      const bases=[primary,...(fallback&&fallback!==primary?[fallback]:[])];
+      let lastError=null;
+      for(let i=0;i<bases.length;i++){
+        try{
+          const u=new URL(bases[i]+'/xrpc/app.bsky.feed.searchPosts');
+          u.searchParams.set('q',String(q));
+          u.searchParams.set('limit',String(Math.max(10,Math.min(75,Number(maxResults)||75))));
+          u.searchParams.set('sort','latest');
+          const body=await requestJson(u.toString(),{attempts:2});
+          return {body,base:bases[i],fallbackUsed:i>0};
+        }catch(err){
+          lastError=err;
+        }
+      }
+      throw lastError||new Error('BLUESKY_QUERY_FAILED');
     }));
     const postsById=new Map();
     const errors=[];
+    let healthyQueries=0,fallbackUsed=false;
     for(const r of settled){
       if(r.status!=='fulfilled'){errors.push('BLUESKY_'+(r.reason instanceof Error?r.reason.message:String(r.reason)));continue;}
-      for(const p of Array.isArray(r.value?.posts)?r.value.posts:[]){
+      healthyQueries++;
+      fallbackUsed=fallbackUsed||r.value.fallbackUsed===true;
+      for(const p of Array.isArray(r.value?.body?.posts)?r.value.body.posts:[]){
         const body=p?.record?.text??p?.value?.text??'';
         const created=p?.record?.createdAt??p?.value?.createdAt??p?.indexedAt;
         const author=p?.author||{};
@@ -132,7 +166,11 @@ export function createMemecoinSocialAttentionProvider({
         if(normalized.id)postsById.set(normalized.id,normalized);
       }
     }
-    return {ok:settled.some(x=>x.status==='fulfilled'),missing:false,posts:[...postsById.values()],error:errors.length?errors.join(' | '):null};
+    return {
+      ok:healthyQueries>0,missing:false,posts:[...postsById.values()],
+      error:errors.length?errors.join(' | '):null,
+      attemptedQueries:queries.length,healthyQueries,failedQueries:Math.max(0,queries.length-healthyQueries),fallbackUsed
+    };
   }
 
   async function fetchDiscovery({force=false,maxResults=100}={}){
@@ -154,7 +192,11 @@ export function createMemecoinSocialAttentionProvider({
       sourceReady,capturedAt:t,queryClass:'MEME_LAUNCH_DISCOVERY',
       posts,seeds:aggregateSeeds(posts),errors,missingSources,
       x:{configured:xConfigured,sourceReady:x.ok,error:x.error},
-      bluesky:{enabled:Boolean(blueskyEnabled),sourceReady:bsky.ok,error:bsky.error},
+      bluesky:{
+        enabled:Boolean(blueskyEnabled),sourceReady:bsky.ok,error:bsky.error,
+        attemptedQueries:Number(bsky.attemptedQueries||0),healthyQueries:Number(bsky.healthyQueries||0),
+        failedQueries:Number(bsky.failedQueries||0),fallbackUsed:bsky.fallbackUsed===true
+      },
       epistemic:'PUBLIC_POST_ATTENTION_NOT_PRICE_CAUSALITY'
     });
     cache={at:t,value};
