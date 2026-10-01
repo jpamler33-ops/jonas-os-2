@@ -67,6 +67,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-mobile-webapp.mjs',
   'biggj-public-news-provider.mjs',
   'biggj-public-trader-watch.mjs',
+  'shadow-specialist-wallets.mjs',
+  'expansion-runtime/memecoin-early-radar.mjs',
   'news-research-adapter.mjs',
   'biggj-official-intel-provider.mjs',
   'biggj-channel-operations.mjs',

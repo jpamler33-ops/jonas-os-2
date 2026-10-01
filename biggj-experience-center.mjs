@@ -183,6 +183,9 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
   const flow=t?.entityFlow||{};
   const sourceReady=t?.sourceReady===true;
   const traders=arr(t?.traders).slice(0,5);
+  const specialist=snapshot?.health?.specialistWallets?.wallets||{};
+  const wallet3=specialist?.W3_TRADER_COPY||{};
+  const wallet5=specialist?.W5_MEME_COPY||{};
   const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null;};
   const sp=v=>{const x=n(v);return x==null?'—':(x>=0?'+':'')+(x*100).toFixed(Math.abs(x)>=1?0:1)+'%';};
   const compactMoney=v=>{
@@ -280,6 +283,11 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
         'Qualität '+clip(comparison?.sampleQuality||'LIMITED',18)+' · **DESKRIPTIV, NICHT KAUSAL**'
       ].join('\n'))]:[]),
       ...traderFields,
+      safeField('SHADOW COPY WALLETS',[
+        '**Wallet 3 · Trader Copy** · Open '+finite(wallet3?.openPositions)+' · Closed '+finite(wallet3?.closedTrades)+' · Net '+money(wallet3?.netPnlQuote),
+        '**Wallet 5 · Memecoin Copy** · Open '+finite(wallet5?.openPositions)+' · Closed '+finite(wallet5?.closedTrades)+' · Net '+money(wallet5?.netPnlQuote),
+        'Kapitalmodell: unbegrenzte **virtuelle** Facility · normalisierte Research-Units · echte Orders blockiert.'
+      ].join('\n')),
       safeField('SOURCE / FRESHNESS',[
         'Quelle '+clip(t?.source||'OKX_PUBLIC_COPY_TRADING_API',80),
         'Snapshot '+(t?.capturedAt?age(t.capturedAt)+' alt':'—'),
