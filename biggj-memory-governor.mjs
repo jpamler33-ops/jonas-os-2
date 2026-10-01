@@ -18,6 +18,7 @@ export function shouldCollectGarbage(snapshot,{
   maxRssMb=880,
   maxExternalMb=128,
   cooldownMs=45_000,
+  cooldownBypassOverageMb=null,
   lastAttemptAt=0,
   now=Date.now()
 }={}){
@@ -28,12 +29,22 @@ export function shouldCollectGarbage(snapshot,{
   const t=finite(now,Date.now());
   const last=Math.max(0,finite(lastAttemptAt,0));
   const cooldownReady=t-last>=cooldown;
-  const heapHigh=finite(snapshot?.heapUsedMb)>=heapTrigger;
+  const heapUsed=finite(snapshot?.heapUsedMb);
+  const heapHigh=heapUsed>=heapTrigger;
   const rssSafe=finite(snapshot?.rssMb)<rssCeiling;
   const externalSafe=finite(snapshot?.externalMb)<externalCeiling;
+  const bypassDelta=cooldownBypassOverageMb!=null&&Number.isFinite(Number(cooldownBypassOverageMb))
+    ?Math.max(5,Number(cooldownBypassOverageMb))
+    :null;
+  const cooldownBypassed=
+    !cooldownReady&&
+    bypassDelta!=null&&
+    heapUsed>=heapTrigger+bypassDelta&&
+    rssSafe&&externalSafe;
   return Object.freeze({
-    shouldCollect:Boolean(cooldownReady&&heapHigh&&rssSafe&&externalSafe),
+    shouldCollect:Boolean((cooldownReady||cooldownBypassed)&&heapHigh&&rssSafe&&externalSafe),
     cooldownReady,
+    cooldownBypassed,
     heapHigh,
     rssSafe,
     externalSafe,
@@ -41,7 +52,8 @@ export function shouldCollectGarbage(snapshot,{
       triggerHeapMb:heapTrigger,
       maxRssMb:rssCeiling,
       maxExternalMb:externalCeiling,
-      cooldownMs:cooldown
+      cooldownMs:cooldown,
+      cooldownBypassOverageMb:bypassDelta
     })
   });
 }
@@ -64,11 +76,12 @@ export function createMemoryGovernor({
     triggerHeapMb=320,
     maxRssMb=880,
     maxExternalMb=128,
+    cooldownBypassOverageMb=null,
     now=Date.now()
   }={}){
     const before=memorySnapshot(memoryUsageFn());
     const decision=shouldCollectGarbage(before,{
-      triggerHeapMb,maxRssMb,maxExternalMb,cooldownMs,lastAttemptAt,now
+      triggerHeapMb,maxRssMb,maxExternalMb,cooldownMs,cooldownBypassOverageMb,lastAttemptAt,now
     });
     if(!decision.shouldCollect){
       lastResult=Object.freeze({
