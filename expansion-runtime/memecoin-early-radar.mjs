@@ -122,6 +122,10 @@ function riskFlags(row,ageMin){
   if(buys>=8&&sells===0)out.push('ONE_SIDED_NO_SELLS_OBSERVED');
   if(liq>0&&fdv!=null&&fdv/liq>120)out.push('FDV_LIQUIDITY_STRETCHED');
   if(liq>0&&mcap!=null&&mcap/liq>120)out.push('MCAP_LIQUIDITY_STRETCHED');
+  if(liq>0&&mcap!=null&&mcap>0&&(liq/mcap>=20||(liq>=250_000&&mcap<10_000)))out.push('DATA_ANOMALY_MCAP_LIQUIDITY');
+  if(liq>0&&fdv!=null&&fdv>0&&liq/fdv>=20)out.push('DATA_ANOMALY_FDV_LIQUIDITY');
+  if(p5!=null&&p5<=-80)out.push('M5_CRASH_EXTREME');
+  else if(p5!=null&&p5<=-50)out.push('M5_DRAWDOWN_SEVERE');
   if(p5!=null&&p5>100)out.push('M5_CHASE_RISK');
   if(v5!=null&&liq>0&&v5/liq>4)out.push('EXTREME_TURNOVER');
   if(ageMin!=null&&ageMin<10)out.push('ULTRA_NEW_PAIR');
@@ -183,6 +187,9 @@ export function scoreEarlyMemecoin(row,{now=Date.now()}={}){
     else if(f==='LIQUIDITY_THIN')penalty+=.07;
     else if(f==='ONE_SIDED_NO_SELLS_OBSERVED')penalty+=.16;
     else if(f==='FDV_LIQUIDITY_STRETCHED'||f==='MCAP_LIQUIDITY_STRETCHED')penalty+=.08;
+    else if(f==='DATA_ANOMALY_MCAP_LIQUIDITY'||f==='DATA_ANOMALY_FDV_LIQUIDITY')penalty+=.30;
+    else if(f==='M5_CRASH_EXTREME')penalty+=.35;
+    else if(f==='M5_DRAWDOWN_SEVERE')penalty+=.15;
     else if(f==='M5_CHASE_RISK')penalty+=.08;
     else if(f==='LOW_M5_ACTIVITY')penalty+=.05;
   }
@@ -200,7 +207,11 @@ export function scoreEarlyMemecoin(row,{now=Date.now()}={}){
   if(ageMin!=null&&ageMin<=60&&score>=.56)stage='NEW_NOW';
   else if(ageMin!=null&&ageMin<=360&&score>=.46)stage='EARLY';
   else if(components.attention>=.45&&score>=.38)stage='ATTENTION';
-  if(flags.includes('LIQUIDITY_EXTREME_THIN')||flags.includes('LIQUIDITY_UNKNOWN'))stage='RISK_ONLY';
+  const hardRiskFlags=new Set([
+    'LIQUIDITY_EXTREME_THIN','LIQUIDITY_UNKNOWN','M5_CRASH_EXTREME',
+    'DATA_ANOMALY_MCAP_LIQUIDITY','DATA_ANOMALY_FDV_LIQUIDITY'
+  ]);
+  if(flags.some(f=>hardRiskFlags.has(f)))stage='RISK_ONLY';
   return Object.freeze({
     researchPriorityScore:Number(score.toFixed(4)),
     stage,
