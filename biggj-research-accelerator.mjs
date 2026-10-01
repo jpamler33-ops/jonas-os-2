@@ -94,7 +94,10 @@ export function buildResearchResourceBudget({
     replayRows=Math.min(configuredRows,650);
   }else if(pressure>=.64){
     mode='BALANCED';
-    issueBudget=Math.min(configuredIssue,2);
+    // Forecasts are issued sequentially and every issuance is protected by the
+    // unchanged pre/post memory admission gates. Do not impose a second,
+    // redundant two-issuance ceiling while memory is still below CAUTIOUS.
+    issueBudget=configuredIssue;
     replayRows=Math.min(configuredRows,900);
   }else{
     mode='ACCELERATED';
@@ -111,7 +114,8 @@ export function buildResearchResourceBudget({
     shadowReplayHistoryRows:replayRows,
     semantics:{
       budgetCanOnlyReduceConfiguredLimits:true,
-      memoryProtectionOverridesAcceleration:true
+      memoryProtectionOverridesAcceleration:true,
+      balancedIssueBudgetReliesOnSequentialAdmissionGuards:true
     }
   });
 }
