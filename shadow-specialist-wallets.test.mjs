@@ -71,6 +71,17 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].canExecuteLive,false);
 });
 
+test('wallet 4 refuses hard market-data anomalies even with security pass',()=>{
+  const now=2_500_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'base',tokenAddress:'ANOM',symbol:'ANOM',priceUsd:.001,liquidityUsd:11_000_000,
+    score:{stage:'NEW_NOW',researchPriorityScore:.95,attentionSignals:['NEW_POOL'],riskFlags:['DATA_ANOMALY_MCAP_LIQUIDITY']},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now});
+  assert.equal(x.results.opened,0);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
+});
+
 test('wallet 4 marks and closes a take-profit research episode from later public price',()=>{
   const now=2_000_000;
   let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{

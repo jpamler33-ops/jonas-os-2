@@ -4031,6 +4031,9 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       LIQUIDITY_VERY_THIN:'sehr dünne Liquidität',LIQUIDITY_THIN:'dünne Liquidität',
       LOW_M5_ACTIVITY:'kaum 5m-Aktivität',ONE_SIDED_NO_SELLS_OBSERVED:'keine Verkäufe im 5m-Fenster gesehen',
       FDV_LIQUIDITY_STRETCHED:'FDV/Liquidität gestreckt',MCAP_LIQUIDITY_STRETCHED:'MC/Liquidität gestreckt',
+      DATA_ANOMALY_MCAP_LIQUIDITY:'Datenanomalie: Liquidität passt nicht zur MC',
+      DATA_ANOMALY_FDV_LIQUIDITY:'Datenanomalie: Liquidität passt nicht zur FDV',
+      M5_CRASH_EXTREME:'5m-Crash ≥80%',M5_DRAWDOWN_SEVERE:'starker 5m-Abverkauf',
       M5_CHASE_RISK:'5m-Pump/Chase-Risiko',EXTREME_TURNOVER:'extremer Turnover',ULTRA_NEW_PAIR:'ultra-neuer Pool'
     };
     const stageLabel={NEW_NOW:'🆕 NEW NOW',EARLY:'⚡ EARLY',ATTENTION:'👀 ATTENTION',WATCH:'◌ WATCH',RISK_ONLY:'⚠️ RISK ONLY'};
@@ -4045,7 +4048,8 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       const securityIcon=securityGate==='PASS'?'✅':securityGate==='ABSTAIN'?'⛔':'❔';
       const securityFlags=[
         ...(row?.security?.criticalRiskFlags||[]),
-        ...(row?.security?.warningFlags||[])
+        ...(row?.security?.warningFlags||[]),
+        ...(row?.security?.unknownReasonCodes||[])
       ].slice(0,3).join(' · ')||'keine kritische Security-Evidenz im aktuellen Check';
       return [
         (i+1)+'. **'+name+'** · '+String(row?.chainId||'').toUpperCase()+' · '+(stageLabel[row?.score?.stage]||row?.score?.stage||'WATCH')+' · Priority '+score+'/100',
@@ -4763,7 +4767,8 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     memecoinEarlyLastRefreshAt=Date.now();
     const combinedErrors=[
       ...(snapshot.errors||[]),
-      ...(memecoinSecurityLastError?[memecoinSecurityLastError]:[])
+      ...(memecoinSecurityLastError?[memecoinSecurityLastError]:[]),
+      ...(memecoinSocialLastError?[memecoinSocialLastError]:[])
     ];
     memecoinEarlyLastError=combinedErrors.length?combinedErrors.slice(0,8).join(' | '):null;
     if(memecoinExperienceSnapshot){
@@ -4791,7 +4796,8 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         pass:securityRows.filter(x=>x?.security?.evidenceGate==='PASS').length,
         abstain:securityRows.filter(x=>x?.security?.evidenceGate==='ABSTAIN').length,
         unknown:securityRows.filter(x=>x?.security?.evidenceGate==='UNKNOWN').length,
-        errors:secured?.securityProvider?.errors?.length||0
+        errors:secured?.securityProvider?.errors?.length||0,
+        unknownReasonCounts:secured?.securityProvider?.unknownReasonCounts||{}
       },
       social:{
         version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
