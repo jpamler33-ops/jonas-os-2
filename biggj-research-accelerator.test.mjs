@@ -52,6 +52,20 @@ test('resource budget accelerates only when headroom exists',()=>{
   assert.equal(pressured.shadowReplayHistoryRows,500);
 });
 
+test('balanced memory state can use configured sequential issue budget',()=>{
+  const balanced=buildResearchResourceBudget({
+    memory:{heapUsedMb:285,rssMb:593,externalMb:6},
+    limits:{heapMb:380,rssMb:780,externalMb:64},
+    configuredMaxIssuedPerSweep:3,
+    configuredHistoryRows:1200
+  });
+  assert.equal(balanced.mode,'BALANCED');
+  assert.ok(balanced.pressure>=.64&&balanced.pressure<.82);
+  assert.equal(balanced.autoLearnIssueBudget,3);
+  assert.equal(balanced.shadowReplayHistoryRows,900);
+  assert.equal(balanced.semantics.balancedIssueBudgetReliesOnSequentialAdmissionGuards,true);
+});
+
 test('bundle plan exposes fan-out without pretending observations are independent',()=>{
   const p=buildResearchBundlePlan({
     leverage:{topBundles:[
