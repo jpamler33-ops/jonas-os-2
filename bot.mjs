@@ -1680,6 +1680,24 @@ async function persistShadowPortfolio(reason='mutation') {
   return shadowPortfolioPersistenceQueue;
 }
 
+async function persistSpecialistWallets(reason='mutation'){
+  specialistWalletPersistenceQueue = specialistWalletPersistenceQueue.then(async()=>{
+    if(!specialistWalletHealthy) return false;
+    try{
+      specialistWalletState = await saveSpecialistWalletState(specialistWalletFile,specialistWalletState);
+      specialistWalletLastError=null;
+      return true;
+    }catch(err){
+      specialistWalletHealthy=false;
+      specialistWalletLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'specialist_wallets.persistence',message:specialistWalletLastError});
+      console.error('[BIGGJ_SPECIALIST_WALLETS_PERSIST_FAILED]',reason,specialistWalletLastError);
+      return false;
+    }
+  });
+  return specialistWalletPersistenceQueue;
+}
+
 async function persistStrategyLeague(reason='mutation'){
   strategyLeaguePersistenceQueue = strategyLeaguePersistenceQueue.then(async()=>{
     if(!strategyLeagueHealthy) return false;
