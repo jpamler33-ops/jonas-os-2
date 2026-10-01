@@ -11,7 +11,7 @@ test('autolearn global ESS sweep retains recent audit-bound issuances across cyc
   assert.match(source,/coverageIssuancePoolItems\(coverageIssuancePool/);
   assert.match(source,/maybePlaceCoverageCurriculumSweep\(coveragePoolItems\)/);
   assert.match(source,/scope:'GLOBAL_ESS_SWEEP'/);
-  assert.match(source,/TCX_COVERAGE_CURRICULUM_MAX_PER_SWEEP/);
+  assert.match(source,/TCX_COVERAGE_CURRICULUM_MAX_PER_SWEEP \\|\\| 2/);
   assert.match(source,/coverageFreshIssuances/);
   assert.match(source,/coveragePooledIssuances/);
   assert.match(source,/coverageGlobalWinners/);
