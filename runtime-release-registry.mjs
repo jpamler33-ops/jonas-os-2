@@ -66,6 +66,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-experience-center.mjs',
   'biggj-mobile-webapp.mjs',
   'biggj-public-news-provider.mjs',
+  'biggj-public-trader-watch.mjs',
   'news-research-adapter.mjs',
   'biggj-official-intel-provider.mjs',
   'biggj-channel-operations.mjs',
