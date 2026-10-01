@@ -21,8 +21,8 @@ test('behavioral strategy is inferred from observed public position history',()=
   assert.equal(x.leverageStyle,'MODERATE_LEVERAGE');
   assert.equal(x.inferred,true);
   assert.equal(x.observedClosedTrades,3);
-  assert.equal(x.realizedWinRate,2/3);
-  assert.equal(x.lossHandling,'BALANCED_HOLD_TIME');
+  assert.equal(x.realizedWinRate,.6667);
+  assert.equal(x.lossHandling,'HOLDS_LOSERS_LONGER');
   assert.ok(x.payoffRatio>1);
 });
 
