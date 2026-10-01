@@ -10340,8 +10340,15 @@ function missionControlData(){
       return {
         symbol,
         capturedAt:Number(r.capturedAt||0)||null,
+        price:Number.isFinite(Number(r.price))?Number(r.price):null,
+        open:Number.isFinite(Number(r.open))?Number(r.open):null,
+        high:Number.isFinite(Number(r.high))?Number(r.high):null,
+        low:Number.isFinite(Number(r.low))?Number(r.low):null,
+        quoteVolume:Number.isFinite(Number(r.quoteVolume))?Number(r.quoteVolume):null,
+        change24hPct:Number.isFinite(Number(r.change24hPct))?Number(r.change24hPct):null,
         status:r.status||'UNKNOWN',
         regime:r.regime||'UNKNOWN',
+        bias:r.bias||'UNKNOWN',
         witnessAgreement:Number.isFinite(Number(r.witnessAgreement))?Number(r.witnessAgreement):null,
         support:Number(r.support||0),
         score:Number.isFinite(Number(r.score))?Number(r.score):null
