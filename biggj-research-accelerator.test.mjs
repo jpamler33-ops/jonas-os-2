@@ -228,8 +228,9 @@ test('autolearn resource budget is measured after bounded GC precheck',async()=>
   const budgetAt=bot.indexOf("researchAcceleration=currentResearchAccelerator(Date.now())");
   assert.ok(gcAt>=0);
   assert.ok(budgetAt>gcAt);
-  assert.match(bot,/triggerHeapMb:autoLearnResumeHeapMb/);
-  assert.match(bot,/cooldownBypassOverageMb:15/);
+  assert.match(bot,/Math\.floor\(autoLearnHeapHeadroomMb\*0\.80\)/);
+  assert.match(bot,/triggerHeapMb:autoLearnBudgetGcTriggerMb/);
+  assert.match(bot,/cooldownBypassOverageMb:10/);
   assert.match(bot,/budgetGcExecuted/);
   assert.match(bot,/budgetGcReclaimedMb/);
   assert.match(bot,/Math\.min\(autoLearnMaxIssuedPerSweep,researchAcceleration\.resource\.autoLearnIssueBudget\)/);
