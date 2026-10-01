@@ -11638,6 +11638,7 @@ async function gracefulShutdown(signal) {
   });
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
   await persistShadowOms(`shutdown:${signal}`);
+  await persistSpecialistWallets(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
@@ -11651,6 +11652,7 @@ await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
 await refreshBiggjWorldModelRuntime('STARTUP');
 await refreshPublicExperienceIntel('startup');
+await refreshMemecoinEarlyRadar('startup');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
 const startupRulebook=currentBiggjRulebookAssessment();
@@ -11792,4 +11794,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),biggjWorldModelWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),memecoinEarlyWatcher(),biggjWorldModelWatcher()]);
