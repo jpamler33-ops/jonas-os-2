@@ -161,7 +161,7 @@ export function prioritizeCoverageCurriculumCandidates(candidates,{limit=1}={}){
     selectedLanes.add(coverageLaneKey(next));
   }
 
-  return freeze({version:SHADOW_COVERAGE_CURRICULUM_VERSION,candidates:selected,eligible:rows.length,limit:max,execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false,meaning:'GLOBAL_ESS_PRIORITY_WITH_MULTI_SLOT_MARGINAL_INFORMATION_DIVERSITY'});
+  return freeze({version:SHADOW_COVERAGE_CURRICULUM_VERSION,candidates:selected,eligible:rows.length,limit:max,execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false,meaning:'GLOBAL_ESS_PRIORITY_WITH_TIME_TO_INFORMATION_AND_MULTI_SLOT_MARGINAL_INFORMATION_DIVERSITY'});
 }
 
 export function coverageCurriculumSummary(ledger,{symbols=[],horizons=DEFAULT_COVERAGE_HORIZONS}={}){
