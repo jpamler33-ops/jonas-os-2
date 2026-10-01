@@ -1,13 +1,13 @@
 
-export const BIGGJ_MOBILE_WEBAPP_VERSION='BIGGJ_MARKET_SCIENCE_APP_V1';
+export const BIGGJ_MOBILE_WEBAPP_VERSION='BIGGJ_USER_COMMAND_CENTER_V2';
 
 const jsonForScript=value=>JSON.stringify(value??{}).replace(/</g,'\\u003c');
 
 export function biggjWebManifest(){
   return JSON.stringify({
-    name:'BIGGJ Market Science OS',
+    name:'BIGGJ Command Center',
     short_name:'BIGGJ',
-    description:'Mobile control plane for BIGGJ Autonomous Market Science & Decision Intelligence.',
+    description:'User-first BIGGJ command center for progress, markets and shadow trading.',
     start_url:'/mission-control',
     scope:'/',
     display:'standalone',
@@ -24,7 +24,7 @@ export function biggjAppIconSvg(){
 }
 
 export function biggjServiceWorker(){
-  return `const CACHE='biggj-v3';const SHELL=['/mission-control','/app.webmanifest','/biggj-icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{})));self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;if(['/mission-control.json','/signal-lab.json','/proof-feed.json'].includes(u.pathname)){e.respondWith(fetch(e.request,{cache:'no-store'}).catch(()=>caches.match('/mission-control')));return;}e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request)));});`;
+  return `const CACHE='biggj-user-v2';const SHELL=['/mission-control','/app.webmanifest','/biggj-icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{})));self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))])));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin)return;if(['/mission-control.json','/signal-lab.json','/proof-feed.json','/superchart.png'].includes(u.pathname)){e.respondWith(fetch(e.request,{cache:'no-store'}).catch(()=>caches.match('/mission-control')));return;}e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});return r;}).catch(()=>caches.match(e.request)));});`;
 }
 
 export function renderBiggjMobileApp(snapshot={}){
@@ -42,7 +42,7 @@ export function renderBiggjMobileApp(snapshot={}){
 <link rel="manifest" href="/app.webmanifest">
 <link rel="icon" href="/biggj-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/biggj-icon.svg">
-<title>BIGGJ // Market Science OS</title>
+<title>BIGGJ // Command Center</title>
 <style>
 :root{
   --bg:#05070a;--bg2:#080c12;--surface:#0b1018;--surface2:#0e1520;--surface3:#111a27;
@@ -118,6 +118,19 @@ button{font:inherit;color:inherit}
 .signalSelectors{display:flex;flex-direction:column;gap:8px;margin-top:12px}.selectorRow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}.selectorRow::-webkit-scrollbar{display:none}.selectorBtn{flex:0 0 auto;border:1px solid var(--line);background:#0b111a;border-radius:11px;padding:8px 10px;font-size:9px;font-weight:800;color:#718096}.selectorBtn.active{border-color:rgba(94,242,214,.34);background:rgba(94,242,214,.08);color:var(--cyan)}.proofHash{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#75869b;font-size:9px}.proofStage{font-size:9px;font-weight:850;letter-spacing:.08em}.signalState{font-size:34px;font-weight:920;letter-spacing:-.05em;line-height:1}.signalBias{font-size:13px;color:var(--soft);margin-top:8px}.signalGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
 .installCard{margin-top:9px;border:1px solid var(--line);background:#0a1018;border-radius:18px;padding:14px}.installCard b{font-size:11px}.installCard p{margin:6px 0 0;color:#78879a;font-size:10px;line-height:1.5}
 .loadingLine{height:2px;position:fixed;left:0;top:0;width:0;background:linear-gradient(90deg,var(--cyan),var(--blue));z-index:100;transition:width .25s,opacity .25s}.loadingLine.on{width:72%;opacity:1}.loadingLine.done{width:100%;opacity:0}
+.userHeroTitle{font-size:30px;line-height:.98;font-weight:920;letter-spacing:-.045em;margin-top:7px;max-width:620px}
+.userAction{border-color:rgba(94,242,214,.22);background:linear-gradient(145deg,rgba(94,242,214,.06),rgba(109,124,255,.03))}
+.userAction.alert{border-color:rgba(255,125,138,.25);background:rgba(255,125,138,.055)}
+.chartShell{border:1px solid var(--line2);border-radius:22px;overflow:hidden;background:#070a0f;box-shadow:var(--shadow)}
+.chartTop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 13px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0e1520,#0a1018)}
+.chartSymbol{font-size:16px;font-weight:900}.chartMeta{font-size:8.5px;color:var(--muted);margin-top:3px}.chartLive{font-size:8px;font-weight:850;color:var(--green)}
+.chartViewport{position:relative;aspect-ratio:1.46/1;background:#070a0f;display:grid;place-items:center;overflow:hidden}
+.chartViewport img{width:100%;height:100%;object-fit:contain;display:block}.chartLoading{position:absolute;inset:0;display:none;place-items:center;background:rgba(5,7,10,.42);backdrop-filter:blur(2px);font-size:10px;color:var(--soft);font-weight:800}.chartViewport.loading .chartLoading{display:grid}
+.chartError{display:none;padding:9px 12px;border-top:1px solid rgba(255,125,138,.16);background:rgba(255,125,138,.05);font-size:9px;color:#ffb0b8}.chartError.show{display:block}
+.progressTrack{height:8px;border-radius:999px;background:#16202d;overflow:hidden;margin-top:10px}.progressTrack i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+.timeline{position:relative;padding-left:23px}.timeline:before{content:"";position:absolute;left:13px;top:15px;bottom:15px;width:1px;background:#26364a}.timelineItem{position:relative;padding:0 0 14px}.timelineItem:last-child{padding-bottom:0}.timelineItem:before{content:"";position:absolute;left:-13px;top:5px;width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 4px rgba(94,242,214,.06)}.timelineTitle{font-size:11px;font-weight:800}.timelineBody{font-size:9.5px;color:#7f8da0;line-height:1.45;margin-top:3px}
+.bottomNav{grid-template-columns:repeat(4,1fr);width:min(calc(100% - 18px),640px)}
+.openMarket{cursor:pointer}
 @media(min-width:700px){.shell{padding-left:22px;padding-right:22px}.metricGrid{grid-template-columns:repeat(4,minmax(0,1fr))}.marketRail{grid-auto-columns:minmax(190px,24%)}.twoCol{display:grid;grid-template-columns:1.15fr .85fr;gap:10px}.hero{padding:23px}.heroMode{font-size:38px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 </style>
@@ -129,7 +142,7 @@ button{font:inherit;color:inherit}
   <div class="topline">
     <div class="brand">
       <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M6 4h7.2c3 0 4.8 1.5 4.8 3.8 0 1.4-.7 2.5-1.9 3.1 1.7.6 2.6 1.8 2.6 3.6 0 3-2.3 4.5-5.9 4.5H6V4Zm4 5.1h2.4c1 0 1.5-.4 1.5-1.2 0-.7-.5-1.1-1.5-1.1H10v2.3Zm0 6.1h2.8c1.2 0 1.8-.5 1.8-1.4 0-.9-.6-1.3-1.8-1.3H10v2.7Z" fill="currentColor"/></svg></div>
-      <div class="brandText"><div class="brandTitle">BIGGJ</div><div class="brandSub">Autonomous Market Science OS</div></div>
+      <div class="brandText"><div class="brandTitle">BIGGJ</div><div class="brandSub">Command Center</div></div>
     </div>
     <div class="topActions">
       <div class="sync" id="syncBadge"><span class="syncDot"></span><span id="syncText">LIVE</span></div>
@@ -143,17 +156,15 @@ button{font:inherit;color:inherit}
 </main>
 
 <nav class="bottomNav" id="nav" aria-label="BIGGJ Navigation">
-  <button data-tab="science" class="active" aria-label="Science"><svg viewBox="0 0 24 24"><path d="M9 3h6m-5 0v6l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7.5 15h9"/></svg><span>Science</span></button>
-  <button data-tab="world" aria-label="World Model"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8S14.4 17.8 12 20c-2.4-2.2-3.6-4.9-3.6-8S9.6 6.2 12 4Z"/></svg><span>World</span></button>
-  <button data-tab="lab" aria-label="Laboratory"><svg viewBox="0 0 24 24"><path d="M9 3h6m-5 0v6l-5 8a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M8 15h8M8.7 12h6.6"/></svg><span>Lab</span></button>
-  <button data-tab="decisions" aria-label="Decision Intelligence"><svg viewBox="0 0 24 24"><path d="M4 17 9 12l3 3 8-9"/><path d="M16 6h4v4"/></svg><span>Decide</span></button>
-  <button data-tab="trading" aria-label="Trading Application"><svg viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7"/><path d="M3 19h18"/></svg><span>Trading</span></button>
-  <button data-tab="system" aria-label="System"><svg viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg><span>System</span></button>
+  <button data-tab="today" class="active" aria-label="Heute"><svg viewBox="0 0 24 24"><path d="M4 11.5 12 5l8 6.5V20H4v-8.5Z"/><path d="M9 20v-6h6v6"/></svg><span>Heute</span></button>
+  <button data-tab="markets" aria-label="Märkte"><svg viewBox="0 0 24 24"><path d="M4 17 9 12l3 3 8-9"/><path d="M16 6h4v4"/></svg><span>Märkte</span></button>
+  <button data-tab="progress" aria-label="Fortschritt"><svg viewBox="0 0 24 24"><path d="M5 19V9m7 10V4m7 15v-7"/><path d="M3 19h18"/></svg><span>Fortschritt</span></button>
+  <button data-tab="trading" aria-label="Trading"><svg viewBox="0 0 24 24"><path d="M5 7h14M7 4v6m10-6v6M5 14h14M9 11v6m6-6v6"/></svg><span>Trading</span></button>
 </nav>
 
 <script>
 let S=__BIGGJ_BOOT__;
-let TAB='science';
+let TAB='today';
 let refreshing=false;
 let lastGoodAt=Date.now();
 let SIGNAL={
@@ -166,6 +177,13 @@ let SIGNAL={
   error:null,
   lastFetchedAt:0,
   lastKey:null
+};
+
+let CHART={
+  symbol:localStorage.getItem('biggj.chart.symbol')||'BTCUSDT',
+  interval:localStorage.getItem('biggj.chart.interval')||'5m',
+  mode:localStorage.getItem('biggj.chart.mode')||'FULL',
+  lastUrl:null,lastLoadedAt:0,loading:false,error:null
 };
 
 const root=document.getElementById('root');
@@ -234,19 +252,18 @@ function operatorCopy(op,factory){
 }
 
 function buildStatusStrip(){
-  const h=S.health||{},os=S.biggj||h.biggjMarketScienceOs||{},frontier=os.science?.frontier||{},ready=h.operationalReadiness||{},cov=h.researchCoverage||{};
+  const h=S.health||{},op=h.autonomousOperator||{},brain=h.biggjObservability||{},p=S.portfolio||{};
   const rows=[
-    ['BIGGJ','MARKET SCIENCE','cyan'],
-    ['Theories',N(frontier.total),N(frontier.broken)>0?'warn':'good'],
-    ['Evidence',N(frontier.evidence),'good'],
-    ['Coverage',P(cov.averageCoverage),N(cov.blocked)>0?'warn':'good'],
-    ['Runtime',ready.ready?'READY':ready.status||'CHECK',ready.ready?'good':'warn'],
+    ['Status',op.operatorNeeded?'AKTION':'AUTONOM',op.operatorNeeded?'bad':'good'],
+    ['Fortschritt',P(brain.maturityIndex),'cyan'],
+    ['Evidence',N(brain.evidence?.evidenceTotal),'good'],
+    ['Shadow PnL',MONEY(p.netPnlQuote),pnlTone(p.netPnlQuote)||'good'],
     ['Mode','SHADOW_ONLY','good']
   ];
   document.getElementById('statusStrip').innerHTML=rows.map(x=>'<div class="chip '+x[2]+'">'+E(x[0])+' <strong>'+E(x[1])+'</strong></div>').join('');
 }
 
-function renderOverview(){
+function renderOverview(){function renderOverview(){
   const h=S.health||{},op=h.autonomousOperator||{},factory=h.autonomousResearchFactory||{},lr=h.biggjLivingResearch||{},cov=h.researchCoverage||{},brain=h.biggjObservability||{},p=S.portfolio||{};
   const needs=(h.experienceNeeds||[]).slice(0,6);
   const radar=(h.marketRadar?.rows||[]).slice(0,5);
@@ -404,6 +421,88 @@ function renderLab(){
   return html+'</section>';
 }
 
+function userMarketRows(){
+  const h=S.health||{},os=S.biggj||h.biggjMarketScienceOs||{},world=os.worldModel||{};
+  const raw=[...(world.markets||[]),...(h.marketRadar?.rows||[])],seen=new Set(),out=[];
+  for(const x of raw){const symbol=String(x?.symbol||'').toUpperCase();if(!symbol||seen.has(symbol))continue;seen.add(symbol);out.push(x);}
+  for(const symbol of ['BTCUSDT','ETHUSDT','SOLUSDT'])if(!seen.has(symbol))out.push({symbol,status:'WATCH',regime:'—'});
+  return out.slice(0,10);
+}
+function userChanges(){
+  const b=(S.health||{}).biggjObservability||{},out=[];
+  for(const x of (b.revisions||[]).slice(0,4))out.push({title:'Annahme revidiert · '+String(x.assumptionId||x.type||'Research'),detail:(x.falsifierCodes||[]).length?'Falsifier '+x.falsifierCodes.join(', '):'Research-State aktualisiert',at:x.at||b.generatedAt});
+  for(const x of (b.learningTimeline?.events||[]).slice(0,6))out.push({title:x.title||x.kind||'Learning Event',detail:x.detail||'Messbarer Research-State aktualisiert',at:x.at});
+  return out.sort((a,b)=>N(b.at)-N(a.at)).slice(0,5);
+}
+function renderToday(){
+  const h=S.health||{},op=h.autonomousOperator||{},factory=h.autonomousResearchFactory||{},brain=h.biggjObservability||{},frontier=(S.biggj||h.biggjMarketScienceOs||{}).science?.frontier||{},p=S.portfolio||{},changes=userChanges(),markets=userMarketRows().slice(0,3),human=op.operatorNeeded===true;
+  let html='<section class="view '+(TAB==='today'?'active':'')+'">';
+  html+='<div class="hero"><div class="overline">JETZT</div><div class="userHeroTitle '+(human?'bad':'cyan')+'">'+(human?'DEINE AKTION IST NÖTIG':'BIGGJ ARBEITET FÜR DICH')+'</div><div class="heroCopy">'+E(operatorCopy(op,factory))+'</div><div class="heroFooter"><div class="badge">Mensch <b>'+(human?'NÖTIG':'NICHT NÖTIG')+'</b></div><div class="badge">24h <b>'+N(brain.learningTimeline?.last24h?.total)+' Events</b></div><div class="badge">Sync <b>'+AGE(S.generatedAt||lastGoodAt)+'</b></div></div></div>';
+  html+=sectionHead('Dein Überblick','nur das Wichtige');
+  html+='<div class="metricGrid">'+metric('Fortschritt',P(brain.maturityIndex),N(brain.trustedSkills)+' trusted skills','cyan')+metric('Evidence',N(brain.evidence?.evidenceTotal),N(brain.evidence?.validationIndependentEpisodes)+' independent')+metric('Experimente',N(frontier.experiments),N(frontier.evidence)+' Science-Evidence')+metric('Shadow PnL',MONEY(p.netPnlQuote),N(p.openPositions)+' offen',pnlTone(p.netPnlQuote))+'</div>';
+  html+=sectionHead(human?'Was du tun musst':'Deine Aktion');
+  html+=human?panel('<span class="bad">Jetzt prüfen</span>',E(op.humanJobRemaining||'Eine konkrete Entscheidung braucht Aufmerksamkeit.'),'ACTION','userAction alert'):panel('<span class="good">Nichts nötig</span>','BIGGJ läuft autonom weiter. Nur echte Entscheidungen oder nicht selbst lösbare Blocker werden dir hochgezogen.','HANDS OFF','userAction');
+  html+=sectionHead('Märkte im Blick','antippen → SuperChart');
+  html+='<div class="marketRail">'+markets.map(x=>{const score=Number.isFinite(Number(x.score))?CLAMP(x.score):CLAMP(x.witnessAgreement);return '<div class="market openMarket" data-open-market="'+E(x.symbol)+'"><div class="marketSymbol">'+E(String(x.symbol).replace('USDT','/USDT'))+'</div><div class="marketStatus">'+E(x.regime||statusDE(x.status))+'</div><div class="marketScore">'+(Number.isFinite(Number(score))?Math.round(score*100):'—')+'</div><div class="bar"><i style="width:'+Math.round(score*100)+'%"></i></div><div class="marketFoot"><span>Witness '+P(x.witnessAgreement)+'</span><span>'+N(x.support)+' support</span></div></div>'}).join('')+'</div>';
+  html+=sectionHead('Was sich verändert hat',changes.length+' Updates');
+  html+='<div class="stack">'+(changes.length?changes.map(x=>panel(E(x.title),E(x.detail),x.at?AGE(x.at):'NEU')).join(''):empty('Noch keine neue Revision oder Learning-Aktivität im aktuellen Fenster.'))+'</div>';
+  return html+'</section>';
+}
+function chartUrl(){
+  const q=new URLSearchParams({symbol:CHART.symbol,interval:CHART.interval,mode:CHART.mode,v:String(Date.now())});
+  return '/superchart.png?'+q.toString();
+}
+function selectedUserMarket(){return userMarketRows().find(x=>String(x.symbol).toUpperCase()===CHART.symbol)||{symbol:CHART.symbol};}
+function renderMarketMonitor(){
+  const rows=userMarketRows(),x=selectedUserMarket();
+  let html='<section class="view '+(TAB==='markets'?'active':'')+'">';
+  html+='<div class="hero"><div class="overline">MARKET MONITOR</div><div class="userHeroTitle">SUPER<span class="cyan">CHART</span></div><div class="heroCopy">Candles + Struktur + Regime + Forecast-Pfade + Confluence + Liquidationen + Events. Ein Chart statt zehn getrennte Tools.</div><div class="heroFooter"><div class="badge">'+E(CHART.symbol.replace('USDT','/USDT'))+' <b>'+E(CHART.interval.toUpperCase())+'</b></div><div class="badge">View <b>'+E(CHART.mode)+'</b></div><div class="badge">Auto <b>30s</b></div></div></div>';
+  html+=sectionHead('Markt wählen');
+  html+='<div class="signalSelectors">'+selectorRow(rows.map(r=>r.symbol),CHART.symbol,'data-chart-symbol',v=>v.replace('USDT',''))+selectorRow(['1m','5m','15m','1h','4h'],CHART.interval,'data-chart-interval',v=>v.toUpperCase())+selectorRow(['PRO','FULL'],CHART.mode,'data-chart-mode')+'</div>';
+  html+='<div class="chartShell"><div class="chartTop"><div><div class="chartSymbol">'+E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(CHART.interval.toUpperCase())+'</div><div class="chartMeta">Structure · Forecast · Liquidity · Confluence · Events</div></div><div class="chartLive">● LIVE</div></div><div class="chartViewport '+(CHART.loading?'loading':'')+'">'+(CHART.lastUrl?'<img src="'+E(CHART.lastUrl)+'" alt="BIGGJ SuperChart '+E(CHART.symbol)+'">':empty('SuperChart wird geladen …'))+'<div class="chartLoading">SUPERCHART WIRD AKTUALISIERT …</div></div><div class="chartError '+(CHART.error?'show':'')+'">'+E(CHART.error||'')+'</div></div>';
+  html+=sectionHead('Warum gerade wichtig?');
+  html+=panel(E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(x.regime||statusDE(x.status)),'Witness '+P(x.witnessAgreement)+' · Support '+N(x.support)+' · Score '+(Number.isFinite(Number(x.score))?Math.round(CLAMP(x.score)*100):'—')+'<br><br><span class="cyan">Der SuperChart trennt beobachtete Daten, abgeleitete Struktur und probabilistische Forecasts.</span>','NOW','userAction');
+  html+=sectionHead('Marktstatus',rows.length+' beobachtet');
+  html+='<div class="marketRail">'+rows.slice(0,6).map(r=>{const score=Number.isFinite(Number(r.score))?CLAMP(r.score):CLAMP(r.witnessAgreement);return '<div class="market openMarket" data-open-market="'+E(r.symbol)+'"><div class="marketSymbol">'+E(String(r.symbol).replace('USDT','/USDT'))+'</div><div class="marketStatus">'+E(r.regime||statusDE(r.status))+'</div><div class="marketScore">'+Math.round(score*100)+'</div><div class="bar"><i style="width:'+Math.round(score*100)+'%"></i></div><div class="marketFoot"><span>'+E(statusDE(r.status))+'</span><span>'+N(r.support)+' support</span></div></div>'}).join('')+'</div>';
+  return html+'</section>';
+}
+function renderProgress(){
+  const h=S.health||{},b=h.biggjObservability||{},frontier=(S.biggj||h.biggjMarketScienceOs||{}).science?.frontier||{},proof=h.biggjProofFeed||{},events=(b.learningTimeline?.events||[]).slice(0,8),revisions=(b.revisions||[]).slice(0,5),queue=(b.researchQueue||[]).slice(0,5),maturity=CLAMP(b.maturityIndex);
+  let html='<section class="view '+(TAB==='progress'?'active':'')+'">';
+  html+='<div class="hero"><div class="overline">MESSBARER FORTSCHRITT</div><div class="userHeroTitle">'+Math.round(maturity*100)+'% <span class="cyan">MATURITY</span></div><div class="heroCopy">Nicht wie viel BIGGJ redet zählt, sondern was messbar hinzugekommen ist: Evidence, aufgelöste Forecasts, Experimente, Skills und Revisionen.</div><div class="progressTrack"><i style="width:'+Math.round(maturity*100)+'%"></i></div><div class="heroFooter"><div class="badge">24h <b>'+N(b.learningTimeline?.last24h?.total)+' Events</b></div><div class="badge">7d <b>'+N(b.learningTimeline?.last7d?.total)+' Events</b></div><div class="badge">Revision <b>'+N(b.runtimeRevision)+'</b></div></div></div>';
+  html+=sectionHead('Scoreboard','Qualität > Aktivität');
+  html+='<div class="metricGrid">'+metric('Evidence',N(b.evidence?.evidenceTotal),N(b.evidence?.validationEvidenceTotal)+' validation','cyan')+metric('Forecasts',N(b.observedForecasts),N(proof.counts?.resolved)+' resolved')+metric('Trusted',N(b.trustedSkills),N(b.totalSkillNodes)+' skill nodes','good')+metric('Experimente',N(frontier.experiments),N(frontier.surprises)+' surprises',N(frontier.surprises)>0?'warn':'')+'</div>';
+  html+=sectionHead('Learning Timeline',events.length+' neu');
+  html+='<div class="panel timeline">'+(events.length?events.map(x=>'<div class="timelineItem"><div class="timelineTitle">'+E(x.title||x.kind||'Learning Event')+'</div><div class="timelineBody">'+E(x.detail||'Messbarer Research-State aktualisiert.')+(x.at?' · '+AGE(x.at):'')+'</div></div>').join(''):empty('Noch keine Learning Events im aktuellen Fenster.'))+'</div>';
+  html+=sectionHead('Was BIGGJ geändert hat',revisions.length+' Revisionen');
+  html+='<div class="stack">'+(revisions.length?revisions.map(x=>panel(E(x.type||'REVISION')+' · '+E(x.assumptionId||'ASSUMPTION'),(x.falsifierCodes||[]).length?'Falsifier: '+E(x.falsifierCodes.join(', ')):'Neue Evidenz hat den Research-State geändert.','LEARNED')).join(''):empty('Keine aktuelle Annahmen-Revision.'))+'</div>';
+  html+=sectionHead('Nächster Hebel',queue.length+' Research Gates');
+  html+='<div class="stack">'+(queue.length?queue.map(x=>panel(E(x.title||x.skillId||'Research'),'<span class="cyan">Als Nächstes:</span> '+E(x.nextGate||'—')+' · Unsicherheit '+P(x.uncertainty),Math.round(CLAMP(x.priority)*100)+'/100')).join(''):empty('Kein offenes High-Leverage Research-Gate im Snapshot.'))+'</div>';
+  return html+'</section>';
+}
+function renderUserTrading(){
+  const p=S.portfolio||{},open=(p.positions||[]).filter(x=>String(x.status||'OPEN').toUpperCase()==='OPEN'),closed=(p.recentClosed||[]).slice(0,8);
+  let html='<section class="view '+(TAB==='trading'?'active':'')+'">';
+  html+='<div class="hero"><div class="overline">SHADOW TRADING</div><div class="userHeroTitle '+pnlTone(p.netPnlQuote)+'">'+E(MONEY(p.netPnlQuote))+'</div><div class="heroCopy">Trading ist Ergebnis- und Lernfeedback. Keine echten Orders; PnL darf keine wissenschaftliche Regel überschreiben.</div><div class="heroFooter"><div class="badge">Equity <b>'+E(MONEY(p.equityQuote))+'</b></div><div class="badge">Open <b>'+N(p.openPositions)+'</b></div><div class="badge">Closed <b>'+N(p.closedTrades)+'</b></div></div></div>';
+  html+=sectionHead('Performance');
+  html+='<div class="metricGrid">'+metric('Net PnL',MONEY(p.netPnlQuote),N(p.closedTrades)+' closed',pnlTone(p.netPnlQuote))+metric('Equity',MONEY(p.equityQuote),'virtuelles Kapital')+metric('Winrate',Number.isFinite(Number(p.winRate))?P(p.winRate):'—',N(p.wins)+' / '+N(p.losses)+' W/L')+metric('Open',N(p.openPositions),'laufende Positionen')+'</div>';
+  html+=sectionHead('Offene Trades',open.length+' Positionen');
+  html+='<div class="stack">'+(open.length?open.map(x=>{const pnl=N(x.lastMark?.unrealizedNetPnlQuote??x.unrealizedPnlQuote??x.pnlQuote);return '<div class="panel trade"><div><div class="tradeSymbol">'+E(String(x.symbol||'').replace('USDT','/USDT'))+' · '+E(x.side||'—')+'</div><div class="tradeInfo">Entry '+E(PRICE(x.entryPrice??x.avgEntryPrice))+' · Mark '+E(PRICE(x.lastMark?.price??x.markPrice))+' · '+E(x.entryMode||x.strategyId||'SHADOW')+'</div></div><div class="tradePnl '+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</div></div>'}).join(''):empty('Keine offenen Shadow-Positionen.'))+'</div>';
+  html+=sectionHead('Zuletzt geschlossen');
+  html+='<div class="stack">'+(closed.length?closed.map(x=>{const pnl=N(x.netPnlQuote??x.realizedNetPnlQuote??x.pnlQuote);return panel(E(String(x.symbol||'').replace('USDT','/USDT'))+' · '+E(x.side||'—'),'<span class="'+pnlTone(pnl)+'">'+E(MONEY(pnl))+'</span> · '+E(x.exitReason||x.closeReason||'closed'),x.closedAt?AGE(x.closedAt):'CLOSED')}).join(''):empty('Noch keine kürzlich geschlossenen Trades.'))+'</div>';
+  html+='<div class="safety" style="margin-top:12px"><div class="safetyTitle">Research Mode</div><div class="safetyBody">SHADOW_ONLY · canExecute:false · canExecuteLive:false · ABSTAIN bleibt ein gültiges Ergebnis.</div></div>';
+  return html+'</section>';
+}
+function loadSuperchart(force=false){
+  if(TAB!=='markets'||CHART.loading)return;
+  if(!force&&Date.now()-CHART.lastLoadedAt<20000)return;
+  CHART.loading=true;CHART.error=null;render();
+  const url=chartUrl(),img=new Image();
+  img.onload=()=>{CHART.lastUrl=url;CHART.lastLoadedAt=Date.now();CHART.loading=false;CHART.error=null;render();};
+  img.onerror=()=>{CHART.loading=false;CHART.error='SuperChart konnte gerade nicht aktualisiert werden. Der letzte gültige Chart bleibt sichtbar.';render();};
+  img.src=url;
+}
+
 function renderSystem(){
   const h=S.health||{},ready=h.operationalReadiness||{},op=h.autonomousOperator||{},factory=h.autonomousResearchFactory||{},fabric=h.marketDataFabric||{},oms=h.shadowOms||{},fr=h.institutionalForecastRuntime||{},dc=h.discordBridge||{},tg=h.telegramPolling||{},st=S.storage||{},lr=h.biggjLivingResearch||{},wm=h.biggjWorldModel||{};
   const rows=[
@@ -436,11 +535,9 @@ function renderSystem(){
 
 function render(){
   buildStatusStrip();
-  root.innerHTML=renderScience()+renderWorld()+renderLab()+renderSignals()+renderTrades()+renderSystem();
-  const gen=N(S.generatedAt||lastGoodAt,lastGoodAt);
-  const age=Date.now()-gen;
-  const badge=document.getElementById('syncBadge');
-  const txt=document.getElementById('syncText');
+  root.innerHTML=renderToday()+renderMarketMonitor()+renderProgress()+renderUserTrading();
+  const gen=N(S.generatedAt||lastGoodAt,lastGoodAt),age=Date.now()-gen;
+  const badge=document.getElementById('syncBadge'),txt=document.getElementById('syncText');
   badge.classList.toggle('stale',age>30000&&navigator.onLine);
   badge.classList.toggle('offline',!navigator.onLine);
   txt.textContent=!navigator.onLine?'OFFLINE':age>30000?'STALE '+AGE(gen):'LIVE '+AGE(gen);
@@ -453,7 +550,7 @@ async function refresh(){
     const r=await fetch('/mission-control.json',{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     S=await r.json();lastGoodAt=Date.now();errorBox.classList.remove('show');render();
-    if(TAB==='decisions')loadSignalLab(false);
+    if(TAB==='markets')loadSuperchart(false);
   }catch(err){
     errorBox.classList.add('show');render();
   }finally{
@@ -461,22 +558,24 @@ async function refresh(){
   }
 }
 nav.addEventListener('click',e=>{
-  const b=e.target.closest('button[data-tab]');if(!b)return;
-  TAB=b.dataset.tab;
-  for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x===b);
+  const button=e.target.closest('button[data-tab]');if(!button)return;
+  TAB=button.dataset.tab;
+  for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x===button);
   render();window.scrollTo({top:0,behavior:'smooth'});
-  if(TAB==='decisions')loadSignalLab(false);
+  if(TAB==='markets')setTimeout(()=>loadSuperchart(true),0);
 });
 root.addEventListener('click',e=>{
-  const symbol=e.target.closest('[data-signal-symbol]');if(symbol){SIGNAL.symbol=symbol.getAttribute('data-signal-symbol');SIGNAL.lab=null;SIGNAL.proof=null;render();loadSignalLab(true);return;}
-  const horizon=e.target.closest('[data-signal-horizon]');if(horizon){SIGNAL.horizon=horizon.getAttribute('data-signal-horizon');SIGNAL.lab=null;render();loadSignalLab(true);return;}
-  const mode=e.target.closest('[data-signal-mode]');if(mode){SIGNAL.mode=mode.getAttribute('data-signal-mode');SIGNAL.lab=null;render();loadSignalLab(true);return;}
+  const open=e.target.closest('[data-open-market]');if(open){CHART.symbol=open.getAttribute('data-open-market');localStorage.setItem('biggj.chart.symbol',CHART.symbol);TAB='markets';for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x.dataset.tab==='markets');render();setTimeout(()=>loadSuperchart(true),0);return;}
+  const symbol=e.target.closest('[data-chart-symbol]');if(symbol){CHART.symbol=symbol.getAttribute('data-chart-symbol');CHART.lastUrl=null;localStorage.setItem('biggj.chart.symbol',CHART.symbol);render();loadSuperchart(true);return;}
+  const interval=e.target.closest('[data-chart-interval]');if(interval){CHART.interval=interval.getAttribute('data-chart-interval');CHART.lastUrl=null;localStorage.setItem('biggj.chart.interval',CHART.interval);render();loadSuperchart(true);return;}
+  const mode=e.target.closest('[data-chart-mode]');if(mode){CHART.mode=mode.getAttribute('data-chart-mode');CHART.lastUrl=null;localStorage.setItem('biggj.chart.mode',CHART.mode);render();loadSuperchart(true);}
 });
-document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='decisions')loadSignalLab(true)});
-window.addEventListener('online',()=>{render();refresh()});
+document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='markets')loadSuperchart(true);});
+window.addEventListener('online',()=>{render();refresh();if(TAB==='markets')loadSuperchart(true);});
 window.addEventListener('offline',render);
 render();
 setInterval(refresh,10000);
+setInterval(()=>{if(TAB==='markets')loadSuperchart(false);},30000);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 </script>
 </body>
