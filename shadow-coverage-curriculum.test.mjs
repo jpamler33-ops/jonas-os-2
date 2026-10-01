@@ -152,7 +152,7 @@ test('all calibrated PASS and CAUTION horizons produce no bootstrap coverage pro
   assert.equal(out.reason,'CALIBRATION_COVERAGE_SUFFICIENT');
 });
 
-test('deficit priority prefers insufficient over watch and longer horizon inside same tier',()=>{
+test('deficit priority prefers insufficient over watch and faster maturity inside the same tier',()=>{
   const x=issuance();
   for(const h of x.forecast.horizons){
     h.gate='ABSTAIN';
@@ -162,7 +162,8 @@ test('deficit priority prefers insufficient over watch and longer horizon inside
   x.forecast.horizons.find(h=>h.horizonId==='3h').calibration={status:'INSUFFICIENT'};
   x.forecast.horizons.find(h=>h.horizonId==='1h').calibration={status:'WATCH'};
   const out=deriveCoverageCurriculumCandidates(x,{now:301_000});
-  assert.deepEqual(out.candidates.slice(0,3).map(x=>x.horizonId),['3h','5m','1h']);
+  assert.deepEqual(out.candidates.slice(0,3).map(x=>x.horizonId),['5m','3h','1h']);
+  assert.equal(out.candidates[0].coveragePriorityScore,out.candidates[1].coveragePriorityScore);
   assert.ok(out.candidates[0].coveragePriorityScore>out.candidates[2].coveragePriorityScore);
 });
 
@@ -237,6 +238,50 @@ test('ESS-targeted curriculum prioritizes the largest class probability-bin defi
   assert.ok(out.candidates[0].coveragePriorityScore>out.candidates.find(c=>c.horizonId==='3h').coveragePriorityScore);
 });
 
+
+test('global scheduler prefers the shortest horizon when ESS deficits are exactly tied',()=>{
+  const btc=issuance();
+  const eth=issuance();
+  eth.symbol='ETHUSDT';
+  eth.issuanceId='iss-eth';
+  eth.forecastFingerprint='e'.repeat(64);
+
+  for(const row of [btc.forecast.horizons.find(h=>h.horizonId==='3h'),eth.forecast.horizons.find(h=>h.horizonId==='5m')]){
+    row.gate='ABSTAIN';
+    row.calibration={
+      status:'INSUFFICIENT',targetEffectiveSamples:40,bins:10,
+      perClass:{
+        up:{raw:.58,effectiveSamples:0,targetEffectiveSamples:40,probabilityBinIndex:5,probabilityBinLo:.5,probabilityBinHi:.6},
+        down:{raw:.30,effectiveSamples:10,targetEffectiveSamples:40,probabilityBinIndex:3,probabilityBinLo:.3,probabilityBinHi:.4},
+        flat:{raw:.12,effectiveSamples:10,targetEffectiveSamples:40,probabilityBinIndex:1,probabilityBinLo:.1,probabilityBinHi:.2}
+      }
+    };
+  }
+
+  // Remove unrelated coverage candidates so the comparison is an exact
+  // 5m-vs-3h tie on class/bin ESS deficit.
+  for(const x of [btc,eth]){
+    for(const h of x.forecast.horizons){
+      if(
+        !(x.symbol==='BTCUSDT'&&h.horizonId==='3h')&&
+        !(x.symbol==='ETHUSDT'&&h.horizonId==='5m')
+      ){
+        h.calibration={status:'CALIBRATED'};
+        h.gate='PASS';
+      }
+    }
+  }
+
+  const rows=[
+    ...deriveCoverageCurriculumCandidates(btc,{now:301_000}).candidates,
+    ...deriveCoverageCurriculumCandidates(eth,{now:301_000}).candidates
+  ];
+  const ranked=prioritizeCoverageCurriculumCandidates(rows,{limit:1});
+  assert.equal(ranked.candidates[0].symbol,'ETHUSDT');
+  assert.equal(ranked.candidates[0].horizonId,'5m');
+  assert.equal(ranked.candidates[0].coverageTargetEffectiveSampleDeficit,40);
+  assert.match(ranked.meaning,/TIME_TO_INFORMATION/);
+});
 
 test('global scheduler selects the largest ESS deficit across coins, horizons, bins and classes',()=>{
   const btc=issuance();
