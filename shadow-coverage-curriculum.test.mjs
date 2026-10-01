@@ -11,18 +11,20 @@ function issuance(){
     issuanceId:'iss-cov',
     symbol:'BTCUSDT',
     generatedAt:300_000,
+    asOf:299_000,
     executionMode:'SHADOW_ONLY',
     action:'ABSTAIN',
     canExecute:false,
     admission:{gate:'ABSTAIN'},
-    trace:{safety:{state:'NORMAL'}},
+    trace:{safety:{state:'NORMAL'},researchState:{regime:'RANGE'}},
     forecastFingerprint:'f'.repeat(64),
-    forecast:{horizons:DEFAULT_COVERAGE_HORIZONS.map((h,i)=>({
+    forecast:{asOf:299_000,price:65_000,horizons:DEFAULT_COVERAGE_HORIZONS.map((h,i)=>({
       horizonId:h.id,
       horizonMs:h.horizonMs,
       gate:i===1?'ABSTAIN':'PASS',
       direction:i===2?'FLAT':i%2===0?'UP':'DOWN',
       expectedReturn:i===2?-.001:(i%2===0?.002:-.002),
+      flatThreshold:i===0?.0008:i===1?.0015:i===2?.003:.006,
       calibration:{status:'CALIBRATED'},
       probabilities:i===2
         ?{up:.32,down:.34,flat:.34}
@@ -161,4 +163,32 @@ test('deficit priority prefers insufficient over watch and longer horizon inside
   const out=deriveCoverageCurriculumCandidates(x,{now:301_000});
   assert.deepEqual(out.candidates.slice(0,3).map(x=>x.horizonId),['3h','5m','1h']);
   assert.ok(out.candidates[0].coveragePriorityScore>out.candidates[2].coveragePriorityScore);
+});
+
+
+test('coverage probe carries complete point-in-time calibration metadata',()=>{
+  const x=issuance();
+  x.forecast.horizons[0].calibration={status:'INSUFFICIENT'};
+  x.forecast.horizons[0].gate='ABSTAIN';
+  const out=deriveCoverageCurriculumCandidates(x,{now:301_000});
+  const row=out.candidates.find(c=>c.horizonId==='5m');
+  assert.ok(row);
+  assert.equal(row.referencePrice,65_000);
+  assert.equal(row.forecastAsOf,299_000);
+  assert.equal(row.flatThreshold,.0008);
+  assert.equal(row.regimeId,'RANGE');
+  assert.equal(row.coverageEvidenceTier,'BOOTSTRAP_RAW_FORECAST');
+  assert.equal(row.execution,'SHADOW_ONLY');
+  assert.equal(row.canExecuteLive,false);
+});
+
+test('coverage curriculum fails closed instead of placing unlearnable probes',()=>{
+  const x=issuance();
+  x.forecast.horizons[0].calibration={status:'INSUFFICIENT'};
+  x.forecast.horizons[0].gate='ABSTAIN';
+  delete x.forecast.horizons[0].flatThreshold;
+  x.forecast.price=null;
+  const out=deriveCoverageCurriculumCandidates(x,{now:301_000});
+  assert.equal(out.candidates.some(c=>c.horizonId==='5m'),false);
+  assert.ok(out.missingCalibrationMetadata>=1);
 });

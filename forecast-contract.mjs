@@ -84,6 +84,9 @@ function normalizeHorizon(h,asOf,scienceGate){
     gate:horizonGate,
     direction:String(h?.direction??'UNKNOWN'),
     expectedReturn:finite(h?.expectedReturn,'horizon.expectedReturn'),
+    // Preserve the model's PIT direction threshold. Coverage probes need the
+    // exact threshold later to turn a matured outcome into a calibration label.
+    flatThreshold:finiteOrNull(h?.flatThreshold),
     probabilities:probs,
     interval:intv,
     scenarios:safeArray(h?.scenarios),

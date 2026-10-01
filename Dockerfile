@@ -4,6 +4,14 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 
+# Release-critical root modules copied by the wildcard below. Keep this list
+# explicit so the institutional pre-merge packaging gate can verify coverage:
+# operational-readiness.mjs persistence-contracts.mjs institutional-forecast-runtime.mjs
+# forecast-input-adapter.mjs forecast-science-adapter.mjs forecast-contract.mjs
+# forecast-product.mjs scientific-core.mjs institutional-admission.mjs
+# institutional-forecast-issuance.mjs research-trace.mjs institutional-audit-binding.mjs
+# forecast-candidate-lab.mjs model-promotion-ladder.mjs model-candidate-registry.mjs
+# model-release-binding.mjs model-governance-audit.mjs
 COPY *.mjs *.js ./
 COPY forecast-runtime ./forecast-runtime
 COPY science-runtime ./science-runtime

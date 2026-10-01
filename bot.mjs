@@ -2713,7 +2713,7 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
         coverageHorizonGate:candidate.horizonGate,
         coverageProbabilityVector:candidate.probabilityVector,
         coverageFlatThreshold:candidate.flatThreshold,
-        coverageForecastAsOf:candidate.generatedAt,
+        coverageForecastAsOf:candidate.forecastAsOf,
         coverageReferencePrice:candidate.referencePrice,
         coverageRegimeId:candidate.regimeId,
         horizonOnlyExit:true,
@@ -8614,6 +8614,15 @@ async function shadowPortfolioWatcher(){
                 calibrationId:bootstrap.id,quality:bootstrap.quality,
                 historyRows:forecastRuntime.engine.calibration.rows.length,
                 execution:'SHADOW_ONLY',canExecuteLive:false
+              }));
+            }else{
+              console.warn('[TCX_COVERAGE_BOOTSTRAP_REJECTED]',JSON.stringify({
+                symbol:closedPosition.symbol,
+                horizonId:closedPosition.horizonId,
+                coverageKey:closedPosition.coverageKey||null,
+                reason:bootstrap.reason,
+                execution:'SHADOW_ONLY',
+                canExecuteLive:false
               }));
             }
           }
