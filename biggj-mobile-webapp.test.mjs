@@ -6,9 +6,34 @@ import {BIGGJ_MOBILE_WEBAPP_VERSION,biggjWebManifest,biggjAppIconSvg,biggjServic
 const sample={generatedAt:1_800_000_000_000,biggj:{science:{frontier:{evidence:294,experiments:3}},worldModel:{markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12,score:.76,price:67842.31,priceChangePercent:1.84,priceChange:1226.4,openPrice:66615.91,highPrice:68410,lowPrice:66102,quoteVolume:38200000000}]}},health:{autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false},biggjObservability:{maturityIndex:.62,trustedSkills:3,totalSkillNodes:12,observedForecasts:44,runtimeRevision:9,evidence:{evidenceTotal:120,validationIndependentEpisodes:18},learningTimeline:{last24h:{total:7},last7d:{total:29},events:[{title:'Regime transfer checked',detail:'OOS evidence advanced'}]},researchQueue:[{title:'Liquidity transfer',nextGate:'FORWARD_SHADOW'}]},biggjProofFeed:{counts:{resolved:20}},marketRadar:{rows:[{symbol:'ETHUSDT',status:'SUPPORTED',regime:'RANGE',witnessAgreement:.7,support:8,score:.61}]}},portfolio:{equityQuote:1012,netPnlQuote:12,openPositions:1,closedTrades:3,positions:[],recentClosed:[]}};
 
 test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V3');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
-test('only four user surfaces',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/MESSBARER FORTSCHRITT/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
+test('only four user surfaces',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/RESEARCH-REIFE/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','OBSERVED MARKET','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · FORECAST · LIQUIDITY · CONFLUENCE · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('progress is measurable',()=>{const h=renderBiggjMobileApp(sample);assert.match(h,/Scoreboard/);assert.match(h,/Learning Timeline/);assert.match(h,/Nächster Hebel/);assert.match(h,/validationIndependentEpisodes/);assert.match(h,/maturityIndex/)});
 test('boot state safe and live refresh no-store',()=>{const h=renderBiggjMobileApp({health:{x:'<script>',autonomousOperator:{mode:'HANDS_OFF'}},portfolio:{}});assert.ok(!h.includes('"x":"<script>"'));assert.match(h,/"x":"\\u003cscript\\u003e"/);assert.match(h,/mission-control\.json/);assert.match(h,/cache:'no-store'/);assert.match(h,/SHADOW_ONLY/);assert.match(h,/canExecuteLive/)});
 test('service worker bypasses live state',()=>{const sw=biggjServiceWorker();for(const x of ['superchart.png','mission-control.json','signal-lab.json','proof-feed.json'])assert.match(sw,new RegExp(x.replace('.','\\.')));assert.match(sw,/cache:'no-store'/);assert.doesNotMatch(sw,/https?:\/\//)});
 test('canonical route still serves mobile app',async()=>{const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');assert.match(source,/renderBiggjMobileApp\(snapshot\)/);assert.match(source,/requestPath === '\/mission-control\/legacy'/);assert.match(source,/renderMissionControlHtml\(snapshot\)/)});
+
+
+test('mobile market view merges world-model and radar facts instead of dropping live price data',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/by\.set\(s,\{\.\.\.\(by\.get\(s\)\|\|\{\}\),\.\.\.x,symbol:s\}\)/);
+  assert.match(h,/volumeQuote/);
+  assert.match(h,/INVALID_CHART_CONTENT_TYPE/);
+  assert.match(h,/EMPTY_CHART_IMAGE/);
+  assert.match(h,/SUPERCHART NICHT VERFÜGBAR/);
+});
+
+test('progress view separates research activity from maturity and humanizes machine labels',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/RESEARCH-REIFE/);
+  assert.match(h,/Aktivität ≠ Reife/);
+  assert.match(h,/Viele Forecasts oder Revisionen erhöhen ihn nicht automatisch/);
+  assert.match(h,/Outcomes aufgelöst/);
+  assert.match(h,/function HUMAN/);
+});
+
+test('live badge reflects successful transport refresh age rather than stale research-state timestamps',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/AGE\(lastGoodAt\)/);
+  assert.doesNotMatch(h,/AGE\(S\.generatedAt\|\|lastGoodAt\)/);
+});
