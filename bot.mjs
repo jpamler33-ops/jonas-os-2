@@ -563,12 +563,13 @@ const markets = requestedSymbols.map(symbol => ({
 }));
 
 const researchMemoryGovernor=createMemoryGovernor({cooldownMs:45_000,minReclaimedMb:4});
-function maybeCollectResearchGarbage(reason,{triggerHeapMb=320}={}){
+function maybeCollectResearchGarbage(reason,{triggerHeapMb=320,cooldownBypassOverageMb=null}={}){
   const result=researchMemoryGovernor.maybeCollect({
     reason,
     triggerHeapMb,
     maxRssMb:900,
     maxExternalMb:128,
+    cooldownBypassOverageMb,
     now:Date.now()
   });
   if(result.executed&&(result.useful||result.reclaimedHeapMb>0)){
@@ -8989,7 +8990,10 @@ async function autoLearnForecastWatcher() {
       for(const symbol of autoLearnSymbols){
         if(!running) break;
         if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
-        maybeCollectResearchGarbage('AUTOLEARN_PRE_ISSUE',{triggerHeapMb:autoLearnResumeHeapMb});
+        maybeCollectResearchGarbage('AUTOLEARN_PRE_ISSUE',{
+          triggerHeapMb:autoLearnResumeHeapMb,
+          cooldownBypassOverageMb:30
+        });
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9370,6 +9374,10 @@ async function shadowCompetitionWatcher(){
         if(!running) break;
         const slotWaitMs=Date.now()-slotWaitStarted;
         activeBackgroundResearchJob='shadow-competition';
+        maybeCollectResearchGarbage('SHADOW_REPLAY_POST_WAIT',{
+          triggerHeapMb:Math.max(280,Math.min(adaptiveShadowAutoHeapMb,servingGuardHeapMb)-10),
+          cooldownBypassOverageMb:30
+        });
 
         let result=null;
         let freshAdmission=null;
@@ -9588,7 +9596,7 @@ async function forecastOutcomeWatcher() {
     try {
       const started=Date.now();
       maybeCollectResearchGarbage('OUTCOME_PRECHECK',{
-        triggerHeapMb:Math.max(280,forecastPersistenceHeapHeadroomMb-10)
+        triggerHeapMb:forecastPersistenceHeapHeadroomMb
       });
       const beforeMemory=process.memoryUsage();
       const admission=evaluateAutoLearnMemoryAdmission({
