@@ -1,0 +1,42 @@
+name: Hotfix BIGGJ Webapp Boot
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotfix-biggj-webapp-boot.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Repair duplicate renderOverview declaration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('biggj-mobile-webapp.mjs')
+          s=p.read_text()
+          bad='function renderOverview(){function renderOverview(){'
+          n=s.count(bad)
+          if n != 1:
+              raise SystemExit(f'expected exactly one malformed declaration, found {n}')
+          p.write_text(s.replace(bad,'function renderOverview(){',1))
+          PY
+      - name: Verify generated browser script actually executes
+        run: |
+          node --check biggj-mobile-webapp.mjs
+          node --test biggj-mobile-webapp.test.mjs
+      - name: Commit repaired source
+        shell: bash
+        run: |
+          git config user.name 'biggj-ci'
+          git config user.email 'biggj-ci@users.noreply.github.com'
+          git add biggj-mobile-webapp.mjs
+          git commit -m 'fix(web): remove duplicate renderOverview boot wrapper'
+          git push origin HEAD:main
