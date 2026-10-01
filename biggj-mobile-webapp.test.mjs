@@ -12,3 +12,28 @@ test('progress is measurable',()=>{const h=renderBiggjMobileApp(sample);assert.m
 test('boot state safe and live refresh no-store',()=>{const h=renderBiggjMobileApp({health:{x:'<script>',autonomousOperator:{mode:'HANDS_OFF'}},portfolio:{}});assert.ok(!h.includes('"x":"<script>"'));assert.match(h,/"x":"\\u003cscript\\u003e"/);assert.match(h,/mission-control\.json/);assert.match(h,/cache:'no-store'/);assert.match(h,/SHADOW_ONLY/);assert.match(h,/canExecuteLive/)});
 test('service worker bypasses live state',()=>{const sw=biggjServiceWorker();for(const x of ['superchart.png','mission-control.json','signal-lab.json','proof-feed.json'])assert.match(sw,new RegExp(x.replace('.','\\.')));assert.match(sw,/cache:'no-store'/);assert.doesNotMatch(sw,/https?:\/\//)});
 test('canonical route still serves mobile app',async()=>{const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');assert.match(source,/renderBiggjMobileApp\(snapshot\)/);assert.match(source,/requestPath === '\/mission-control\/legacy'/);assert.match(source,/renderMissionControlHtml\(snapshot\)/)});
+
+
+test('mobile market view merges world-model and radar facts instead of dropping live price data',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/by\.set\(s,\{\.\.\.\(by\.get\(s\)\|\|\{\}\),\.\.\.x,symbol:s\}\)/);
+  assert.match(h,/volumeQuote/);
+  assert.match(h,/INVALID_CHART_CONTENT_TYPE/);
+  assert.match(h,/EMPTY_CHART_IMAGE/);
+  assert.match(h,/SUPERCHART NICHT VERFÜGBAR/);
+});
+
+test('progress view separates research activity from maturity and humanizes machine labels',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/RESEARCH-REIFE/);
+  assert.match(h,/Aktivität ≠ Reife/);
+  assert.match(h,/Viele Forecasts oder Revisionen erhöhen ihn nicht automatisch/);
+  assert.match(h,/Outcomes aufgelöst/);
+  assert.match(h,/function HUMAN/);
+});
+
+test('live badge reflects successful transport refresh age rather than stale research-state timestamps',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/AGE\(lastGoodAt\)/);
+  assert.doesNotMatch(h,/AGE\(S\.generatedAt\|\|lastGoodAt\)/);
+});
