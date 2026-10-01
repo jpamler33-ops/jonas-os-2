@@ -2047,7 +2047,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshGlobalIntel,180000);
     addTimer(refreshNewsFeed,120000);
     addTimer(refreshWorldWatch,120000);
-    addTimer(refreshMemecoinLab,120000);
+    addTimer(refreshMemecoinLab,30000);
     addTimer(refreshAuxiliaryDesks,60000);
     addTimer(refreshRulebookPanel,60000);
     addTimer(()=>refreshChannelSupervisor({autoRepair:true}),60000);
