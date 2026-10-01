@@ -132,6 +132,11 @@ const LEGACY_MANAGED_CATEGORY_NAMES=new Set([
   'BIGGJ • DASHBOARD',BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY
 ]);
 
+export function isBiggjDiscordManagedCategoryNamespace(name){
+  const value=String(name||'').trim();
+  return /^(?:TCX|BIGGJ)\s*•\s*/i.test(value);
+}
+
 const CHANNEL_PROFILE_GROUPS=Object.freeze({
   HOME:new Set(['start-here']),
   LIVE_60:new Set([
@@ -1181,7 +1186,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       for(const category of [...g.channels.cache.values()].filter(c=>c?.type===ChannelType.GuildCategory)){
         const name=String(category.name||'');
         if(DESIRED_DISCORD_CATEGORY_NAMES.has(name))continue;
-        if(!LEGACY_MANAGED_CATEGORY_NAMES.has(name)&&name!==BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY)continue;
+        const managedLegacyCategory=
+          LEGACY_MANAGED_CATEGORY_NAMES.has(name) ||
+          name===BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY ||
+          isBiggjDiscordManagedCategoryNamespace(name);
+        if(!managedLegacyCategory)continue;
         const hasChildren=[...g.channels.cache.values()].some(c=>String(c?.parentId||'')===String(category.id||''));
         if(!hasChildren){
           try{
