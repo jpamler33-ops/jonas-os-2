@@ -1030,6 +1030,9 @@ let claimAssumptionResearchLastLoggedObservationCount=0;
 let claimAssumptionResearchLastSummary=null;
 let claimAssumptionResearchLastReport=null;
 let biggjLivingResearchRefreshQueue=Promise.resolve();
+let biggjLivingResearchDeferredTimer=null;
+const biggjLivingResearchDeferredReasons=new Set();
+const biggjLivingResearchDeferredMs=Math.max(250,Math.min(5_000,Number(process.env.TCX_BIGGJ_LIVING_RESEARCH_DEFER_MS||1_000)));
 
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
   const run=async()=>{
@@ -1123,6 +1126,22 @@ async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimA
   const queued=biggjLivingResearchRefreshQueue.then(run,run);
   biggjLivingResearchRefreshQueue=queued.then(()=>undefined,()=>undefined);
   return queued;
+}
+
+function scheduleBiggjLivingResearchRefresh(reason='runtime-refresh'){
+  biggjLivingResearchDeferredReasons.add(String(reason||'runtime-refresh'));
+  if(biggjLivingResearchDeferredTimer) return false;
+  biggjLivingResearchDeferredTimer=setTimeout(()=>{
+    biggjLivingResearchDeferredTimer=null;
+    const reasons=[...biggjLivingResearchDeferredReasons];
+    biggjLivingResearchDeferredReasons.clear();
+    const batchedReason='deferred:'+(reasons.length?reasons.join('+'):'runtime-refresh');
+    void refreshBiggjLivingResearch(batchedReason).catch(err=>{
+      recordError(observability,{scope:'biggj_living_research.deferred',message:err instanceof Error?err.message:String(err)});
+    });
+  },biggjLivingResearchDeferredMs);
+  biggjLivingResearchDeferredTimer.unref?.();
+  return true;
 }
 function maybeEvaluateClaimAssumptionResearch(reason='resolved-outcomes',{force=false}={}){
   const now=Date.now();
@@ -7237,7 +7256,11 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       await persistForecastRuntime('forecast-thesis-revision',{defer:issuanceSource==='TCX_AUTOLEARN_V1'});
     }
     if(thesisRevisionObservation.changed>0){
-      await refreshBiggjLivingResearch('thesis-revision');
+      if(issuanceSource==='TCX_AUTOLEARN_V1'){
+        scheduleBiggjLivingResearchRefresh('thesis-revision');
+      }else{
+        await refreshBiggjLivingResearch('thesis-revision');
+      }
       console.log('[TCX_THESIS_REVISION]',JSON.stringify({
         symbol,
         examined:thesisRevisionObservation.examined,
@@ -11400,6 +11423,13 @@ async function gracefulShutdown(signal) {
   await saveBiggjAutonomousOperator(autonomousOperatorFile,autonomousOperatorState).catch(err=>{
     console.error('[TCX_BIGGJ_AUTONOMOUS_OPERATOR_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
   });
+  if(biggjLivingResearchDeferredTimer){
+    clearTimeout(biggjLivingResearchDeferredTimer);
+    biggjLivingResearchDeferredTimer=null;
+    const deferredReasons=[...biggjLivingResearchDeferredReasons];
+    biggjLivingResearchDeferredReasons.clear();
+    await refreshBiggjLivingResearch('shutdown-deferred:'+(deferredReasons.length?deferredReasons.join('+'):'runtime-refresh')).catch(()=>{});
+  }
   await biggjLivingResearchRefreshQueue.catch(()=>{});
   await saveBiggjLivingResearchRuntime(biggjLivingResearchFile,biggjLivingResearchState).catch(err=>{
     console.error('[TCX_BIGGJ_LIVING_RESEARCH_SHUTDOWN_PERSIST_FAILED]',err instanceof Error?err.message:String(err));
