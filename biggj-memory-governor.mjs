@@ -1,4 +1,4 @@
-export const BIGGJ_MEMORY_GOVERNOR_VERSION='BIGGJ_MEMORY_GOVERNOR_V1';
+export const BIGGJ_MEMORY_GOVERNOR_VERSION='BIGGJ_MEMORY_GOVERNOR_V2';
 
 const finite=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,finite(v,a)));
@@ -137,6 +137,31 @@ export function createMemoryGovernor({
     }
   }
 
+  function collectThenEvaluate({
+    reason='UNSPECIFIED',
+    triggerHeapMb=320,
+    maxRssMb=880,
+    maxExternalMb=128,
+    now=Date.now(),
+    evaluate=null
+  }={}){
+    const collection=maybeCollect({
+      reason,
+      triggerHeapMb,
+      maxRssMb,
+      maxExternalMb,
+      now
+    });
+    // Always re-sample after the collection attempt. This prevents callers from
+    // deferring work based on a stale pre-GC snapshot when GC reclaimed enough
+    // headroom to make the operation safe.
+    const postCollection=memorySnapshot(memoryUsageFn());
+    const admission=typeof evaluate==='function'
+      ?evaluate(postCollection)
+      :Object.freeze({allowed:true,reason:'NO_ADMISSION_EVALUATOR',memory:postCollection});
+    return Object.freeze({collection,postCollection,admission});
+  }
+
   function summary(){
     return Object.freeze({
       version:BIGGJ_MEMORY_GOVERNOR_VERSION,
@@ -152,10 +177,11 @@ export function createMemoryGovernor({
         onlyReclaimsUnreachableRuntimeObjects:true,
         doesNotDeleteResearchHistory:true,
         doesNotRelaxMemoryHardLimits:true,
-        stopTheWorldGcRateLimited:true
+        stopTheWorldGcRateLimited:true,
+        postCollectionAdmissionRemeasured:true
       })
     });
   }
 
-  return Object.freeze({maybeCollect,summary});
+  return Object.freeze({maybeCollect,collectThenEvaluate,summary});
 }
