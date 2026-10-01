@@ -196,7 +196,7 @@ function solanaNormalize(raw={},meta={}){
       closable,
       balanceMutable,
       transferHookPresent:Boolean(transferHook),
-      transferHookUpgradable,
+      transferHookUpgradable:hookUpgradable,
       transferHookMalicious,
       creatorMalicious
     },
