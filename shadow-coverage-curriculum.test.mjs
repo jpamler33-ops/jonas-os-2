@@ -4,6 +4,7 @@ import {
   deriveCoverageCurriculumCandidates,
   coverageCurriculumSummary,
   prioritizeCoverageCurriculumCandidates,
+  coverageCurriculumRefreshPriority,
   DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
 
@@ -279,4 +280,35 @@ test('global scheduler selects the largest ESS deficit across coins, horizons, b
   assert.equal(ranked.candidates[0].coverageTargetProbabilityBinIndex,5);
   assert.equal(ranked.candidates[0].coverageTargetEffectiveSampleDeficit,37);
   assert.equal(ranked.canExecuteLive,false);
+});
+
+
+test('refresh priority surfaces the strongest known ESS deficit before a new forecast is issued',()=>{
+  const x=issuance();
+  x.generatedAt=250_000;
+  const five=x.forecast.horizons.find(h=>h.horizonId==='5m');
+  five.calibration={
+    status:'INSUFFICIENT',targetEffectiveSamples:40,bins:10,
+    perClass:{
+      up:{raw:.58,effectiveSamples:14,targetEffectiveSamples:40,probabilityBinIndex:5,probabilityBinLo:.5,probabilityBinHi:.6},
+      down:{raw:.30,effectiveSamples:4,targetEffectiveSamples:40,probabilityBinIndex:3,probabilityBinLo:.3,probabilityBinHi:.4},
+      flat:{raw:.12,effectiveSamples:30,targetEffectiveSamples:40,probabilityBinIndex:1,probabilityBinLo:.1,probabilityBinHi:.2}
+    }
+  };
+  const priority=coverageCurriculumRefreshPriority(x,{now:400_000});
+  assert.equal(priority.symbol,'BTCUSDT');
+  assert.equal(priority.reason,'EFFECTIVE_SAMPLE_DEFICIT');
+  assert.equal(priority.horizonId,'5m');
+  assert.equal(priority.targetClass,'DOWN');
+  assert.equal(priority.effectiveSampleDeficit,36);
+  assert.equal(priority.effectiveSampleDeficitRatio,.9);
+  assert.equal(priority.ageMs,150_000);
+  assert.equal(priority.basis,'REFRESH_PRIORITY_ONLY');
+});
+
+test('missing forecast is highest refresh priority so unseen symbols are not ignored',()=>{
+  const priority=coverageCurriculumRefreshPriority(null,{now:400_000});
+  assert.equal(priority.reason,'NO_FORECAST');
+  assert.equal(priority.tier,6);
+  assert.ok(priority.score>5_000_000_000_000);
 });
