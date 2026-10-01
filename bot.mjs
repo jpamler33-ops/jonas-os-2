@@ -4022,8 +4022,9 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
     const signalLabel={
       NEW_POOL:'neuer Pool',NEW_PROFILE:'neues Token-Profil',NEW_BOOST:'neuer Boost',
       COMMUNITY_TAKEOVER:'Community Takeover',DEX_AD:'DEX Ad',X_LINKED_PROFILE:'X-Profil verknüpft',
-      WEBSITE:'Website',EXTERNAL_MENTION:'öffentliche Erwähnung',X_POSTS_RECENT:'direkte X-Posts',
-      X_ATTENTION_SPIKE:'X-Attention Spike',X_HIGH_REACH_AUTHOR:'X-Account mit hoher Reichweite'
+      WEBSITE:'Website',EXTERNAL_MENTION:'öffentliche Erwähnung',SOCIAL_POSTS_RECENT:'direkte Social-Posts',
+      SOCIAL_ATTENTION_SPIKE:'Social-Attention Spike',SOCIAL_HIGH_REACH_AUTHOR:'Account mit hoher Reichweite',
+      X_DIRECT_POST:'X-Post',BLUESKY_DIRECT_POST:'Bluesky-Post'
     };
     const riskLabel={
       LIQUIDITY_UNKNOWN:'Liquidität unbekannt',LIQUIDITY_EXTREME_THIN:'extrem dünne Liquidität',
@@ -4071,7 +4072,8 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'ATTENTION-QUELLEN',
       '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
       '• öffentliche News-Erwähnungen + X-verknüpfte Projektprofile.',
-      '• Direct X Recent Search: '+(memecoinSocialSnapshot?.sourceReady?'LIVE':memecoinSocialSnapshot?.configured?'DEGRADED':'TOKEN FEHLT')+'.','',
+      '• Bluesky Public Search: '+(memecoinSocialSnapshot?.bluesky?.sourceReady?'LIVE':'DEGRADED')+' · kein Login/API-Key nötig.',
+      '• X Recent Search: '+(memecoinSocialSnapshot?.x?.sourceReady?'LIVE':memecoinSocialSnapshot?.x?.configured?'DEGRADED':'TOKEN FEHLT')+'.','',
       'ON-CHAIN SECURITY',
       '• GoPlus: Honeypot/Trade-Sperren · Mint/Freeze/Admin-Rechte · Holder-Konzentration · LP-Lock-Evidenz.',
       '• Kritische Evidenz => ABSTAIN; fehlende Evidenz => UNKNOWN und kein neuer Wallet-4-Entry.',
@@ -4640,7 +4642,7 @@ async function resolveDirectSocialMemecoinSeeds(social,existingRows=[]){
         const row=await memecoinEarlyProvider.fetchTokenSnapshot(chain,seed.value,{force:false});
         if(row){
           out.push({...row,socialDiscoverySeed:{
-            source:'X_RECENT_SEARCH',
+            source:String(social?.source||'DIRECT_SOCIAL_SEARCH'),
             type:seed.type,
             posts:Number(seed.posts||0),
             uniqueAuthors:Number(seed.uniqueAuthors||0),
@@ -4680,7 +4682,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     }catch(err){
       memecoinSocialLastError=err instanceof Error?err.message:String(err);
       memecoinSocialSnapshot={
-        version:MEMECOIN_SOCIAL_ATTENTION_VERSION,source:'X_RECENT_SEARCH',
+        version:MEMECOIN_SOCIAL_ATTENTION_VERSION,source:'NO_DIRECT_SOCIAL_SOURCE',
         configured:memecoinSocialProvider.configured===true,sourceReady:false,capturedAt:Date.now(),
         posts:[],seeds:[],errors:[memecoinSocialLastError],epistemic:'NO_DIRECT_X_DATA'
       };
@@ -4738,7 +4740,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         configured:memecoinSocialSnapshot?.configured===true,
         sourceReady:memecoinSocialSnapshot?.sourceReady===true,
         capturedAt:memecoinSocialSnapshot?.capturedAt||null,
-        source:'X_RECENT_SEARCH',
+        source:memecoinSocialSnapshot?.source||'NO_DIRECT_SOCIAL_SOURCE',
         errors:memecoinSocialSnapshot?.errors||[]
       }
     };
