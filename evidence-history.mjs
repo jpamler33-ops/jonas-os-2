@@ -19,10 +19,33 @@ function isGzipBuffer(value){
   return Buffer.isBuffer(value)&&value.length>=2&&value[0]===0x1f&&value[1]===0x8b;
 }
 
-function normalizedEvidenceRecords(records,{maxPerSymbol=500}={}){
+function canonicalEvidenceRecordSafe(r){
+  if(!r||typeof r!=="object"||Array.isArray(r)) return false;
+  const symbol=String(r.symbol||"");
+  const capturedAt=Number(r.capturedAt);
+  const index=Number(r.index);
+  const closedAt=r.closedAt==null?null:Number(r.closedAt);
+  if(
+    Number(r.schemaVersion)!==SCHEMA_VERSION||
+    symbol!==symbol.toUpperCase()||
+    !SYMBOL_RE.test(symbol)||
+    !Number.isFinite(capturedAt)||capturedAt<=0||
+    !Number.isFinite(index)||index<0||index>100||
+    !Number.isFinite(Number(r.disagreementCount))||Number(r.disagreementCount)<0||
+    !Number.isFinite(Number(r.weakCount))||Number(r.weakCount)<0||
+    typeof r.trend!=="string"||
+    (r.stateFingerprint!=null&&!validateStateFingerprint(r.stateFingerprint))||
+    (r.validityLast!=null&&(typeof r.validityLast!=="object"||Array.isArray(r.validityLast)))||
+    (closedAt!=null&&(!Number.isFinite(closedAt)||closedAt<=0))||
+    !r.map||typeof r.map!=="object"||Array.isArray(r.map)
+  ) return false;
+  return true;
+}
+
+function normalizedEvidenceRecords(records,{maxPerSymbol=500,reuseCanonicalRecords=false}={}){
   const grouped=new Map();
   for(const r of Array.isArray(records)?records:[]){
-    const x=sanitizeRecord(r);
+    const x=reuseCanonicalRecords&&canonicalEvidenceRecordSafe(r)?r:sanitizeRecord(r);
     if(!x) continue;
     if(!grouped.has(x.symbol)) grouped.set(x.symbol,[]);
     grouped.get(x.symbol).push(x);
@@ -282,9 +305,13 @@ async function* evidenceHistoryJsonChunks(clean,{updatedAt,maxBytes}){
   yield checked("]}");
 }
 
-export async function saveEvidenceHistory(filePath,records,{maxPerSymbol=500,maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES}={}){
+export async function saveEvidenceHistory(filePath,records,{
+  maxPerSymbol=500,
+  maxLogicalBytes=DEFAULT_MAX_LOGICAL_BYTES,
+  reuseCanonicalRecords=false
+}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
-  const clean=normalizedEvidenceRecords(records,{maxPerSymbol});
+  const clean=normalizedEvidenceRecords(records,{maxPerSymbol,reuseCanonicalRecords});
   const maxBytes=Math.max(1024,Number(maxLogicalBytes)||DEFAULT_MAX_LOGICAL_BYTES);
   const tmp=filePath+".tmp-"+process.pid;
   await unlink(tmp).catch(err=>{if(err?.code!=="ENOENT") throw err;});

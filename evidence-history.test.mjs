@@ -175,3 +175,44 @@ test("streaming evidence save preserves exact schema for a larger batch",async()
   assert.equal(loaded.recoveredFromCorrupt,false);
   assert.equal(loaded.records.length,200);
 });
+
+
+test("canonical runtime save can reuse validated record objects without changing persisted schema",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-reuse-"));
+  const file=path.join(dir,"history.json");
+  const one=createEvidenceRecord("BTCUSDT",ctx(),null);
+  one.validityLast={status:"VALID",driftScore:0.1,ageMs:10};
+  const saved=await saveEvidenceHistory(file,[one],{
+    maxPerSymbol:2000,
+    reuseCanonicalRecords:true
+  });
+  assert.equal(saved.length,1);
+  assert.equal(saved[0],one);
+
+  const stored=await readFile(file);
+  const parsed=JSON.parse(gunzipSync(stored).toString("utf8"));
+  assert.equal(parsed.records.length,1);
+  assert.equal(parsed.records[0].fingerprint,one.fingerprint);
+
+  const loaded=await loadEvidenceHistory(file);
+  assert.equal(loaded.records.length,1);
+  assert.equal(loaded.records[0].fingerprint,one.fingerprint);
+  assert.notEqual(loaded.records[0],one);
+});
+
+test("reuse fast path still sanitizes non-canonical input instead of trusting it",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-reuse-guard-"));
+  const file=path.join(dir,"history.json");
+  const one={
+    ...createEvidenceRecord("BTCUSDT",ctx(),null),
+    index:999,
+    trend:42
+  };
+  const saved=await saveEvidenceHistory(file,[one],{
+    reuseCanonicalRecords:true
+  });
+  assert.equal(saved.length,1);
+  assert.notEqual(saved[0],one);
+  assert.equal(saved[0].index,100);
+  assert.equal(saved[0].trend,"42");
+});
