@@ -47,3 +47,22 @@ test('market radar carries observed 24h market fields used by the mobile termina
   assert.match(source,/quoteVolume:Number\(ctx\.market\?\.volumeQuote\)/);
   assert.match(source,/open:Number\(ticker\.openPrice\)/);
 });
+
+
+test('mobile live ticker endpoint returns bounded observed market data only',()=>{
+  assert.match(source,/requestPath === '\/market-ticker\.json'/);
+  assert.match(source,/INVALID_MARKET_TICKER_REQUEST/);
+  assert.match(source,/MARKET_TICKER_UNAVAILABLE/);
+  assert.match(source,/mobile_market_ticker/);
+  assert.match(source,/change24hPct:Number\.isFinite\(Number\(market\.changePct\)\)/);
+  assert.match(source,/quoteVolume:Number\.isFinite\(Number\(market\.volumeQuote\)\)/);
+  assert.match(source,/source:market\.source\|\|'BINANCE_PUBLIC_REST'/);
+  assert.match(source,/execution:'SHADOW_ONLY',[\s\S]*canExecuteLive:false/);
+});
+
+test('mission-control radar serialization keeps observed ticker fields for fallback rendering',()=>{
+  assert.match(source,/price:Number\.isFinite\(Number\(r\.price\)\)\?Number\(r\.price\):null/);
+  assert.match(source,/open:Number\.isFinite\(Number\(r\.open\)\)\?Number\(r\.open\):null/);
+  assert.match(source,/quoteVolume:Number\.isFinite\(Number\(r\.quoteVolume\)\)\?Number\(r\.quoteVolume\):null/);
+  assert.match(source,/change24hPct:Number\.isFinite\(Number\(r\.change24hPct\)\)\?Number\(r\.change24hPct\):null/);
+});
