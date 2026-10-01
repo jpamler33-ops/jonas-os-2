@@ -106,6 +106,10 @@ import {
   SHADOW_COVERAGE_CURRICULUM_VERSION, DEFAULT_COVERAGE_HORIZONS
 } from './shadow-coverage-curriculum.mjs';
 import {
+  createCoverageIssuancePool, rememberCoverageIssuance, coverageIssuancePoolItems,
+  COVERAGE_ISSUANCE_POOL_VERSION
+} from './coverage-issuance-pool.mjs';
+import {
   buildLearnedChallengerLab, deriveLearnedChallengerTrades, learnedChallengerSummary,
   LEARNED_CHALLENGER_ENGINE_VERSION
 } from './learned-challenger-engine.mjs';
@@ -544,6 +548,10 @@ const requestedSymbols = (process.env.TCX_TELEGRAM_SYMBOLS ||
   .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
 const autoLearnSymbols = (process.env.TCX_AUTOLEARN_SYMBOLS || requestedSymbols.join(','))
   .split(',').map(x=>x.trim().toUpperCase()).filter(x=>requestedSymbols.includes(x));
+const coverageIssuancePool=createCoverageIssuancePool({
+  maxAgeMs:10*60_000,
+  maxEntries:Math.max(32,autoLearnSymbols.length*2)
+});
 const biggjWorldModelRefreshMs=Math.max(60_000,Number(process.env.TCX_BIGGJ_WORLD_MODEL_REFRESH_MS||300_000));
 const biggjWorldModelMaxSymbols=Math.max(3,Math.min(requestedSymbols.length,Number(process.env.TCX_BIGGJ_WORLD_MODEL_MAX_SYMBOLS||12)));
 const MEMECOIN_CEX_SYMBOLS=new Set(
@@ -9140,7 +9148,8 @@ async function autoLearnForecastWatcher() {
     let issued=0,skipped=0,failed=0,deferred=0;
     let memoryPressure=false;
     let transientPostIssuePressure=false;
-    const coverageSweepItems=[];
+    const coverageSweepIssued=[];
+    let coveragePoolItems=[];
     let coverageSweepRun=null;
     const researchAcceleration=currentResearchAccelerator(Date.now());
     const effectiveAutoLearnMaxIssuedPerSweep=Math.max(
@@ -9204,7 +9213,12 @@ async function autoLearnForecastWatcher() {
           });
           if(result?.ok){
             issued++;
-            coverageSweepItems.push({
+            rememberCoverageIssuance(coverageIssuancePool,{
+              issuance:result.issuance,
+              auditHealthy:result.auditHealthy===true,
+              now:Date.now()
+            });
+            coverageSweepIssued.push({
               issuance:result.issuance,
               auditHealthy:result.auditHealthy===true
             });
@@ -9310,11 +9324,14 @@ async function autoLearnForecastWatcher() {
         }
         await sleep(autoLearnInterIssueMs);
       }
-      if(coverageSweepItems.length){
+      coveragePoolItems=coverageIssuancePoolItems(coverageIssuancePool,{now:Date.now()});
+      if(coveragePoolItems.length){
         try{
-          coverageSweepRun=await maybePlaceCoverageCurriculumSweep(coverageSweepItems);
+          coverageSweepRun=await maybePlaceCoverageCurriculumSweep(coveragePoolItems);
           console.log('[TCX_COVERAGE_GLOBAL_ESS_SWEEP]',JSON.stringify({
-            issuances:coverageSweepItems.length,
+            freshIssuances:coverageSweepIssued.length,
+            pooledIssuances:coveragePoolItems.length,
+            poolVersion:COVERAGE_ISSUANCE_POOL_VERSION,
             eligible:Number(coverageSweepRun?.eligible||0),
             placed:Number(coverageSweepRun?.placed||0),
             reason:coverageSweepRun?.reason||null,
@@ -9355,6 +9372,8 @@ async function autoLearnForecastWatcher() {
         acceleratorMode:researchAcceleration.resource.mode,
         acceleratorPressure:researchAcceleration.resource.pressure,
         interIssueMs:autoLearnInterIssueMs,
+        coverageFreshIssuances:coverageSweepIssued.length,
+        coveragePooledIssuances:coveragePoolItems.length,
         coverageGlobalEligible:Number(coverageSweepRun?.eligible||0),
         coverageGlobalPlaced:Number(coverageSweepRun?.placed||0),
         coverageGlobalReason:coverageSweepRun?.reason||null,
