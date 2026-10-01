@@ -32,7 +32,7 @@ test('mobile control plane exposes the curated user command center',()=>{
     },portfolio:{equityQuote:1000,openPositions:0,closedTrades:0,netPnlQuote:0,positions:[],recentClosed:[]}
   });
   const html=renderBiggjMobileApp(s);
-  for(const x of ['data-tab="today"','data-tab="markets"','data-tab="progress"','data-tab="trading"','OBSERVED MARKET','MESSBARER FORTSCHRITT'])assert.match(html,new RegExp(x));
+  for(const x of ['data-tab="today"','data-tab="markets"','data-tab="progress"','data-tab="trading"','OBSERVED MARKET','RESEARCH-REIFE'])assert.match(html,new RegExp(x));
   for(const hidden of ['data-tab="science"','data-tab="world"','data-tab="lab"','data-tab="decisions"','data-tab="system"'])assert.doesNotMatch(html,new RegExp(hidden));
   assert.match(html,/app\.webmanifest/);assert.match(html,/serviceWorker/);assert.match(html,/SHADOW_ONLY/);
 });
