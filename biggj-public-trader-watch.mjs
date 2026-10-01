@@ -338,6 +338,13 @@ export function createBiggjPublicTraderWatchProvider({
     });
   }
 
+  async function fetchTraderByCode(uniqueCode,{nickname='Tracked Public Lead Trader'}={}){
+    const code=text(uniqueCode,32);
+    if(!code)throw new Error('OKX_PUBLIC_TRADER_CODE_REQUIRED');
+    const trader=await traderDetails({uniqueCode:code,nickName:nickname},-1);
+    return trader?Object.freeze({...trader,providerRank:null,trackedLifecycleOnly:true}):null;
+  }
+
   async function fetchTopTraders({limit=defaultLimit,force=false}={}){
     const t=Number(now());
     const max=clampInt(limit,1,8,5);
@@ -415,6 +422,7 @@ export function createBiggjPublicTraderWatchProvider({
 
   return Object.freeze({
     version:BIGGJ_PUBLIC_TRADER_WATCH_VERSION,
-    fetchTopTraders
+    fetchTopTraders,
+    fetchTraderByCode
   });
 }
