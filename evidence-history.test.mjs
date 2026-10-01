@@ -11,6 +11,9 @@ import {
   appendEvidenceRecord,
   loadEvidenceHistory,
   saveEvidenceHistory,
+  appendEvidenceHistoryWal,
+  compactEvidenceHistory,
+  evidenceHistoryWalPath,
   evidenceHistoryFor
 } from "./evidence-history.mjs";
 
@@ -215,4 +218,64 @@ test("reuse fast path still sanitizes non-canonical input instead of trusting it
   assert.notEqual(saved[0],one);
   assert.equal(saved[0].index,100);
   assert.equal(saved[0].trend,"42");
+});
+
+
+test("evidence WAL replays durable upserts over the compressed snapshot",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-wal-"));
+  const file=path.join(dir,"history.json");
+  const wal=evidenceHistoryWalPath(file);
+  const btc=createEvidenceRecord("BTCUSDT",ctx({capturedAt:1000}),null);
+  await saveEvidenceHistory(file,[btc],{maxPerSymbol:2000,reuseCanonicalRecords:true});
+
+  const revised={
+    ...btc,
+    validityLast:{status:"DRIFTED",driftScore:0.8,ageMs:5000,reasons:["TEST"]},
+    closedAt:2000
+  };
+  const eth=createEvidenceRecord("ETHUSDT",ctx({capturedAt:2000}),null);
+  const appended=await appendEvidenceHistoryWal(file,[revised,eth],{walPath:wal});
+  assert.equal(appended.appended,2);
+
+  const loaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
+  assert.equal(loaded.records.length,2);
+  assert.equal(loaded.walRecords,2);
+  assert.equal(loaded.records.find(x=>x.symbol==="BTCUSDT").closedAt,2000);
+  assert.equal(loaded.records.find(x=>x.symbol==="BTCUSDT").validityLast.status,"DRIFTED");
+  assert.ok(loaded.records.find(x=>x.symbol==="ETHUSDT"));
+});
+
+test("evidence WAL can recover records when no snapshot exists yet",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-wal-only-"));
+  const file=path.join(dir,"history.json");
+  const wal=evidenceHistoryWalPath(file);
+  const one=createEvidenceRecord("BTCUSDT",ctx({capturedAt:3000}),null);
+  await appendEvidenceHistoryWal(file,[one],{walPath:wal});
+
+  const loaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
+  assert.equal(loaded.storageEncoding,null);
+  assert.equal(loaded.records.length,1);
+  assert.equal(loaded.records[0].fingerprint,one.fingerprint);
+});
+
+test("snapshot compaction preserves WAL evidence then clears the WAL",async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),"tcx-evidence-compact-"));
+  const file=path.join(dir,"history.json");
+  const wal=evidenceHistoryWalPath(file);
+  const one=createEvidenceRecord("BTCUSDT",ctx({capturedAt:4000}),null);
+  await appendEvidenceHistoryWal(file,[one],{walPath:wal});
+  const loaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
+
+  const compacted=await compactEvidenceHistory(file,loaded.records,{
+    walPath:wal,
+    maxPerSymbol:2000,
+    reuseCanonicalRecords:true
+  });
+  assert.equal(compacted.length,1);
+  await assert.rejects(readFile(wal),err=>err?.code==="ENOENT");
+
+  const reloaded=await loadEvidenceHistory(file,{walPath:wal,maxPerSymbol:2000});
+  assert.equal(reloaded.records.length,1);
+  assert.equal(reloaded.walRecords,0);
+  assert.equal(reloaded.records[0].fingerprint,one.fingerprint);
 });
