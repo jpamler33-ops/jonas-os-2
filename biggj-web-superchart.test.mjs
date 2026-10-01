@@ -34,3 +34,16 @@ test('web SuperChart cannot grant execution authority',()=>{
   assert.match(source,/execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false/);
   assert.match(source,/p\?\.execution==='SHADOW_ONLY'&&p\?\.canExecuteLive===false/);
 });
+
+
+test('mobile SuperChart CSP permits fetched object URLs on iOS',()=>{
+  assert.match(source,/img-src 'self' data: blob:/);
+});
+
+test('market radar carries observed 24h market fields used by the mobile terminal',()=>{
+  assert.match(source,/open:Number\(ctx\.market\?\.open\)/);
+  assert.match(source,/high:Number\(ctx\.market\?\.high\)/);
+  assert.match(source,/low:Number\(ctx\.market\?\.low\)/);
+  assert.match(source,/quoteVolume:Number\(ctx\.market\?\.volumeQuote\)/);
+  assert.match(source,/open:Number\(ticker\.openPrice\)/);
+});
