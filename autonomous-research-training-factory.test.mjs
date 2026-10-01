@@ -394,7 +394,9 @@ test('factory stops claiming data-only when an owned research task is persistent
         }]
       }),
       historyStats:{rows:100,progressAt:1000},
-      asOf:2000+i*1000
+      // Simulate a genuinely stale upstream PIT flow (>6h) plus enough
+      // no-progress wall time to distinguish it from normal data maturation.
+      asOf:1000+7*60*60*1000+i*5*60*1000
     }).state;
   }
   assert.equal(state.leverage.stalledTaskCount,1);

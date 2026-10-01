@@ -1023,42 +1023,42 @@ export async function saveInstitutionalForecastRuntime(runtime){
   let journalStoreMeta=null;
   try{
     if(externalizeArchives){
-      // Materialize the exact serialized chunks once. The live journal can mutate
-      // while gzip I/O yields to the event loop; hashing one generator and later
-      // streaming a second generator can otherwise observe different bytes.
-      const journalBuffers=[...journalStoreBuffers(payload.journal)];
-      const journalFingerprint=fingerprintJsonBuffers(journalBuffers);
-      const journalLogicalBytes=journalFingerprint.logicalBytes;
+      // Serialize the sidecar exactly once while hashing the same bytes that are
+      // written. This preserves snapshot identity without retaining ~9 MB of
+      // journal chunks as Buffer objects in external memory.
       const maxJournalStoreBytes=journalStoreByteLimit(runtime.maxJournalStoreBytes);
-      if(journalLogicalBytes>maxJournalStoreBytes){
-        throw Object.assign(new Error('forecast journal store exceeds configured persistence limit'),{
-          code:'TCX_JOURNAL_STORE_TOO_LARGE_TO_PERSIST',
-          bytes:journalLogicalBytes,
-          maxJournalStoreBytes
-        });
-      }
-      const journalHash=journalFingerprint.sha256;
+      const journalCandidateSlot=runtime.journalStoreSlot==='a'?'b':'a';
+      const journalCandidatePath=journalStorePath(runtime.filePath,journalCandidateSlot);
+      const journalTmp=journalCandidatePath+'.tmp-'+process.pid;
       let journalSlot=runtime.journalStoreSlot;
       let journalBytes=runtime.lastJournalStoreBytes;
-      if(!journalSlot||runtime.journalStoreHash!==journalHash){
-        journalSlot=runtime.journalStoreSlot==='a'?'b':'a';
-        const storePath=journalStorePath(runtime.filePath,journalSlot);
-        const storeTmp=storePath+'.tmp-'+process.pid;
-        try{
-          const streamed=await writeGzipJsonBuffers({
-            filePath:storeTmp,
-            buffers:journalBuffers,
-            level:1
+      let journalHash=null;
+      let journalLogicalBytes=0;
+      try{
+        const streamed=await writeGzipJsonBuffers({
+          filePath:journalTmp,
+          buffers:journalStoreBuffers(payload.journal),
+          level:1
+        });
+        journalHash=streamed.sha256;
+        journalLogicalBytes=streamed.logicalBytes;
+        if(journalLogicalBytes>maxJournalStoreBytes){
+          throw Object.assign(new Error('forecast journal store exceeds configured persistence limit'),{
+            code:'TCX_JOURNAL_STORE_TOO_LARGE_TO_PERSIST',
+            bytes:journalLogicalBytes,
+            maxJournalStoreBytes
           });
-          if(streamed.sha256!==journalHash||streamed.logicalBytes!==journalLogicalBytes){
-            throw new Error('forecast journal store streaming fingerprint mismatch');
-          }
-          journalBytes=streamed.storageBytes;
-          await rename(storeTmp,storePath);
-        }catch(err){
-          await rm(storeTmp,{force:true}).catch(()=>{});
-          throw err;
         }
+        if(journalSlot&&runtime.journalStoreHash===journalHash){
+          await rm(journalTmp,{force:true});
+        }else{
+          journalSlot=journalCandidateSlot;
+          journalBytes=streamed.storageBytes;
+          await rename(journalTmp,journalCandidatePath);
+        }
+      }catch(err){
+        await rm(journalTmp,{force:true}).catch(()=>{});
+        throw err;
       }
       journalStoreMeta={
         version:FORECAST_JOURNAL_STORE_VERSION,
@@ -1074,42 +1074,41 @@ export async function saveInstitutionalForecastRuntime(runtime){
         journalStore:journalStoreMeta
       };
 
-      // Keep fingerprint and persisted bytes bound to one serialized engine view.
-      // This prevents concurrent bounded-cache rotation from changing the stream
-      // after its fingerprint has already been computed.
-      const engineBuffers=[...engineStoreBuffers(payload.engine)];
-      const engineFingerprint=fingerprintJsonBuffers(engineBuffers);
-      const engineLogicalBytes=engineFingerprint.logicalBytes;
+      // Stream the engine sidecar once instead of materializing every serialized
+      // chunk in an array. The stream hash is the persisted-byte fingerprint.
       const maxEngineStoreBytes=engineStoreByteLimit(runtime.maxEngineStoreBytes);
-      if(engineLogicalBytes>maxEngineStoreBytes){
-        throw Object.assign(new Error('forecast engine store exceeds configured persistence limit'),{
-          code:'TCX_ENGINE_STORE_TOO_LARGE_TO_PERSIST',
-          bytes:engineLogicalBytes,
-          maxEngineStoreBytes
-        });
-      }
-      const engineHash=engineFingerprint.sha256;
+      const engineCandidateSlot=runtime.engineStoreSlot==='a'?'b':'a';
+      const engineCandidatePath=engineStorePath(runtime.filePath,engineCandidateSlot);
+      const engineTmp=engineCandidatePath+'.tmp-'+process.pid;
       let engineSlot=runtime.engineStoreSlot;
       let engineBytes=runtime.lastEngineStoreBytes;
-      if(!engineSlot||runtime.engineStoreHash!==engineHash){
-        engineSlot=runtime.engineStoreSlot==='a'?'b':'a';
-        const storePath=engineStorePath(runtime.filePath,engineSlot);
-        const storeTmp=storePath+'.tmp-'+process.pid;
-        try{
-          const streamed=await writeGzipJsonBuffers({
-            filePath:storeTmp,
-            buffers:engineBuffers,
-            level:1
+      let engineHash=null;
+      let engineLogicalBytes=0;
+      try{
+        const streamed=await writeGzipJsonBuffers({
+          filePath:engineTmp,
+          buffers:engineStoreBuffers(payload.engine),
+          level:1
+        });
+        engineHash=streamed.sha256;
+        engineLogicalBytes=streamed.logicalBytes;
+        if(engineLogicalBytes>maxEngineStoreBytes){
+          throw Object.assign(new Error('forecast engine store exceeds configured persistence limit'),{
+            code:'TCX_ENGINE_STORE_TOO_LARGE_TO_PERSIST',
+            bytes:engineLogicalBytes,
+            maxEngineStoreBytes
           });
-          if(streamed.sha256!==engineHash||streamed.logicalBytes!==engineLogicalBytes){
-            throw new Error('forecast engine store streaming fingerprint mismatch');
-          }
-          engineBytes=streamed.storageBytes;
-          await rename(storeTmp,storePath);
-        }catch(err){
-          await rm(storeTmp,{force:true}).catch(()=>{});
-          throw err;
         }
+        if(engineSlot&&runtime.engineStoreHash===engineHash){
+          await rm(engineTmp,{force:true});
+        }else{
+          engineSlot=engineCandidateSlot;
+          engineBytes=streamed.storageBytes;
+          await rename(engineTmp,engineCandidatePath);
+        }
+      }catch(err){
+        await rm(engineTmp,{force:true}).catch(()=>{});
+        throw err;
       }
       engineStoreMeta={
         version:FORECAST_ENGINE_STORE_VERSION,
@@ -1131,43 +1130,43 @@ export async function saveInstitutionalForecastRuntime(runtime){
       // hashing one view and serializing a later view caused production
       // fingerprint mismatches and correctly failed the runtime closed.
       const trackerArchiveRows=trackerRows.map(trackerArchiveRowForPersistence);
-      const trackerArchiveBuffers=[...jsonArrayStoreBuffers({
-        version:FORECAST_TRACKER_ARCHIVE_VERSION,
-        arrayKey:'records',
-        rows:trackerArchiveRows
-      })];
-      const archiveFingerprint=fingerprintJsonBuffers(trackerArchiveBuffers);
-      const archiveLogicalBytes=archiveFingerprint.logicalBytes;
       const maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
-      if(archiveLogicalBytes>maxTrackerArchiveBytes){
-        throw Object.assign(new Error('forecast tracker archive exceeds configured persistence limit'),{
-          code:'TCX_TRACKER_ARCHIVE_TOO_LARGE_TO_PERSIST',
-          bytes:archiveLogicalBytes,
-          maxTrackerArchiveBytes
-        });
-      }
-      const archiveHash=archiveFingerprint.sha256;
+      const trackerCandidateSlot=runtime.trackerArchiveSlot==='a'?'b':'a';
+      const trackerCandidatePath=trackerArchivePath(runtime.filePath,trackerCandidateSlot);
+      const trackerTmp=trackerCandidatePath+'.tmp-'+process.pid;
       let slot=runtime.trackerArchiveSlot;
       let archiveBytes=runtime.lastTrackerArchiveBytes;
-      if(!slot||runtime.trackerArchiveHash!==archiveHash){
-        slot=runtime.trackerArchiveSlot==='a'?'b':'a';
-        const archivePath=trackerArchivePath(runtime.filePath,slot);
-        const archiveTmp=archivePath+'.tmp-'+process.pid;
-        try{
-          const streamed=await writeGzipJsonBuffers({
-            filePath:archiveTmp,
-            buffers:trackerArchiveBuffers,
-            level:1
+      let archiveHash=null;
+      let archiveLogicalBytes=0;
+      try{
+        const streamed=await writeGzipJsonBuffers({
+          filePath:trackerTmp,
+          buffers:jsonArrayStoreBuffers({
+            version:FORECAST_TRACKER_ARCHIVE_VERSION,
+            arrayKey:'records',
+            rows:trackerArchiveRows
+          }),
+          level:1
+        });
+        archiveHash=streamed.sha256;
+        archiveLogicalBytes=streamed.logicalBytes;
+        if(archiveLogicalBytes>maxTrackerArchiveBytes){
+          throw Object.assign(new Error('forecast tracker archive exceeds configured persistence limit'),{
+            code:'TCX_TRACKER_ARCHIVE_TOO_LARGE_TO_PERSIST',
+            bytes:archiveLogicalBytes,
+            maxTrackerArchiveBytes
           });
-          if(streamed.sha256!==archiveHash||streamed.logicalBytes!==archiveLogicalBytes){
-            throw new Error('forecast tracker archive streaming fingerprint mismatch');
-          }
-          archiveBytes=streamed.storageBytes;
-          await rename(archiveTmp,archivePath);
-        }catch(err){
-          await rm(archiveTmp,{force:true}).catch(()=>{});
-          throw err;
         }
+        if(slot&&runtime.trackerArchiveHash===archiveHash){
+          await rm(trackerTmp,{force:true});
+        }else{
+          slot=trackerCandidateSlot;
+          archiveBytes=streamed.storageBytes;
+          await rename(trackerTmp,trackerCandidatePath);
+        }
+      }catch(err){
+        await rm(trackerTmp,{force:true}).catch(()=>{});
+        throw err;
       }
       const revisionCount=trackerArchiveRows.reduce((n,row)=>n+(Array.isArray(row?.revisions)?row.revisions.length:0),0);
       const thesisRevisionEventCount=trackerArchiveRows.reduce((n,row)=>n+Number(row?.thesisMemory?.eventCount||0),0);
@@ -1191,43 +1190,43 @@ export async function saveInstitutionalForecastRuntime(runtime){
       // Issuances are also live objects. Project/clone once so the hash and
       // sidecar bytes are from the same point-in-time serialization.
       const issuanceStoreRows=issuanceRows.map(issuanceForPersistence);
-      const issuanceStoreBuffers=[...jsonArrayStoreBuffers({
-        version:FORECAST_ISSUANCE_STORE_VERSION,
-        arrayKey:'issuances',
-        rows:issuanceStoreRows
-      })];
-      const storeFingerprint=fingerprintJsonBuffers(issuanceStoreBuffers);
-      const storeLogicalBytes=storeFingerprint.logicalBytes;
       const maxIssuanceStoreBytes=issuanceStoreByteLimit(runtime.maxIssuanceStoreBytes);
-      if(storeLogicalBytes>maxIssuanceStoreBytes){
-        throw Object.assign(new Error('forecast issuance store exceeds configured persistence limit'),{
-          code:'TCX_ISSUANCE_STORE_TOO_LARGE_TO_PERSIST',
-          bytes:storeLogicalBytes,
-          maxIssuanceStoreBytes
-        });
-      }
-      const storeHash=storeFingerprint.sha256;
+      const issuanceCandidateSlot=runtime.issuanceStoreSlot==='a'?'b':'a';
+      const issuanceCandidatePath=issuanceStorePath(runtime.filePath,issuanceCandidateSlot);
+      const issuanceTmp=issuanceCandidatePath+'.tmp-'+process.pid;
       let slot=runtime.issuanceStoreSlot;
       let storeBytes=runtime.lastIssuanceStoreBytes;
-      if(!slot||runtime.issuanceStoreHash!==storeHash){
-        slot=runtime.issuanceStoreSlot==='a'?'b':'a';
-        const storePath=issuanceStorePath(runtime.filePath,slot);
-        const storeTmp=storePath+'.tmp-'+process.pid;
-        try{
-          const streamed=await writeGzipJsonBuffers({
-            filePath:storeTmp,
-            buffers:issuanceStoreBuffers,
-            level:1
+      let storeHash=null;
+      let storeLogicalBytes=0;
+      try{
+        const streamed=await writeGzipJsonBuffers({
+          filePath:issuanceTmp,
+          buffers:jsonArrayStoreBuffers({
+            version:FORECAST_ISSUANCE_STORE_VERSION,
+            arrayKey:'issuances',
+            rows:issuanceStoreRows
+          }),
+          level:1
+        });
+        storeHash=streamed.sha256;
+        storeLogicalBytes=streamed.logicalBytes;
+        if(storeLogicalBytes>maxIssuanceStoreBytes){
+          throw Object.assign(new Error('forecast issuance store exceeds configured persistence limit'),{
+            code:'TCX_ISSUANCE_STORE_TOO_LARGE_TO_PERSIST',
+            bytes:storeLogicalBytes,
+            maxIssuanceStoreBytes
           });
-          if(streamed.sha256!==storeHash||streamed.logicalBytes!==storeLogicalBytes){
-            throw new Error('forecast issuance streaming fingerprint mismatch');
-          }
-          storeBytes=streamed.storageBytes;
-          await rename(storeTmp,storePath);
-        }catch(err){
-          await rm(storeTmp,{force:true}).catch(()=>{});
-          throw err;
         }
+        if(slot&&runtime.issuanceStoreHash===storeHash){
+          await rm(issuanceTmp,{force:true});
+        }else{
+          slot=issuanceCandidateSlot;
+          storeBytes=streamed.storageBytes;
+          await rename(issuanceTmp,issuanceCandidatePath);
+        }
+      }catch(err){
+        await rm(issuanceTmp,{force:true}).catch(()=>{});
+        throw err;
       }
       issuanceStoreMeta={
         version:FORECAST_ISSUANCE_STORE_VERSION,
