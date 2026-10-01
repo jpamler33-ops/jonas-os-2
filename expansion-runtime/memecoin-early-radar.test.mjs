@@ -34,6 +34,28 @@ test('ultra thin one-sided pool is risk-only even when new',()=>{
   assert.ok(x.riskFlags.includes('ONE_SIDED_NO_SELLS_OBSERVED'));
 });
 
+test('crash and liquidity-to-cap data anomalies are forced to risk-only',()=>{
+  const now=2_000_000_000_000;
+  const x=scoreEarlyMemecoin({
+    pairCreatedAt:now-7*60_000,liquidityUsd:11_090_000,volumeM5:2800,
+    buysM5:5,sellsM5:2,priceChangeM5:-100,marketCap:859.33,
+    signalNewPool:true
+  },{now});
+  assert.equal(x.stage,'RISK_ONLY');
+  assert.ok(x.riskFlags.includes('M5_CRASH_EXTREME'));
+  assert.ok(x.riskFlags.includes('DATA_ANOMALY_MCAP_LIQUIDITY'));
+  assert.ok(x.researchPriorityScore<.5);
+});
+
+test('severe drawdown is penalized even before hard-crash threshold',()=>{
+  const now=2_000_000_000_000;
+  const x=scoreEarlyMemecoin({
+    pairCreatedAt:now-15*60_000,liquidityUsd:50_000,volumeM5:8_000,
+    buysM5:15,sellsM5:14,priceChangeM5:-60,marketCap:300_000
+  },{now});
+  assert.ok(x.riskFlags.includes('M5_DRAWDOWN_SEVERE'));
+});
+
 test('external exact token mention raises attention without claiming causality',()=>{
   const now=2_000_000_000_000;
   const snap={capturedAt:now,rows:[{
