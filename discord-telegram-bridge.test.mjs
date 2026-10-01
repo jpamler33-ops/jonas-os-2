@@ -118,18 +118,25 @@ test('refresh budgets are exposed in bridge source',async()=>{
 });
 
 
-test('BIGGJ Discord V12 keeps a small user dashboard and deep tools on demand',async()=>{
+test('BIGGJ Discord V13 keeps exactly ten permanent user channels and deep tools on demand',async()=>{
   const fs=await import('node:fs/promises');
   const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
   const science=await fs.readFile(new URL('./biggj-discord-market-science.mjs',import.meta.url),'utf8');
   assert.match(source,/BIGGJ_DISCORD_MARKET_SCIENCE_V7/);
-  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V12_USER_FIRST/);
-  const layout=source.slice(source.indexOf('const SERVER_LAYOUT=Object.freeze(['),source.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY='));
+  assert.match(source,/BIGGJ_DISCORD_CHANNEL_UX_V13_FOCUSED/);
+  const layout=source.slice(source.indexOf('const SERVER_LAYOUT=Object.freeze(['),source.indexOf('const BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY='));
   assert.doesNotMatch(layout,/\.\.\.BIGGJ_DISCORD_MARKET_SCIENCE_LAYOUT/);
   assert.doesNotMatch(layout,/\.\.\.BIGGJ_DISCORD_OBSERVABILITY_LAYOUT/);
   assert.doesNotMatch(layout,/\.\.\.BIGGJ_EXPERIENCE_LAYOUT/);
-  assert.match(layout,/BIGGJ • DASHBOARD/);
+  assert.match(layout,/BIGGJ • HOME/);
+  assert.match(layout,/BIGGJ • INTELLIGENCE/);
   assert.match(layout,/BIGGJ • TRADING/);
+  const names=[...layout.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
+  assert.deepEqual(names,[
+    'start-here','progress','market-overview','news-feed',
+    'memecoins','trader-watch','academy',
+    'trade-cockpit','live-trades','closed-trades'
+  ]);
   assert.match(source,/name:'science'/);
   assert.match(source,/name:'worldmodel'/);
   assert.match(source,/name:'lab'/);
@@ -153,25 +160,36 @@ test('deduplicated news event stream uses stable markers and separates world fam
   assert.match(source,/slice\(0,12\)/);
 });
 
-test('channel manager runtime supervises the curated dashboard and archives legacy technical surfaces',async()=>{
+test('channel manager runtime supervises the focused dashboard and prunes obsolete managed Discord surfaces',async()=>{
   const fs=await import('node:fs/promises');
   const bridge=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
   const a=bridge.indexOf('const SERVER_LAYOUT=Object.freeze([');
-  const b=bridge.indexOf('const BIGGJ_TECH_ARCHIVE_CATEGORY=',a);
+  const b=bridge.indexOf('const BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY=',a);
   assert.ok(a>=0&&b>a);
   const block=bridge.slice(a,b);
   const names=[...block.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
-  assert.equal(names.length,11);
+  assert.equal(names.length,10);
   assert.equal(new Set(names).size,names.length);
-  for(const name of ['start-here','progress','market-overview','chart-desk','news-feed','mobile-app','trade-cockpit','performance','live-trades','closed-trades','alerts'])assert.ok(names.includes(name),name);
+  for(const name of ['start-here','progress','market-overview','news-feed','memecoins','trader-watch','academy','trade-cockpit','live-trades','closed-trades'])assert.ok(names.includes(name),name);
+  for(const removed of ['chart-desk','performance','mobile-app','alerts'])assert.ok(!names.includes(removed),removed);
   assert.match(bridge,/BIGGJ • ARCHIVE · TECH/);
   assert.match(bridge,/LEGACY_MANAGED_CHANNEL_NAMES/);
-  assert.match(bridge,/archive technical surface/);
-  assert.match(bridge,/remove empty legacy category after safe archive/);
-  assert.match(bridge,/auditBiggjDiscordChannelLayout/);
+  assert.match(bridge,/channel\.delete\('BIGGJ Discord V13 prune obsolete managed Discord surface/);
+  assert.match(bridge,/remove empty legacy category after managed-channel prune/);
+  assert.match(bridge,/prunedLegacyChannels/);
   assert.match(bridge,/createBiggjChannelManagerRuntime/);
   assert.match(bridge,/channel-supervisor/);
   assert.match(bridge,/channel-improvements/);
+});
+
+test('single academy surface and home exception panel avoid sidebar and message duplication',async()=>{
+  const fs=await import('node:fs/promises');
+  const source=await fs.readFile(new URL('./discord-telegram-bridge.mjs',import.meta.url),'utf8');
+  assert.match(source,/channelCache\.get\('academy'\)/);
+  assert.match(source,/Academy Single-Surface bereit/);
+  assert.match(source,/channelCache\.get\('start-here'\)/);
+  assert.match(source,/upsertMarked\(c,'BIGGJ_AUTOPILOT_ALERT_V1'/);
+  assert.match(source,/x===marker\|\|x\.startsWith\(String\(marker\)\+' · '\)/);
 });
 test('previously empty operational channels now have live builders',async()=>{
   const fs=await import('node:fs/promises');
