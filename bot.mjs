@@ -238,6 +238,7 @@ import {
   biggjResearchAcceleratorSummary,
   BIGGJ_RESEARCH_ACCELERATOR_VERSION
 } from './biggj-research-accelerator.mjs';
+import { createMemoryGovernor, BIGGJ_MEMORY_GOVERNOR_VERSION } from './biggj-memory-governor.mjs';
 import { buildResearchCoverageDiagnostic, buildResearchCoverageFleetSummary, RESEARCH_COVERAGE_DOCTOR_VERSION } from './research-coverage-doctor.mjs';
 import { buildForecastScienceInputs, FORECAST_RUNTIME_SCIENCE_ADAPTER_VERSION } from './forecast-science-adapter.mjs';
 import { deriveForecastRuntimeQuality, renderInstitutionalForecastCard, renderResearchDependencyCard, researchDependencyKeyboard, forecastKeyboard as forecastProductKeyboard, FORECAST_PRODUCT_VERSION } from './forecast-product.mjs';
@@ -559,6 +560,27 @@ const markets = requestedSymbols.map(symbol => ({
   icon: MARKET_META[symbol]?.[0] || '•',
   label: MARKET_META[symbol]?.[1] || symbol.replace('USDT','')
 }));
+
+const researchMemoryGovernor=createMemoryGovernor({cooldownMs:45_000,minReclaimedMb:4});
+function maybeCollectResearchGarbage(reason,{triggerHeapMb=320}={}){
+  const result=researchMemoryGovernor.maybeCollect({
+    reason,
+    triggerHeapMb,
+    maxRssMb:900,
+    maxExternalMb:128,
+    now:Date.now()
+  });
+  if(result.executed&&(result.useful||result.reclaimedHeapMb>0)){
+    console.log('[BIGGJ_MEMORY_GC]',JSON.stringify({
+      reason,
+      before:result.before,
+      after:result.after,
+      reclaimedHeapMb:result.reclaimedHeapMb,
+      useful:result.useful
+    }));
+  }
+  return result;
+}
 
 function servingMemoryPressure(){
   const m=process.memoryUsage();
@@ -4013,6 +4035,7 @@ function biggjWorldAssetClass(symbol){
 
 async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
  const started=Date.now();
+ maybeCollectResearchGarbage('WORLD_MODEL_PRECHECK',{triggerHeapMb:Math.max(280,servingGuardHeapMb-10)});
  const pressure=servingMemoryPressure();
  if(pressure.pressured){
   console.warn('[BIGGJ_WORLD_MODEL_DEFERRED]',JSON.stringify({
@@ -8964,6 +8987,7 @@ async function autoLearnForecastWatcher() {
       for(const symbol of autoLearnSymbols){
         if(!running) break;
         if(issued>=effectiveAutoLearnMaxIssuedPerSweep){ deferred++; break; }
+        maybeCollectResearchGarbage('AUTOLEARN_PRE_ISSUE',{triggerHeapMb:autoLearnResumeHeapMb});
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9261,6 +9285,9 @@ async function shadowCompetitionWatcher(){
             :researchAcceleration.resource.mode==='CAUTIOUS'
               ?Math.min(144,shadowCompetitionWorkerHeapMb)
               :shadowCompetitionWorkerHeapMb;
+        maybeCollectResearchGarbage('SHADOW_REPLAY_PRECHECK',{
+          triggerHeapMb:Math.max(280,Math.min(adaptiveShadowAutoHeapMb,servingGuardHeapMb)-10)
+        });
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
@@ -9533,6 +9560,9 @@ async function forecastOutcomeWatcher() {
 
     try {
       const started=Date.now();
+      maybeCollectResearchGarbage('OUTCOME_PRECHECK',{
+        triggerHeapMb:Math.max(280,forecastPersistenceHeapHeadroomMb-10)
+      });
       const beforeMemory=process.memoryUsage();
       const admission=evaluateAutoLearnMemoryAdmission({
         phase:'ISSUE',
@@ -10872,6 +10902,10 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowResearchWorker:FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
   shadowResearchWorkerAdmission:FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
   autoLearnMemoryAdmission:AUTOLEARN_MEMORY_ADMISSION_VERSION,
+  biggjMemoryGovernor:{
+    ...researchMemoryGovernor.summary(),
+    version:BIGGJ_MEMORY_GOVERNOR_VERSION
+  },
   backgroundMemoryLimits:{
     autoLearn:{
       issue:{heapUsedMb:autoLearnHeapHeadroomMb,rssMb:autoLearnRssHeadroomMb,externalMb:autoLearnExternalHeadroomMb},
