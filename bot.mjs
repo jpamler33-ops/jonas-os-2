@@ -491,6 +491,7 @@ const coverageCurriculumEnabled = String(process.env.TCX_COVERAGE_CURRICULUM_ENA
 const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 5));
 const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
 const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
+const coverageCurriculumMaxPerIssuance = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_PER_ISSUANCE || 1) || 1));
 const forecastJournalMaxEntries = Math.max(1000, Math.min(3000, Math.floor(Number(process.env.TCX_FORECAST_JOURNAL_MAX_ENTRIES || 1500) || 1500)));
 const forecastAuditMaxEvents = Math.max(200, Math.floor(Number(process.env.TCX_FORECAST_AUDIT_MAX_EVENTS || 1000) || 1000));
 const forecastMaxIssuances = Math.max(300, Math.floor(Number(process.env.TCX_FORECAST_MAX_ISSUANCES || 1500) || 1500));
@@ -2684,7 +2685,7 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
 
   let placed=0;
   const results=[];
-  for(const candidate of derived.candidates){
+  for(const candidate of derived.candidates.slice(0,coverageCurriculumMaxPerIssuance)){
     if(remaining<=0) break;
     const laneOpen=openCoverage.filter(p=>
       p.symbol===candidate.symbol&&String(p.horizonId)===candidate.horizonId
@@ -2720,6 +2721,15 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
         coverageDataSafety:candidate.dataSafety,
         coverageCalibrationStatus:candidate.calibrationStatus,
         coverageHorizonGate:candidate.horizonGate,
+        coverageTargetClass:candidate.coverageTargetClass,
+        coverageTargetProbability:candidate.coverageTargetProbability,
+        coverageTargetProbabilityBinIndex:candidate.coverageTargetProbabilityBinIndex,
+        coverageTargetProbabilityBinLo:candidate.coverageTargetProbabilityBinLo,
+        coverageTargetProbabilityBinHi:candidate.coverageTargetProbabilityBinHi,
+        coverageTargetEffectiveSamples:candidate.coverageTargetEffectiveSamples,
+        coverageTargetEffectiveSamplesGoal:candidate.coverageTargetEffectiveSamplesGoal,
+        coverageTargetEffectiveSampleDeficit:candidate.coverageTargetEffectiveSampleDeficit,
+        coverageTargetEffectiveSampleDeficitRatio:candidate.coverageTargetEffectiveSampleDeficitRatio,
         coverageProbabilityVector:candidate.probabilityVector,
         coverageFlatThreshold:candidate.flatThreshold,
         coverageForecastAsOf:candidate.forecastAsOf,
@@ -2742,7 +2752,10 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
     results.push({
       coverageKey:candidate.coverageKey,placed:true,orderId:order.id,
       symbol:candidate.symbol,horizonId:candidate.horizonId,side:candidate.side,
-      notionalQuote:candidate.notionalQuote
+      notionalQuote:candidate.notionalQuote,
+      targetClass:candidate.coverageTargetClass,
+      targetBin:candidate.coverageTargetProbabilityBinIndex,
+      targetEssDeficit:candidate.coverageTargetEffectiveSampleDeficit
     });
   }
 
@@ -2753,6 +2766,11 @@ async function maybePlaceCoverageCurriculum(issuance,{auditHealthy=false,portfol
       eligible:derived.candidates.length,
       placed,
       horizons:results.filter(x=>x.placed).map(x=>x.horizonId),
+      targets:results.filter(x=>x.placed).map(x=>({
+        symbol:x.symbol,horizonId:x.horizonId,class:x.targetClass,
+        probabilityBin:x.targetBin,effectiveSampleDeficit:x.targetEssDeficit
+      })),
+      maxPerIssuance:coverageCurriculumMaxPerIssuance,
       execution:'SHADOW_ONLY',
       canExecuteLive:false
     }));
