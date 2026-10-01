@@ -105,9 +105,12 @@ export function deriveCoverageCurriculumCandidates(issuance,{
     });
   }
 
+  const forecastAsOf=finite(issuance?.forecast?.asOf,finite(issuance?.asOf,generatedAt));
+  const referencePrice=finite(issuance?.forecast?.price,finite(issuance?.price));
   const existing=new Set((existingCoverageKeys||[]).map(String));
   const byHorizon=horizonMap(issuance);
   const candidates=[];
+  let missingCalibrationMetadata=0;
   for(const policy of horizons){
     const h=byHorizon.get(policy.id);
     if(!h) continue;
@@ -115,7 +118,14 @@ export function deriveCoverageCurriculumCandidates(issuance,{
     const horizonGate=String(h?.gate||'UNKNOWN').toUpperCase();
     const p=normalizeProbabilities(h);
     const expectedReturn=finite(h?.expectedReturn);
+    const flatThreshold=finite(h?.flatThreshold);
     if(!p||expectedReturn==null) continue;
+    // A probe that cannot later be labelled is wasted research. Fail closed
+    // before spending a coverage slot when PIT calibration metadata is absent.
+    if(flatThreshold==null||forecastAsOf==null||referencePrice==null||referencePrice<=0){
+      missingCalibrationMetadata++;
+      continue;
+    }
 
     const start=slotStart(t,policy.horizonMs);
     const keyCore={
@@ -145,11 +155,11 @@ export function deriveCoverageCurriculumCandidates(issuance,{
       directionalProbability,
       probabilityEdge:directionalProbability-oppositeProbability,
       probabilityVector:p,
-      flatThreshold:finite(h?.flatThreshold),
+      flatThreshold,
       admissionGate:String(issuance.admission?.gate||'ABSTAIN').toUpperCase(),
       horizonGate,
       calibrationStatus,
-      regimeId:String(issuance?.trace?.regimeId||issuance?.regimeId||'UNKNOWN'),
+      regimeId:String(issuance?.trace?.researchState?.regime||issuance?.trace?.regimeId||issuance?.regimeId||'UNKNOWN'),
       coverageEvidenceTier:
         calibrationStatus==='CALIBRATED'&&['PASS','CAUTION'].includes(horizonGate)
           ?'CALIBRATED'
@@ -161,7 +171,8 @@ export function deriveCoverageCurriculumCandidates(issuance,{
       dataSafety:safety,
       issuanceId:String(issuance.issuanceId||''),
       forecastFingerprint:String(issuance.forecastFingerprint||issuance.forecast?.fingerprint||''),
-      referencePrice:finite(issuance.price),
+      referencePrice,
+      forecastAsOf,
       generatedAt
     };
     candidates.push(freeze({
@@ -186,7 +197,10 @@ export function deriveCoverageCurriculumCandidates(issuance,{
   return freeze({
     version:SHADOW_COVERAGE_CURRICULUM_VERSION,
     candidates,
-    reason:candidates.length?'COVERAGE_SLOTS_DUE':'CALIBRATION_COVERAGE_SUFFICIENT',
+    reason:candidates.length
+      ?'COVERAGE_SLOTS_DUE'
+      :(missingCalibrationMetadata?'FORECAST_CALIBRATION_METADATA_MISSING':'CALIBRATION_COVERAGE_SUFFICIENT'),
+    missingCalibrationMetadata,
     execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false
   });
 }
