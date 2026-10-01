@@ -6,7 +6,7 @@ import { renderBiggjMobileApp } from './biggj-mobile-webapp.mjs';
 
 test('market science mission control remains explicitly shadow only',()=>{
   const s=missionControlSnapshot({health:{ok:true}});
-  assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V1');
+  assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
   const html=renderMissionControlHtml(s);
@@ -35,6 +35,21 @@ test('mobile control plane exposes the curated user command center',()=>{
   for(const x of ['data-tab="today"','data-tab="markets"','data-tab="progress"','data-tab="trading"','LIVE TICKER','RESEARCH-REIFE'])assert.match(html,new RegExp(x));
   for(const hidden of ['data-tab="science"','data-tab="world"','data-tab="lab"','data-tab="decisions"','data-tab="system"'])assert.doesNotMatch(html,new RegExp(hidden));
   assert.match(html,/app\.webmanifest/);assert.match(html,/serviceWorker/);assert.match(html,/SHADOW_ONLY/);
+});
+
+test('mission control trading view separates primary performance from research activity and shows discovery blockers',()=>{
+  const s=missionControlSnapshot({
+    health:{},
+    portfolio:{
+      equityQuote:10000,netPnlQuote:0,openPositions:0,closedTrades:0,positions:[],
+      researchActivity:{openPositions:1,closedTrades:2,wins:1,losses:1,winRate:.5,netPnlQuote:3.5,byMode:{COVERAGE_PROBE:{open:1,closed:2,realizedPnlQuote:3.5}},active:[{symbol:'BTCUSDT',side:'LONG',entryMode:'COVERAGE_PROBE',entryPrice:60000,horizonId:'15m'}],recentClosed:[]}
+    },
+    discovery:{checkedCoins:6,forecastAvailable:6,admittedForecasts:0,totalCalibratedHorizons:0,totalHorizons:18,standardCandidates:0,explorationCandidates:0,standardTrades:0,explorationTrades:0,coverageProbes:1,topBlockers:[{reason:'NO_CALIBRATED_HORIZONS',count:6,text:'Noch fehlen genügend aufgelöste Ergebnisse zur Horizont-Kalibrierung'}],nextStep:'Forward outcomes sammeln',runtime:{omsStatus:'READY',omsFilled:1,academyStage:'LEARNING',academyCoreAllowed:false,trainingHold:false,openDiscoveryPositions:1,discoveryOpenCap:3}}
+  });
+  const html=renderMissionControlHtml(s);
+  for(const text of ['PRIMARY +','Research Trading','Discovery Pipeline','Aktueller Blocker','Runtime Gates','NO_CALIBRATED_HORIZONS','COVERAGE_PROBE','SHADOW_ONLY']) assert.match(html,new RegExp(text));
+  assert.match(html,/performanceExcluded|nicht in Primary-PnL/);
+  assert.match(html,/canExecuteLive:false/);
 });
 
 test('mission snapshot feeds only primary positions into primary Discord trade streams',()=>{
