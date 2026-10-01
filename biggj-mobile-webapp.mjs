@@ -269,7 +269,7 @@ function buildStatusStrip(){
   document.getElementById('statusStrip').innerHTML=rows.map(x=>'<div class="chip '+x[2]+'">'+E(x[0])+' <strong>'+E(x[1])+'</strong></div>').join('');
 }
 
-function renderOverview(){function renderOverview(){
+function renderOverview(){
   const h=S.health||{},op=h.autonomousOperator||{},factory=h.autonomousResearchFactory||{},lr=h.biggjLivingResearch||{},cov=h.researchCoverage||{},brain=h.biggjObservability||{},p=S.portfolio||{};
   const needs=(h.experienceNeeds||[]).slice(0,6);
   const radar=(h.marketRadar?.rows||[]).slice(0,5);
