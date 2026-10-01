@@ -64,6 +64,8 @@ test('clean covered token can pass and unknown source never fabricates pass',asy
   const y=await bad.enrichSnapshot({rows:[{chainId:'base',tokenAddress:address}]},{maxChecks:1});
   assert.equal(y.rows[0].security.evidenceGate,'UNKNOWN');
   assert.ok(y.rows[0].security.warningFlags.includes('SECURITY_SOURCE_UNAVAILABLE'));
+  assert.ok(y.rows[0].security.unknownReasonCodes.includes('SECURITY_SOURCE_UNAVAILABLE'));
+  assert.equal(y.securityProvider.unknownReasonCounts.SECURITY_SOURCE_UNAVAILABLE,1);
 });
 
 test('enrichment is bounded to protect free-provider rate budget',async()=>{
