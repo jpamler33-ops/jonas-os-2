@@ -189,7 +189,7 @@ let CHART={
   symbol:localStorage.getItem('biggj.chart.symbol')||'BTCUSDT',
   interval:localStorage.getItem('biggj.chart.interval')||'5m',
   mode:localStorage.getItem('biggj.chart.mode')||'FULL',
-  lastUrl:null,lastLoadedAt:0,loading:false,error:null
+  lastUrl:null,lastLoadedAt:0,loading:false,error:null,fullscreen:false
 };
 
 const root=document.getElementById('root');
@@ -472,7 +472,7 @@ function renderMarketMonitor(){
   html+='<div class="hero"><div class="overline">MARKET MONITOR</div><div class="userHeroTitle">SUPER<span class="cyan">CHART</span></div><div class="heroCopy">Ein Chart für das komplette Bild: Candles, Struktur, Regime, Forecast-Pfade, Confluence, Liquidationen und Events.</div><div class="heroFooter"><div class="badge">'+E(CHART.symbol.replace('USDT','/USDT'))+' <b>'+E(CHART.interval.toUpperCase())+'</b></div><div class="badge">View <b>'+E(CHART.mode)+'</b></div><div class="badge">Refresh <b>30s</b></div></div></div>';
   html+=sectionHead('Markt wählen');
   html+='<div class="signalSelectors">'+selectorRow(rows.map(r=>r.symbol),CHART.symbol,'data-chart-symbol',v=>v.replace('USDT',''))+selectorRow(quick,CHART.interval,'data-chart-interval',v=>v.toUpperCase())+selectorRow(['PRO','FULL'],CHART.mode,'data-chart-mode')+'</div>';
-  html+='<div class="chartShell" id="superchartShell"><div class="chartTop"><div><div class="chartSymbol">'+E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(CHART.interval.toUpperCase())+'</div><div class="chartMeta">Structure · Forecast · Liquidity · Confluence · Events</div></div><div class="chartTools"><div class="chartLive">● LIVE</div><button class="chartToolBtn" data-chart-fullscreen aria-label="SuperChart Vollbild"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div></div>';
+  html+='<div class="chartShell '+(CHART.fullscreen?'fullscreen':'')+'" id="superchartShell"><div class="chartTop"><div><div class="chartSymbol">'+E(CHART.symbol.replace('USDT','/USDT'))+' · '+E(CHART.interval.toUpperCase())+'</div><div class="chartMeta">Structure · Forecast · Liquidity · Confluence · Events</div></div><div class="chartTools"><div class="chartLive">● LIVE</div><button class="chartToolBtn" data-chart-fullscreen aria-label="SuperChart Vollbild"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div></div>';
   html+='<div class="chartQuick">'+quick.map(v=>'<button class="'+(v===CHART.interval?'active':'')+'" data-chart-interval="'+v+'">'+v.toUpperCase()+'</button>').join('')+'<button class="'+(CHART.mode==='FULL'?'active':'')+'" data-chart-mode="FULL">FULL</button></div>';
   html+='<div class="chartViewport '+(CHART.loading?'loading':'')+'">'+(CHART.lastUrl?'<img src="'+E(CHART.lastUrl)+'" alt="BIGGJ SuperChart '+E(CHART.symbol)+'">':empty('SuperChart wird geladen …'))+'<div class="chartLoading">SUPERCHART WIRD AKTUALISIERT …</div></div><div class="chartError '+(CHART.error?'show':'')+'">'+E(CHART.error||'')+'</div></div>';
   html+=sectionHead('Warum gerade wichtig?','beobachtet ≠ garantiert');
@@ -556,6 +556,7 @@ function render(){
   badge.classList.toggle('stale',age>30000&&navigator.onLine);
   badge.classList.toggle('offline',!navigator.onLine);
   txt.textContent=!navigator.onLine?'OFFLINE':age>30000?'STALE '+AGE(gen):'LIVE '+AGE(gen);
+  document.body.classList.toggle('chartFullscreen',TAB==='markets'&&CHART.fullscreen);
 }
 
 async function refresh(){
@@ -575,21 +576,22 @@ async function refresh(){
 nav.addEventListener('click',e=>{
   const button=e.target.closest('button[data-tab]');if(!button)return;
   TAB=button.dataset.tab;
+  if(TAB!=='markets')CHART.fullscreen=false;
   for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x===button);
   render();window.scrollTo({top:0,behavior:'smooth'});
   if(TAB==='markets')setTimeout(()=>loadSuperchart(true),0);
 });
 root.addEventListener('click',e=>{
-  const open=e.target.closest('[data-open-market]');if(open){CHART.symbol=open.getAttribute('data-open-market');localStorage.setItem('biggj.chart.symbol',CHART.symbol);TAB='markets';for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x.dataset.tab==='markets');render();setTimeout(()=>loadSuperchart(true),0);return;}
+  const open=e.target.closest('[data-open-market]');if(open){CHART.symbol=open.getAttribute('data-open-market');CHART.fullscreen=false;localStorage.setItem('biggj.chart.symbol',CHART.symbol);TAB='markets';for(const x of nav.querySelectorAll('button'))x.classList.toggle('active',x.dataset.tab==='markets');render();setTimeout(()=>loadSuperchart(true),0);return;}
   const symbol=e.target.closest('[data-chart-symbol]');if(symbol){CHART.symbol=symbol.getAttribute('data-chart-symbol');CHART.lastUrl=null;localStorage.setItem('biggj.chart.symbol',CHART.symbol);render();loadSuperchart(true);return;}
   const interval=e.target.closest('[data-chart-interval]');if(interval){CHART.interval=interval.getAttribute('data-chart-interval');CHART.lastUrl=null;localStorage.setItem('biggj.chart.interval',CHART.interval);render();loadSuperchart(true);return;}
   const mode=e.target.closest('[data-chart-mode]');if(mode){CHART.mode=mode.getAttribute('data-chart-mode');CHART.lastUrl=null;localStorage.setItem('biggj.chart.mode',CHART.mode);render();loadSuperchart(true);return;}
-  const full=e.target.closest('[data-chart-fullscreen]');if(full){const shell=document.getElementById('superchartShell');if(!shell)return;const on=!shell.classList.contains('fullscreen');shell.classList.toggle('fullscreen',on);document.body.classList.toggle('chartFullscreen',on);full.setAttribute('aria-label',on?'SuperChart Vollbild schließen':'SuperChart Vollbild');return;}
+  const full=e.target.closest('[data-chart-fullscreen]');if(full){CHART.fullscreen=!CHART.fullscreen;render();return;}
 });
 document.getElementById('refreshBtn').addEventListener('click',()=>{refresh();if(TAB==='markets')loadSuperchart(true);});
 window.addEventListener('online',()=>{render();refresh();if(TAB==='markets')loadSuperchart(true);});
 window.addEventListener('offline',render);
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('chartFullscreen')){document.body.classList.remove('chartFullscreen');document.getElementById('superchartShell')?.classList.remove('fullscreen');}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&CHART.fullscreen){CHART.fullscreen=false;render();}});
 render();
 setInterval(refresh,10000);
 setInterval(()=>{if(TAB==='markets')loadSuperchart(false);},30000);
