@@ -137,7 +137,9 @@ test('institutional staged release set hashes forecast, science, admission and t
     'expansion-runtime/source-intelligence.mjs',
     'expansion-runtime/event-impact-memory.mjs',
     'expansion-runtime/liquidity-intelligence.mjs',
-    'biggj-public-trader-watch.mjs'
+    'biggj-public-trader-watch.mjs',
+    'shadow-specialist-wallets.mjs',
+    'expansion-runtime/memecoin-early-radar.mjs'
   ]){
     assert.ok(files.includes(required),required+' missing from institutional release identity');
   }
