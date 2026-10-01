@@ -49,3 +49,32 @@ test('market header uses a dedicated selected-symbol live ticker and never coerc
   assert.match(h,/Marktdaten werden synchronisiert/);
   assert.doesNotMatch(h,/pct:Number\(pct\)/);
 });
+
+
+test('mobile hero translates human action codes and keeps internal incidents non-actionable',()=>{
+  const actionable=structuredClone(sample);
+  actionable.health.autonomousOperator={
+    mode:'ESCALATION_REQUIRED',
+    operatorNeeded:true,
+    humanJobRemaining:'APPROVAL_REQUIRED',
+    activeIncidents:1,
+    internalIncidents:0
+  };
+  const actionableHtml=renderBiggjMobileApp(actionable);
+  assert.match(actionableHtml,/Eine Freigabe oder Entscheidung wartet auf dich/);
+  assert.doesNotMatch(actionableHtml,/>APPROVAL_REQUIRED</);
+
+  const internal=structuredClone(sample);
+  internal.health.autonomousOperator={
+    mode:'AUTO_MONITORING',
+    operatorNeeded:false,
+    humanJobRemaining:'EXCEPTIONS_ONLY',
+    activeIncidents:13,
+    internalIncidents:12
+  };
+  const internalHtml=renderBiggjMobileApp(internal);
+  assert.match(internalHtml,/BIGGJ ARBEITET FÜR DICH/);
+  assert.match(internalHtml,/Keine Aktion von dir nötig/);
+  assert.match(internalHtml,/internal=N\(op\.internalIncidents\|\|0\)/);
+  assert.match(internalHtml,/human\?E\(HUMAN_ACTION\(op\.humanJobRemaining\)\):E\(autonomousText\)/);
+});

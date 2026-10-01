@@ -311,11 +311,13 @@ export function refreshBiggjAutonomousOperator(state,{
   }
   incidents=markPlannedRecoveries(incidents,actions,t,p);
 
+  // A stale internal worker is an internal operations incident, not a user task.
+  // Escalate to the human only when there is an actual governance/config decision
+  // or when an automatic recovery path has been exhausted.
   const escalationIncidents=Object.values(incidents).filter(x=>
     x.kind==='APPROVAL_REQUIRED'||
     x.kind==='AUTOMATION_GAP'||
     (x.kind==='OWNER_DISABLED'&&!x.recoveryAction)||
-    (x.kind==='OWNER_UNHEALTHY'&&!x.recoveryAction&&x.cycles>=3)||
     (x.kind==='DATA_QUALITY_BLOCKED'&&x.cycles>=3)||
     x.recoveryAttempts>=p.maxRecoveryAttempts
   );
@@ -420,6 +422,13 @@ export function biggjAutonomousOperatorSummary(state){
     waitingForData:state?.waitingForData===true,
     automationCoverage:finite(state?.automationCoverage,0),
     activeIncidents:incidents.length,
+    internalIncidents:incidents.filter(x=>x.kind==='OWNER_UNHEALTHY').length,
+    humanActionIncidents:incidents.filter(x=>
+      x.kind==='APPROVAL_REQUIRED'||
+      x.kind==='AUTOMATION_GAP'||
+      (x.kind==='OWNER_DISABLED'&&!x.recoveryAction)||
+      x.exhausted===true
+    ).length,
     approvalRequired:incidents.filter(x=>x.kind==='APPROVAL_REQUIRED').length,
     selfHealing:arr(state?.plannedActions).length,
     exhaustedRecoveries:incidents.filter(x=>x.exhausted===true).length,
