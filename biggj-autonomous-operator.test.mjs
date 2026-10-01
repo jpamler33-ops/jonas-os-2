@@ -263,6 +263,34 @@ test('research stall is self-diagnosed before human escalation',()=>{
   assert.equal(out.state.operatorNeeded,false);
 });
 
+
+
+test('stale internal owner is monitored internally and does not create fake human work',()=>{
+  let state=createBiggjAutonomousOperator({asOf:now-10_000});
+  for(let i=0;i<4;i++){
+    const t=now+i*60_000;
+    const out=refreshBiggjAutonomousOperator(state,{
+      factorySummary:factory({
+        mode:'RESEARCH_STALLED',
+        operatorDataOnly:false,
+        dataNeeds:['MORE_POINT_IN_TIME_DATA'],
+        nextTasks:[task({taskId:'pit-'+i,subject:'seed:PIT_EVENT_CLOCK'})]
+      }),
+      operations:{forecast_shadow_competition:{lastAt:now-600_000,lastError:null}},
+      ownerPolicies:policies(),
+      uptimeMs:600_000,
+      asOf:t
+    });
+    state=out.state;
+  }
+  const summary=biggjAutonomousOperatorSummary(state);
+  assert.equal(summary.ownerAssessments[0].state,'STALE');
+  assert.equal(summary.internalIncidents,1);
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.humanJobRemaining,'EXCEPTIONS_ONLY');
+  assert.equal(summary.mode,'AUTO_MONITORING');
+});
+
 test('disabled required owner escalates when there is no safe recovery',()=>{
   const state=createBiggjAutonomousOperator({asOf:now-10_000});
   const out=refreshBiggjAutonomousOperator(state,{
