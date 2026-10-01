@@ -10465,22 +10465,23 @@ function missionControlData(){
 }
 const port = Number(process.env.PORT || 8080);
 const server = http.createServer(async (req,res) => {
-  if (req.url === '/app.webmanifest') {
+  const requestPath=String(req.url||'').split('?')[0]||'/';
+  if (requestPath === '/app.webmanifest') {
     res.writeHead(200,{'content-type':'application/manifest+json; charset=utf-8','cache-control':'public, max-age=300'});
     res.end(biggjWebManifest());
     return;
   }
-  if (req.url === '/biggj-icon.svg') {
+  if (requestPath === '/biggj-icon.svg') {
     res.writeHead(200,{'content-type':'image/svg+xml; charset=utf-8','cache-control':'public, max-age=86400'});
     res.end(biggjAppIconSvg());
     return;
   }
-  if (req.url === '/sw.js') {
+  if (requestPath === '/sw.js') {
     res.writeHead(200,{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'});
     res.end(biggjServiceWorker());
     return;
   }
-  if (String(req.url||'').split('?')[0] === '/superchart.png') {
+  if (requestPath === '/superchart.png') {
     const started=Date.now();
     try{
       const u=new URL(String(req.url||''),'http://localhost');
@@ -10514,12 +10515,12 @@ const server = http.createServer(async (req,res) => {
     }
     return;
   }
-  if (req.url === '/rulebook.md') {
+  if (requestPath === '/rulebook.md') {
     res.writeHead(200,{'content-type':'text/markdown; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
     res.end(renderBiggjRulebookMarkdown());
     return;
   }
-  if (req.url === '/rulebook.json') {
+  if (requestPath === '/rulebook.json') {
     const snapshot=missionControlData();
     res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
     res.end(JSON.stringify(snapshot?.health?.biggjRulebook||{
@@ -10530,12 +10531,12 @@ const server = http.createServer(async (req,res) => {
     }));
     return;
   }
-  if (req.url === '/ai/status.json') {
+  if (requestPath === '/ai/status.json') {
     res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
     res.end(JSON.stringify(biggjOpenAiBridge.snapshot()));
     return;
   }
-  if (String(req.url||'').split('?')[0] === '/ai/ask') {
+  if (requestPath === '/ai/ask') {
     if(String(req.method||'GET').toUpperCase()!=='POST'){
       res.writeHead(405,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','allow':'POST'});
       res.end(JSON.stringify({ok:false,error:'METHOD_NOT_ALLOWED',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
@@ -10578,7 +10579,7 @@ const server = http.createServer(async (req,res) => {
     }
     return;
   }
-  if (String(req.url||'').startsWith('/signal-lab.json')) {
+  if (requestPath === '/signal-lab.json') {
     try{
       const u=new URL(String(req.url||''),'http://localhost');
       const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase();
@@ -10599,7 +10600,7 @@ const server = http.createServer(async (req,res) => {
     }
     return;
   }
-  if (String(req.url||'').startsWith('/proof-feed.json')) {
+  if (requestPath === '/proof-feed.json') {
     try{
       const u=new URL(String(req.url||''),'http://localhost');
       const raw=String(u.searchParams.get('symbol')||'ALL').toUpperCase();
@@ -10619,24 +10620,24 @@ const server = http.createServer(async (req,res) => {
     }
     return;
   }
-  if (req.url === '/mission-control') {
+  if (requestPath === '/mission-control') {
     const snapshot=missionControlData();
     res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
     res.end(renderBiggjMobileApp(snapshot));
     return;
   }
-  if (req.url === '/mission-control/legacy') {
+  if (requestPath === '/mission-control/legacy') {
     const snapshot=missionControlData();
     res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});
     res.end(renderMissionControlHtml(snapshot));
     return;
   }
-  if (req.url === '/mission-control.json') {
+  if (requestPath === '/mission-control.json') {
     res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});
     res.end(JSON.stringify(missionControlData()));
     return;
   }
-  if (req.url === '/ready') {
+  if (requestPath === '/ready') {
     const readiness=currentOperationalReadiness();
     res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
     res.end(JSON.stringify({
@@ -10649,7 +10650,7 @@ const server = http.createServer(async (req,res) => {
     }));
     return;
   }
-  if (req.url === '/health' || req.url === '/') {
+  if (requestPath === '/health' || requestPath === '/') {
     const activeAlerts = [...alerts.values()].reduce((n,x) => n+x.length,0);
     res.writeHead(200,{'content-type':'application/json'});
     res.end(JSON.stringify({

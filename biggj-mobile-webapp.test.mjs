@@ -108,6 +108,6 @@ test('service worker bypasses cache for live chart and live state',()=>{
 test('canonical route still serves mobile app and legacy technical dashboard remains available',async()=>{
   const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.match(source,/renderBiggjMobileApp\(snapshot\)/);
-  assert.match(source,/req\.url === '\/mission-control\/legacy'/);
+  assert.match(source,/requestPath === '\/mission-control\/legacy'/);
   assert.match(source,/renderMissionControlHtml\(snapshot\)/);
 });
