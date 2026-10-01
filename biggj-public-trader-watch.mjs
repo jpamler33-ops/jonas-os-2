@@ -75,6 +75,8 @@ function normalizeClosed(row={}){
     instId:symbolOf(row),
     side:sideOf(row),
     leverage:finite(row?.lever),
+    openAvgPx:finite(row?.openAvgPx),
+    closeAvgPx:finite(row?.closeAvgPx),
     pnl:finite(row?.pnl),
     pnlRatio:finite(row?.pnlRatio),
     openTime,
