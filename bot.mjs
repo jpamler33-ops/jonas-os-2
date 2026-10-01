@@ -1670,7 +1670,13 @@ async function persistEpisodeMemory(reason='mutation') {
 async function persistEvidenceHistory(reason='mutation') {
   evidenceHistoryQueue = evidenceHistoryQueue.then(async () => {
     try {
-      evidenceRecords = await saveEvidenceHistory(evidenceHistoryFile,evidenceRecords,{maxPerSymbol:2000});
+      evidenceRecords = await saveEvidenceHistory(evidenceHistoryFile,evidenceRecords,{
+        maxPerSymbol:2000,
+        // Runtime records are created by the canonical lifecycle or sanitized on
+        // load. Reuse those validated objects instead of duplicating the entire
+        // evidence history before every streamed gzip persistence.
+        reuseCanonicalRecords:true
+      });
       evidenceHistoryHealthy = true;
       evidenceHistoryLastError = null;
     } catch (err) {
