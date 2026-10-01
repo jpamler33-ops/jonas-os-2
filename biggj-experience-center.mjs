@@ -182,28 +182,74 @@ export function buildBiggjTraderWatchPayload(snapshot={}){
   const registry=t?.entityRegistry||{};
   const flow=t?.entityFlow||{};
   const sourceReady=t?.sourceReady===true;
+  const traders=arr(t?.traders).slice(0,5);
+  const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null;};
+  const sp=v=>{const x=n(v);return x==null?'—':(x>=0?'+':'')+(x*100).toFixed(Math.abs(x)>=1?0:1)+'%';};
+  const compactMoney=v=>{
+    const x=n(v);if(x==null)return '—';
+    const a=Math.abs(x),sign=x<0?'-':x>0?'+':'';
+    if(a>=1_000_000)return sign+(a/1_000_000).toFixed(2)+'M';
+    if(a>=1_000)return sign+(a/1_000).toFixed(1)+'k';
+    return sign+a.toFixed(0);
+  };
+  const holdingLabel=x=>({SCALP:'Scalp',INTRADAY:'Intraday',SWING:'Swing',POSITION:'Position',UNRESOLVED:'unklar'}[String(x||'').toUpperCase()]||clip(x,24));
+  const biasLabel=x=>({LONG_BIAS:'Long-Bias',SHORT_BIAS:'Short-Bias',TWO_WAY:'Long/Short',UNRESOLVED:'unklar'}[String(x||'').toUpperCase()]||clip(x,24));
+  const leverageLabel=x=>({HIGH_LEVERAGE:'hoher Hebel',MODERATE_LEVERAGE:'mittlerer Hebel',LOW_LEVERAGE:'niedriger Hebel',UNRESOLVED:'Hebel unklar'}[String(x||'').toUpperCase()]||clip(x,28));
+  const traderFields=traders.map((trader,index)=>{
+    const m=trader?.metrics||{},strategy=trader?.strategy||{};
+    const positions=arr(trader?.openPositions).slice(0,3);
+    const openLines=positions.length?positions.map(pos=>{
+      if(pos?.protectedFields)return '• '+(pos?.instId||'geschützt')+' · Details vom Trader geschützt';
+      const lever=n(pos?.leverage),upl=n(pos?.uplRatio),entry=n(pos?.openAvgPx),mark=n(pos?.markPx);
+      return '• '+clip(pos?.side||'?',8)+' '+clip(pos?.instId||'?',26)+
+        (lever!=null?' · '+lever.toFixed(1).replace(/\.0$/,'')+'x':'')+
+        (entry!=null?' · Entry '+entry.toLocaleString('de-DE',{maximumFractionDigits:4}):'')+
+        (mark!=null?' · Mark '+mark.toLocaleString('de-DE',{maximumFractionDigits:4}):'')+
+        (upl!=null?' · UPL '+sp(upl):'');
+    }):['• keine öffentlich sichtbare offene Position'];
+    const focus=arr(strategy?.topSymbols).slice(0,3).map(x=>String(x?.symbol||'').replace('-USDT-SWAP','')).filter(Boolean).join(' / ')||'—';
+    const inferred=[
+      holdingLabel(strategy?.holdingStyle),
+      biasLabel(strategy?.directionalBias),
+      leverageLabel(strategy?.leverageStyle),
+      'Fokus '+focus
+    ].join(' · ');
+    return safeField(
+      '#'+String(trader?.providerRank||index+1)+' · '+clip(trader?.nickname||'Public Lead Trader',70),
+      [
+        '90T ROI '+sp(m?.pnlRatio90d)+' · Win '+sp(m?.winRatio)+' · PnL '+compactMoney(m?.pnl90d)+' USDT',
+        'AUM '+compactMoney(m?.aum)+' USDT · Copier '+(n(m?.copyTraderNum)??'—')+' · Lead '+(n(m?.leadDays)??'—')+'d',
+        '**Verhaltensprofil (abgeleitet):** '+inferred,
+        '**Offene Trades:**',
+        ...openLines
+      ].join('\n')
+    );
+  });
   const reason=sourceReady
-    ?'Öffentliche Trader-/Wallet-Performancequelle aktiv.'
-    :'Noch **kein belastbarer öffentlicher PnL-/Trader-Ranking-Feed** angebunden. BIGGJ zeigt deshalb keine erfundenen „Top Trader“.';
+    ?'Live aus **OKX Public Copy Trading**. Reihenfolge = OKX-Overview-Ranking; Strategieprofile werden nur aus beobachteten öffentlichen Trades abgeleitet.'
+    :'Trader-Quelle aktuell nicht frisch/verfügbar. BIGGJ erfindet keine Positionen oder Rankings.';
   return payload(
-    'BIGGJ // PROFIT TRADER WATCH',
+    'BIGGJ // TOP TRADER WATCH',
     reason,
     [
-      safeField('CURRENT COVERAGE',[
-        'Entity registry '+finite(registry?.entities??registry?.entityCount)+' bekannte Entities',
-        'Entity-flow observations '+finite(flow?.observations??flow?.observationCount),
-        'Source status '+(sourceReady?'READY':'SOURCE REQUIRED')
+      ...traderFields,
+      safeField('SOURCE / FRESHNESS',[
+        'Quelle '+clip(t?.source||'OKX_PUBLIC_COPY_TRADING_API',80),
+        'Snapshot '+(t?.capturedAt?age(t.capturedAt)+' alt':'—'),
+        'Ranking '+clip(t?.rankingMethod||'OKX_OVERVIEW',40),
+        'Offene Positionen können laut Provider verzögert oder teilweise geschützt sein.',
+        t?.lastError?'Degraded: '+clip(t.lastError,260):'Status '+(sourceReady?'READY':'SOURCE REQUIRED')
       ].join('\n')),
-      safeField('QUALIFICATION RULES',[
-        '• öffentlich belegbare Historie',
-        '• Point-in-Time erfassbar',
-        '• realisierte vs. unrealisierte PnL getrennt',
-        '• Gebühren/Slippage soweit verfügbar',
-        '• mindestens mehrere unabhängige Trades/Zeiträume',
-        '• kein Ranking nur nach einem Screenshot oder einer einzelnen Wallet-Bewegung'
+      safeField('METHOD',[
+        '„Strategie“ = INFERRED, nicht Selbstauskunft.',
+        'Basis: Haltedauer, Long/Short-Verteilung, Hebel und Markt-Fokus der öffentlich sichtbaren Positionen/Historie.',
+        'Kein automatisches Copy-Trading · keine echten Orders.'
       ].join('\n')),
-      safeField('NEXT SOURCE NEED',clip(t?.nextNeed||'PIT-fähige öffentliche Trader-/Wallet-Performancequelle mit stabiler Identität und Historie.',700)),
-      safeField('PRIVACY','Nur öffentliche Markt-/On-Chain-Daten. Keine privaten Accounts, DMs oder nichtöffentlichen personenbezogenen Daten.')
+      safeField('CROSS-CHECK',clip(t?.nextNeed||'Zweite unabhängige öffentliche Traderquelle für Cross-Validation.',700)),
+      safeField('PUBLIC DATA ONLY',[
+        'Entity registry '+finite(registry?.entities??registry?.entityCount)+' Entities · Flow '+finite(flow?.observations??flow?.observationCount),
+        'Keine privaten Accounts/DMs · keine Identitätsauflösung natürlicher Personen.'
+      ].join('\n'))
     ],
     BIGGJ_EXPERIENCE_MARKERS.traders,
     [
