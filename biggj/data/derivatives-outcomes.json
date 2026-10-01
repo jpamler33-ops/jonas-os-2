@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-10-01T00:31:46.613Z",
+  "updatedAt": "2026-10-01T07:09:59.451Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -223,6 +223,12 @@
           "price": 83443.5,
           "return": -0.002320726563172615,
           "direction": -1
+        },
+        "h4": {
+          "observedAt": "2026-10-01T07:09:59.451Z",
+          "price": 84150.4,
+          "return": 0.0061312137124927,
+          "direction": 1
         }
       },
       "caseId": "9492b9ada561fa90fbccd99de6dfd63cb2797bf4842e832dde5b340519edc822"
@@ -246,27 +252,62 @@
       },
       "evidenceClassification": "OBSERVED_DERIVED",
       "status": "OPEN",
-      "outcomes": {},
+      "outcomes": {
+        "h1": {
+          "observedAt": "2026-10-01T07:09:59.451Z",
+          "price": 84150.4,
+          "return": 0.008471600544080582,
+          "direction": 1
+        },
+        "h4": {
+          "observedAt": "2026-10-01T07:09:59.451Z",
+          "price": 84150.4,
+          "return": 0.008471600544080582,
+          "direction": 1
+        }
+      },
       "caseId": "a1c9d24673c4dc18073b756020d4931d3592034fddf19411280c1f8bc48bcc45"
+    },
+    {
+      "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
+      "openedAt": "2026-10-01T07:09:59.451Z",
+      "entryPrice": 84150.4,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "evidenceFeatures": {
+        "fundingMedian": 0.6838328677188262,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 84150.4
+      },
+      "evidenceGuards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "evidenceClassification": "OBSERVED_DERIVED",
+      "status": "OPEN",
+      "outcomes": {},
+      "caseId": "f7e95a8b9fc83862192618c1c3a9cad59f5abf2cf26b6e2a8f63a0072a69684e"
     }
   ],
   "summary": {
     "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
-    "totalCases": 7,
-    "eligibleCases": 7,
+    "totalCases": 8,
+    "eligibleCases": 8,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 7,
+        "cases": 8,
         "horizons": {
           "h1": {
-            "n": 6,
-            "meanReturn": -0.00012208470861446719,
-            "positiveRate": 0.3333333333333333
+            "n": 7,
+            "meanReturn": 0.0011055846131991112,
+            "positiveRate": 0.42857142857142855
           },
           "h4": {
-            "n": 5,
-            "meanReturn": -0.0003858377331323659,
-            "positiveRate": 0.4
+            "n": 7,
+            "meanReturn": 0.0018105179415587788,
+            "positiveRate": 0.5714285714285714
           },
           "h24": {
             "n": 3,
@@ -286,24 +327,24 @@
       "minN": 30,
       "validationN": 100
     },
-    "eligibleCases": 7,
+    "eligibleCases": 8,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 7,
+        "cases": 8,
         "horizons": {
           "h1": {
-            "n": 6,
-            "meanReturn": -0.00012208470861446719,
-            "hitRate": 0.3333333333333333,
-            "wilsonLower95": 0.09676933255921684,
+            "n": 7,
+            "meanReturn": 0.0011055846131991112,
+            "hitRate": 0.42857142857142855,
+            "wilsonLower95": 0.15821692226262685,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
           "h4": {
-            "n": 5,
-            "meanReturn": -0.0003858377331323659,
-            "hitRate": 0.4,
-            "wilsonLower95": 0.11761823115925325,
+            "n": 7,
+            "meanReturn": 0.0018105179415587788,
+            "hitRate": 0.5714285714285714,
+            "wilsonLower95": 0.2504542304090258,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
