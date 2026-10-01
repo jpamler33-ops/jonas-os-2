@@ -47,7 +47,7 @@ test('keyless Bluesky public search supplies direct attention without X credenti
     bearerToken:'',blueskyEnabled:true,blueskyQueries:['memecoin'],now:()=>2000,
     fetchImpl:async url=>{
       const u=new URL(url);
-      assert.equal(u.hostname,'public.api.bsky.app');
+      assert.equal(u.hostname,'api.bsky.app');
       assert.equal(u.pathname,'/xrpc/app.bsky.feed.searchPosts');
       return {ok:true,status:200,json:async()=>({posts:[{
         uri:'at://did:plc:test/app.bsky.feed.post/abc',
@@ -73,6 +73,23 @@ test('single weak cashtag does not contaminate same-symbol radar rows',()=>{
   });
   assert.equal(out.rows[0].directSocialAttention.posts,0);
   assert.equal(out.rows[0].directSocialAttention.attentionBand,'NONE');
+});
+
+test('Bluesky search falls back to secondary AppView host',async()=>{
+  const calls=[];
+  const p=createMemecoinSocialAttentionProvider({
+    bearerToken:'',blueskyEnabled:true,blueskyQueries:['memecoin'],now:()=>2500,
+    blueskyBaseUrls:['https://api.bsky.app','https://public.api.bsky.app'],
+    fetchImpl:async url=>{
+      const u=new URL(url);calls.push(u.hostname);
+      if(u.hostname==='api.bsky.app')return {ok:false,status:403,json:async()=>({})};
+      return {ok:true,status:200,json:async()=>({posts:[]})};
+    }
+  });
+  const x=await p.fetchDiscovery();
+  assert.equal(x.bluesky.sourceReady,true);
+  assert.equal(x.bluesky.sourceBase,'https://public.api.bsky.app');
+  assert.deepEqual(calls,['api.bsky.app','public.api.bsky.app']);
 });
 
 test('direct social evidence maps to existing radar rows without claiming causality',()=>{
