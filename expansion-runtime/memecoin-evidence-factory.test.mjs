@@ -19,6 +19,7 @@ function row({
     volumeM5:20_000,volumeH1:70_000,buysM5:buys,sellsM5:sells,
     priceChangeM5:p5,priceChangeH1:35,pairCreatedAt:1_000_000-age*60_000,
     firstSeenAt:1_000_000,
+    signalNewPool:true,
     directSocialAttention:{posts:3,uniqueAuthors:2,engagement:40,attentionBand:attention},
     score:{stage,ageMinutes:age,researchPriorityScore:.7,attentionSignals:['SOCIAL_POSTS_RECENT'],riskFlags:[]},
     security:{evidenceGate:gate,source:'GOPLUS+RUGCHECK',coverage:{holderConcentrationIndependent:true},holderState:{top10Share:.30,largestHolderShare:.08}},
@@ -33,6 +34,7 @@ test('every discovered token becomes one independent PIT case, not one case per 
   assert.equal(s.version,MEMECOIN_EVIDENCE_FACTORY_VERSION);
   assert.equal(s.independentCases,2);
   assert.equal(s.counterfactuals.immediate.independentCases,0);
+  assert.equal(state.cases[0].initial.discoverySignals.includes('NEW_POOL'),true);
   assert.equal(s.policyMutationAllowed,false);
   assert.equal(s.canExecuteLive,false);
 });
