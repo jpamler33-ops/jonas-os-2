@@ -98,6 +98,11 @@ import {
 } from './shadow-strategy-league.mjs';
 import { STRATEGY_EVIDENCE_ENGINE_VERSION } from './strategy-evidence-engine.mjs';
 import {
+  loadParallelStrategyWorlds, saveParallelStrategyWorlds,
+  refreshParallelStrategyWorlds, parallelStrategyWorldsSummary,
+  PARALLEL_STRATEGY_WORLDS_VERSION
+} from './parallel-strategy-worlds.mjs';
+import {
   buildShadowTradeQualityModel, qualityLearnerSummary,
   SHADOW_TRADE_QUALITY_LEARNER_VERSION
 } from './shadow-trade-quality-learner.mjs';
@@ -1375,6 +1380,11 @@ const memecoinEvidenceFactoryFile = process.env.TCX_MEME_EVIDENCE_FACTORY_FILE |
 let loadedMemecoinEvidenceFactory = await loadMemecoinEvidenceFactoryState(memecoinEvidenceFactoryFile);
 const strategyLeagueFile = process.env.TCX_STRATEGY_LEAGUE_FILE || '/data/tcx-strategy-league.json';
 let loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
+const parallelStrategyWorldsFile=process.env.TCX_PARALLEL_STRATEGY_WORLDS_FILE||'/data/tcx-parallel-strategy-worlds.json';
+let loadedParallelStrategyWorlds=await loadParallelStrategyWorlds(parallelStrategyWorldsFile,{
+  baseStrategies:SHADOW_STRATEGIES,
+  now:Date.now()
+});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
 let loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
 let venueQualityRecords = loadedVenueQuality.records;
@@ -1415,6 +1425,12 @@ let strategyLeagueHealthy = loadedStrategyLeague.healthy;
 let strategyLeagueLastError = loadedStrategyLeague.error || null;
 loadedStrategyLeague=null;
 let strategyLeaguePersistenceQueue = Promise.resolve();
+let parallelStrategyWorldsState=loadedParallelStrategyWorlds.state;
+let parallelStrategyWorldsHealthy=loadedParallelStrategyWorlds.healthy;
+let parallelStrategyWorldsLastError=loadedParallelStrategyWorlds.error||null;
+const parallelStrategyWorldsRecoveredFromCorrupt=loadedParallelStrategyWorlds.recoveredFromCorrupt===true;
+loadedParallelStrategyWorlds=null;
+let parallelStrategyWorldsPersistenceQueue=Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let marketFabricMaintenanceQueue = Promise.resolve();
 let marketFabricLastMaintenanceAt = 0;
@@ -1449,6 +1465,7 @@ const institutionalConfig = Object.freeze({
   strategyLeague:{
     version:SHADOW_STRATEGY_LEAGUE_VERSION,
     evidenceEngineVersion:STRATEGY_EVIDENCE_ENGINE_VERSION,
+    parallelWorldsVersion:PARALLEL_STRATEGY_WORLDS_VERSION,
     canExecuteLive:false,
     enabled:strategyLeagueEnabled,
     strategies:SHADOW_STRATEGIES.map(x=>x.id),
@@ -1524,6 +1541,7 @@ try {
       shadowPortfolio:SHADOW_PORTFOLIO_LEDGER_VERSION,
       strategyLeague:SHADOW_STRATEGY_LEAGUE_VERSION,
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
+      parallelStrategyWorlds:PARALLEL_STRATEGY_WORLDS_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
@@ -3339,7 +3357,8 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
     baseNotionalQuote:strategyLeagueBaseNotionalQuote,
     memeMinExpectedReturn:autoShadowMemecoinMinExpectedReturn,
     memeMinDirectionalProbability:autoShadowMemecoinMinDirectionalProbability,
-    memeMinProbabilityEdge:autoShadowMemecoinMinProbabilityEdge
+    memeMinProbabilityEdge:autoShadowMemecoinMinProbabilityEdge,
+    worldState:parallelStrategyWorldsState
   });
 
   let placed=0;
@@ -3384,6 +3403,11 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
         leagueEvidenceGrade:candidate.leagueEvidenceGrade,
         leagueEvidenceFailedGates:candidate.leagueEvidenceFailedGates,
         leagueStatus:candidate.leagueStatus,
+        leagueWorldId:candidate.leagueWorldId,
+        leagueGenomeId:candidate.leagueGenomeId,
+        leagueGeneration:candidate.leagueGeneration,
+        leagueMutation:candidate.leagueMutation,
+        leagueWorldProfile:candidate.leagueWorldProfile,
         decisionKey:candidate.leagueDecisionKey,
         issuanceId:candidate.issuanceId,
         forecastFingerprint:candidate.forecastFingerprint,
