@@ -70,6 +70,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-specialist-wallets.mjs',
   'expansion-runtime/memecoin-early-radar.mjs',
   'expansion-runtime/memecoin-security-provider.mjs',
+  'expansion-runtime/memecoin-security-outcome-tracker.mjs',
   'expansion-runtime/memecoin-social-attention.mjs',
   'news-research-adapter.mjs',
   'biggj-official-intel-provider.mjs',
