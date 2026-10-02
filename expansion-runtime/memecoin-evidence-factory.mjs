@@ -1,6 +1,8 @@
 import {readFile,writeFile,rename} from 'node:fs/promises';
 
 export const MEMECOIN_EVIDENCE_FACTORY_VERSION='BIGGJ_MEMECOIN_EVIDENCE_FACTORY_V1';
+export const MEMECOIN_RETURN_QUALITY_GUARD_VERSION='BIGGJ_MEME_RETURN_QUALITY_GUARD_V1';
+export const MEMECOIN_RETURN_MAX_PRICE_RATIO=1_000_000;
 
 export const MEMECOIN_EVIDENCE_HORIZONS=Object.freeze({
   '5m':5*60_000,
@@ -38,9 +40,26 @@ function keyOf(chainId,tokenAddress){
   if(!c||!a)return '';
   return c+':'+(c==='solana'?a:a.toLowerCase());
 }
-function ret(entry,price){
+function returnQuality(entry,price){
   const e=finite(entry),p=finite(price);
-  return e>0&&p>0?p/e-1:null;
+  if(!(e>0)||!(p>0))return {
+    valid:false,reason:'NON_POSITIVE_OR_MISSING_PRICE',return:null,rawReturn:null,priceRatio:null,absLogMove:null
+  };
+  const priceRatio=p/e;
+  const rawReturn=priceRatio-1;
+  const absLogMove=Math.abs(Math.log(priceRatio));
+  if(!Number.isFinite(priceRatio)||!Number.isFinite(rawReturn)||!Number.isFinite(absLogMove))return {
+    valid:false,reason:'NON_FINITE_PRICE_RATIO',return:null,rawReturn:Number.isFinite(rawReturn)?rawReturn:null,
+    priceRatio:Number.isFinite(priceRatio)?priceRatio:null,absLogMove:Number.isFinite(absLogMove)?absLogMove:null
+  };
+  if(absLogMove>Math.log(MEMECOIN_RETURN_MAX_PRICE_RATIO))return {
+    valid:false,reason:'EXTREME_PRICE_RATIO_QUARANTINED',return:null,rawReturn,priceRatio,absLogMove
+  };
+  return {valid:true,reason:null,return:rawReturn,rawReturn,priceRatio,absLogMove};
+}
+function ret(entry,price){
+  const q=returnQuality(entry,price);
+  return q.valid?q.return:null;
 }
 function mean(xs=[]){
   const a=xs.filter(Number.isFinite);return a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
@@ -199,6 +218,7 @@ function recordObservation(rec,row,now,horizons=MEMECOIN_EVIDENCE_HORIZONS){
   const due=candidateHorizon(rec,now,horizons);
   if(!due)return {updated:false,horizon:null};
   rec.observations??={};
+  const rq=returnQuality(rec.initialPriceUsd,px);
   rec.observations[due.label]={
     targetMs:due.targetMs,
     observedAt:Number(now),
@@ -206,7 +226,10 @@ function recordObservation(rec,row,now,horizons=MEMECOIN_EVIDENCE_HORIZONS){
     lateByMs:due.lateByMs,
     quality:due.onTime?'ON_TIME':'LATE',
     priceUsd:px,
-    returnFromInitial:ret(rec.initialPriceUsd,px),
+    returnFromInitial:rq.valid?rq.return:null,
+    returnFromInitialRaw:rq.rawReturn,
+    returnQuality:rq.valid?'VALID':rq.reason,
+    priceRatioFromInitial:rq.priceRatio,
     liquidityUsd:finite(row?.liquidityUsd),
     marketCap:finite(row?.marketCap),
     volumeM5:finite(row?.volumeM5),
@@ -253,7 +276,8 @@ function patternKeys(c){
 function outcomeAt(c,label){
   const o=c?.observations?.[label];
   if(!o||o.quality!=='ON_TIME')return null;
-  return finite(o.returnFromInitial);
+  const q=returnQuality(c?.initialPriceUsd,o?.priceUsd);
+  return q.valid?q.return:null;
 }
 function aggregatePattern(rows,horizon){
   const vals=rows.map(x=>outcomeAt(x,horizon)).filter(Number.isFinite);
@@ -315,36 +339,73 @@ function discreteCheckpointSimulation(c,{entryLabel=null,stop=-.45,take=1.5}={})
     .filter(x=>x.quality==='ON_TIME'&&finite(x.priceUsd)>0&&finite(x.observedAt)>entryTime)
     .sort((a,b)=>Number(a.observedAt)-Number(b.observedAt));
   if(!obs.length)return null;
-  let maxRet=-Infinity,minRet=Infinity,exit=null;
+  let maxRet=-Infinity,minRet=Infinity,exit=null,largestRawAbsReturn=null;
+  const quarantineReasons=[];
   for(const o of obs){
-    const r=ret(entryPrice,o.priceUsd);if(r==null)continue;
+    const q=returnQuality(entryPrice,o.priceUsd);
+    if(Number.isFinite(q.rawReturn)){
+      const abs=Math.abs(q.rawReturn);
+      largestRawAbsReturn=largestRawAbsReturn==null?abs:Math.max(largestRawAbsReturn,abs);
+    }
+    if(!q.valid){
+      quarantineReasons.push(q.reason);
+      continue;
+    }
+    const r=q.return;
     maxRet=Math.max(maxRet,r);minRet=Math.min(minRet,r);
     if(!exit&&(r<=stop||r>=take))exit={label:o.label,return:r,reason:r<=stop?'STOP_CHECKPOINT':'TAKE_CHECKPOINT'};
   }
-  const last=obs[obs.length-1],finalReturn=ret(entryPrice,last.priceUsd);
+  const last=obs[obs.length-1],finalQ=returnQuality(entryPrice,last.priceUsd);
+  if(!finalQ.valid)quarantineReasons.push(finalQ.reason);
+  const uniqueReasons=[...new Set(quarantineReasons.filter(Boolean))];
+  const quarantined=uniqueReasons.length>0;
   return {
     entryLabel:entryLabel||'INITIAL',
     observations:obs.length,
     finalLabel:last.label,
-    finalReturn,
-    maxObservedReturn:Number.isFinite(maxRet)?maxRet:null,
-    minObservedReturn:Number.isFinite(minRet)?minRet:null,
-    checkpointExit:exit,
+    finalReturn:quarantined?null:finalQ.return,
+    rawFinalReturn:finalQ.rawReturn,
+    maxObservedReturn:quarantined?null:(Number.isFinite(maxRet)?maxRet:null),
+    minObservedReturn:quarantined?null:(Number.isFinite(minRet)?minRet:null),
+    checkpointExit:quarantined?null:exit,
+    dataQuality:quarantined?'QUARANTINED':'VALID',
+    quarantineReasons:uniqueReasons,
+    largestRawAbsReturn,
     semantics:'DISCRETE_CHECKPOINT_APPROXIMATION_NOT_INTRABAR_PATH'
   };
 }
 function counterfactualAggregate(cases,entryLabel=null){
   const sims=cases.map(c=>discreteCheckpointSimulation(c,{entryLabel})).filter(Boolean);
-  const finals=sims.map(x=>finite(x.finalReturn)).filter(Number.isFinite);
+  const usable=sims.filter(x=>x.dataQuality==='VALID');
+  const quarantined=sims.filter(x=>x.dataQuality!=='VALID');
+  const finals=usable.map(x=>finite(x.finalReturn)).filter(Number.isFinite);
+  const quarantineReasons={};
+  for(const sim of quarantined)for(const reason of sim.quarantineReasons||[]){
+    quarantineReasons[reason]=Number(quarantineReasons[reason]||0)+1;
+  }
+  const largestRawAbsReturn=sims
+    .map(x=>finite(x.largestRawAbsReturn))
+    .filter(Number.isFinite)
+    .reduce((m,x)=>m==null?x:Math.max(m,x),null);
   return {
     independentCases:sims.length,
+    usableCases:usable.length,
+    quarantinedCases:quarantined.length,
+    quarantineReasons,
+    largestRawAbsReturn,
     averageFinalReturn:mean(finals),
     medianFinalReturn:median(finals),
     positiveRate:finals.length?finals.filter(x=>x>0).length/finals.length:null,
     severeLossRate:finals.length?finals.filter(x=>x<=-.45).length/finals.length:null,
     moonshotRate:finals.length?finals.filter(x=>x>=1.5).length/finals.length:null,
-    stopCheckpointRate:sims.length?sims.filter(x=>x.checkpointExit?.reason==='STOP_CHECKPOINT').length/sims.length:null,
-    takeCheckpointRate:sims.length?sims.filter(x=>x.checkpointExit?.reason==='TAKE_CHECKPOINT').length/sims.length:null,
+    stopCheckpointRate:usable.length?usable.filter(x=>x.checkpointExit?.reason==='STOP_CHECKPOINT').length/usable.length:null,
+    takeCheckpointRate:usable.length?usable.filter(x=>x.checkpointExit?.reason==='TAKE_CHECKPOINT').length/usable.length:null,
+    qualityGuard:{
+      version:MEMECOIN_RETURN_QUALITY_GUARD_VERSION,
+      maxPriceRatio:MEMECOIN_RETURN_MAX_PRICE_RATIO,
+      action:'QUARANTINE_NOT_CLIP',
+      rawObservationPreserved:true
+    },
     semantics:'ONE_TOKEN_LAUNCH_EQUALS_ONE_INDEPENDENT_CASE'
   };
 }
@@ -436,12 +497,19 @@ export function memecoinEvidenceFactorySummary(input,{
 }={}){
   const state=stateFrom(input);
   const byHorizon={};
+  let quarantinedObservations=0;
+  const quarantineReasons={};
   for(const label of Object.keys(MEMECOIN_EVIDENCE_HORIZONS)){
-    const observations=state.cases.map(c=>c?.observations?.[label]).filter(Boolean);
-    const onTime=observations.filter(x=>x.quality==='ON_TIME');
-    const returns=onTime.map(x=>finite(x.returnFromInitial)).filter(Number.isFinite);
+    const rows=state.cases.map(c=>({c,o:c?.observations?.[label]})).filter(x=>x.o);
+    const onTime=rows.filter(x=>x.o.quality==='ON_TIME');
+    const qualified=onTime.map(({c,o})=>returnQuality(c?.initialPriceUsd,o?.priceUsd));
+    const returns=qualified.filter(x=>x.valid).map(x=>x.return).filter(Number.isFinite);
+    const quarantined=qualified.filter(x=>!x.valid);
+    quarantinedObservations+=quarantined.length;
+    for(const q of quarantined)quarantineReasons[q.reason]=Number(quarantineReasons[q.reason]||0)+1;
     byHorizon[label]={
-      observed:observations.length,onTime:onTime.length,late:observations.length-onTime.length,
+      observed:rows.length,onTime:onTime.length,late:rows.length-onTime.length,
+      usable:returns.length,quarantined:quarantined.length,
       averageReturn:mean(returns),medianReturn:median(returns),
       positiveRate:returns.length?returns.filter(x=>x>0).length/returns.length:null,
       severeLossRate:returns.length?returns.filter(x=>x<=-.45).length/returns.length:null,
@@ -458,6 +526,14 @@ export function memecoinEvidenceFactorySummary(input,{
     independentCases:state.cases.length,
     complete24h,
     byHorizon,
+    returnQualityGuard:{
+      version:MEMECOIN_RETURN_QUALITY_GUARD_VERSION,
+      maxPriceRatio:MEMECOIN_RETURN_MAX_PRICE_RATIO,
+      action:'QUARANTINE_NOT_CLIP',
+      rawObservationPreserved:true,
+      quarantinedObservations,
+      quarantineReasons
+    },
     counterfactuals:{
       immediate:counterfactualAggregate(state.cases,null),
       delay5m:counterfactualAggregate(state.cases,'5m'),
