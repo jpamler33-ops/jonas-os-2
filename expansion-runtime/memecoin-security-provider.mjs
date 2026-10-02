@@ -274,7 +274,13 @@ export function createMemecoinSecurityProvider({
   holderFallbackEnabled=true,
   holderCacheMs=10*60_000,
   solanaRpcUrl='',
-  solanaRpcUrls=['https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'],
+  solanaRpcUrls=[
+    'https://solana.api.onfinality.io/public',
+    'https://solana.drpc.org',
+    'https://solana-rpc.publicnode.com',
+    'https://api.mainnet.solana.com'
+  ],
+  honeypotBaseUrl='https://api.honeypot.is',
   evmRpcUrls={
     base:['https://base-rpc.publicnode.com','https://mainnet.base.org'],
     ethereum:['https://ethereum-rpc.publicnode.com','https://cloudflare-eth.com']
@@ -292,6 +298,7 @@ export function createMemecoinSecurityProvider({
   const normalizeUrls=v=>(Array.isArray(v)?v:[v]).map(x=>String(x||'').trim().replace(/\/+$/,'')).filter(Boolean);
   const solRpcs=[...new Set([...normalizeUrls(solanaRpcUrl),...normalizeUrls(solanaRpcUrls)])];
   const evmRpcs=Object.fromEntries(Object.entries(evmRpcUrls||{}).map(([k,v])=>[normChain(k),normalizeUrls(v)]));
+  const honeypotBase=String(honeypotBaseUrl||'').trim().replace(/\/+$/,'');
   const blockscoutBases=Object.fromEntries(Object.entries(blockscoutBaseUrls||{}).map(([k,v])=>[normChain(k),String(v||'').replace(/\/+$/,'')]));
   let lastRequestAt=0;
   async function throttle(){
@@ -380,42 +387,71 @@ export function createMemecoinSecurityProvider({
         rpcHost:new URL(hitRpc.url).hostname,sortedByBalance:true,independentFromGoPlus:true
       });
     }else if(chain==='base'||chain==='ethereum'){
-      const host=blockscoutBases[chain];
-      if(!host)throw new Error('BLOCKSCOUT_'+chain.toUpperCase()+'_NOT_CONFIGURED');
-      const encoded=encodeURIComponent(address);
-      let token=null,holders=null,holderTransport='V2',supplyTransport='V2';
-      try{token=await publicJson(host+'/api/v2/tokens/'+encoded);}catch{}
-      try{holders=await publicJson(host+'/api/v2/tokens/'+encoded+'/holders');}catch{}
-      let rows=Array.isArray(holders?.items)?holders.items:[];
-      if(!rows.length){
-        const legacy=await publicJson(host+'/api?module=token&action=getTokenHolders&contractaddress='+encoded+'&page=1&offset=20');
-        rows=Array.isArray(legacy?.result)?legacy.result:[];
-        holderTransport='LEGACY';
-      }
-      let totalSupplyRaw=token?.total_supply??token?.totalSupply;
-      let rpcHost=null;
-      if(finite(totalSupplyRaw)==null||finite(totalSupplyRaw)<=0){
+      const gid=chainIdForGoPlus(chain);
+      let honeypotError=null;
+      if(honeypotBase&&gid){
         try{
-          const legacyToken=await publicJson(host+'/api?module=token&action=getToken&contractaddress='+encoded);
-          totalSupplyRaw=legacyToken?.result?.totalSupply??legacyToken?.result?.total_supply;
-          supplyTransport='LEGACY';
-        }catch{}
+          const u=new URL(honeypotBase+'/v1/TopHolders');
+          u.searchParams.set('address',address);
+          u.searchParams.set('chainID',gid);
+          const hp=await publicJson(u.toString());
+          const rows=Array.isArray(hp?.holders)?hp.holders:[];
+          const totalSupplyRaw=hp?.totalSupply;
+          const shares=holderSharesFromRaw(rows.map(x=>x?.balance??x?.value),totalSupplyRaw);
+          if(!shares)throw new Error('HONEYPOT_TOP_HOLDERS_INCOMPLETE');
+          value=freeze({
+            source:'HONEYPOT_IS_TOP_HOLDERS',
+            sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
+            ...shares,totalSupplyRaw:String(totalSupplyRaw),holderCount:null,
+            holderTransport:'HONEYPOT_TOP_HOLDERS_V1',supplyTransport:'HONEYPOT_TOP_HOLDERS_V1',rpcHost:null,
+            sortedByBalance:true,independentFromGoPlus:true
+          });
+        }catch(err){
+          honeypotError=err instanceof Error?err.message:String(err);
+        }
       }
-      if(finite(totalSupplyRaw)==null||finite(totalSupplyRaw)<=0){
-        const rpcSupply=await evmTotalSupply(chain,address);
-        totalSupplyRaw=rpcSupply.amount;
-        rpcHost=rpcSupply.rpcHost;
-        supplyTransport='RPC_ETH_CALL';
+      if(!value){
+        const host=blockscoutBases[chain];
+        if(!host)throw new Error('EVM_HOLDER_EVIDENCE_FAILED:honeypot='+String(honeypotError||'UNAVAILABLE')+',blockscout=NOT_CONFIGURED');
+        const encoded=encodeURIComponent(address);
+        let token=null,holders=null,holderTransport='V2',supplyTransport='V2';
+        try{token=await publicJson(host+'/api/v2/tokens/'+encoded);}catch{}
+        try{holders=await publicJson(host+'/api/v2/tokens/'+encoded+'/holders');}catch{}
+        let rows=Array.isArray(holders?.items)?holders.items:[];
+        if(!rows.length){
+          try{
+            const legacy=await publicJson(host+'/api?module=token&action=getTokenHolders&contractaddress='+encoded+'&page=1&offset=20');
+            rows=Array.isArray(legacy?.result)?legacy.result:[];
+            holderTransport='LEGACY';
+          }catch{}
+        }
+        let totalSupplyRaw=token?.total_supply??token?.totalSupply;
+        let rpcHost=null;
+        if(finite(totalSupplyRaw)==null||finite(totalSupplyRaw)<=0){
+          try{
+            const legacyToken=await publicJson(host+'/api?module=token&action=getToken&contractaddress='+encoded);
+            totalSupplyRaw=legacyToken?.result?.totalSupply??legacyToken?.result?.total_supply;
+            supplyTransport='LEGACY';
+          }catch{}
+        }
+        if(finite(totalSupplyRaw)==null||finite(totalSupplyRaw)<=0){
+          try{
+            const rpcSupply=await evmTotalSupply(chain,address);
+            totalSupplyRaw=rpcSupply.amount;
+            rpcHost=rpcSupply.rpcHost;
+            supplyTransport='RPC_ETH_CALL';
+          }catch{}
+        }
+        const shares=holderSharesFromRaw(rows.map(x=>x?.value??x?.balance),totalSupplyRaw);
+        if(!shares)throw new Error('EVM_HOLDER_EVIDENCE_FAILED:honeypot='+String(honeypotError||'INCOMPLETE')+',blockscout=INCOMPLETE');
+        value=freeze({
+          source:'BLOCKSCOUT_'+chain.toUpperCase()+'_TOKEN_HOLDERS',
+          sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
+          ...shares,totalSupplyRaw:String(totalSupplyRaw),holderCount:finite(token?.holders_count??token?.holders),
+          holderTransport,supplyTransport,rpcHost,
+          sortedByBalance:true,independentFromGoPlus:true
+        });
       }
-      const shares=holderSharesFromRaw(rows.map(x=>x?.value??x?.balance),totalSupplyRaw);
-      if(!shares)throw new Error('BLOCKSCOUT_HOLDER_EVIDENCE_INCOMPLETE');
-      value=freeze({
-        source:'BLOCKSCOUT_'+chain.toUpperCase()+'_TOKEN_HOLDERS',
-        sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
-        ...shares,totalSupplyRaw:String(totalSupplyRaw),holderCount:finite(token?.holders_count??token?.holders),
-        holderTransport,supplyTransport,rpcHost,
-        sortedByBalance:true,independentFromGoPlus:true
-      });
     }else{
       value=freeze({sourceReady:false,source:'UNSUPPORTED',capturedAt:t,chainId:chain,tokenAddress:address,reason:'CHAIN_UNSUPPORTED'});
     }
@@ -508,7 +544,7 @@ export function createMemecoinSecurityProvider({
       holderFallback:{
         enabled:Boolean(holderFallbackEnabled),attempted:holderAttempted,
         resolvedPass:holderResolvedPass,resolvedAbstain:holderResolvedAbstain,
-        errors:holderErrors,sources:['SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS','BLOCKSCOUT_BASE_TOKEN_HOLDERS','BLOCKSCOUT_ETHEREUM_TOKEN_HOLDERS']
+        errors:holderErrors,sources:['SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS','HONEYPOT_IS_TOP_HOLDERS','BLOCKSCOUT_BASE_TOKEN_HOLDERS','BLOCKSCOUT_ETHEREUM_TOKEN_HOLDERS']
       }
     }});
   }
