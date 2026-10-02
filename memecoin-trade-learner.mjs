@@ -126,8 +126,21 @@ function summarize(raw,{priorWinRate=.5,priorStrength=10,returnPriorStrength=8}=
   const qualityScore=clamp(.42*posteriorWinRate+.28*clamp(.5+.5*Math.tanh(shrinkedMeanReturn/.35))+.18*(1-clamp(downside/.55))+.12*confidence);
   let label='UNCERTAIN';
   if(n>=8){
-    if((posteriorWinRate<=.40&&shrinkedMeanReturn<0)||shrinkedMeanReturn<=-.12||(severeLossRate!=null&&severeLossRate>=.45))label='LEARNED_BAD';
+    const compensatedTailRisk=
+      shrinkedMeanReturn>=.10&&
+      (moonshotRate??0)>=.20&&
+      (severeLossRate??0)<=.75;
+    const uncompensatedSevereTail=
+      (severeLossRate??0)>=.60&&
+      shrinkedMeanReturn<=.05&&
+      (moonshotRate??0)<.20;
+    if(
+      shrinkedMeanReturn<=-.12||
+      (posteriorWinRate<=.40&&shrinkedMeanReturn<0)||
+      uncompensatedSevereTail
+    )label='LEARNED_BAD';
     else if(posteriorWinRate>=.57&&shrinkedMeanReturn>=.08&&(severeLossRate==null||severeLossRate<=.25))label='LEARNED_GOOD';
+    else if(compensatedTailRisk)label='ASYMMETRIC_EDGE';
     else label='MIXED';
   }
   return Object.freeze({
@@ -186,6 +199,7 @@ export function buildMemecoinTradeLearningModel(state,{asOf=Date.now()}={}){
       groups:g4,
       global:g4All?.GLOBAL?.ALL||summarize(null),
       topGood:topPatterns(g4,'LEARNED_GOOD'),
+      topAsymmetric:topPatterns(g4,'ASYMMETRIC_EDGE'),
       topBad:topPatterns(g4,'LEARNED_BAD')
     },
     wallet5:{samples:c5.length,groups:g5,global:g5?.GLOBAL?.ALL||summarize(null),topGood:topPatterns(g5,'LEARNED_GOOD'),topBad:topPatterns(g5,'LEARNED_BAD')},
