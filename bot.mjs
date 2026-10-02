@@ -1985,6 +1985,7 @@ async function refreshBiggjDiscoveryLedgerRuntime(reason='PERIODIC'){
       temporalTemple:memecoinEarlySnapshot?.temporalTemple||null,
       evidenceFactory:memecoinEarlySnapshot?.evidenceFactory||null,
       parallelWorlds:parallelStrategyWorldsSummary(parallelStrategyWorldsState),
+      indicatorEvolution:indicatorEvolutionState,
       asOf:now,
       maxEntries:Math.max(100,Math.min(2000,Number(process.env.TCX_BIGGJ_DISCOVERY_LEDGER_MAX_ENTRIES||500))),
       maxEventsPerEntry:Math.max(8,Math.min(100,Number(process.env.TCX_BIGGJ_DISCOVERY_LEDGER_MAX_EVENTS||40)))
@@ -11835,6 +11836,20 @@ function missionControlData(){
     lastError:biggjDiscoveryLedgerLastError,
     file:biggjDiscoveryLedgerFile
   },
+  indicatorEvolution:{
+    ...indicatorEvolutionSummary(indicatorEvolutionState),
+    version:INDICATOR_EVOLUTION_ENGINE_VERSION,
+    featureFactoryVersion:TECHNICAL_INDICATOR_FACTORY_VERSION,
+    featureFactory:{
+      families:TECHNICAL_INDICATOR_EXPERIMENTS.length/4,
+      experiments:TECHNICAL_INDICATOR_EXPERIMENTS.length,
+      timeframes:['5m','15m','1h','4h']
+    },
+    healthy:indicatorEvolutionHealthy,
+    recoveredFromCorrupt:indicatorEvolutionRecoveredFromCorrupt,
+    lastError:indicatorEvolutionLastError,
+    file:indicatorEvolutionFile
+  },
   autonomousOperator:{
     ...biggjAutonomousOperatorSummary(autonomousOperatorState),
     version:BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
@@ -12697,6 +12712,10 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   discoveryLedger:{
     healthy:biggjDiscoveryLedgerHealthy,
     ...biggjDiscoveryLedgerSummary(biggjDiscoveryLedgerState,{asOf:Date.now()})
+  },
+  indicatorEvolution:{
+    healthy:indicatorEvolutionHealthy,
+    ...indicatorEvolutionSummary(indicatorEvolutionState)
   },
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
