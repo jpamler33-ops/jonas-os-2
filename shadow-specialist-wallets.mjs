@@ -413,9 +413,16 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     else if(softViolations.length>0&&!hardSafe)results.contrarianRejectedByHardGuard++;
 
     const probeScore=contrarianEligible?stableProbeScore(row):1;
+    // Exploration must actually happen: when the lane is empty, bootstrap one
+    // hard-safe single-rule probe instead of waiting indefinitely for the
+    // probabilistic sampler. Further probes still respect the configured rate.
+    const bootstrapContrarian=
+      contrarianEligible&&
+      openContrarian()===0&&
+      results.contrarianOpened===0;
     const contrarianSelected=
       contrarianEligible&&
-      probeScore<Math.max(0,Math.min(1,Number(contrarianProbeRate)||0))&&
+      (bootstrapContrarian||probeScore<Math.max(0,Math.min(1,Number(contrarianProbeRate)||0)))&&
       openContrarian()<Math.max(0,Number(contrarianMaxOpen)||0);
 
     if(!baseEligible&&!contrarianSelected)continue;
@@ -459,6 +466,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       entryResearchLane:researchLane,
       entryContrarianViolations:contrarianSelected?clone(softViolations):[],
       entryContrarianProbeScore:contrarianSelected?probeScore:null,
+      entryContrarianBootstrap:contrarianSelected&&bootstrapContrarian,
       peakUnrealizedReturnPct:0,
       troughUnrealizedReturnPct:0,
       entryMarketFeatures:{
