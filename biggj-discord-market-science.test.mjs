@@ -58,6 +58,18 @@ const snapshot={
         }
       }
     },
+    parallelStrategyWorlds:{
+      worldCount:2,
+      generations:5,
+      evolutions:3,
+      worlds:[
+        {strategyId:'EDGE_HUNTER',label:'Edge Hunter',generation:3,doctrine:{name:'Edge World'},currentGenome:{status:'MEASURING',mutation:{field:'minProbabilityEdge',before:.14,after:.155,direction:'TIGHTEN'},evidence:{closed:5,winRate:.6}}},
+        {strategyId:'DEFENSIVE',label:'Defensive',generation:2,doctrine:{name:'Robustness World'},currentGenome:{status:'AWAITING_FORWARD_TRADES',mutation:{field:'minDirectionalProbability',before:.64,after:.6525,direction:'TIGHTEN'},evidence:{closed:0,winRate:null}}}
+      ],
+      council:{convergences:[{field:'minProbabilityEdge',direction:'TIGHTEN',worlds:['WORLD_EDGE_HUNTER','WORLD_SCOUT']}],crossPollination:[{sourceWorld:'WORLD_EDGE_HUNTER'}]},
+      automaticPrimaryMutation:false,
+      canExecuteLive:false
+    },
     biggjAutopilotSupervisor:{
       state:'WAITING_FOR_DATA',
       humanActionRequired:false,
@@ -85,6 +97,10 @@ test('science home presents knowledge and new Temporal Temple findings before tr
   assert.match(text,/S17 → S45/);
   assert.match(text,/verworfen: S12 → S03/);
   assert.match(text,/keine automatische Promotion/);
+  assert.match(text,/PARALLEL WORLDS · STRATEGY EVOLUTION/);
+  assert.match(text,/Edge World/);
+  assert.match(text,/Gen 3/);
+  assert.match(text,/automatische PRIMARY-Mutation gesperrt/);
   assert.match(text,/Reality > models/);
   assert.ok(p.components[0].components.some(x=>x.custom_id==='dc7:science:world'));
 });
