@@ -459,7 +459,7 @@ test('passive data-quality quarantine is waiting for data, not a human escalatio
   assert.equal(out.actions.length,0);
 });
 
-test('non-passive repeated data-quality block still escalates',()=>{
+test('non-passive repeated data-quality block stays visible without inventing a human action',()=>{
   let state=createBiggjAutonomousOperator({asOf:now-10_000});
   for(let i=0;i<3;i++){
     const out=refreshBiggjAutonomousOperator(state,{
@@ -478,7 +478,9 @@ test('non-passive repeated data-quality block still escalates',()=>{
   }
   const summary=biggjAutonomousOperatorSummary(state);
   assert.equal(summary.waitingForData,false);
-  assert.equal(summary.operatorNeeded,true);
-  assert.equal(summary.mode,'ESCALATION_REQUIRED');
-  assert.match(summary.humanJobRemaining,/DATA_QUALITY_BLOCKED/);
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.mode,'AUTO_MONITORING');
+  assert.equal(summary.humanJobRemaining,'EXCEPTIONS_ONLY');
+  assert.equal(summary.dataQualityIncidents,1);
+  assert.equal(summary.humanActionIncidents,0);
 });
