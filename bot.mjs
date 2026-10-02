@@ -6,7 +6,7 @@ import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } fro
 import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION } from './biggj-public-trader-watch.mjs';
 import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, scoreEarlyMemecoin, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
 import { createMemecoinSecurityProvider, MEMECOIN_SECURITY_PROVIDER_VERSION } from './expansion-runtime/memecoin-security-provider.mjs';
-import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, observeMemecoinSecurityOutcomes, dueMemecoinSecurityOutcomeFollowups, memecoinSecurityOutcomeSummary, MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION } from './expansion-runtime/memecoin-security-outcome-tracker.mjs';
+import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, observeMemecoinSecurityOutcomes, dueMemecoinSecurityOutcomeFollowups, recordMemecoinSecurityOutcomeFollowupAttempt, memecoinSecurityOutcomeSummary, MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION } from './expansion-runtime/memecoin-security-outcome-tracker.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
 import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -4816,9 +4816,19 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     for(const due of dueOutcomeFollowups){
       try{
         const row=await memecoinEarlyProvider.fetchTokenSnapshot(due.chainId,due.tokenAddress,{force:false});
-        if(row)outcomeFollowupRows.push(row);
+        if(row){
+          outcomeFollowupRows.push(row);
+        }else{
+          memecoinSecurityOutcomeState=recordMemecoinSecurityOutcomeFollowupAttempt(
+            memecoinSecurityOutcomeState,due.key,{at:Date.now(),error:'TOKEN_SNAPSHOT_EMPTY'}
+          ).state;
+        }
       }catch(err){
-        recordError(observability,{scope:'memecoin_security_outcomes.followup',message:err instanceof Error?err.message:String(err)});
+        const message=err instanceof Error?err.message:String(err);
+        memecoinSecurityOutcomeState=recordMemecoinSecurityOutcomeFollowupAttempt(
+          memecoinSecurityOutcomeState,due.key,{at:Date.now(),error:message}
+        ).state;
+        recordError(observability,{scope:'memecoin_security_outcomes.followup',message});
       }
     }
     let outcomeFollowupResult={created:0,updated:0,matured:0,records:memecoinSecurityOutcomeState?.records?.length||0};
