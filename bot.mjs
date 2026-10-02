@@ -11352,6 +11352,11 @@ function currentPersistenceCompatibility(){
         healthy:autonomousOperatorHealthy,
         recoveredFromCorrupt:false,
         loadedSchema:BIGGJ_AUTONOMOUS_OPERATOR_VERSION
+      },
+      INDICATOR_EVOLUTION:{
+        healthy:indicatorEvolutionHealthy,
+        recoveredFromCorrupt:indicatorEvolutionRecoveredFromCorrupt,
+        loadedSchema:INDICATOR_EVOLUTION_ENGINE_VERSION
       }
     },
     localFilePersistence:true,
