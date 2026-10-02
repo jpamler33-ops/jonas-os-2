@@ -4110,6 +4110,12 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
     });
     const wallets=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets||{};
     const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{};
+    const outcome=memecoinSecurityOutcomeSummary(memecoinSecurityOutcomeState,{
+      asOf:Date.now(),
+      minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
+    });
+    const fallback1h=outcome.cohorts?.PASS_HOLDER_FALLBACK?.horizons?.['1h']||{};
+    const native1h=outcome.cohorts?.PASS_NATIVE?.horizons?.['1h']||{};
     const text=[
       '🐸 BIGGJ MEMECOIN EARLY RADAR','',
       '**Ziel: neue Aufmerksamkeit erkennen, bevor Market Cap/Trending groß werden.**',
@@ -4128,11 +4134,15 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       '• X Recent Search: '+(memecoinSocialSnapshot?.x?.sourceReady?'LIVE':memecoinSocialSnapshot?.x?.configured?'DEGRADED':'TOKEN FEHLT')+'.','',
       'ON-CHAIN SECURITY',
       '• GoPlus: Honeypot/Trade-Sperren · Mint/Freeze/Admin-Rechte · Holder-Konzentration · LP-Lock-Evidenz.',
-      '• Holder-Fallback: Solana RPC + Blockscout Base/Ethereum; nur wenn GoPlus genau bei Holder-Evidenz UNKNOWN ist.',
+      '• Holder-Fallback: RugCheck/Solana-RPC sowie Honeypot.is/Blockscout für Base/Ethereum; nur bei fehlender Holder-Evidenz.',
       '• Kritische Evidenz => ABSTAIN; fehlende Evidenz => UNKNOWN und kein neuer Wallet-4-Entry.',
       '• Security-Flags sind Evidenzfelder, **keine Rug-Pull-Wahrscheinlichkeit**.','',
+      'SECURITY OUTCOME LAB',
+      '• '+Number(outcome.records||0)+' Kandidaten werden über 5m / 15m / 1h / 6h / 12h nachverfolgt.',
+      '• 1h Fallback-PASS n='+Number(fallback1h.matured||0)+' · Native-PASS n='+Number(native1h.matured||0)+' · '+(outcome.comparison?.ready?'Vergleich messbar':'noch Stichprobe sammeln')+'.',
+      '• Schwellen werden **nicht** automatisch verändert; erst belastbare Shadow-Stichprobe.','',
       'Alles bleibt SHADOW_ONLY / canExecuteLive:false.','',
-      'Quellen: DEX Screener + GeckoTerminal + GoPlus'+(memecoinSocialSnapshot?.sourceReady?' + X Recent Search':''),
+      'Quellen: DEX Screener + GeckoTerminal + GoPlus + RugCheck/Honeypot.is'+(memecoinSocialSnapshot?.sourceReady?' + direkte Social-Suche':''),
       memecoinEarlyLastError?'Degraded: '+String(memecoinEarlyLastError).slice(0,280):'Source: LIVE'
     ].join('\n');
     recordOperation(observability,{name:'memecoin_radar',ok:true,latencyMs:Date.now()-started});
