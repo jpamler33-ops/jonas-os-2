@@ -1195,6 +1195,51 @@ test('gzip persistence snapshots mutable tracker fields once before async sideca
   assert.equal(r.healthy,true);
 });
 
+test('gzip persistence binds tracker membership before async journal serialization can rotate the live tracker',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-tracker-generation-race-'));
+  const file=path.join(dir,'runtime.json.gz');
+  const r=await openInstitutionalForecastRuntime(file,{snapshotCompression:'gzip'});
+  seedInstitutionalForecastRuntimeFromEpisodes(r,Array.from({length:30},(_,i)=>episode(i)));
+  const inp=input();
+  const issued=issueInstitutionalForecast(r,{
+    input:inp,
+    scientificValidity:science(inp.asOf,'PASS'),
+    dataSafety:{state:'NORMAL'},
+    researchValidity:{status:'VALID'},
+    traceContext:traceContext(inp),
+    generatedAt:inp.asOf+100
+  });
+  assert.ok(r.intelligence.tracker.records.has(issued.forecastId));
+
+  let rotated=false;
+  const journalRace={};
+  Object.defineProperty(journalRace,'rotateTracker',{
+    enumerable:true,
+    get(){
+      if(!rotated){
+        rotated=true;
+        r.intelligence.tracker.records.delete(issued.forecastId);
+      }
+      return 'ROTATED_AFTER_CAPTURE';
+    }
+  });
+  r.journal.entries.push(journalRace);
+
+  const meta=await saveInstitutionalForecastRuntime(r);
+  assert.equal(rotated,true);
+  assert.equal(r.intelligence.tracker.records.has(issued.forecastId),false);
+  assert.equal(meta.persistenceManifest.status,'VERIFIED');
+
+  const reopened=await openInstitutionalForecastRuntime(file,{
+    snapshotCompression:'gzip',
+    config:r.engine.configSnapshot()
+  });
+  assert.equal(reopened.recoveredFromCorrupt,false);
+  assert.equal(reopened.persistenceManifestStatus,'VERIFIED');
+  assert.ok(reopened.intelligence.tracker.records.has(issued.forecastId));
+  assert.equal(reopened.issuances.length,1);
+});
+
 test('gzip persistence snapshots mutable issuance objects once before async sidecar I/O',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-issuance-race-'));
   const file=path.join(dir,'runtime.json.gz');

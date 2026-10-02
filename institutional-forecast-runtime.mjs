@@ -969,14 +969,14 @@ function trackerArchiveRowForPersistence(record){
   };
 }
 
-function intelligencePersistenceView(service,{externalizeTrackerArchive=false}={}){
-  const trackerRows=[...(service?.tracker?.records?.values?.()??[])];
+function intelligencePersistenceView(service,{externalizeTrackerArchive=false,trackerRows=null}={}){
+  const rows=Array.isArray(trackerRows)?trackerRows:[...(service?.tracker?.records?.values?.()??[])];
   return {
     version:1,
     sequence:Number(service?.sequence||0),
     tracker:{
       version:1,
-      records:trackerRows.map(record=>({
+      records:rows.map(record=>({
         ...record,
         report:trackerReportForPersistence(record?.report),
         ...(externalizeTrackerArchive?{issueState:null,revisions:[],thesisMemory:null}:null)
@@ -990,13 +990,16 @@ function intelligencePersistenceView(service,{externalizeTrackerArchive=false}={
   };
 }
 
-function externalizedHotSnapshot(runtime,savedAt=Date.now()){
+function externalizedHotSnapshot(runtime,savedAt=Date.now(),{trackerRows=null,journalEntries=null}={}){
   return {
     version:INSTITUTIONAL_FORECAST_RUNTIME_VERSION,
     savedAt,
     engine:engineSnapshot(runtime.engine),
-    journal:{version:3,entries:runtime.journal.entries},
-    intelligence:intelligencePersistenceView(runtime.intelligence,{externalizeTrackerArchive:true}),
+    journal:{version:3,entries:Array.isArray(journalEntries)?journalEntries:runtime.journal.entries},
+    intelligence:intelligencePersistenceView(runtime.intelligence,{
+      externalizeTrackerArchive:true,
+      trackerRows
+    }),
     issuances:[]
   };
 }
@@ -1005,10 +1008,26 @@ export async function saveInstitutionalForecastRuntime(runtime){
   if(!runtime?.healthy) throw new Error('institutional forecast runtime unhealthy: fail closed');
   await mkdir(path.dirname(runtime.filePath),{recursive:true});
   const externalizeArchives=runtime.snapshotCompression==='gzip';
-  // In compressed serving mode, do not materialize a second full copy of
-  // issuances/tracker state before immediately externalizing it to sidecars.
+  // Capture every identity-bearing collection before the first async write.
+  // Sidecar streaming deliberately yields to the event loop; if the bounded
+  // tracker rotates in that window, re-reading it later can produce a main
+  // snapshot that references tracker IDs absent from its archive.
+  const capturedTrackerRows=externalizeArchives
+    ?[...(runtime?.intelligence?.tracker?.records?.values?.()??[])]
+    :null;
+  const capturedTrackerArchiveRows=externalizeArchives
+    ?capturedTrackerRows.map(trackerArchiveRowForPersistence)
+    :null;
+  const capturedJournalEntries=externalizeArchives
+    ?runtime.journal.entries.slice()
+    :null;
+  // In compressed serving mode, do not materialize serialized Buffer arrays.
+  // We only freeze bounded collection membership; row serialization still streams.
   const payload=externalizeArchives
-    ?externalizedHotSnapshot(runtime)
+    ?externalizedHotSnapshot(runtime,Date.now(),{
+      trackerRows:capturedTrackerRows,
+      journalEntries:capturedJournalEntries
+    })
     :institutionalForecastRuntimeSnapshot(runtime);
   let persistencePayload=externalizeArchives
     ?payload
@@ -1124,12 +1143,10 @@ export async function saveInstitutionalForecastRuntime(runtime){
       };
     }
     if(externalizeArchives){
-      const trackerRows=[...(runtime?.intelligence?.tracker?.records?.values?.()??[])];
-      // Snapshot/project exactly once before any asynchronous I/O. The tracker
-      // is live and may receive revisions while gzip yields to the event loop;
-      // hashing one view and serializing a later view caused production
-      // fingerprint mismatches and correctly failed the runtime closed.
-      const trackerArchiveRows=trackerRows.map(trackerArchiveRowForPersistence);
+      // Use the exact tracker generation captured with the hot snapshot. Do not
+      // re-read the live bounded Map after journal/engine I/O has yielded.
+      const trackerRows=capturedTrackerRows;
+      const trackerArchiveRows=capturedTrackerArchiveRows;
       const maxTrackerArchiveBytes=trackerArchiveByteLimit(runtime.maxTrackerArchiveBytes);
       const trackerCandidateSlot=runtime.trackerArchiveSlot==='a'?'b':'a';
       const trackerCandidatePath=trackerArchivePath(runtime.filePath,trackerCandidateSlot);
