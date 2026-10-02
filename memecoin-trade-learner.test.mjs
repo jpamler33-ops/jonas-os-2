@@ -78,6 +78,23 @@ test('sparse evidence stays neutral',()=>{
   assert.equal(scored.evidence.level,'PRIOR');
 });
 
+test('legacy W4 trades without entry microstructure remain diagnostic and cannot block new candidates',()=>{
+  const legacy=Array.from({length:40},(_,i)=>({
+    walletId:WALLET_4_MEME_SCOUT,positionKey:'legacy'+i,chainId:'solana',tokenAddress:'L'+i,
+    execution:'SHADOW_ONLY',canExecuteLive:false,status:'CLOSED',
+    openedAt:1000+i,closedAt:2000+i,entryStage:'NEW_NOW',entryResearchPriorityScore:.7,
+    realizedReturnPct:-.6,realizedNetPnlQuote:-60,closeReason:'MEME_STOP'
+  }));
+  const model=buildMemecoinTradeLearningModel(state(legacy));
+  const scored=scoreMemecoinScoutCandidate(model,candidate());
+  assert.equal(model.wallet4.samples,40);
+  assert.equal(model.wallet4.featureCompleteSamples,0);
+  assert.equal(model.wallet4.legacyOrIncompleteSamples,40);
+  assert.equal(model.wallet4.global.label,'LEARNED_BAD');
+  assert.equal(scored.action,'NEUTRAL');
+  assert.equal(scored.evidence.level,'PRIOR');
+});
+
 test('W5 copy outcomes are learned separately from W4 scout policy',()=>{
   const w5=Array.from({length:10},(_,i)=>copyClosed(i,-.25));
   const model=buildMemecoinTradeLearningModel(state([],w5));

@@ -150,6 +150,12 @@ function buildGroups(rows,keyFn,shapeFn){
 function eligibleClosed(wallet){
   return (wallet?.closed||[]).filter(x=>x?.execution==='SHADOW_ONLY'&&x?.canExecuteLive===false&&finite(x?.realizedReturnPct)!=null&&finite(x?.realizedNetPnlQuote)!=null);
 }
+function hasActionableScoutEntryFeatures(row={}){
+  const f=row?.entryMarketFeatures;
+  if(!f||typeof f!=='object')return false;
+  return finite(f.ageMinutes)!=null&&finite(f.liquidityUsd)!=null&&
+    finite(f.buysM5)!=null&&finite(f.sellsM5)!=null&&finite(f.priceChangeM5)!=null;
+}
 function topPatterns(groups,label,limit=5){
   const rows=[];
   for(const [level,g] of Object.entries(groups||{}))for(const [key,s] of Object.entries(g||{})){
@@ -160,12 +166,21 @@ function topPatterns(groups,label,limit=5){
 }
 export function buildMemecoinTradeLearningModel(state,{asOf=Date.now()}={}){
   const w4=state?.wallets?.[WALLET_4_MEME_SCOUT]||{},w5=state?.wallets?.[WALLET_5_MEME_COPY]||{};
-  const c4=eligibleClosed(w4),c5=eligibleClosed(w5);
-  const g4=buildGroups(c4,w4Keys,x=>memecoinScoutFeatureShape(x,x.openedAt||asOf));
+  const c4=eligibleClosed(w4),c4Actionable=c4.filter(hasActionableScoutEntryFeatures),c5=eligibleClosed(w5);
+  const g4=buildGroups(c4Actionable,w4Keys,x=>memecoinScoutFeatureShape(x,x.openedAt||asOf));
+  const g4All=buildGroups(c4,w4Keys,x=>memecoinScoutFeatureShape(x,x.openedAt||asOf));
   const g5=buildGroups(c5,w5Keys,memecoinCopyFeatureShape);
   const core={
     version:MEMECOIN_TRADE_LEARNER_VERSION,asOf:Number(asOf),
-    wallet4:{samples:c4.length,groups:g4,global:g4?.GLOBAL?.ALL||summarize(null),topGood:topPatterns(g4,'LEARNED_GOOD'),topBad:topPatterns(g4,'LEARNED_BAD')},
+    wallet4:{
+      samples:c4.length,
+      featureCompleteSamples:c4Actionable.length,
+      legacyOrIncompleteSamples:Math.max(0,c4.length-c4Actionable.length),
+      groups:g4,
+      global:g4All?.GLOBAL?.ALL||summarize(null),
+      topGood:topPatterns(g4,'LEARNED_GOOD'),
+      topBad:topPatterns(g4,'LEARNED_BAD')
+    },
     wallet5:{samples:c5.length,groups:g5,global:g5?.GLOBAL?.ALL||summarize(null),topGood:topPatterns(g5,'LEARNED_GOOD'),topBad:topPatterns(g5,'LEARNED_BAD')},
     execution:'SHADOW_ONLY',canExecuteLive:false,
     learningMode:'ABSTAIN_ONLY_AFTER_MINIMUM_EVIDENCE',
@@ -186,7 +201,8 @@ export function scoreMemecoinScoutCandidate(model,row,{
   minBlockConfidence=.44,minBoostConfidence=.44
 }={}){
   const shape=memecoinScoutFeatureShape(row);
-  const chosen=choose(model?.wallet4?.groups,w4Keys(shape),{EXACT:minExactSamples,CONTEXT:minContextSamples,CORE:minCoreSamples,CHAIN:minChainSamples,GLOBAL:30});
+  const decisionKeys=w4Keys(shape).filter(([level])=>['EXACT','CONTEXT','CORE'].includes(level));
+  const chosen=choose(model?.wallet4?.groups,decisionKeys,{EXACT:minExactSamples,CONTEXT:minContextSamples,CORE:minCoreSamples});
   let action='NEUTRAL',adjustment=0;
   if(chosen.label==='LEARNED_BAD'&&chosen.confidence>=minBlockConfidence){action='BLOCK';adjustment=-.20;}
   else if(chosen.label==='LEARNED_GOOD'&&chosen.confidence>=minBoostConfidence){action='BOOST';adjustment=.05;}
@@ -207,7 +223,14 @@ export function scoreMemecoinCopyCandidate(model,pos,{
 export function memecoinTradeLearningSummary(model){
   return Object.freeze({
     version:MEMECOIN_TRADE_LEARNER_VERSION,
-    wallet4:{samples:model?.wallet4?.samples||0,global:model?.wallet4?.global||null,topGood:model?.wallet4?.topGood||[],topBad:model?.wallet4?.topBad||[]},
+    wallet4:{
+      samples:model?.wallet4?.samples||0,
+      featureCompleteSamples:model?.wallet4?.featureCompleteSamples||0,
+      legacyOrIncompleteSamples:model?.wallet4?.legacyOrIncompleteSamples||0,
+      global:model?.wallet4?.global||null,
+      topGood:model?.wallet4?.topGood||[],
+      topBad:model?.wallet4?.topBad||[]
+    },
     wallet5:{samples:model?.wallet5?.samples||0,global:model?.wallet5?.global||null,topGood:model?.wallet5?.topGood||[],topBad:model?.wallet5?.topBad||[]},
     learningMode:model?.learningMode||'ABSTAIN_ONLY_AFTER_MINIMUM_EVIDENCE',
     automaticPositiveOverride:false,execution:'SHADOW_ONLY',canExecuteLive:false
