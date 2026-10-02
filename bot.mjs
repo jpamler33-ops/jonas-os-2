@@ -103,6 +103,11 @@ import {
   PARALLEL_STRATEGY_WORLDS_VERSION
 } from './parallel-strategy-worlds.mjs';
 import {
+  loadBiggjDiscoveryLedger, saveBiggjDiscoveryLedger,
+  refreshBiggjDiscoveryLedger, biggjDiscoveryLedgerSummary,
+  BIGGJ_DISCOVERY_LEDGER_VERSION
+} from './biggj-discovery-ledger.mjs';
+import {
   buildShadowTradeQualityModel, qualityLearnerSummary,
   SHADOW_TRADE_QUALITY_LEARNER_VERSION
 } from './shadow-trade-quality-learner.mjs';
@@ -1398,6 +1403,8 @@ let loadedParallelStrategyWorlds=await loadParallelStrategyWorlds(parallelStrate
   baseStrategies:SHADOW_STRATEGIES,
   now:Date.now()
 });
+const biggjDiscoveryLedgerFile=process.env.TCX_BIGGJ_DISCOVERY_LEDGER_FILE||'/data/tcx-biggj-discovery-ledger.json';
+let loadedBiggjDiscoveryLedger=await loadBiggjDiscoveryLedger(biggjDiscoveryLedgerFile,{now:Date.now()});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
 let loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
 let venueQualityRecords = loadedVenueQuality.records;
@@ -1450,6 +1457,12 @@ let parallelStrategyWorldsLastError=loadedParallelStrategyWorlds.error||null;
 const parallelStrategyWorldsRecoveredFromCorrupt=loadedParallelStrategyWorlds.recoveredFromCorrupt===true;
 loadedParallelStrategyWorlds=null;
 let parallelStrategyWorldsPersistenceQueue=Promise.resolve();
+let biggjDiscoveryLedgerState=loadedBiggjDiscoveryLedger.state;
+let biggjDiscoveryLedgerHealthy=loadedBiggjDiscoveryLedger.healthy;
+let biggjDiscoveryLedgerLastError=loadedBiggjDiscoveryLedger.error||null;
+const biggjDiscoveryLedgerRecoveredFromCorrupt=loadedBiggjDiscoveryLedger.recoveredFromCorrupt===true;
+loadedBiggjDiscoveryLedger=null;
+let biggjDiscoveryLedgerPersistenceQueue=Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let marketFabricMaintenanceQueue = Promise.resolve();
 let marketFabricLastMaintenanceAt = 0;
@@ -1485,6 +1498,7 @@ const institutionalConfig = Object.freeze({
     version:SHADOW_STRATEGY_LEAGUE_VERSION,
     evidenceEngineVersion:STRATEGY_EVIDENCE_ENGINE_VERSION,
     parallelWorldsVersion:PARALLEL_STRATEGY_WORLDS_VERSION,
+    discoveryLedgerVersion:BIGGJ_DISCOVERY_LEDGER_VERSION,
     canExecuteLive:false,
     enabled:strategyLeagueEnabled,
     strategies:SHADOW_STRATEGIES.map(x=>x.id),
@@ -1561,6 +1575,7 @@ try {
       strategyLeague:SHADOW_STRATEGY_LEAGUE_VERSION,
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
       parallelStrategyWorlds:PARALLEL_STRATEGY_WORLDS_VERSION,
+      biggjDiscoveryLedger:BIGGJ_DISCOVERY_LEDGER_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
@@ -1922,6 +1937,64 @@ async function persistParallelStrategyWorlds(reason='mutation'){
   return parallelStrategyWorldsPersistenceQueue;
 }
 
+async function persistBiggjDiscoveryLedger(reason='mutation'){
+  biggjDiscoveryLedgerPersistenceQueue=biggjDiscoveryLedgerPersistenceQueue.then(async()=>{
+    try{
+      biggjDiscoveryLedgerState=await saveBiggjDiscoveryLedger(biggjDiscoveryLedgerFile,biggjDiscoveryLedgerState);
+      biggjDiscoveryLedgerHealthy=true;
+      biggjDiscoveryLedgerLastError=null;
+      return true;
+    }catch(err){
+      biggjDiscoveryLedgerHealthy=false;
+      biggjDiscoveryLedgerLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'biggj_discovery_ledger.persistence',message:biggjDiscoveryLedgerLastError});
+      console.error('[BIGGJ_DISCOVERY_LEDGER_PERSIST_FAILED]',reason,biggjDiscoveryLedgerLastError);
+      return false;
+    }
+  });
+  return biggjDiscoveryLedgerPersistenceQueue;
+}
+
+async function refreshBiggjDiscoveryLedgerRuntime(reason='PERIODIC'){
+  const now=Date.now();
+  try{
+    const refreshed=refreshBiggjDiscoveryLedger(biggjDiscoveryLedgerState,{
+      temporalTemple:memecoinEarlySnapshot?.temporalTemple||null,
+      evidenceFactory:memecoinEarlySnapshot?.evidenceFactory||null,
+      parallelWorlds:parallelStrategyWorldsSummary(parallelStrategyWorldsState),
+      asOf:now,
+      maxEntries:Math.max(100,Math.min(2000,Number(process.env.TCX_BIGGJ_DISCOVERY_LEDGER_MAX_ENTRIES||500))),
+      maxEventsPerEntry:Math.max(8,Math.min(100,Number(process.env.TCX_BIGGJ_DISCOVERY_LEDGER_MAX_EVENTS||40)))
+    });
+    biggjDiscoveryLedgerState=refreshed.state;
+    if(refreshed.changed)await persistBiggjDiscoveryLedger(reason);
+    const summary=biggjDiscoveryLedgerSummary(biggjDiscoveryLedgerState,{asOf:now});
+    if(refreshed.delta.newEntries||refreshed.delta.statusChanges){
+      console.log('[BIGGJ_DISCOVERY_LEDGER]',JSON.stringify({
+        reason,
+        total:summary.total,
+        robust:summary.robust,
+        validated:summary.validated,
+        falsified:summary.falsified,
+        newEntries:refreshed.delta.newEntries,
+        statusChanges:refreshed.delta.statusChanges,
+        milestones:refreshed.delta.milestones,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false,
+        automaticPromotion:false
+      }));
+    }
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    biggjDiscoveryLedgerHealthy=false;
+    biggjDiscoveryLedgerLastError=msg;
+    recordError(observability,{scope:'biggj_discovery_ledger',message:msg});
+    console.error('[BIGGJ_DISCOVERY_LEDGER_ERROR]',reason,msg);
+    return biggjDiscoveryLedgerSummary(biggjDiscoveryLedgerState,{asOf:now});
+  }
+}
+
 async function refreshParallelStrategyWorldsRuntime(reason='PERIODIC'){
   const now=Date.now();
   try{
@@ -1941,6 +2014,7 @@ async function refreshParallelStrategyWorldsRuntime(reason='PERIODIC'){
     parallelStrategyWorldsState=refreshed.state;
     if(refreshed.changed) await persistParallelStrategyWorlds(reason);
     const summary=parallelStrategyWorldsSummary(parallelStrategyWorldsState);
+    if(refreshed.changed)await refreshBiggjDiscoveryLedgerRuntime('PARALLEL_WORLDS:'+reason);
     if(refreshed.changed){
       console.log('[BIGGJ_PARALLEL_WORLDS]',JSON.stringify({
         reason,
@@ -5211,6 +5285,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
 
     memecoinEarlySnapshot=snapshot;
     memecoinEarlyLastRefreshAt=Date.now();
+    await refreshBiggjDiscoveryLedgerRuntime('MEMECOIN_RADAR:'+reason);
     const combinedErrors=[
       ...(snapshot.errors||[]),
       ...(memecoinSecurityLastError?[memecoinSecurityLastError]:[]),
@@ -11651,6 +11726,14 @@ function missionControlData(){
     lastError:parallelStrategyWorldsLastError,
     file:parallelStrategyWorldsFile
   },
+  discoveryLedger:{
+    ...biggjDiscoveryLedgerSummary(biggjDiscoveryLedgerState,{asOf:now}),
+    version:BIGGJ_DISCOVERY_LEDGER_VERSION,
+    healthy:biggjDiscoveryLedgerHealthy,
+    recoveredFromCorrupt:biggjDiscoveryLedgerRecoveredFromCorrupt,
+    lastError:biggjDiscoveryLedgerLastError,
+    file:biggjDiscoveryLedgerFile
+  },
   autonomousOperator:{
     ...biggjAutonomousOperatorSummary(autonomousOperatorState),
     version:BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
@@ -12447,6 +12530,7 @@ async function gracefulShutdown(signal) {
   await persistMemecoinEvidenceFactory(`shutdown:${signal}`);
   await persistStrategyLeague(`shutdown:${signal}`);
   await persistParallelStrategyWorlds(`shutdown:${signal}`);
+  await persistBiggjDiscoveryLedger(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
@@ -12506,6 +12590,10 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   parallelStrategyWorlds:{
     healthy:parallelStrategyWorldsHealthy,
     ...parallelStrategyWorldsSummary(parallelStrategyWorldsState)
+  },
+  discoveryLedger:{
+    healthy:biggjDiscoveryLedgerHealthy,
+    ...biggjDiscoveryLedgerSummary(biggjDiscoveryLedgerState,{asOf:Date.now()})
   },
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),

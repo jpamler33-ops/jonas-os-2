@@ -58,6 +58,17 @@ const snapshot={
         }
       }
     },
+    discoveryLedger:{
+      version:'BIGGJ_DISCOVERY_LEDGER_V1',
+      total:3,validated:2,robust:1,falsified:1,
+      topDiscoveries:[
+        {type:'TRANSITION_LAW',title:'S17 → S45 → 1h',currentStatus:'ROBUST_FORWARD_LAW_CANDIDATE',samples:48,robust:true,validated:true},
+        {type:'WALK_FORWARD_PATTERN',title:'SECURITY:solana|UNKNOWN|LIQ_LT10K · 1h',currentStatus:'WALK_FORWARD_VALIDATED',samples:20,robust:false,validated:true},
+        {type:'TRANSITION_LAW',title:'S12 → S03 → 4h',currentStatus:'FAILED_FORWARD_VALIDATION',samples:26,robust:false,validated:false}
+      ],
+      recentlyChanged:[{title:'S17 → S45 → 1h',previousStatus:'COLLECTING',status:'ROBUST_FORWARD_LAW_CANDIDATE',samples:48}],
+      canExecuteLive:false,automaticPromotion:false
+    },
     parallelStrategyWorlds:{
       worldCount:2,
       generations:5,
@@ -93,6 +104,10 @@ test('science home presents knowledge and new Temporal Temple findings before tr
   assert.match(p.embeds[0].title,/MARKET SCIENCE/);
   assert.match(p.embeds[0].description,/Trading ist nur eine nachgelagerte Anwendung/);
   const text=p.embeds[0].fields.map(x=>x.name+'\n'+x.value).join('\n');
+  assert.match(text,/HALL OF DISCOVERIES · LIFECYCLE/);
+  assert.match(text,/Gespeichert 3 · validiert 2 · robust 1 · widerlegt 1/);
+  assert.match(text,/Dauerhafte Forschungschronik · authority NONE/);
+  assert.match(text,/Letzter Statuswechsel: S17 → S45 → 1h/);
   assert.match(text,/NEUE ENTDECKUNGEN · TEMPORAL TEMPLE/);
   assert.match(text,/S17 → S45/);
   assert.match(text,/verworfen: S12 → S03/);
