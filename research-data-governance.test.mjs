@@ -426,9 +426,76 @@ test('CFTC contract declares weekly observation-time semantics',async()=>{
   assert.equal(contract.maxObservationAgeMs,12*24*60*60_000);
 });
 
+
+function weeklyH10DollarSnapshot({
+  eventTime,
+  availableAt,
+  ingestedAt=availableAt+1_000,
+  sourceEventId='weekly-h10-dollar'
+}={}){
+  return createResearchFeatureSnapshot({
+    streamKey:'BTCUSDT',
+    domain:'MACRO',
+    source:'FRED_DTWEXBGS_CURRENT',
+    sourceVersion:'TEST',
+    sourceEventId,
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:6*60*60_000,
+    finality:'OBSERVED',
+    quality:{completeness:1,sourceCount:1,expectedSourceCount:1,status:'CURRENT_SERIES_CAPTURE'},
+    features:[{id:'research.macro.broadDollarIndex',value:121.5}],
+    provenance:{fredTransport:'FRED_GRAPH_CSV',fredSeriesIds:['DTWEXBGS'],weeklyBatchRelease:true,test:true}
+  });
+}
+
+test('H10 broad dollar daily observation stays healthy until the next weekly batch release',()=>{
+  const DAY=24*60*60_000;
+  const availableAt=Date.UTC(2026,9,5,18,0,0);
+  const eventTime=Date.UTC(2026,8,25,0,0,0);
+  const state=createResearchDataGovernanceState({createdAt:availableAt});
+  const governed=governResearchSnapshot(state,weeklyH10DollarSnapshot({eventTime,availableAt}),{evaluatedAt:availableAt+1_000});
+  assert.equal(governed.governance.decision,'ACCEPT');
+  assert.equal(governed.governance.sourceStatus,'HEALTHY');
+  assert.equal(governed.governance.timelinessMetric,'OBSERVATION_AGE');
+  assert.equal(governed.governance.eventTimeSemantics,'OBSERVATION_TIME');
+  assert.ok(governed.governance.observationAgeMs>10*DAY);
+  assert.ok(governed.governance.observationAgeMs<12*DAY);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='PUBLICATION_LAG_SLO_BREACH'),false);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='OBSERVATION_AGE_SLO_BREACH'),false);
+});
+
+test('H10 broad dollar data still fails closed beyond bounded weekly observation age',()=>{
+  const DAY=24*60*60_000;
+  const availableAt=Date.UTC(2026,9,5,18,0,0);
+  const state=createResearchDataGovernanceState({createdAt:availableAt});
+  const decisions=[];
+  for(let i=0;i<3;i++){
+    const a=availableAt+i*2_000;
+    const governed=governResearchSnapshot(state,weeklyH10DollarSnapshot({
+      eventTime:a-13*DAY,
+      availableAt:a,
+      ingestedAt:a+500,
+      sourceEventId:'weekly-h10-stale-'+i
+    }),{evaluatedAt:a+500});
+    decisions.push(governed.governance.decision);
+    assert.ok(governed.governance.reasons.some(x=>x.code==='OBSERVATION_AGE_SLO_BREACH'));
+  }
+  assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
+});
+
+test('H10 broad dollar contract declares weekly batch observation semantics',async()=>{
+  const { researchSourceContract }=await import('./research-source-contracts.mjs');
+  const contract=researchSourceContract('MACRO','FRED_DTWEXBGS_CURRENT');
+  assert.equal(contract.eventTimeSemantics,'OBSERVATION_TIME');
+  assert.equal(contract.cadence,'WEEKLY_BATCH_DAILY_OBSERVATIONS');
+  assert.equal(contract.maxObservationAgeMs,12*24*60*60_000);
+});
+
 test('both monthly FRED contracts declare explicit observation-period semantics',async()=>{
   const { researchSourceContract, RESEARCH_SOURCE_CONTRACTS_VERSION }=await import('./research-source-contracts.mjs');
-  assert.equal(RESEARCH_SOURCE_CONTRACTS_VERSION,'TCX_RESEARCH_SOURCE_CONTRACTS_V13');
+  assert.equal(RESEARCH_SOURCE_CONTRACTS_VERSION,'TCX_RESEARCH_SOURCE_CONTRACTS_V14');
   for(const source of ['FRED_CPIAUCSL_CURRENT','FRED_UNRATE_CURRENT']){
     const contract=researchSourceContract('MACRO',source);
     assert.equal(contract.eventTimeSemantics,'OBSERVATION_PERIOD_START');
