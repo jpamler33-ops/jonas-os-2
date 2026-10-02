@@ -74,18 +74,25 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].canExecuteLive,false);
 });
 
-test('wallet 4 keeps thin launches in research but blocks them from the performance scout',()=>{
+test('wallet 4 preserves thin asymmetric opportunities unless the optional blanket guard is explicitly enabled',()=>{
   const now=2_300_000;
-  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+  const snapshot={sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'THIN',symbol:'THIN',priceUsd:.01,liquidityUsd:18_000,
     volumeM5:8_000,buysM5:12,sellsM5:5,priceChangeM5:12,
     score:{stage:'NEW_NOW',researchPriorityScore:.80,attentionSignals:['NEW_POOL'],riskFlags:['LIQUIDITY_THIN']},
     security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
-  }]},{now,minLiquidityUsd:10_000,minScore:.58});
-  assert.equal(x.results.eligible,1);
-  assert.equal(x.results.tailRiskBlocked,1);
-  assert.equal(x.results.opened,0);
-  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
+  }]};
+  const allowed=applyMemecoinScoutSnapshot(createSpecialistWalletState(),snapshot,{now,minLiquidityUsd:10_000,minScore:.58});
+  assert.equal(allowed.results.eligible,1);
+  assert.equal(allowed.results.tailRiskBlocked,0);
+  assert.equal(allowed.results.opened,1);
+
+  const guarded=applyMemecoinScoutSnapshot(createSpecialistWalletState(),snapshot,{
+    now,minLiquidityUsd:10_000,minScore:.58,blockThinLiquidityEntries:true
+  });
+  assert.equal(guarded.results.eligible,1);
+  assert.equal(guarded.results.tailRiskBlocked,1);
+  assert.equal(guarded.results.opened,0);
 });
 
 test('wallet 4 refuses hard market-data anomalies even with security pass',()=>{
