@@ -9770,6 +9770,9 @@ async function shadowPortfolioWatcher(){
       }
 
       if(changed) await persistShadowPortfolio('watcher');
+      if(closed>0||!walletResearchManagerPersistencePrimed){
+        await refreshWalletResearchManagerRuntime('shadow-portfolio-watch');
+      }
       const summary=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:Date.now()});
       const researchSummary=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:Date.now()});
       recordOperation(observability,{name:'shadow_portfolio_watch',ok:true,latencyMs:Date.now()-started,error:null});
@@ -11786,6 +11789,17 @@ function missionControlData(){
  };
  const portfolio=shadowPortfolioSummary(shadowPortfolioLedger,{asOf:now});
  const researchActivity=shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now});
+ const walletResearchManager=shadowWalletResearchManagerSummary(walletResearchManagerState,shadowPortfolioLedger,{
+   asOf:now,
+   targetArmTrades:walletResearchTargetArmTrades,
+   maxEpochMs:walletResearchMaxEpochMs
+ });
+ health.walletResearchManager={
+   ...walletResearchManager,
+   enabled:walletResearchManagerEnabled,
+   healthy:walletResearchManagerHealthy,
+   lastError:walletResearchManagerLastError
+ };
  const allShadowPositions=shadowPortfolioLedger?.positions||[];
  const researchShadowModes=new Set(['CHALLENGER','ABSTAIN_PROBE','COVERAGE_PROBE','EXPLORATION']);
  const primaryShadowPositions=allShadowPositions.filter(p=>!researchShadowModes.has(String(p?.entryMode||'STANDARD').toUpperCase()));
@@ -11800,7 +11814,7 @@ function missionControlData(){
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   asOf:now
  });
- const portfolioView={...portfolio,researchActivity,positions:openPositions,recentClosed};
+ const portfolioView={...portfolio,researchActivity,walletResearchManager,positions:openPositions,recentClosed};
  const marketScienceOs=buildBiggjMarketScienceOs({
    epistemicSummary:health.biggjEpistemicKernel,
    scienceDirectorSummary:health.biggjMarketScienceDirector,
