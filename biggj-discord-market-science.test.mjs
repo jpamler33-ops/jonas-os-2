@@ -44,6 +44,20 @@ const snapshot={
     }
   },
   health:{
+    memecoinRadar:{
+      temporalTemple:{
+        independentCases:40,
+        bookOfChanges:{observedTransitions:160},
+        transitionLaws:{
+          status:'FORWARD_LAW_CANDIDATES_PRESENT',
+          testedHypotheses:24,
+          candidates:[
+            {fromState:'S17',toState:'S45',forwardHorizon:'1h',independentCases:30,contextsEligible:4,validated:true,status:'FORWARD_LAW_CANDIDATE',validation:{medianReturn:.18}},
+            {fromState:'S12',toState:'S03',forwardHorizon:'4h',independentCases:26,contextsEligible:3,validated:false,status:'FAILED_FORWARD_VALIDATION',validation:{medianReturn:-.04}}
+          ]
+        }
+      }
+    },
     biggjAutopilotSupervisor:{
       state:'WAITING_FOR_DATA',
       humanActionRequired:false,
@@ -62,11 +76,16 @@ test('Discord control room is science-first and starts at science-home',()=>{
   assert.deepEqual(names.slice(0,6),['start-here','science-home','world-model','science-lab','decision-intelligence','autopilot-supervisor']);
 });
 
-test('science home presents knowledge before trading',()=>{
+test('science home presents knowledge and new Temporal Temple findings before trading',()=>{
   const p=buildBiggjDiscordScienceHomePayload(snapshot);
   assert.match(p.embeds[0].title,/MARKET SCIENCE/);
   assert.match(p.embeds[0].description,/Trading ist nur eine nachgelagerte Anwendung/);
-  assert.match(p.embeds[0].fields.map(x=>x.value).join('\n'),/Reality > models/);
+  const text=p.embeds[0].fields.map(x=>x.name+'\n'+x.value).join('\n');
+  assert.match(text,/NEUE ENTDECKUNGEN · TEMPORAL TEMPLE/);
+  assert.match(text,/S17 → S45/);
+  assert.match(text,/verworfen: S12 → S03/);
+  assert.match(text,/keine automatische Promotion/);
+  assert.match(text,/Reality > models/);
   assert.ok(p.components[0].components.some(x=>x.custom_id==='dc7:science:world'));
 });
 
