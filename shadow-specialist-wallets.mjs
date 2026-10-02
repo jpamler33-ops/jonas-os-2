@@ -316,6 +316,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   stopReturn=-.45,
   takeReturn=1.50,
   blockThinLiquidityEntries=true,
+  contrarianEnabled=false,
   contrarianProbeRate=.15,
   contrarianMarginMultiplier=.05,
   contrarianMinLiquidityUsd=5_000,
@@ -406,6 +407,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     if(!learningOk)softViolations.push('LEARNED_BLOCK_WOULD_ABSTAIN');
 
     const contrarianEligible=
+      contrarianEnabled===true&&
       hardSafe&&
       softViolations.length>0&&
       softViolations.length<=Math.max(1,Number(contrarianMaxSoftViolations)||1);
