@@ -11,6 +11,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'state-store.mjs',
   'market-structure.mjs',
   'chart-renderer.mjs',
+  'trend-box-engine.mjs',
   'biggj-visual-intelligence.mjs',
   'dashboard-state.mjs',
   'episode-memory.mjs',
