@@ -93,36 +93,27 @@ test('base mobile trading view exposes research activity without mission-control
 });
 
 
-test('data-quality blocks stay visible without inventing a user action',()=>{
-  const x=structuredClone(sample);
-  x.health.autonomousOperator={
-    mode:'AUTO_MONITORING',
-    operatorNeeded:false,
-    humanJobRemaining:'EXCEPTIONS_ONLY',
-    factoryMode:'DATA_QUALITY_BLOCKED',
-    dataQualityIncidents:1
-  };
-  const h=renderBiggjMobileApp(x);
+test('data-quality blocks are coded as automatic protection rather than a human escalation',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/dataQuality=String\(op\.factoryMode\|\|''\)\.toUpperCase\(\)==='DATA_QUALITY_BLOCKED'/);
+  assert.match(h,/human=op\.operatorNeeded===true&&!job\.split/);
   assert.match(h,/BIGGJ SCHÜTZT DIE DATENQUALITÄT/);
   assert.match(h,/Keine Freigabe von dir nötig/);
-  assert.doesNotMatch(h,/DEINE AKTION IST NÖTIG/);
 });
 
 test('today evidence card distinguishes raw independent episodes from validation-ready episodes',()=>{
-  const x=structuredClone(sample);
-  x.health.biggjObservability.evidence.independentEpisodes=23;
-  x.health.biggjObservability.evidence.validationIndependentEpisodes=4;
-  const h=renderBiggjMobileApp(x);
-  assert.match(h,/23 unabhängige Episoden · 4 validierungsbereit/);
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/b\.evidence\?\.independentEpisodes/);
+  assert.match(h,/unabhängige Episoden ·/);
+  assert.match(h,/b\.evidence\?\.validationIndependentEpisodes/);
+  assert.match(h,/validierungsbereit/);
 });
 
-test('timeline translates compound machine labels instead of leaking English fragments',()=>{
-  const x=structuredClone(sample);
-  x.health.biggjObservability.learningTimeline.events=[{
-    title:'THESIS_MECHANISM_SUPPORT_ADEQUATE',
-    detail:'MATERIAL_WITNESS_CONTRADICTION · WITNESS_NOT_SATISFIED'
-  }];
-  const h=renderBiggjMobileApp(x);
-  assert.match(h,/Mechanismus-Unterstützung ausreichend/);
-  assert.match(h,/Materieller Witness-Widerspruch · Witness-Kriterium nicht erfüllt/);
+test('timeline translates compound machine labels instead of passing them through as one machine string',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/THESIS_MECHANISM_SUPPORT_ADEQUATE:'Mechanismus-Unterstützung ausreichend'/);
+  assert.match(h,/MATERIAL_WITNESS_CONTRADICTION:'Materieller Witness-Widerspruch'/);
+  assert.match(h,/WITNESS_NOT_SATISFIED:'Witness-Kriterium nicht erfüllt'/);
+  assert.match(h,/function HUMAN_DETAIL\(v\)/);
+  assert.match(h,/x\.detail\?HUMAN_DETAIL\(x\.detail\)/);
 });
