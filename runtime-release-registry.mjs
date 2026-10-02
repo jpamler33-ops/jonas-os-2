@@ -44,6 +44,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-regime-brain.mjs',
   'adversarial-stress-lab.mjs',
   'shadow-strategy-league.mjs',
+  'parallel-strategy-worlds.mjs',
   'multi-venue-shadow-sor.mjs',
   'venue-quality-memory.mjs',
   'execution-research-lab.mjs',
