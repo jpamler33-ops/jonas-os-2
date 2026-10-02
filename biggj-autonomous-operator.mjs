@@ -283,10 +283,17 @@ export function refreshBiggjAutonomousOperator(state,{
   };
 
   for(const row of assessments){
-    if(row.state==='APPROVAL_REQUIRED')add('APPROVAL_REQUIRED',row.subject,row.reason,null);
-    else if(row.state==='UNOWNED')add('AUTOMATION_GAP',row.subject,row.reason,null);
-    else if(row.state==='DISABLED')add('OWNER_DISABLED',row.subject,row.reason,row.recoveryAction);
-    else if(row.state==='STALE'||row.state==='ERROR')add('OWNER_UNHEALTHY',row.subject,row.reason,row.recoveryAction);
+    if(row.state==='APPROVAL_REQUIRED'){
+      add('APPROVAL_REQUIRED',row.subject,row.reason,null);
+    }else if(row.state==='UNOWNED'){
+      // Missing handler policy is an owner-level problem and must not be
+      // multiplied once per task that happens to use the same handler.
+      add('AUTOMATION_GAP',row.handler||row.subject,row.reason,null);
+    }else if(row.state==='DISABLED'){
+      add('OWNER_DISABLED',row.handler||row.subject,row.reason,row.recoveryAction);
+    }else if(row.state==='STALE'||row.state==='ERROR'){
+      add('OWNER_UNHEALTHY',row.handler||row.subject,row.reason,row.recoveryAction);
+    }
   }
 
   const factoryMode=String(factorySummary?.mode||'UNINITIALIZED');
