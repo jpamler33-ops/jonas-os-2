@@ -1,4 +1,4 @@
-export const BIGGJ_TEMPORAL_TEMPLE_VERSION='BIGGJ_TEMPORAL_TEMPLE_V1';
+export const BIGGJ_TEMPORAL_TEMPLE_VERSION='BIGGJ_TEMPORAL_TEMPLE_V2';
 
 const HORIZON_ORDER=Object.freeze(['5m','15m','30m','1h','4h','12h','24h']);
 const TRANSITION_PAIRS=Object.freeze([
@@ -121,6 +121,223 @@ function nextReturn(c,fromLabel,toLabel){
   const a=onTime(c,fromLabel),b=onTime(c,toLabel);
   if(!a||!b)return null;
   return ret(a.priceUsd,b.priceUsd);
+}
+
+function futureHorizonsAfter(label){
+  const idx=HORIZON_ORDER.indexOf(label);
+  return idx<0?[]:HORIZON_ORDER.slice(idx+1);
+}
+
+function contextAt(c,label){
+  const o=onTime(c,label);
+  const liq=finite(o?.liquidityUsd)??finite(c?.initial?.liquidityUsd);
+  return [String(c?.chainId||'unknown').toLowerCase(),liqBin(liq)].join('|');
+}
+
+function wilsonInterval(successes,total,z=1.96){
+  const n=Math.max(0,Number(total)||0),k=Math.max(0,Math.min(n,Number(successes)||0));
+  if(!n)return {low:null,high:null};
+  const p=k/n,z2=z*z,den=1+z2/n;
+  const center=(p+z2/(2*n))/den;
+  const margin=(z*Math.sqrt((p*(1-p)+z2/(4*n))/n))/den;
+  return {low:Math.max(0,center-margin),high:Math.min(1,center+margin)};
+}
+
+function returnStats(rows=[]){
+  const vals=rows.map(x=>finite(x?.forwardReturn)).filter(Number.isFinite);
+  if(!vals.length)return {
+    samples:0,averageReturn:null,medianReturn:null,positiveRate:null,
+    positiveRateWilson95:{low:null,high:null},severeLossRate:null
+  };
+  const positives=vals.filter(x=>x>0).length;
+  return {
+    samples:vals.length,
+    averageReturn:mean(vals),
+    medianReturn:median(vals),
+    positiveRate:positives/vals.length,
+    positiveRateWilson95:wilsonInterval(positives,vals.length),
+    severeLossRate:vals.filter(x=>x<=-.45).length/vals.length
+  };
+}
+
+function directionOf(stats,minMedianEffect=.02){
+  const m=finite(stats?.medianReturn);
+  if(m==null||Math.abs(m)<Math.max(0,Number(minMedianEffect)||0))return 'NONE';
+  return m>0?'POSITIVE':'NEGATIVE';
+}
+
+function directionMatches(stats,direction,minMedianEffect=.02){
+  if(direction==='NONE')return false;
+  return directionOf(stats,minMedianEffect)===direction;
+}
+
+function confidenceSupports(stats,direction){
+  const ci=stats?.positiveRateWilson95||{};
+  if(direction==='POSITIVE')return Number.isFinite(ci.low)&&ci.low>.5;
+  if(direction==='NEGATIVE')return Number.isFinite(ci.high)&&ci.high<.5;
+  return false;
+}
+
+function transitionLawStudy(cases,{
+  minTrain=16,
+  minValidate=6,
+  minContextSamples=3,
+  minContexts=2,
+  maxFolds=3,
+  minMedianEffect=.02,
+  limit=20
+}={}){
+  const groups=new Map();
+  for(const c of cases){
+    for(const [from,to] of TRANSITION_PAIRS){
+      const s1=temporalStateForCase(c,from),s2=temporalStateForCase(c,to);
+      if(!s1||!s2)continue;
+      const key=[from,to,s1.stateId,s2.stateId].join('|');
+      const base={
+        caseKey:String(c?.key||''),
+        discoveredAt:finite(c?.discoveredAt)??0,
+        chain:String(c?.chainId||'unknown').toLowerCase(),
+        context:contextAt(c,to),
+        from,to,fromState:s1.stateId,toState:s2.stateId
+      };
+      const rows=groups.get(key)||[];
+      for(const forwardHorizon of futureHorizonsAfter(to)){
+        const forwardReturn=nextReturn(c,to,forwardHorizon);
+        if(forwardReturn==null)continue;
+        rows.push({...base,forwardHorizon,forwardReturn});
+      }
+      if(rows.length)groups.set(key,rows);
+    }
+  }
+
+  const candidates=[];
+  let testedHypotheses=0,eligibleHypotheses=0;
+  const collecting=[];
+
+  for(const [transitionKey,allRows] of groups){
+    const byForward=new Map();
+    for(const row of allRows){
+      const a=byForward.get(row.forwardHorizon)||[];
+      a.push(row);byForward.set(row.forwardHorizon,a);
+    }
+    for(const [forwardHorizon,rows0] of byForward){
+      testedHypotheses++;
+      const rows=rows0.slice().sort((a,b)=>a.discoveredAt-b.discoveredAt||a.caseKey.localeCompare(b.caseKey));
+      const n=rows.length;
+      const foldSize=Math.max(1,Number(minValidate)||1);
+      const possibleFolds=Math.min(
+        Math.max(1,Number(maxFolds)||1),
+        Math.floor((n-Math.max(1,Number(minTrain)||1))/foldSize)
+      );
+      if(possibleFolds<1){
+        collecting.push({
+          transitionKey,
+          from:rows[0]?.from||null,to:rows[0]?.to||null,
+          fromState:rows[0]?.fromState||null,toState:rows[0]?.toState||null,
+          forwardHorizon,samples:n,
+          required:Math.max(1,Number(minTrain)||1)+foldSize
+        });
+        continue;
+      }
+      eligibleHypotheses++;
+      const validationStart=n-possibleFolds*foldSize;
+      const initialTrain=rows.slice(0,validationStart);
+      const trainStats=returnStats(initialTrain);
+      const direction=directionOf(trainStats,minMedianEffect);
+      const folds=[];
+      for(let i=0;i<possibleFolds;i++){
+        const start=validationStart+i*foldSize;
+        const validationRows=rows.slice(start,start+foldSize);
+        const validationStats=returnStats(validationRows);
+        folds.push({
+          fold:i+1,
+          trainSamples:start,
+          validationSamples:validationRows.length,
+          validation:validationStats,
+          directionConsistent:directionMatches(validationStats,direction,minMedianEffect)
+        });
+      }
+      const holdoutRows=rows.slice(validationStart);
+      const validation=returnStats(holdoutRows);
+      const contextMap=new Map();
+      for(const row of holdoutRows){
+        const a=contextMap.get(row.context)||[];
+        a.push(row);contextMap.set(row.context,a);
+      }
+      const contextStats=[...contextMap.entries()].map(([context,xs])=>({
+        context,
+        ...returnStats(xs)
+      })).filter(x=>x.samples>=Math.max(1,Number(minContextSamples)||1));
+      const contextConsistent=contextStats.length>=Math.max(1,Number(minContexts)||1)&&
+        direction!=='NONE'&&contextStats.every(x=>directionMatches(x,direction,minMedianEffect));
+      const allFoldsConsistent=direction!=='NONE'&&folds.length>0&&folds.every(x=>x.directionConsistent);
+      const holdoutDirectionConsistent=directionMatches(validation,direction,minMedianEffect);
+      const confidenceSupported=confidenceSupports(validation,direction);
+      const validated=allFoldsConsistent&&holdoutDirectionConsistent&&contextConsistent;
+      const robust=validated&&confidenceSupported&&folds.length>=2;
+      const status=robust?'ROBUST_FORWARD_LAW_CANDIDATE':
+        validated?'FORWARD_LAW_CANDIDATE':
+        direction==='NONE'?'NO_TRAIN_EFFECT':'FAILED_FORWARD_VALIDATION';
+
+      candidates.push({
+        transitionKey,
+        from:rows[0].from,to:rows[0].to,
+        fromState:rows[0].fromState,toState:rows[0].toState,
+        forwardHorizon,
+        independentCases:n,
+        initialTrainCases:initialTrain.length,
+        holdoutCases:holdoutRows.length,
+        direction,
+        train:trainStats,
+        validation,
+        folds,
+        contextsEligible:contextStats.length,
+        contextConsistent,
+        contextStats:contextStats.slice(0,10),
+        confidenceSupported,
+        validated,
+        robust,
+        status,
+        decisionAuthority:false
+      });
+    }
+  }
+
+  const rank=x=>{
+    if(x.robust)return 4;
+    if(x.validated)return 3;
+    if(x.status==='NO_TRAIN_EFFECT')return 1;
+    return 0;
+  };
+  candidates.sort((a,b)=>
+    rank(b)-rank(a)||
+    Number(b.confidenceSupported)-Number(a.confidenceSupported)||
+    b.holdoutCases-a.holdoutCases||
+    b.independentCases-a.independentCases
+  );
+  collecting.sort((a,b)=>b.samples-a.samples);
+
+  return {
+    status:candidates.some(x=>x.robust)?'ROBUST_LAW_CANDIDATES_PRESENT':
+      candidates.some(x=>x.validated)?'FORWARD_LAW_CANDIDATES_PRESENT':'COLLECTING_OR_UNVALIDATED',
+    testedHypotheses,
+    eligibleHypotheses,
+    candidates:candidates.slice(0,Math.max(1,Number(limit)||20)),
+    collecting:collecting.slice(0,12),
+    thresholds:{
+      minTrain:Math.max(1,Number(minTrain)||1),
+      minValidate:foldSize,
+      minContextSamples:Math.max(1,Number(minContextSamples)||1),
+      minContexts:Math.max(1,Number(minContexts)||1),
+      maxFolds:Math.max(1,Number(maxFolds)||1),
+      minMedianEffect:Math.max(0,Number(minMedianEffect)||0)
+    },
+    leakageGuard:'FORWARD_OUTCOME_BEGINS_AFTER_TRANSITION_TO_STATE',
+    selectionGuard:'ALL_OBSERVED_TRANSITIONS_ENUMERATED_BEFORE_FORWARD_VALIDATION',
+    validation:'CHRONOLOGICAL_EXPANDING_WALK_FORWARD_PLUS_CROSS_CONTEXT_HOLDOUT',
+    multiplicityGuard:'NO_AUTOMATIC_PROMOTION_EXTERNAL_REPLICATION_REQUIRED',
+    decisionAuthority:false
+  };
 }
 
 function transitionRows(cases){
@@ -371,7 +588,13 @@ export function buildBiggjTemporalTemple(evidenceState,{
   minEphemerisSamples=4,
   minResonanceSamples=8,
   minInvariantPerContext=4,
-  minInvariantContexts=2
+  minInvariantContexts=2,
+  minTransitionLawTrain=16,
+  minTransitionLawValidate=6,
+  minTransitionLawContextSamples=3,
+  minTransitionLawContexts=2,
+  maxTransitionLawFolds=3,
+  minTransitionLawMedianEffect=.02
 }={}){
   const cases=casesOf(evidenceState);
   const lattice=transitionAtlas(cases,{minSamples:minEphemerisSamples});
@@ -381,6 +604,14 @@ export function buildBiggjTemporalTemple(evidenceState,{
   const resonance30m4h=resonanceStudy(cases,{from:'30m',to:'4h',minSamples:minResonanceSamples});
   const invariants=scaleInvariantCandidates(cases,{
     from:'15m',to:'1h',minPerContext:minInvariantPerContext,minContexts:minInvariantContexts
+  });
+  const transitionLaws=transitionLawStudy(cases,{
+    minTrain:minTransitionLawTrain,
+    minValidate:minTransitionLawValidate,
+    minContextSamples:minTransitionLawContextSamples,
+    minContexts:minTransitionLawContexts,
+    maxFolds:maxTransitionLawFolds,
+    minMedianEffect:minTransitionLawMedianEffect
   });
   const core={
     version:BIGGJ_TEMPORAL_TEMPLE_VERSION,
@@ -393,7 +624,8 @@ export function buildBiggjTemporalTemple(evidenceState,{
       bookOfChanges:'64_STATE_TRANSITION_LATTICE',
       eventClock:'MEANINGFUL_EVENTS_OVER_WALL_CLOCK',
       invariants:'SCALE_CONTEXT_STABILITY',
-      ephemeris:'EMPIRICAL_NEXT_STATE_DISTRIBUTION'
+      ephemeris:'EMPIRICAL_NEXT_STATE_DISTRIBUTION',
+      transitionLaws:'STATE_TRANSITION_TO_LATER_FORWARD_BEHAVIOR'
     },
     axes:AXES,
     eventClock:eventClock(cases),
@@ -401,6 +633,7 @@ export function buildBiggjTemporalTemple(evidenceState,{
     nilometers:{oneHour:nilometers1h,fourHour:nilometers4h},
     resonance:{fifteenMinToOneHour:resonance15m1h,thirtyMinToFourHour:resonance30m4h},
     invariants,
+    transitionLaws,
     ephemeris:{
       rows:lattice.ephemeris,
       status:lattice.ephemeris.length?'EMPIRICAL_ONLY':'COLLECTING',
@@ -431,6 +664,7 @@ export function biggjTemporalTempleSummary(state){
     nilometers:state.nilometers,
     resonance:state.resonance,
     invariants:state.invariants,
+    transitionLaws:state.transitionLaws,
     ephemeris:state.ephemeris,
     policyMutationAllowed:false,
     automaticPromotionAllowed:false,
