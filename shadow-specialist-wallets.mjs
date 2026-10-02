@@ -138,7 +138,7 @@ export function applyPublicTraderCopySnapshot(input,snapshot,{
   const memeSet=new Set((Array.isArray(memeSymbols)?memeSymbols:[]).map(x=>String(x).toUpperCase()));
   const traders=Array.isArray(snapshot?.traders)?snapshot.traders:[];
   const sourceReady=snapshot?.sourceReady===true&&traders.length>0;
-  const results={openedW3:0,openedW5:0,closedW3:0,closedW5:0,marked:0,sourceReady};
+  const results={openedW3:0,openedW5:0,closedW3:0,closedW5:0,learningBlockedW5:0,marked:0,sourceReady};
   const closeByTrader=new Map();
   for(const t of traders){
     const map=new Map();
@@ -203,12 +203,17 @@ export function applyPublicTraderCopySnapshot(input,snapshot,{
         }
         if(isMemeInstrument(pos.instId,memeSet)){
           const w5=state.wallets[WALLET_5_MEME_COPY];
+          if(String(pos?.memeLearning?.action||'NEUTRAL').toUpperCase()==='BLOCK'){
+            results.learningBlockedW5++;
+            continue;
+          }
           if(w5.positions.length<maxOpenOperational){
             const margin=Math.max(1,Number(wallet5MarginQuote)||150);
             const position={...common,walletId:WALLET_5_MEME_COPY,
               positionKey:traderPositionKey(WALLET_5_MEME_COPY,trader,pos),
               marginQuote:margin,exposureQuote:margin*leverage,
-              memeClassification:'KNOWN_CEX_MEME_SYMBOL'
+              memeClassification:'KNOWN_CEX_MEME_SYMBOL',
+              entryMemeLearning:clone(pos?.memeLearning||null)
             };
             if(openPosition(w5,position))results.openedW5++;
           }
