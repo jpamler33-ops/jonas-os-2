@@ -321,7 +321,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
-  const results={opened:0,closed:0,marked:0,eligible:0,learningBlocked:0,learningBoosted:0,tailRiskBlocked:0,tailRiskClosed:0,sourceReady:snapshot?.sourceReady===true};
+  const results={opened:0,closed:0,marked:0,eligible:0,learningBlocked:0,learningThrottled:0,learningBoosted:0,tailRiskBlocked:0,tailRiskClosed:0,sourceReady:snapshot?.sourceReady===true};
 
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
@@ -380,10 +380,14 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     }
     if(learningAction==='BLOCK'){results.learningBlocked++;continue;}
     if(learningAction==='BOOST')results.learningBoosted++;
+    const learningSizeMultiplier=learningAction==='THROTTLE'
+      ?Math.max(.05,Math.min(.35,finite(row?.memeLearning?.sizeMultiplier,.15)))
+      :1;
+    if(learningAction==='THROTTLE')results.learningThrottled++;
     if(wallet.positions.length>=maxOpenOperational)break;
     const key=memePositionKey(row);
     if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key))continue;
-    const margin=Math.max(1,Number(marginQuote)||100);
+    const margin=Math.max(1,(Number(marginQuote)||100)*learningSizeMultiplier);
     const position={
       walletId:WALLET_4_MEME_SCOUT,positionKey:key,
       chainId:String(row?.chainId||''),tokenAddress:String(row?.tokenAddress||''),
@@ -420,6 +424,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
         holderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence)
       },
       entryMemeLearning:clone(row?.memeLearning||null),
+      entryLearningSizeMultiplier:learningSizeMultiplier,
       entrySecurityGate:securityGate,
       entrySecuritySource:text(row?.security?.source||'',160),
       entryHolderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence),
