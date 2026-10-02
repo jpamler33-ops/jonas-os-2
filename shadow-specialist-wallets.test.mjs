@@ -128,6 +128,42 @@ test('wallet 4 learned BLOCK can only abstain from an otherwise eligible shadow 
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
 });
 
+test('wallet 4 contrarian lane intentionally probes one soft rule at tiny shadow size',()=>{
+  const now=2_725_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'CONTRA',symbol:'CONTRA',priceUsd:.01,liquidityUsd:55_000,
+    volumeM5:20_000,buysM5:18,sellsM5:9,priceChangeM5:18,pairCreatedAt:now-14*60_000,
+    score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:['SOCIAL_POSTS_RECENT'],riskFlags:[]},
+    security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32}},
+    memeLearning:{action:'BLOCK',rankingAdjustment:-.2,evidence:{level:'EXACT',samples:20,label:'LEARNED_BAD',confidence:.8}}
+  }]},{now,marginQuote:100,contrarianProbeRate:1,contrarianMarginMultiplier:.05});
+  assert.equal(x.results.contrarianEligible,1);
+  assert.equal(x.results.contrarianOpened,1);
+  assert.equal(x.results.opened,1);
+  const p=x.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.equal(p.entryResearchLane,'CONTRARIAN_PROBE');
+  assert.deepEqual(p.entryContrarianViolations,['LEARNED_BLOCK_WOULD_ABSTAIN']);
+  assert.equal(p.marginQuote,5);
+  assert.equal(p.exposureQuote,5);
+  assert.equal(p.canExecute,false);
+  assert.equal(p.canExecuteLive,false);
+});
+
+test('wallet 4 contrarian lane never bypasses hard security guards',()=>{
+  const now=2_730_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'HARDNO',symbol:'HARDNO',priceUsd:.01,liquidityUsd:55_000,
+    volumeM5:20_000,buysM5:18,sellsM5:9,priceChangeM5:18,pairCreatedAt:now-14*60_000,
+    score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'ABSTAIN',criticalRiskFlags:['HONEYPOT_FLAGGED'],warningFlags:[]},
+    memeLearning:{action:'BLOCK',evidence:{level:'EXACT',samples:20,label:'LEARNED_BAD',confidence:.8}}
+  }]},{now,contrarianProbeRate:1});
+  assert.equal(x.results.contrarianOpened,0);
+  assert.equal(x.results.opened,0);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
+  assert.ok(x.results.contrarianRejectedByHardGuard>=1);
+});
+
 test('wallet 4 THROTTLE keeps learning but reduces destructive cohort notional',()=>{
   const now=2_750_000;
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
