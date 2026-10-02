@@ -60,7 +60,7 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   const snap={sourceReady:true,rows:[
     {chainId:'solana',tokenAddress:'GOOD',symbol:'GOOD',priceUsd:.01,liquidityUsd:30_000,pairCreatedAt:now-10_000,
       score:{stage:'NEW_NOW',researchPriorityScore:.72,attentionSignals:['NEW_PROFILE'],riskFlags:['ULTRA_NEW_PAIR']},
-      security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true}}},
+      security:{evidenceGate:'PASS',source:'GOPLUS_SOLANA_TOKEN_SECURITY+RUGCHECK_SOLANA_TOP_HOLDERS',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},independentHolderEvidence:{source:'RUGCHECK_SOLANA_TOP_HOLDERS'}}},
     {chainId:'solana',tokenAddress:'BAD',symbol:'BAD',priceUsd:.01,liquidityUsd:900,pairCreatedAt:now-10_000,
       score:{stage:'RISK_ONLY',researchPriorityScore:.80,attentionSignals:['NEW_BOOST'],riskFlags:['LIQUIDITY_EXTREME_THIN']},
       security:{evidenceGate:'ABSTAIN',criticalRiskFlags:['HONEYPOT_FLAGGED'],warningFlags:[]}}
@@ -68,6 +68,9 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),snap,{now,minLiquidityUsd:10_000,minScore:.58});
   assert.equal(x.results.opened,1);
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].tokenAddress,'GOOD');
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].entryHolderFallbackUsed,true);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].entryHolderEvidenceSource,'RUGCHECK_SOLANA_TOP_HOLDERS');
+  assert.match(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].entrySecuritySource,/RUGCHECK_SOLANA_TOP_HOLDERS/);
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].canExecuteLive,false);
 });
 
