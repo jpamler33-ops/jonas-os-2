@@ -746,6 +746,8 @@ export function autonomousResearchTrainingFactorySummary(state){
       version:state?.leverage?.version??BIGGJ_RESEARCH_LEVERAGE_ENGINE_VERSION,
       leverCount:finite(state?.leverage?.leverCount,10),
       stalledTaskCount:finite(state?.leverage?.stalledTaskCount),
+      waitingForDataTaskCount:finite(state?.leverage?.waitingForDataTaskCount),
+      stalledTasks:arr(state?.leverage?.stalledTasks).slice(0,8),
       batchOpportunityCount:finite(state?.leverage?.batchOpportunityCount),
       dataState:state?.leverage?.dataState??null,
       topBundles:arr(state?.leverage?.topBundles).slice(0,8),
