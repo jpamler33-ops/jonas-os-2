@@ -66,6 +66,15 @@ import { openModelCandidateRegistry, modelCandidateRegistrySummary, MODEL_CANDID
 import { processGovernorPromotionReviews, MODEL_PROMOTION_REVIEW_SERVICE_VERSION } from './model-promotion-review-service.mjs';
 import { createFeatureResearchRound, advanceFeatureResearchRound, featureResearchSummary, loadFeatureResearch, saveFeatureResearch, DEFAULT_RESEARCH_FEATURES, WALLET_RESEARCH_FEATURES, FORECAST_FEATURE_RESEARCH_VERSION } from './forecast-feature-research.mjs';
 import { buildDerivedResearchIntelligenceFeatures, EXTERNAL_RESEARCH_FEATURE_EXPERIMENTS, DERIVED_INTELLIGENCE_RESEARCH_EXPERIMENTS, PREDICTION_MARKET_RESEARCH_EXPERIMENTS, RESEARCH_INTELLIGENCE_FEATURES_VERSION } from './research-intelligence-features.mjs';
+import {
+  buildTechnicalIndicatorFeatures, technicalIndicatorFeatureSummary,
+  TECHNICAL_INDICATOR_EXPERIMENTS, TECHNICAL_INDICATOR_FACTORY_VERSION
+} from './technical-indicator-feature-factory.mjs';
+import {
+  loadIndicatorEvolutionState, saveIndicatorEvolutionState,
+  refreshIndicatorEvolutionEngine, indicatorEvolutionSummary,
+  INDICATOR_EVOLUTION_ENGINE_VERSION
+} from './indicator-evolution-engine.mjs';
 import { runChaosSuite, runChaosScenario, chaosScenarioNames, CHAOS_ENGINEERING_VERSION } from './chaos-engineering.mjs';
 import { loadShadowOms, saveShadowOms, normalizeExecutionBook, createShadowOrder, applyAggTrades, markShadowOrder, cancelShadowOrder, shadowOrderSummary, SHADOW_OMS_VERSION, SHADOW_OMS_CAPABILITIES } from './shadow-oms.mjs';
 import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from './autonomous-shadow-trader.mjs';
@@ -1305,6 +1314,18 @@ let autonomousOperatorLastError=null;
 const autonomousOperatorRefreshMs=Math.max(30_000,Math.min(300_000,Number(process.env.TCX_AUTONOMOUS_OPERATOR_MS||60_000)));
 const featureResearchFile = process.env.TCX_FEATURE_RESEARCH_FILE || '/data/tcx-feature-research.json';
 let featureResearchState = await loadFeatureResearch(featureResearchFile);
+const indicatorEvolutionFile=process.env.TCX_INDICATOR_EVOLUTION_FILE||'/data/tcx-indicator-evolution.json';
+let loadedIndicatorEvolution=await loadIndicatorEvolutionState(indicatorEvolutionFile,{
+  incumbentConfig:forecastRuntime.engine.configSnapshot(),
+  experiments:TECHNICAL_INDICATOR_EXPERIMENTS,
+  now:Date.now()
+});
+let indicatorEvolutionState=loadedIndicatorEvolution.state;
+let indicatorEvolutionHealthy=loadedIndicatorEvolution.healthy;
+let indicatorEvolutionLastError=loadedIndicatorEvolution.error||null;
+const indicatorEvolutionRecoveredFromCorrupt=loadedIndicatorEvolution.recoveredFromCorrupt===true;
+loadedIndicatorEvolution=null;
+let indicatorEvolutionPersistenceQueue=Promise.resolve();
 const evidenceHistoryFile = process.env.TCX_EVIDENCE_HISTORY_FILE || '/data/tcx-evidence-history.json';
 const evidenceHistoryWalFile = process.env.TCX_EVIDENCE_HISTORY_WAL_FILE || evidenceHistoryWalPath(evidenceHistoryFile);
 let loadedEvidenceHistory = await loadEvidenceHistory(evidenceHistoryFile,{
@@ -1576,6 +1597,8 @@ try {
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
       parallelStrategyWorlds:PARALLEL_STRATEGY_WORLDS_VERSION,
       biggjDiscoveryLedger:BIGGJ_DISCOVERY_LEDGER_VERSION,
+      technicalIndicatorFactory:TECHNICAL_INDICATOR_FACTORY_VERSION,
+      indicatorEvolution:INDICATOR_EVOLUTION_ENGINE_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
