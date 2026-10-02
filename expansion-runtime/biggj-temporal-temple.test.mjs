@@ -26,6 +26,8 @@ function evidenceCase(i,{
   age=8,
   oneHourReturn=.25,
   fourHourReturn=.45,
+  twelveHourReturn=.55,
+  twentyFourHourReturn=.65,
   expanding=true
 }={}){
   const entry=1;
@@ -34,6 +36,8 @@ function evidenceCase(i,{
   const l30=liq*(expanding?1.30:.70);
   const l60=liq*(expanding?1.45:.60);
   const l240=liq*(expanding?1.60:.50);
+  const l720=liq*(expanding?1.70:.45);
+  const l1440=liq*(expanding?1.80:.40);
   const buy=expanding?18:5,sell=expanding?7:18;
   const vol0=liq*.25;
   return {
@@ -53,7 +57,9 @@ function evidenceCase(i,{
       '15m':obs({mins:15,price:1+direction*.16,entry,liq:l15,mcap:mcap*(expanding?1.08:.92),vol:vol0*1.8,buys:buy,sells:sell,p5:direction*12}),
       '30m':obs({mins:30,price:1+direction*.22,entry,liq:l30,mcap:mcap*(expanding?1.12:.88),vol:vol0*2.1,buys:buy,sells:sell,p5:direction*15}),
       '1h':obs({mins:60,price:1+oneHourReturn,entry,liq:l60,mcap:mcap*(1+oneHourReturn*.6),vol:vol0*2.4,buys:buy,sells:sell,p5:oneHourReturn>=0?18:-18}),
-      '4h':obs({mins:240,price:1+fourHourReturn,entry,liq:l240,mcap:mcap*(1+fourHourReturn*.5),vol:vol0*2.0,buys:buy,sells:sell,p5:fourHourReturn>=0?12:-12})
+      '4h':obs({mins:240,price:1+fourHourReturn,entry,liq:l240,mcap:mcap*(1+fourHourReturn*.5),vol:vol0*2.0,buys:buy,sells:sell,p5:fourHourReturn>=0?12:-12}),
+      '12h':obs({mins:720,price:1+twelveHourReturn,entry,liq:l720,mcap:mcap*(1+twelveHourReturn*.4),vol:vol0*1.8,buys:buy,sells:sell,p5:twelveHourReturn>=0?10:-10}),
+      '24h':obs({mins:1440,price:1+twentyFourHourReturn,entry,liq:l1440,mcap:mcap*(1+twentyFourHourReturn*.35),vol:vol0*1.6,buys:buy,sells:sell,p5:twentyFourHourReturn>=0?8:-8})
     }
   };
 }
@@ -124,6 +130,76 @@ test('scale invariants require the same state to survive distinct chain-liquidit
   assert.ok(temple.invariants.candidates.some(x=>x.invariant&&x.contexts>=2&&x.direction==='POSITIVE'));
 });
 
+test('transition laws validate only later forward behavior with chronological folds and cross-context holdout',()=>{
+  const cases=Array.from({length:40},(_,i)=>{
+    const chain=i%2===0?'solana':'base';
+    const liq=i%4<2?40_000:300_000;
+    return evidenceCase(i,{
+      chain,liq,mcap:liq*5,expanding:true,
+      oneHourReturn:.34+(i%3)*.01,
+      fourHourReturn:.55+(i%4)*.01,
+      twelveHourReturn:.72+(i%5)*.01,
+      twentyFourHourReturn:.88+(i%6)*.01
+    });
+  });
+  const temple=buildBiggjTemporalTemple({cases},{
+    minTransitionLawTrain:16,
+    minTransitionLawValidate:6,
+    minTransitionLawContextSamples:3,
+    minTransitionLawContexts:2,
+    maxTransitionLawFolds:3,
+    minTransitionLawMedianEffect:.01,
+    minNilometerTrain:100,
+    minNilometerValidate:20
+  });
+  assert.match(temple.transitionLaws.status,/LAW_CANDIDATES_PRESENT/);
+  const law=temple.transitionLaws.candidates.find(x=>
+    x.from==='15m'&&x.to==='30m'&&x.forwardHorizon==='1h'&&x.validated
+  );
+  assert.ok(law);
+  assert.equal(law.fromState,'S63');
+  assert.equal(law.toState,'S63');
+  assert.equal(law.direction,'POSITIVE');
+  assert.ok(law.folds.length>=2);
+  assert.ok(law.contextsEligible>=2);
+  assert.equal(law.contextConsistent,true);
+  assert.equal(law.decisionAuthority,false);
+  assert.match(temple.transitionLaws.leakageGuard,/AFTER_TRANSITION_TO_STATE/);
+});
+
+test('transition law walk-forward rejects a relation that reverses in later chronological samples',()=>{
+  const cases=Array.from({length:34},(_,i)=>{
+    const late=i>=22;
+    return evidenceCase(i,{
+      chain:i%2===0?'solana':'base',
+      liq:i%4<2?40_000:300_000,
+      mcap:(i%4<2?40_000:300_000)*5,
+      expanding:true,
+      oneHourReturn:late?.08:.36,
+      fourHourReturn:late?.10:.56,
+      twelveHourReturn:late?.12:.70,
+      twentyFourHourReturn:late?.14:.82
+    });
+  });
+  const temple=buildBiggjTemporalTemple({cases},{
+    minTransitionLawTrain:16,
+    minTransitionLawValidate:6,
+    minTransitionLawContextSamples:2,
+    minTransitionLawContexts:2,
+    maxTransitionLawFolds:2,
+    minTransitionLawMedianEffect:.01,
+    minNilometerTrain:100,
+    minNilometerValidate:20
+  });
+  const law=temple.transitionLaws.candidates.find(x=>
+    x.from==='15m'&&x.to==='30m'&&x.forwardHorizon==='1h'
+  );
+  assert.ok(law);
+  assert.equal(law.direction,'POSITIVE');
+  assert.equal(law.validated,false);
+  assert.equal(law.status,'FAILED_FORWARD_VALIDATION');
+});
+
 test('summary stays research-only and cannot auto-promote',()=>{
   const temple=buildBiggjTemporalTemple({cases:[evidenceCase(1)]});
   const s=biggjTemporalTempleSummary(temple);
@@ -131,4 +207,5 @@ test('summary stays research-only and cannot auto-promote',()=>{
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.policyMutationAllowed,false);
   assert.equal(s.automaticPromotionAllowed,false);
+  assert.equal(s.transitionLaws.decisionAuthority,false);
 });
