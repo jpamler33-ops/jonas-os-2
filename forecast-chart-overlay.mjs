@@ -107,7 +107,9 @@ export function forecastIssuancesToChartMoments(issuances,{
     .sort((a,b)=>a.asOf-b.asOf);
   const chosen=[];
   let lastBucket=null;
-  const span=Math.max(1,Number(endAt)-Number(startAt));
+  const resolvedStart=Number.isFinite(Number(startAt))?Number(startAt):(rows[0]?.asOf??0);
+  const resolvedEnd=Number.isFinite(Number(endAt))?Number(endAt):(rows.at(-1)?.asOf??resolvedStart+1);
+  const span=Math.max(1,resolvedEnd-resolvedStart);
   const bucketMs=Math.max(1,span/Math.max(1,Number(limit)||24));
   for(const row of rows){
     const forecast=row.issuance?.forecast||{};
@@ -117,10 +119,11 @@ export function forecastIssuancesToChartMoments(issuances,{
       .filter(h=>finite(h?.horizonMs)>0&&finite(h?.interval?.median)!=null);
     if(!candidates.length)continue;
     let h=horizonId?candidates.find(x=>String(x?.horizonId||'')===String(horizonId)):null;
+    if(horizonId&&!h)continue;
     if(!h)h=candidates[0];
     const medianReturn=finite(h?.interval?.median),horizonMs=finite(h?.horizonMs);
     if(medianReturn==null||!(horizonMs>0))continue;
-    const bucket=Math.floor((row.asOf-Number(startAt))/bucketMs);
+    const bucket=Math.floor((row.asOf-resolvedStart)/bucketMs);
     if(bucket===lastBucket&&chosen.length){
       chosen[chosen.length-1]={
         asOf:row.asOf,
