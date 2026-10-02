@@ -239,6 +239,61 @@ function memeSecurityGate(row={}){
 function memeSecurityCritical(row={}){
   return Array.isArray(row?.security?.criticalRiskFlags)&&row.security.criticalRiskFlags.length>0;
 }
+function memeEntryTailRisk(row={}){
+  const flags=new Set(Array.isArray(row?.score?.riskFlags)?row.score.riskFlags:[]);
+  const liq=finite(row?.liquidityUsd);
+  const thin=flags.has('LIQUIDITY_THIN')||(liq!=null&&liq<25_000);
+  const veryThin=flags.has('LIQUIDITY_VERY_THIN')||flags.has('LIQUIDITY_EXTREME_THIN')||(liq!=null&&liq<10_000);
+  return Object.freeze({
+    blocked:veryThin||thin,
+    thin,
+    veryThin,
+    liquidityUsd:liq,
+    reason:veryThin?'VERY_THIN_LIQUIDITY':thin?'THIN_LIQUIDITY':null
+  });
+}
+function memeTailRiskDiagnostics(position,row,marked){
+  const ret=finite(marked?.unrealizedReturnPct);
+  const liq=finite(row?.liquidityUsd);
+  const entryLiquidity=finite(position?.entryMarketFeatures?.liquidityUsd);
+  const liquidityRatio=liq!=null&&entryLiquidity>0?liq/entryLiquidity:null;
+  const p5=finite(row?.priceChangeM5);
+  const buys=Math.max(0,finite(row?.buysM5,0));
+  const sells=Math.max(0,finite(row?.sellsM5,0));
+  const trades=buys+sells;
+  const sellShare=trades>0?sells/trades:null;
+  const flags=new Set(Array.isArray(row?.score?.riskFlags)?row.score.riskFlags:[]);
+  const momentumCrash=p5!=null&&p5<=-50;
+  const liquidityDamage=liquidityRatio!=null&&liquidityRatio<=.55;
+  const severeLiquidityDamage=liquidityRatio!=null&&liquidityRatio<=.30;
+  const sellPressure=trades>=8&&sellShare>=.70;
+  const severeMomentum=p5!=null&&p5<=-80;
+  const riskOnly=String(row?.score?.stage||'').toUpperCase()==='RISK_ONLY';
+  const severeFlag=flags.has('M5_CRASH_EXTREME')||flags.has('DATA_ANOMALY_MCAP_LIQUIDITY')||flags.has('DATA_ANOMALY_FDV_LIQUIDITY');
+  const signalCount=[momentumCrash,liquidityDamage,sellPressure].filter(Boolean).length;
+  const armed=ret!=null&&ret<=-.12;
+  const trigger=armed&&(severeMomentum||severeLiquidityDamage||signalCount>=2||(riskOnly&&signalCount>=1)||(severeFlag&&signalCount>=1));
+  return Object.freeze({
+    trigger,
+    armed,
+    returnPct:ret,
+    entryLiquidityUsd:entryLiquidity,
+    liquidityUsd:liq,
+    liquidityRatio,
+    priceChangeM5:p5,
+    buysM5:buys,
+    sellsM5:sells,
+    sellShare,
+    momentumCrash,
+    liquidityDamage,
+    severeLiquidityDamage,
+    sellPressure,
+    severeMomentum,
+    riskOnly,
+    severeFlag,
+    signalCount
+  });
+}
 
 export function applyMemecoinScoutSnapshot(input,snapshot,{
   now=Date.now(),
@@ -249,29 +304,48 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   maxOpenOperational=30,
   horizonMs=12*60*60_000,
   stopReturn=-.45,
-  takeReturn=1.50
+  takeReturn=1.50,
+  blockThinLiquidityEntries=true
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
-  const results={opened:0,closed:0,marked:0,eligible:0,learningBlocked:0,learningBoosted:0,sourceReady:snapshot?.sourceReady===true};
+  const results={opened:0,closed:0,marked:0,eligible:0,learningBlocked:0,learningBoosted:0,tailRiskBlocked:0,tailRiskClosed:0,sourceReady:snapshot?.sourceReady===true};
 
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
     const row=byKey.get(String(p.chainId||'')+':'+String(p.tokenAddress||''));
     if(row&&finite(row?.priceUsd)>0){
-      const marked=markPosition(p,row.priceUsd,now,feeBps);
-      wallet.positions[i]=marked;results.marked++;
-      const ret=finite(marked.unrealizedReturnPct);
+      const baseMarked=markPosition(p,row.priceUsd,now,feeBps);
+      const ret=finite(baseMarked.unrealizedReturnPct);
       const liq=finite(row?.liquidityUsd);
+      const peakReturn=Math.max(finite(p?.peakUnrealizedReturnPct,ret??-Infinity),ret??-Infinity);
+      const troughReturn=Math.min(finite(p?.troughUnrealizedReturnPct,ret??Infinity),ret??Infinity);
+      const risk=memeTailRiskDiagnostics(p,row,baseMarked);
+      const marked={
+        ...baseMarked,
+        peakUnrealizedReturnPct:Number.isFinite(peakReturn)?peakReturn:null,
+        troughUnrealizedReturnPct:Number.isFinite(troughReturn)?troughReturn:null,
+        lastMemeTailRisk:clone(risk)
+      };
+      wallet.positions[i]=marked;results.marked++;
       let reason=null;
-      if(ret!=null&&ret<=stopReturn)reason='MEME_STOP';
+      // Security/liquidity invalidation has priority over price PnL labels so
+      // the learner can distinguish "bad thesis" from "market became unsafe".
+      if(memeSecurityGate(row)==='ABSTAIN'||memeSecurityCritical(row))reason='MEME_SECURITY_ABSTAIN';
+      else if(liq!=null&&liq<3_000)reason='MEME_LIQUIDITY_COLLAPSE';
+      else if(risk.trigger)reason='MEME_TAIL_RISK_EXIT';
+      else if(ret!=null&&ret<=stopReturn)reason='MEME_STOP';
       else if(ret!=null&&ret>=takeReturn)reason='MEME_TAKE_PROFIT';
       else if(Number(now)-Number(p.openedAt||now)>=Math.max(60_000,Number(horizonMs)||12*60*60_000))reason='MEME_HORIZON';
-      else if(liq!=null&&liq<3_000)reason='MEME_LIQUIDITY_COLLAPSE';
-      else if(memeSecurityGate(row)==='ABSTAIN'||memeSecurityCritical(row))reason='MEME_SECURITY_ABSTAIN';
-      if(reason){closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});results.closed++;}
+      if(reason){
+        const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
+        if(closed){
+          results.closed++;
+          if(reason==='MEME_TAIL_RISK_EXIT')results.tailRiskClosed++;
+        }
+      }
     }
   }
 
@@ -283,9 +357,17 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     const flags=row?.score?.riskFlags||[];
     const securityGate=memeSecurityGate(row);
     const learningAction=String(row?.memeLearning?.action||'NEUTRAL').toUpperCase();
+    const entryTailRisk=memeEntryTailRisk(row);
     const baseEligible=['NEW_NOW','EARLY'].includes(stage)&&score>=minScore&&liq>=minLiquidityUsd&&px>0&&!severeMemeRisk(flags)&&securityGate==='PASS'&&!memeSecurityCritical(row);
     if(!baseEligible)continue;
     results.eligible++;
+    // Wallet 4 is the performance scout. Very thin launches remain in the
+    // evidence factory, but are not opened here by default because a 15 s
+    // checkpoint cannot protect against an instantaneous liquidity rug.
+    if(blockThinLiquidityEntries&&entryTailRisk.blocked){
+      results.tailRiskBlocked++;
+      continue;
+    }
     if(learningAction==='BLOCK'){results.learningBlocked++;continue;}
     if(learningAction==='BOOST')results.learningBoosted++;
     if(wallet.positions.length>=maxOpenOperational)break;
@@ -302,6 +384,9 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       entryResearchPriorityScore:score,entryStage:stage,
       entryAttentionSignals:clone(row?.score?.attentionSignals||[]),
       entryRiskFlags:clone(flags),
+      entryTailRisk:clone(entryTailRisk),
+      peakUnrealizedReturnPct:0,
+      troughUnrealizedReturnPct:0,
       entryMarketFeatures:{
         chainId:String(row?.chainId||''),stage,
         ageMinutes:finite(row?.score?.ageMinutes),
