@@ -1778,7 +1778,7 @@ async function persistMemecoinEvidenceFactory(reason='mutation'){
       memecoinEvidenceFactoryState=await saveMemecoinEvidenceFactoryState(
         memecoinEvidenceFactoryFile,
         memecoinEvidenceFactoryState,
-        {maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||2500)))}
+        {maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))}
       );
       memecoinEvidenceFactoryLastError=null;
       return true;
@@ -4864,7 +4864,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       learnedSecuredRows,
       {
         now:evidenceNow,
-        maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||2500)))
+        maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))
       }
     );
     memecoinEvidenceFactoryState=evidenceObserved.state;
@@ -4897,7 +4897,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         evidenceFollowupRows,
         {
           now:Date.now(),
-          maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||2500)))
+          maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))
         }
       );
       memecoinEvidenceFactoryState=followed.state;
@@ -11567,11 +11567,11 @@ function missionControlData(){
     },
     learning:memecoinEarlySnapshot?.tradeLearning||memecoinTradeLearningSummary(buildMemecoinTradeLearningModel(specialistWalletState,{asOf:now})),
     evidenceFactory:{
-      ...memecoinEvidenceFactorySummary(memecoinEvidenceFactoryState,{
+      ...(memecoinEarlySnapshot?.evidenceFactory||memecoinEvidenceFactorySummary(memecoinEvidenceFactoryState,{
         asOf:now,
         minPatternTrain:Math.max(12,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_TRAIN||20)),
         minPatternValidate:Math.max(5,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_VALIDATE||8))
-      }),
+      })),
       healthy:memecoinEvidenceFactoryHealthy,
       lastError:memecoinEvidenceFactoryLastError,
       file:memecoinEvidenceFactoryFile
