@@ -358,11 +358,19 @@ export function refreshParallelStrategyWorlds(state,{
     if(!byId.has(strategyId)) changed=true;
     const rows=closedForGenome(leaguePositions,strategyId,world.currentGenome.genomeId);
     const evidence=metrics(rows);
+    const previousEvidence=JSON.stringify(world.currentGenome.evidence||null);
+    const previousStatus=String(world.currentGenome.status||'');
+    const previousExtensions=JSON.stringify(world.extensions||[]);
     world.currentGenome.evidence=evidence;
     world.currentGenome.status=evidence.closed>=Math.max(1,Number(minClosedPerGeneration)||8)
       ?'GENERATION_READY'
       :evidence.closed>0?'MEASURING':'AWAITING_FORWARD_TRADES';
     world.extensions=extensionsFor(world,{temporalTemple,learnedChallenger,strategySummary});
+    if(
+      previousEvidence!==JSON.stringify(world.currentGenome.evidence)||
+      previousStatus!==world.currentGenome.status||
+      previousExtensions!==JSON.stringify(world.extensions)
+    ) changed=true;
 
     if(evidence.closed>=Math.max(1,Number(minClosedPerGeneration)||8)){
       const mutation=nextMutation(world,evidence);
