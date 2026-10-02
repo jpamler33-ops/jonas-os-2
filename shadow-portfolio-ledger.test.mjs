@@ -315,18 +315,36 @@ test('learned challenger is tracked but excluded from primary portfolio metrics'
       challengerRuleStatus:'DISCOVERED',
       challengerDiscoveryStrength:.72,
       challengerSourceSamples:16,
-      challengerForwardSamples:0
+      challengerForwardSamples:0,
+      walletResearchManagerVersion:'TCX_SHADOW_WALLET_RESEARCH_MANAGER_V1',
+      walletResearchEpochId:'wre_test',
+      walletResearchEpochNumber:3,
+      walletResearchCycle:1,
+      walletResearchArm:'EXPERIMENT',
+      walletResearchWheelId:'MIN_PROBABILITY_EDGE',
+      walletResearchWheelValue:.14,
+      walletResearchPolicyFingerprint:'f'.repeat(64),
+      walletResearchDecision:{arm:'EXPERIMENT',activeConstraint:{wheelId:'MIN_PROBABILITY_EDGE',value:.14}}
     }
   });
   let l=reconcileShadowPortfolioEntries(createEmptyShadowPortfolioLedger(),[e],{now:1000}).ledger;
   assert.equal(l.positions.length,1);
   assert.equal(l.positions[0].entryMode,'CHALLENGER');
   assert.equal(l.positions[0].challengerRuleId,'lc_test');
+  assert.equal(l.positions[0].walletResearchEpochId,'wre_test');
+  assert.equal(l.positions[0].walletResearchArm,'EXPERIMENT');
+  assert.equal(l.positions[0].walletResearchWheelId,'MIN_PROBABILITY_EDGE');
+  assert.equal(l.positions[0].walletResearchWheelValue,.14);
   let x=markShadowPosition(l.positions[0],book({bid:102}),{at:61_000,feeBps:0}).position;
   x=closeShadowPosition(x,{reason:'TAKE_PROFIT',at:61_000});
   l=replaceShadowPortfolioPosition(l,x);
   const summary=shadowPortfolioSummary(l,{asOf:70_000});
   assert.equal(summary.closedTrades,0);
+  const research=shadowResearchActivitySummary(l,{asOf:70_000});
+  assert.equal(research.closedTrades,1);
+  assert.equal(research.winRate,1);
+  assert.ok(Number.isFinite(research.expectancyQuote));
+  assert.ok(Number.isFinite(research.profitFactor));
   const stats=shadowPortfolioPeriodStats(l,{period:'ALL',asOf:70_000});
   assert.equal(stats.trades,0);
 });
