@@ -85,3 +85,70 @@ export function forecastOverlaySummary(overlay){
     ].join('\n')
   });
 }
+
+
+export function forecastHorizonForChartInterval(interval){
+  const tf=String(interval||'5m').toLowerCase();
+  return tf==='1m'?'5m':tf==='5m'?'15m':tf==='15m'?'1h':'3h';
+}
+
+export function forecastIssuancesToChartMoments(issuances,{
+  symbol=null,
+  startAt=Number.NEGATIVE_INFINITY,
+  endAt=Number.POSITIVE_INFINITY,
+  horizonId=null,
+  limit=24
+}={}){
+  const wantedSymbol=symbol==null?null:String(symbol).toUpperCase();
+  const rows=(Array.isArray(issuances)?issuances:[])
+    .filter(x=>!wantedSymbol||String(x?.symbol||'').toUpperCase()===wantedSymbol)
+    .map(x=>({issuance:x,asOf:finite(x?.forecast?.asOf??x?.asOf)}))
+    .filter(x=>x.asOf!=null&&x.asOf>=Number(startAt)&&x.asOf<=Number(endAt))
+    .sort((a,b)=>a.asOf-b.asOf);
+  const chosen=[];
+  let lastBucket=null;
+  const span=Math.max(1,Number(endAt)-Number(startAt));
+  const bucketMs=Math.max(1,span/Math.max(1,Number(limit)||24));
+  for(const row of rows){
+    const forecast=row.issuance?.forecast||{};
+    const anchorPrice=finite(forecast?.price??row.issuance?.input?.price);
+    if(!(anchorPrice>0))continue;
+    const candidates=(Array.isArray(forecast?.horizons)?forecast.horizons:[])
+      .filter(h=>finite(h?.horizonMs)>0&&finite(h?.interval?.median)!=null);
+    if(!candidates.length)continue;
+    let h=horizonId?candidates.find(x=>String(x?.horizonId||'')===String(horizonId)):null;
+    if(!h)h=candidates[0];
+    const medianReturn=finite(h?.interval?.median),horizonMs=finite(h?.horizonMs);
+    if(medianReturn==null||!(horizonMs>0))continue;
+    const bucket=Math.floor((row.asOf-Number(startAt))/bucketMs);
+    if(bucket===lastBucket&&chosen.length){
+      chosen[chosen.length-1]={
+        asOf:row.asOf,
+        anchorPrice,
+        horizonId:String(h?.horizonId||''),
+        horizonMs,
+        targetAt:row.asOf+horizonMs,
+        medianReturn,
+        medianPrice:anchorPrice*(1+medianReturn),
+        gate:String(h?.gate||'UNKNOWN'),
+        operationalConfidence:finite(h?.operationalConfidence),
+        probabilistic:true
+      };
+    }else{
+      chosen.push({
+        asOf:row.asOf,
+        anchorPrice,
+        horizonId:String(h?.horizonId||''),
+        horizonMs,
+        targetAt:row.asOf+horizonMs,
+        medianReturn,
+        medianPrice:anchorPrice*(1+medianReturn),
+        gate:String(h?.gate||'UNKNOWN'),
+        operationalConfidence:finite(h?.operationalConfidence),
+        probabilistic:true
+      });
+      lastBucket=bucket;
+    }
+  }
+  return Object.freeze(chosen.slice(-Math.max(1,Number(limit)||24)).map(Object.freeze));
+}
