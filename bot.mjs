@@ -11404,6 +11404,11 @@ function missionControlData(){
       pass:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security?.evidenceGate==='PASS').length,
       abstain:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security?.evidenceGate==='ABSTAIN').length,
       unknown:(memecoinEarlySnapshot?.rows||[]).filter(x=>x?.security?.evidenceGate==='UNKNOWN').length,
+      holderFallback:memecoinEarlySnapshot?.securityProvider?.holderFallback||null,
+      outcomes:memecoinSecurityOutcomeSummary(memecoinSecurityOutcomeState,{
+        asOf:now,
+        minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
+      }),
       truthBoundary:'THIRD_PARTY_SECURITY_EVIDENCE_NOT_RUG_PROBABILITY'
     },
     social:{

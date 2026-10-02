@@ -5,8 +5,8 @@ import {BIGGJ_MOBILE_WEBAPP_VERSION,biggjWebManifest,biggjAppIconSvg,biggjServic
 
 const sample={generatedAt:1_800_000_000_000,biggj:{science:{frontier:{evidence:294,experiments:3}},worldModel:{markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12,score:.76,price:67842.31,priceChangePercent:1.84,priceChange:1226.4,openPrice:66615.91,highPrice:68410,lowPrice:66102,quoteVolume:38200000000}]}},health:{autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false},biggjObservability:{maturityIndex:.62,trustedSkills:3,totalSkillNodes:12,observedForecasts:44,runtimeRevision:9,evidence:{evidenceTotal:120,validationIndependentEpisodes:18},learningTimeline:{last24h:{total:7},last7d:{total:29},events:[{title:'Regime transfer checked',detail:'OOS evidence advanced'}]},researchQueue:[{title:'Liquidity transfer',nextGate:'FORWARD_SHADOW'}]},biggjProofFeed:{counts:{resolved:20}},marketRadar:{rows:[{symbol:'ETHUSDT',status:'SUPPORTED',regime:'RANGE',witnessAgreement:.7,support:8,score:.61}]}},portfolio:{equityQuote:1012,netPnlQuote:12,openPositions:1,closedTrades:3,positions:[],recentClosed:[]}};
 
-test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V5');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
-test('only four user surfaces',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/RESEARCH-REIFE/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
+test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V6_MEME_WALLET');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
+test('five user surfaces include the dedicated meme wallet',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading','meme'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/RESEARCH-REIFE/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','LIVE TICKER','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · FORECAST · LIQUIDITY · CONFLUENCE · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('progress is measurable',()=>{const h=renderBiggjMobileApp(sample);assert.match(h,/Scoreboard/);assert.match(h,/Learning Timeline/);assert.match(h,/Nächster Hebel/);assert.match(h,/validationIndependentEpisodes/);assert.match(h,/maturityIndex/)});
 test('boot state safe and live refresh no-store',()=>{const h=renderBiggjMobileApp({health:{x:'<script>',autonomousOperator:{mode:'HANDS_OFF'}},portfolio:{}});assert.ok(!h.includes('"x":"<script>"'));assert.match(h,/"x":"\\u003cscript\\u003e"/);assert.match(h,/mission-control\.json/);assert.match(h,/cache:'no-store'/);assert.match(h,/SHADOW_ONLY/);assert.match(h,/canExecuteLive/)});
@@ -88,7 +88,7 @@ test('base mobile trading view exposes research activity without mission-control
   x.portfolio.researchActivity={openPositions:20,closedTrades:3998,wins:1900,losses:2098,winRate:.475,netPnlQuote:-12.5,byMode:{COVERAGE_PROBE:{open:20,closed:3998,realizedPnlQuote:-12.5}},active:[{symbol:'BTCUSDT',side:'LONG',entryMode:'COVERAGE_PROBE',entryPrice:60000,horizonId:'15m'}],recentClosed:[]};
   const h=renderBiggjMobileApp(x);
   for(const text of ['PRIMARY +','Research Trading','Research Open','Research Closed','Discovery Pipeline','Aktueller Blocker','Runtime Gates','Aktive Research Positionen']) assert.match(h,new RegExp(text));
-  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V5'/);
+  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V6_MEME_WALLET'/);
   assert.match(h,/next\?\.appVersion&&next\.appVersion!==APP_VERSION/);
 });
 
@@ -116,4 +116,39 @@ test('timeline translates compound machine labels instead of passing them throug
   assert.match(h,/WITNESS_NOT_SATISFIED:'Witness-Kriterium nicht erfüllt'/);
   assert.match(h,/function HUMAN_DETAIL\(v\)/);
   assert.match(h,/x\.detail\?HUMAN_DETAIL\(x\.detail\)/);
+});
+
+
+test('meme wallet mirrors the premium mockup structure and binds only live shadow fields',()=>{
+  const x=structuredClone(sample);
+  x.health.memecoinRadar={
+    sourceReady:true,
+    source:'DEXSCREENER_PLUS_GECKOTERMINAL_KEYLESS',
+    rows:[{
+      chainId:'solana',tokenAddress:'SoTest',symbol:'MOONPUP',priceUsd:.0000367,liquidityUsd:1200000,
+      score:{stage:'NEW_NOW'},security:{evidenceGate:'PASS'}
+    }],
+    security:{
+      checked:4,pass:2,abstain:1,unknown:1,
+      outcomes:{records:8,comparison:{status:'INSUFFICIENT_SAMPLE'},cohorts:{
+        PASS_HOLDER_FALLBACK:{records:2,horizons:{'1h':{matured:0,averageReturn:null,severeLossRate:null}}},
+        PASS_NATIVE:{records:1,horizons:{'1h':{matured:0,averageReturn:null,severeLossRate:null}}},
+        ABSTAIN:{records:2,horizons:{'1h':{matured:0,averageReturn:null,severeLossRate:null}}},
+        UNKNOWN:{records:3,horizons:{'1h':{matured:0,averageReturn:null,severeLossRate:null}}}
+      }}
+    }
+  };
+  x.health.specialistWallets={wallets:{W4_MEME_SCOUT:{
+    walletId:'W4_MEME_SCOUT',openPositions:1,closedTrades:1,wins:1,losses:0,winRate:1,
+    realizedPnlQuote:50,unrealizedPnlQuote:25,netPnlQuote:75,profitFactor:null,
+    cumulativeMarginUsedQuote:200,currentMarginAtRiskQuote:100,
+    active:[{chainId:'solana',tokenAddress:'SoTest',symbol:'MOONPUP',entryPrice:.0000123,lastPrice:.0000367,openedAt:Date.now()-600000,unrealizedNetPnlQuote:25,unrealizedReturnPct:1.983,entrySecurityGate:'PASS',entryStage:'NEW_NOW'}],
+    recentClosed:[{symbol:'OLDPUP',chainId:'solana',openedAt:Date.now()-7200000,closedAt:Date.now()-3600000,realizedNetPnlQuote:50,realizedReturnPct:.5,closeReason:'MEME_TAKE_PROFIT'}]
+  },W5_MEME_COPY:{walletId:'W5_MEME_COPY',openPositions:0,closedTrades:0,active:[],recentClosed:[]}}};
+  const h=renderBiggjMobileApp(x);
+  for(const text of ['Meme Wallet','Early Meme Scout','SHADOW_ONLY','LIVE DATA','NO REAL ORDERS · PAPER ONLY','Unrealized PnL','Realized PnL','Total PnL','ROI auf Einsatz','Performance Overview','Open Positions','Security Outcome Lab','PASS Holder Fallback','PASS Native','ABSTAIN','UNKNOWN'])assert.match(h,new RegExp(text));
+  assert.match(h,/data-meme-wallet="W4_MEME_SCOUT"/);
+  assert.match(h,/data-meme-range="7D"/);
+  assert.match(h,/MEME_PANEL='positions'/);
+  assert.match(h,/canExecuteLive:false/);
 });
