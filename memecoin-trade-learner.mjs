@@ -218,18 +218,38 @@ function choose(groups,keys,mins){
   return {level:'PRIOR',key:'PRIOR',samples:0,posteriorWinRate:.5,shrinkedMeanReturn:0,severeLossRate:null,confidence:0,qualityScore:.5,label:'UNCERTAIN'};
 }
 export function scoreMemecoinScoutCandidate(model,row,{
-  minExactSamples=8,minContextSamples=12,minCoreSamples=18,minChainSamples=25,
-  minBlockConfidence=.44,minBoostConfidence=.44
+  minExactSamples=8,minContextSamples=12,minCoreSamples=18,minChainSamples=30,minGlobalSamples=40,
+  minBlockConfidence=.44,minBoostConfidence=.44,minThrottleConfidence=.65,throttleSizeMultiplier=.15
 }={}){
   const shape=memecoinScoutFeatureShape(row);
-  const decisionKeys=w4Keys(shape).filter(([level])=>['EXACT','CONTEXT','CORE'].includes(level));
-  const chosen=choose(model?.wallet4?.groups,decisionKeys,{EXACT:minExactSamples,CONTEXT:minContextSamples,CORE:minCoreSamples});
-  let action='NEUTRAL',adjustment=0;
-  if(chosen.label==='LEARNED_BAD'&&chosen.confidence>=minBlockConfidence){action='BLOCK';adjustment=-.20;}
-  else if(chosen.label==='LEARNED_GOOD'&&chosen.confidence>=minBoostConfidence){action='BOOST';adjustment=.05;}
+  const keys=w4Keys(shape);
+  const specificKeys=keys.filter(([level])=>['EXACT','CONTEXT','CORE'].includes(level));
+  const broadKeys=keys.filter(([level])=>['CHAIN','GLOBAL'].includes(level));
+  const specific=choose(model?.wallet4?.groups,specificKeys,{EXACT:minExactSamples,CONTEXT:minContextSamples,CORE:minCoreSamples});
+  const broad=choose(model?.wallet4?.groups,broadKeys,{CHAIN:minChainSamples,GLOBAL:minGlobalSamples});
+  const specificPositive=['LEARNED_GOOD','ASYMMETRIC_EDGE'].includes(String(specific.label||''));
+  const broadDestructive=
+    broad.label==='LEARNED_BAD'&&
+    broad.confidence>=minThrottleConfidence&&
+    Number(broad.shrinkedMeanReturn||0)<0&&
+    Number(broad.severeLossRate||0)>=.60;
+  let action='NEUTRAL',adjustment=0,sizeMultiplier=1,chosen=specific;
+  if(specific.label==='LEARNED_BAD'&&specific.confidence>=minBlockConfidence){
+    action='BLOCK';adjustment=-.20;sizeMultiplier=0;
+  }else if(specific.label==='LEARNED_GOOD'&&specific.confidence>=minBoostConfidence){
+    action='BOOST';adjustment=.05;
+  }else if(!specificPositive&&broadDestructive){
+    // Preserve learning without repeatedly paying full virtual notional for a
+    // broadly destructive chain/regime. Specific positive evidence can still
+    // graduate out of this throttle; live execution authority remains false.
+    action='THROTTLE';adjustment=-.10;sizeMultiplier=clamp(throttleSizeMultiplier,.05,.35);chosen=broad;
+  }
+  const pack=x=>({level:x.level,key:x.key,samples:x.samples,posteriorWinRate:x.posteriorWinRate,shrinkedMeanReturn:x.shrinkedMeanReturn,severeLossRate:x.severeLossRate,confidence:x.confidence,qualityScore:x.qualityScore,label:x.label});
   return Object.freeze({
-    version:MEMECOIN_TRADE_LEARNER_VERSION,shape,action,rankingAdjustment:adjustment,
-    evidence:{level:chosen.level,key:chosen.key,samples:chosen.samples,posteriorWinRate:chosen.posteriorWinRate,shrinkedMeanReturn:chosen.shrinkedMeanReturn,severeLossRate:chosen.severeLossRate,confidence:chosen.confidence,qualityScore:chosen.qualityScore,label:chosen.label},
+    version:MEMECOIN_TRADE_LEARNER_VERSION,shape,action,rankingAdjustment:adjustment,sizeMultiplier,
+    evidence:pack(chosen),
+    specificEvidence:pack(specific),
+    broadEvidence:pack(broad),
     canOverrideSecurity:false,canCreateEntry:false,canExecuteLive:false
   });
 }
