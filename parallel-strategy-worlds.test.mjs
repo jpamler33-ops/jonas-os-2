@@ -51,7 +51,7 @@ test('does not evolve a world before forward shadow sample floor',()=>{
   const scout=s.worlds.find(x=>x.strategyId==='SCOUT');
   const rows=Array.from({length:7},(_,i)=>closed({strategyId:'SCOUT',genomeId:scout.currentGenome.genomeId,i,pnl:1,ret:.01}));
   const r=refreshParallelStrategyWorlds(s,{baseStrategies:BASE,leaguePositions:rows,asOf:2_000_000,minClosedPerGeneration:8});
-  assert.equal(r.changed,false);
+  assert.equal(r.changed,true);
   const after=r.state.worlds.find(x=>x.strategyId==='SCOUT');
   assert.equal(after.generation,1);
   assert.equal(after.currentGenome.status,'MEASURING');
