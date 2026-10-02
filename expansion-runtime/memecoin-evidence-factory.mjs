@@ -96,12 +96,38 @@ function attentionBin(row={}){
   if(signals.has('NEW_BOOST')||signals.has('COMMUNITY_TAKEOVER'))return 'ATTN_DEX_EVENT';
   return signals.size?'ATTN_LIGHT':'ATTN_NONE';
 }
+function discoverySignals(row={}){
+  const out=[];
+  if(row?.signalNewPool)out.push('NEW_POOL');
+  if(row?.signalProfile)out.push('DEX_PROFILE');
+  if(row?.signalBoost)out.push('DEX_BOOST');
+  if(row?.signalTakeover)out.push('COMMUNITY_TAKEOVER');
+  if(row?.signalAd)out.push('DEX_AD');
+  if(row?.socialDiscoverySeed)out.push('DIRECT_SOCIAL_SEED');
+  if(Number(row?.externalAttentionCount||0)>0)out.push('EXTERNAL_MENTION');
+  if(Number(row?.directSocialAttention?.posts||0)>0)out.push('DIRECT_SOCIAL_MATCH');
+  return out;
+}
+function discoveryBin(f={}){
+  const s=new Set(f?.discoverySignals||[]);
+  if(s.has('DIRECT_SOCIAL_SEED'))return 'DISCOVERY_SOCIAL_SEED';
+  if(s.has('NEW_POOL'))return 'DISCOVERY_NEW_POOL';
+  if(s.has('DEX_BOOST'))return 'DISCOVERY_BOOST';
+  if(s.has('DEX_PROFILE'))return 'DISCOVERY_PROFILE';
+  if(s.has('DIRECT_SOCIAL_MATCH'))return 'DISCOVERY_SOCIAL_MATCH';
+  return 'DISCOVERY_RADAR';
+}
 function snapshotFeatures(row={},now=Date.now()){
   const security=row?.security||{};
   return {
     chainId:String(row?.chainId||'').toLowerCase(),
     pairAddress:text(row?.pairAddress,200)||null,
+    dexId:text(row?.dexId,80)||null,
     stage:String(row?.score?.stage||'UNKNOWN').toUpperCase(),
+    discoverySignals:discoverySignals(row),
+    socialDiscoverySource:text(row?.socialDiscoverySeed?.source,120)||null,
+    xLinked:row?.xLinked===true,
+    websiteLinked:row?.websiteLinked===true,
     researchPriorityScore:finite(row?.score?.researchPriorityScore),
     ageMinutes:ageMinutes(row,now),
     liquidityUsd:finite(row?.liquidityUsd),
@@ -211,7 +237,8 @@ function patternShape(c){
     liq:liqBin(f.liquidityUsd),
     pressure:pressureBin(f.buysM5,f.sellsM5),
     attention:attentionBin({score:{attentionSignals:f.attentionSignals||[]},directSocialAttention:{attentionBand:f.socialAttentionBand}}),
-    security:String(f.securityGate||'UNKNOWN')
+    security:String(f.securityGate||'UNKNOWN'),
+    discovery:discoveryBin(f)
   };
 }
 function patternKeys(c){
@@ -219,7 +246,8 @@ function patternKeys(c){
   return [
     ['CONTEXT',[s.chain,s.stage,s.age,s.liq,s.pressure].join('|')],
     ['CORE',[s.chain,s.stage,s.liq].join('|')],
-    ['SECURITY',[s.chain,s.security,s.liq].join('|')]
+    ['SECURITY',[s.chain,s.security,s.liq].join('|')],
+    ['DISCOVERY',[s.chain,s.discovery,s.stage,s.liq].join('|')]
   ];
 }
 function outcomeAt(c,label){
@@ -321,13 +349,24 @@ function counterfactualAggregate(cases,entryLabel=null){
   };
 }
 
+function trimCases(cases,maxCases,asOf=Date.now()){
+  const cap=Math.max(200,Number(maxCases)||4000);
+  if(cases.length<=cap)return cases;
+  const sorted=cases.slice().sort((a,b)=>Number(b.discoveredAt||0)-Number(a.discoveredAt||0));
+  const protectionMs=26*60*60_000;
+  const recent=sorted.filter(c=>Number(asOf)-Number(c.discoveredAt||0)<protectionMs);
+  const old=sorted.filter(c=>Number(asOf)-Number(c.discoveredAt||0)>=protectionMs);
+  return [...recent.slice(0,cap),...old.slice(0,Math.max(0,cap-recent.length))]
+    .sort((a,b)=>Number(a.discoveredAt||0)-Number(b.discoveredAt||0));
+}
+
 export function createMemecoinEvidenceFactoryState(){
   return Object.freeze(stateFrom(null));
 }
 
 export function observeMemecoinEvidence(input,rows,{
   now=Date.now(),
-  maxCases=2500,
+  maxCases=4000,
   horizons=MEMECOIN_EVIDENCE_HORIZONS
 }={}){
   const state=stateFrom(input);
@@ -352,9 +391,7 @@ export function observeMemecoinEvidence(input,rows,{
       const px=finite(row?.priceUsd);if(px>0)rec.lastPriceUsd=px;
     }
   }
-  state.cases=state.cases
-    .sort((a,b)=>Number(a.discoveredAt||0)-Number(b.discoveredAt||0))
-    .slice(-Math.max(200,Number(maxCases)||2500));
+  state.cases=trimCases(state.cases,maxCases,now);
   state.updatedAt=Number(now);results.cases=state.cases.length;
   return Object.freeze({state:Object.freeze(state),results:Object.freeze(results)});
 }
@@ -453,9 +490,9 @@ export async function loadMemecoinEvidenceFactoryState(filePath){
   }
 }
 
-export async function saveMemecoinEvidenceFactoryState(filePath,input,{maxCases=2500}={}){
+export async function saveMemecoinEvidenceFactoryState(filePath,input,{maxCases=4000}={}){
   const state=stateFrom(input);
-  state.cases=state.cases.slice(-Math.max(200,Number(maxCases)||2500));
+  state.cases=trimCases(state.cases,maxCases,Date.now());
   state.updatedAt=Date.now();
   const tmp=filePath+'.tmp';
   await writeFile(tmp,JSON.stringify(state),'utf8');
