@@ -69,6 +69,15 @@ const snapshot={
       recentlyChanged:[{title:'S17 → S45 → 1h',previousStatus:'COLLECTING',status:'ROBUST_FORWARD_LAW_CANDIDATE',samples:48}],
       canExecuteLive:false,automaticPromotion:false
     },
+    indicatorEvolution:{
+      catalogSize:216,active:203,
+      counts:{CORE_CANDIDATE:2,SUPPORTED_ONCE:3,SPECIALIST_CANDIDATE:4,RETIRED:10,REDUNDANT:7,REACTIVATION_TRIAL:1},
+      top:[
+        {id:'TA_5M_RSI',label:'Relative Strength Index · 5M',family:'RSI',timeframe:'5m',status:'CORE_CANDIDATE',oosCases:130,independentEpisodes:80,meanBrierDelta:-.009,q:.012},
+        {id:'TA_1H_ADX_DMI',label:'ADX / Directional Movement · 1H',family:'ADX_DMI',timeframe:'1h',status:'SPECIALIST_CANDIDATE',oosCases:100,independentEpisodes:65,meanBrierDelta:-.006,q:.041}
+      ],
+      canExecuteLive:false,automaticProductionMutation:false
+    },
     parallelStrategyWorlds:{
       worldCount:2,
       generations:5,
@@ -106,6 +115,10 @@ test('science home presents knowledge and new Temporal Temple findings before tr
   const text=p.embeds[0].fields.map(x=>x.name+'\n'+x.value).join('\n');
   assert.match(text,/HALL OF DISCOVERIES · LIFECYCLE/);
   assert.match(text,/Gespeichert 3 · validiert 2 · robust 1 · widerlegt 1/);
+  assert.match(text,/INDICATOR EVOLUTION · FEATURE SURVIVAL/);
+  assert.match(text,/Arsenal 216 · aktiv 203 · Core 2 · Specialist 4/);
+  assert.match(text,/Relative Strength Index/);
+  assert.match(text,/Walk-forward \+ FDR · keine automatische Production-Mutation/);
   assert.match(text,/Dauerhafte Forschungschronik · authority NONE/);
   assert.match(text,/Letzter Statuswechsel: S17 → S45 → 1h/);
   assert.match(text,/NEUE ENTDECKUNGEN · TEMPORAL TEMPLE/);
