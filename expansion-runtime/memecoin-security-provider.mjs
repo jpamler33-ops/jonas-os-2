@@ -273,7 +273,12 @@ export function createMemecoinSecurityProvider({
   minRequestGapMs=2100,
   holderFallbackEnabled=true,
   holderCacheMs=10*60_000,
-  solanaRpcUrl='https://api.mainnet-beta.solana.com',
+  solanaRpcUrl='',
+  solanaRpcUrls=['https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'],
+  evmRpcUrls={
+    base:['https://base-rpc.publicnode.com','https://mainnet.base.org'],
+    ethereum:['https://ethereum-rpc.publicnode.com','https://cloudflare-eth.com']
+  },
   blockscoutBaseUrls={
     base:'https://base.blockscout.com',
     ethereum:'https://eth.blockscout.com'
@@ -284,7 +289,9 @@ export function createMemecoinSecurityProvider({
   const base=String(baseUrl).replace(/\/+$/,'');
   const cache=new Map();
   const holderCache=new Map();
-  const solRpc=String(solanaRpcUrl||'').replace(/\/+$/,'');
+  const normalizeUrls=v=>(Array.isArray(v)?v:[v]).map(x=>String(x||'').trim().replace(/\/+$/,'')).filter(Boolean);
+  const solRpcs=[...new Set([...normalizeUrls(solanaRpcUrl),...normalizeUrls(solanaRpcUrls)])];
+  const evmRpcs=Object.fromEntries(Object.entries(evmRpcUrls||{}).map(([k,v])=>[normChain(k),normalizeUrls(v)]));
   const blockscoutBases=Object.fromEntries(Object.entries(blockscoutBaseUrls||{}).map(([k,v])=>[normChain(k),String(v||'').replace(/\/+$/,'')]));
   let lastRequestAt=0;
   async function throttle(){
@@ -319,6 +326,33 @@ export function createMemecoinSecurityProvider({
       return data;
     }finally{clearTimeout(timer);}
   }
+  async function rpcFallback(urls,fn,label){
+    const errors=[];
+    for(const url of normalizeUrls(urls)){
+      try{return {url,value:await fn(url)};}
+      catch(err){errors.push(new URL(url).hostname+':'+(err instanceof Error?err.message:String(err)));}
+    }
+    throw new Error(label+'_ALL_FAILED:'+errors.join(','));
+  }
+  function hexUintToDecimal(raw){
+    const s=String(raw||'').trim();
+    if(!/^0x[0-9a-fA-F]+$/.test(s))return null;
+    try{return BigInt(s).toString();}catch{return null;}
+  }
+  async function evmTotalSupply(chain,address){
+    const urls=evmRpcs[chain]||[];
+    if(!urls.length)throw new Error('EVM_RPC_'+chain.toUpperCase()+'_NOT_CONFIGURED');
+    const hit=await rpcFallback(urls,async url=>{
+      const body=await publicJson(url,{method:'POST',body:{
+        jsonrpc:'2.0',id:1,method:'eth_call',
+        params:[{to:address,data:'0x18160ddd'},'latest']
+      }});
+      const amount=hexUintToDecimal(body?.result);
+      if(amount==null)throw new Error('TOTAL_SUPPLY_INVALID');
+      return amount;
+    },'EVM_TOTAL_SUPPLY');
+    return {amount:hit.value,rpcHost:new URL(hit.url).hostname};
+  }
   async function fetchIndependentHolderEvidence(chainId,tokenAddress,{force=false}={}){
     if(!holderFallbackEnabled)return freeze({sourceReady:false,source:'DISABLED',reason:'HOLDER_FALLBACK_DISABLED'});
     const chain=normChain(chainId),address=String(tokenAddress||'').trim();
@@ -326,37 +360,60 @@ export function createMemecoinSecurityProvider({
     if(!force&&hit&&t-hit.at<Math.max(60_000,Number(holderCacheMs)||600_000))return hit.value;
     let value;
     if(chain==='solana'){
-      if(!solRpc)throw new Error('SOLANA_RPC_NOT_CONFIGURED');
-      const [largest,supply]=await Promise.all([
-        publicJson(solRpc,{method:'POST',body:{jsonrpc:'2.0',id:1,method:'getTokenLargestAccounts',params:[address,{commitment:'confirmed'}]}}),
-        publicJson(solRpc,{method:'POST',body:{jsonrpc:'2.0',id:2,method:'getTokenSupply',params:[address,{commitment:'confirmed'}]}})
-      ]);
-      const rows=Array.isArray(largest?.result?.value)?largest.result.value:[];
-      const totalSupplyRaw=supply?.result?.value?.amount;
-      const shares=holderSharesFromRaw(rows.map(x=>x?.amount),totalSupplyRaw);
-      if(!shares)throw new Error('SOLANA_HOLDER_EVIDENCE_INCOMPLETE');
+      if(!solRpcs.length)throw new Error('SOLANA_RPC_NOT_CONFIGURED');
+      const hitRpc=await rpcFallback(solRpcs,async rpc=>{
+        const [largest,supply]=await Promise.all([
+          publicJson(rpc,{method:'POST',body:{jsonrpc:'2.0',id:1,method:'getTokenLargestAccounts',params:[address,{commitment:'confirmed'}]}}),
+          publicJson(rpc,{method:'POST',body:{jsonrpc:'2.0',id:2,method:'getTokenSupply',params:[address,{commitment:'confirmed'}]}})
+        ]);
+        const rows=Array.isArray(largest?.result?.value)?largest.result.value:[];
+        const totalSupplyRaw=supply?.result?.value?.amount;
+        const shares=holderSharesFromRaw(rows.map(x=>x?.amount),totalSupplyRaw);
+        if(!shares)throw new Error('HOLDER_EVIDENCE_INCOMPLETE');
+        return {largest,supply,shares,totalSupplyRaw};
+      },'SOLANA_HOLDER_RPC');
+      const {largest,shares,totalSupplyRaw}=hitRpc.value;
       value=freeze({
         source:'SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS',
         sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
         ...shares,totalSupplyRaw:String(totalSupplyRaw),slot:finite(largest?.result?.context?.slot),
-        sortedByBalance:true,independentFromGoPlus:true
+        rpcHost:new URL(hitRpc.url).hostname,sortedByBalance:true,independentFromGoPlus:true
       });
     }else if(chain==='base'||chain==='ethereum'){
       const host=blockscoutBases[chain];
       if(!host)throw new Error('BLOCKSCOUT_'+chain.toUpperCase()+'_NOT_CONFIGURED');
       const encoded=encodeURIComponent(address);
-      const [token,holders]=await Promise.all([
-        publicJson(host+'/api/v2/tokens/'+encoded),
-        publicJson(host+'/api/v2/tokens/'+encoded+'/holders')
-      ]);
-      const rows=Array.isArray(holders?.items)?holders.items:[];
-      const totalSupplyRaw=token?.total_supply??token?.totalSupply;
+      let token=null,holders=null,holderTransport='V2',supplyTransport='V2';
+      try{token=await publicJson(host+'/api/v2/tokens/'+encoded);}catch{}
+      try{holders=await publicJson(host+'/api/v2/tokens/'+encoded+'/holders');}catch{}
+      let rows=Array.isArray(holders?.items)?holders.items:[];
+      if(!rows.length){
+        const legacy=await publicJson(host+'/api?module=token&action=getTokenHolders&contractaddress='+encoded+'&page=1&offset=20');
+        rows=Array.isArray(legacy?.result)?legacy.result:[];
+        holderTransport='LEGACY';
+      }
+      let totalSupplyRaw=token?.total_supply??token?.totalSupply;
+      let rpcHost=null;
+      if(finite(totalSupplyRaw)==null||finite(totalSupplyRaw)<=0){
+        try{
+          const legacyToken=await publicJson(host+'/api?module=token&action=getToken&contractaddress='+encoded);
+          totalSupplyRaw=legacyToken?.result?.totalSupply??legacyToken?.result?.total_supply;
+          supplyTransport='LEGACY';
+        }catch{}
+      }
+      if(finite(totalSupplyRaw)==null||finite(totalSupplyRaw)<=0){
+        const rpcSupply=await evmTotalSupply(chain,address);
+        totalSupplyRaw=rpcSupply.amount;
+        rpcHost=rpcSupply.rpcHost;
+        supplyTransport='RPC_ETH_CALL';
+      }
       const shares=holderSharesFromRaw(rows.map(x=>x?.value??x?.balance),totalSupplyRaw);
       if(!shares)throw new Error('BLOCKSCOUT_HOLDER_EVIDENCE_INCOMPLETE');
       value=freeze({
         source:'BLOCKSCOUT_'+chain.toUpperCase()+'_TOKEN_HOLDERS',
         sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
         ...shares,totalSupplyRaw:String(totalSupplyRaw),holderCount:finite(token?.holders_count??token?.holders),
+        holderTransport,supplyTransport,rpcHost,
         sortedByBalance:true,independentFromGoPlus:true
       });
     }else{
