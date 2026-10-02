@@ -305,7 +305,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   horizonMs=12*60*60_000,
   stopReturn=-.45,
   takeReturn=1.50,
-  blockThinLiquidityEntries=true
+  blockThinLiquidityEntries=false
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
