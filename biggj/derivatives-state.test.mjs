@@ -1,5 +1,38 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {buildDerivativesState} from './derivatives-state.mjs';
-const t='2026-09-29T07:00:00.000Z';const o=(provider,funding,mark,oi,extra={})=>({provider,symbol:provider==='KRAKEN_FUTURES'?'PF_XBTUSD':'BTCUSDT',sourceTimestamp:'2026-09-29T06:30:00.000Z',ingestTimestamp:'2026-09-29T06:31:00.000Z',values:{funding_rate:funding,mark_price:mark,open_interest:oi,...extra}});
-test('aligned funding can become directional feature with two fresh providers',()=>{const s=buildDerivativesState([o('OKX',.0001,65000,100),o('KRAKEN_FUTURES',.0002,null,200)],{asOf:t});assert.equal(s.funding.consensus,'ALIGNED');assert.equal(s.quality.usableForDirectionalFeature,true);});
-test('funding sign conflict fails closed',()=>{const s=buildDerivativesState([o('OKX',.0001,65000,100),o('KRAKEN_FUTURES',-.0001,null,200)],{asOf:t});assert.equal(s.funding.consensus,'CONFLICT');assert.equal(s.quality.usableForDirectionalFeature,false);});
-test('raw OI is never summed across incompatible providers',()=>{const s=buildDerivativesState([o('OKX',.0001,65000,100),o('KRAKEN_FUTURES',.0002,null,200)],{asOf:t});assert.equal(s.openInterest.aggregation,'DISABLED_UNLESS_UNITS_VERIFIED');assert.equal(s.openInterest.byProvider.OKX.value,100);assert.equal(s.openInterest.byProvider.KRAKEN_FUTURES.value,200);});
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {buildDerivativesState} from './derivatives-state.mjs';
+const t='2026-09-29T07:00:00.000Z';
+const o=(provider,funding,mark,oi,extra={})=>({
+  provider,
+  symbol:provider==='KRAKEN_FUTURES'?'PF_XBTUSD':'BTCUSDT',
+  sourceTimestamp:'2026-09-29T06:30:00.000Z',
+  ingestTimestamp:'2026-09-29T06:31:00.000Z',
+  values:{funding_rate:funding,mark_price:mark,open_interest:oi,...extra}
+});
+
+test('aligned comparable funding can become directional feature with two fresh providers',()=>{
+  const s=buildDerivativesState([o('OKX',.0001,65000,100),o('BINANCE_FUTURES',.00012,65010,200)],{asOf:t});
+  assert.equal(s.funding.consensus,'ALIGNED');
+  assert.equal(s.funding.comparableProviderCount,2);
+  assert.equal(s.quality.usableForDirectionalFeature,true);
+});
+
+test('provider-native funding semantics fail closed even when signs align',()=>{
+  const s=buildDerivativesState([o('OKX',.0001,65000,100),o('KRAKEN_FUTURES',.9,null,200)],{asOf:t});
+  assert.equal(s.funding.consensus,'INSUFFICIENT');
+  assert.equal(s.quality.usableForDirectionalFeature,false);
+  assert.equal(s.alerts.some(a=>a.type==='FUNDING_NOT_DIRECTLY_COMPARABLE'),true);
+});
+
+test('funding sign conflict fails closed',()=>{
+  const s=buildDerivativesState([o('OKX',.0001,65000,100),o('BINANCE_FUTURES',-.0001,65010,200)],{asOf:t});
+  assert.equal(s.funding.consensus,'CONFLICT');
+  assert.equal(s.quality.usableForDirectionalFeature,false);
+});
+
+test('raw OI is never summed across incompatible providers',()=>{
+  const s=buildDerivativesState([o('OKX',.0001,65000,100),o('KRAKEN_FUTURES',.0002,null,200)],{asOf:t});
+  assert.equal(s.openInterest.aggregation,'DISABLED_UNLESS_UNITS_VERIFIED');
+  assert.equal(s.openInterest.byProvider.OKX.value,100);
+  assert.equal(s.openInterest.byProvider.KRAKEN_FUTURES.value,200);
+});

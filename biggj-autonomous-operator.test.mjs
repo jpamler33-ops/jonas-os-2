@@ -459,7 +459,7 @@ test('passive data-quality quarantine is waiting for data, not a human escalatio
   assert.equal(out.actions.length,0);
 });
 
-test('non-passive repeated data-quality block still escalates',()=>{
+test('non-passive repeated data-quality block stays visible without inventing a human action',()=>{
   let state=createBiggjAutonomousOperator({asOf:now-10_000});
   for(let i=0;i<3;i++){
     const out=refreshBiggjAutonomousOperator(state,{
@@ -478,7 +478,35 @@ test('non-passive repeated data-quality block still escalates',()=>{
   }
   const summary=biggjAutonomousOperatorSummary(state);
   assert.equal(summary.waitingForData,false);
-  assert.equal(summary.operatorNeeded,true);
-  assert.equal(summary.mode,'ESCALATION_REQUIRED');
-  assert.match(summary.humanJobRemaining,/DATA_QUALITY_BLOCKED/);
+  assert.equal(summary.operatorNeeded,false);
+  assert.equal(summary.mode,'AUTO_MONITORING');
+  assert.equal(summary.humanJobRemaining,'EXCEPTIONS_ONLY');
+  assert.equal(summary.dataQualityIncidents,1);
+  assert.equal(summary.humanActionIncidents,0);
+});
+
+
+test('one unhealthy owner shared by many tasks creates one owner incident',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const tasks=Array.from({length:12},(_,i)=>task({
+    taskId:'shared-'+i,
+    subject:'seed:SHARED_'+i,
+    autoHandler:'SHADOW_COMPETITION_WORKER'
+  }));
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'DATA_COLLECTION_ONLY',
+      operatorDataOnly:false,
+      nextTasks:tasks
+    }),
+    operations:{},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.activeIncidents,1);
+  assert.equal(summary.internalIncidents,1);
+  assert.equal(Object.keys(out.state.incidents)[0],'OWNER_UNHEALTHY|SHADOW_COMPETITION_WORKER');
+  assert.equal(out.state.ownerAssessments.length,12);
 });
