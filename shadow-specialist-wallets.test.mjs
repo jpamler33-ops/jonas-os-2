@@ -136,7 +136,7 @@ test('wallet 4 contrarian lane intentionally probes one soft rule at tiny shadow
     score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:['SOCIAL_POSTS_RECENT'],riskFlags:[]},
     security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32}},
     memeLearning:{action:'BLOCK',rankingAdjustment:-.2,evidence:{level:'EXACT',samples:20,label:'LEARNED_BAD',confidence:.8}}
-  }]},{now,marginQuote:100,contrarianProbeRate:1,contrarianMarginMultiplier:.05});
+  }]},{now,marginQuote:100,contrarianEnabled:true,contrarianProbeRate:1,contrarianMarginMultiplier:.05});
   assert.equal(x.results.contrarianEligible,1);
   assert.equal(x.results.contrarianOpened,1);
   assert.equal(x.results.opened,1);
@@ -157,7 +157,7 @@ test('wallet 4 bootstraps one hard-safe contrarian probe even when random rate i
     score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:[],riskFlags:[]},
     security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32}},
     memeLearning:{action:'BLOCK',rankingAdjustment:-.2,evidence:{level:'EXACT',samples:20,label:'LEARNED_BAD',confidence:.8}}
-  }]},{now,marginQuote:100,contrarianProbeRate:0,contrarianMarginMultiplier:.05});
+  }]},{now,marginQuote:100,contrarianEnabled:true,contrarianProbeRate:0,contrarianMarginMultiplier:.05});
   assert.equal(x.results.contrarianEligible,1);
   assert.equal(x.results.contrarianOpened,1);
   const p=x.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
@@ -174,7 +174,7 @@ test('wallet 4 contrarian lane never bypasses hard security guards',()=>{
     score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:[],riskFlags:[]},
     security:{evidenceGate:'ABSTAIN',criticalRiskFlags:['HONEYPOT_FLAGGED'],warningFlags:[]},
     memeLearning:{action:'BLOCK',evidence:{level:'EXACT',samples:20,label:'LEARNED_BAD',confidence:.8}}
-  }]},{now,contrarianProbeRate:1});
+  }]},{now,contrarianEnabled:true,contrarianProbeRate:1});
   assert.equal(x.results.contrarianOpened,0);
   assert.equal(x.results.opened,0);
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
