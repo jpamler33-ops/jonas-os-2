@@ -131,6 +131,38 @@ test('Blockscout holder evidence resolves a holder-only GoPlus UNKNOWN without r
   assert.equal(out.securityProvider.unknownReasonCounts.HOLDER_CONCENTRATION_EVIDENCE_MISSING,undefined);
 });
 
+test('RugCheck holder evidence resolves Solana holder-only UNKNOWN without RPC',async()=>{
+  const address='So22222222222222222222222222222222222222222';
+  let rpcCalls=0;
+  const p=createMemecoinSecurityProvider({
+    minRequestGapMs:0,now:()=>4500,solanaRpcUrls:['https://solana.test'],
+    fetchImpl:async url=>{
+      const u=new URL(url);
+      if(u.hostname==='api.gopluslabs.io')return ok({code:1,result:{[address]:{
+        mintable:{status:'0'},freezable:{status:'0'},non_transferable:'0',holders:[]
+      }}});
+      if(u.hostname==='api.rugcheck.xyz')return ok({
+        topHolders:[
+          {address:'a',pct:8},{address:'b',pct:7},{address:'c',pct:6},
+          {address:'d',pct:5},{address:'e',pct:4},{address:'f',pct:3},
+          {address:'g',pct:2},{address:'h',pct:2},{address:'i',pct:1},{address:'j',pct:1}
+        ],
+        token:{supply:'1000000000'}
+      });
+      if(u.hostname==='solana.test'){rpcCalls++;throw new Error('should not reach RPC');}
+      throw new Error('unexpected '+url);
+    }
+  });
+  const out=await p.enrichSnapshot({rows:[{chainId:'solana',tokenAddress:address}]},{maxChecks:1,maxHolderFallbackChecks:1});
+  const s=out.rows[0].security;
+  assert.equal(s.evidenceGate,'PASS');
+  assert.equal(s.holderState.independentSource,'RUGCHECK_SOLANA_TOP_HOLDERS');
+  assert.equal(Number(s.holderState.top10Share.toFixed(2)),.39);
+  assert.equal(Number(s.holderState.largestHolderShare.toFixed(2)),.08);
+  assert.equal(out.securityProvider.holderFallback.resolvedPass,1);
+  assert.equal(rpcCalls,0);
+});
+
 test('Solana RPC holder fallback can convert concentration uncertainty into ABSTAIN',async()=>{
   const address='So11111111111111111111111111111111111111112';
   const p=createMemecoinSecurityProvider({

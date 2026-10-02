@@ -668,6 +668,7 @@ const memecoinSecurityProvider=createMemecoinSecurityProvider({
   solanaRpcUrls:String(process.env.TCX_SOLANA_PUBLIC_RPC_URLS||'https://solana.api.onfinality.io/public,https://solana.drpc.org,https://solana-rpc.publicnode.com,https://api.mainnet.solana.com')
     .split(',').map(x=>x.trim()).filter(Boolean),
   honeypotBaseUrl:String(process.env.TCX_HONEYPOT_API_URL||'https://api.honeypot.is').trim(),
+  rugcheckBaseUrl:String(process.env.TCX_RUGCHECK_API_URL||'https://api.rugcheck.xyz').trim(),
   evmRpcUrls:{
     base:String(process.env.TCX_BASE_PUBLIC_RPC_URLS||'https://base-rpc.publicnode.com,https://mainnet.base.org')
       .split(',').map(x=>x.trim()).filter(Boolean),

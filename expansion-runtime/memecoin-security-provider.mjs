@@ -281,6 +281,7 @@ export function createMemecoinSecurityProvider({
     'https://api.mainnet.solana.com'
   ],
   honeypotBaseUrl='https://api.honeypot.is',
+  rugcheckBaseUrl='https://api.rugcheck.xyz',
   evmRpcUrls={
     base:['https://base-rpc.publicnode.com','https://mainnet.base.org'],
     ethereum:['https://ethereum-rpc.publicnode.com','https://cloudflare-eth.com']
@@ -299,6 +300,7 @@ export function createMemecoinSecurityProvider({
   const solRpcs=[...new Set([...normalizeUrls(solanaRpcUrl),...normalizeUrls(solanaRpcUrls)])];
   const evmRpcs=Object.fromEntries(Object.entries(evmRpcUrls||{}).map(([k,v])=>[normChain(k),normalizeUrls(v)]));
   const honeypotBase=String(honeypotBaseUrl||'').trim().replace(/\/+$/,'');
+  const rugcheckBase=String(rugcheckBaseUrl||'').trim().replace(/\/+$/,'');
   const blockscoutBases=Object.fromEntries(Object.entries(blockscoutBaseUrls||{}).map(([k,v])=>[normChain(k),String(v||'').replace(/\/+$/,'')]));
   let lastRequestAt=0;
   async function throttle(){
@@ -367,25 +369,54 @@ export function createMemecoinSecurityProvider({
     if(!force&&hit&&t-hit.at<Math.max(60_000,Number(holderCacheMs)||600_000))return hit.value;
     let value;
     if(chain==='solana'){
-      if(!solRpcs.length)throw new Error('SOLANA_RPC_NOT_CONFIGURED');
-      const hitRpc=await rpcFallback(solRpcs,async rpc=>{
-        const [largest,supply]=await Promise.all([
-          publicJson(rpc,{method:'POST',body:{jsonrpc:'2.0',id:1,method:'getTokenLargestAccounts',params:[address,{commitment:'confirmed'}]}}),
-          publicJson(rpc,{method:'POST',body:{jsonrpc:'2.0',id:2,method:'getTokenSupply',params:[address,{commitment:'confirmed'}]}})
-        ]);
-        const rows=Array.isArray(largest?.result?.value)?largest.result.value:[];
-        const totalSupplyRaw=supply?.result?.value?.amount;
-        const shares=holderSharesFromRaw(rows.map(x=>x?.amount),totalSupplyRaw);
-        if(!shares)throw new Error('HOLDER_EVIDENCE_INCOMPLETE');
-        return {largest,supply,shares,totalSupplyRaw};
-      },'SOLANA_HOLDER_RPC');
-      const {largest,shares,totalSupplyRaw}=hitRpc.value;
-      value=freeze({
-        source:'SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS',
-        sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
-        ...shares,totalSupplyRaw:String(totalSupplyRaw),slot:finite(largest?.result?.context?.slot),
-        rpcHost:new URL(hitRpc.url).hostname,sortedByBalance:true,independentFromGoPlus:true
-      });
+      let rugcheckError=null;
+      if(rugcheckBase){
+        try{
+          const report=await publicJson(rugcheckBase+'/v1/tokens/'+encodeURIComponent(address)+'/report');
+          const rows=Array.isArray(report?.topHolders)?report.topHolders:
+            Array.isArray(report?.top_holders)?report.top_holders:[];
+          const pcts=rows.map(x=>finite(x?.pct??x?.percent??x?.percentage)).filter(x=>x!=null&&x>=0);
+          if(!pcts.length)throw new Error('RUGCHECK_TOP_HOLDERS_INCOMPLETE');
+          const fractions=pcts.map(x=>clamp01(x/100)).sort((a,b)=>b-a);
+          value=freeze({
+            source:'RUGCHECK_SOLANA_TOP_HOLDERS',
+            sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
+            top10Share:clamp01(fractions.slice(0,10).reduce((s,x)=>s+x,0)),
+            largestHolderShare:fractions[0]??null,
+            observedHolders:fractions.length,
+            totalSupplyRaw:report?.token?.supply??report?.totalSupply??null,
+            holderTransport:'RUGCHECK_REPORT_V1',rpcHost:null,
+            sortedByBalance:true,independentFromGoPlus:true
+          });
+        }catch(err){
+          rugcheckError=err instanceof Error?err.message:String(err);
+        }
+      }
+      if(!value){
+        if(!solRpcs.length)throw new Error('SOLANA_HOLDER_EVIDENCE_FAILED:rugcheck='+String(rugcheckError||'UNAVAILABLE')+',rpc=NOT_CONFIGURED');
+        try{
+          const hitRpc=await rpcFallback(solRpcs,async rpc=>{
+            const [largest,supply]=await Promise.all([
+              publicJson(rpc,{method:'POST',body:{jsonrpc:'2.0',id:1,method:'getTokenLargestAccounts',params:[address,{commitment:'confirmed'}]}}),
+              publicJson(rpc,{method:'POST',body:{jsonrpc:'2.0',id:2,method:'getTokenSupply',params:[address,{commitment:'confirmed'}]}})
+            ]);
+            const rows=Array.isArray(largest?.result?.value)?largest.result.value:[];
+            const totalSupplyRaw=supply?.result?.value?.amount;
+            const shares=holderSharesFromRaw(rows.map(x=>x?.amount),totalSupplyRaw);
+            if(!shares)throw new Error('HOLDER_EVIDENCE_INCOMPLETE');
+            return {largest,supply,shares,totalSupplyRaw};
+          },'SOLANA_HOLDER_RPC');
+          const {largest,shares,totalSupplyRaw}=hitRpc.value;
+          value=freeze({
+            source:'SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS',
+            sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
+            ...shares,totalSupplyRaw:String(totalSupplyRaw),slot:finite(largest?.result?.context?.slot),
+            rpcHost:new URL(hitRpc.url).hostname,sortedByBalance:true,independentFromGoPlus:true
+          });
+        }catch(err){
+          throw new Error('SOLANA_HOLDER_EVIDENCE_FAILED:rugcheck='+String(rugcheckError||'UNAVAILABLE')+',rpc='+(err instanceof Error?err.message:String(err)));
+        }
+      }
     }else if(chain==='base'||chain==='ethereum'){
       const gid=chainIdForGoPlus(chain);
       let honeypotError=null;
@@ -544,7 +575,7 @@ export function createMemecoinSecurityProvider({
       holderFallback:{
         enabled:Boolean(holderFallbackEnabled),attempted:holderAttempted,
         resolvedPass:holderResolvedPass,resolvedAbstain:holderResolvedAbstain,
-        errors:holderErrors,sources:['SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS','HONEYPOT_IS_TOP_HOLDERS','BLOCKSCOUT_BASE_TOKEN_HOLDERS','BLOCKSCOUT_ETHEREUM_TOKEN_HOLDERS']
+        errors:holderErrors,sources:['RUGCHECK_SOLANA_TOP_HOLDERS','SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS','HONEYPOT_IS_TOP_HOLDERS','BLOCKSCOUT_BASE_TOKEN_HOLDERS','BLOCKSCOUT_ETHEREUM_TOKEN_HOLDERS']
       }
     }});
   }
