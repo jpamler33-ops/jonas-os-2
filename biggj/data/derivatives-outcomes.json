@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-10-01T21:00:24.999Z",
+  "updatedAt": "2026-10-02T00:44:07.673Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -269,7 +269,7 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
+      "status": "CLOSED",
       "outcomes": {
         "h1": {
           "observedAt": "2026-10-01T07:09:59.451Z",
@@ -281,6 +281,12 @@
           "observedAt": "2026-10-01T07:09:59.451Z",
           "price": 84150.4,
           "return": 0.008471600544080582,
+          "direction": 1
+        },
+        "h24": {
+          "observedAt": "2026-10-02T00:44:07.673Z",
+          "price": 84818.2,
+          "return": 0.016474620551630625,
           "direction": 1
         }
       },
@@ -375,7 +381,14 @@
       },
       "evidenceClassification": "OBSERVED_DERIVED",
       "status": "OPEN",
-      "outcomes": {},
+      "outcomes": {
+        "h1": {
+          "observedAt": "2026-10-02T00:44:07.673Z",
+          "price": 84818.2,
+          "return": 0.002754619011363646,
+          "direction": 1
+        }
+      },
       "caseId": "f16bf68062ad998bb1641bdf1763a2e2a9f71d53cc3b9a3f02a07c2c543dd005"
     }
   ],
@@ -388,9 +401,9 @@
         "cases": 10,
         "horizons": {
           "h1": {
-            "n": 9,
-            "meanReturn": 0.0014342505427900301,
-            "positiveRate": 0.4444444444444444
+            "n": 10,
+            "meanReturn": 0.0015662873896473916,
+            "positiveRate": 0.5
           },
           "h4": {
             "n": 9,
@@ -398,9 +411,9 @@
             "positiveRate": 0.5555555555555556
           },
           "h24": {
-            "n": 6,
-            "meanReturn": 0.0038575130975919136,
-            "positiveRate": 0.6666666666666666
+            "n": 7,
+            "meanReturn": 0.005659957019597444,
+            "positiveRate": 0.7142857142857143
           }
         }
       }
@@ -421,10 +434,10 @@
         "cases": 10,
         "horizons": {
           "h1": {
-            "n": 9,
-            "meanReturn": 0.0014342505427900301,
-            "hitRate": 0.4444444444444444,
-            "wilsonLower95": 0.188775429471914,
+            "n": 10,
+            "meanReturn": 0.0015662873896473916,
+            "hitRate": 0.5,
+            "wilsonLower95": 0.2365895936154873,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
@@ -437,10 +450,10 @@
             "claimAllowed": false
           },
           "h24": {
-            "n": 6,
-            "meanReturn": 0.0038575130975919136,
-            "hitRate": 0.6666666666666666,
-            "wilsonLower95": 0.2999883213415286,
+            "n": 7,
+            "meanReturn": 0.005659957019597444,
+            "hitRate": 0.7142857142857143,
+            "wilsonLower95": 0.35892909014821267,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           }
