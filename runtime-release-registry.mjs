@@ -34,6 +34,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-training-supervisor.mjs',
   'strategy-evidence-engine.mjs',
   'shadow-trade-quality-learner.mjs',
+  'memecoin-trade-learner.mjs',
   'mandatory-shadow-discovery.mjs',
   'shadow-coverage-curriculum.mjs',
   'coverage-issuance-pool.mjs',

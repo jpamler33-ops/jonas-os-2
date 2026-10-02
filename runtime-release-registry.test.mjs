@@ -139,6 +139,7 @@ test('institutional staged release set hashes forecast, science, admission and t
     'expansion-runtime/liquidity-intelligence.mjs',
     'biggj-public-trader-watch.mjs',
     'shadow-specialist-wallets.mjs',
+    'memecoin-trade-learner.mjs',
     'expansion-runtime/memecoin-early-radar.mjs',
     'expansion-runtime/memecoin-security-provider.mjs',
     'expansion-runtime/memecoin-security-outcome-tracker.mjs',
