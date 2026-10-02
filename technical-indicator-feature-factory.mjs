@@ -62,6 +62,26 @@ function wmaSeries(values,period){
   const den=period*(period+1)/2;
   return rolling(values,period,xs=>xs.reduce((s,x,i)=>s+Number(x)*(i+1),0)/den);
 }
+function kamaSeries(values,erPeriod=10,fast=2,slow=30){
+  const xs=(values||[]).map(finite),out=Array(xs.length).fill(null);
+  if(xs.length<=erPeriod)return out;
+  let k=xs[erPeriod];
+  out[erPeriod]=k;
+  const fastSc=2/(fast+1),slowSc=2/(slow+1);
+  for(let i=erPeriod+1;i<xs.length;i++){
+    if(xs[i]==null||xs[i-erPeriod]==null){out[i]=k;continue;}
+    const change=Math.abs(xs[i]-xs[i-erPeriod]);
+    let volatility=0;
+    for(let j=i-erPeriod+1;j<=i;j++){
+      if(xs[j]!=null&&xs[j-1]!=null)volatility+=Math.abs(xs[j]-xs[j-1]);
+    }
+    const er=volatility>0?change/volatility:0;
+    const sc=(er*(fastSc-slowSc)+slowSc)**2;
+    k=k+sc*(xs[i]-k);
+    out[i]=k;
+  }
+  return out;
+}
 function diffSeries(a,b){return a.map((x,i)=>finite(x)!=null&&finite(b[i])!=null?Number(x)-Number(b[i]):null);}
 function pctDistance(price,line){
   const p=finite(price),l=finite(line);
@@ -381,19 +401,7 @@ function indicatorSnapshot(rows){
   const hma20=last(wmaSeries(hmaRaw,Math.max(2,Math.round(Math.sqrt(20)))));
   const lag=Math.floor((20-1)/2),zlemaInput=c.map((x,i)=>i>=lag?Number(x)+(Number(x)-Number(c[i-lag])):null);
   const zlema20=last(emaSeries(zlemaInput,20));
-  let kama=null;
-  if(c.length>=21){
-    let k=c[c.length-21];
-    for(let i=c.length-20;i<c.length;i++){
-      const change=Math.abs(c[i]-c[i-10]??0),vol=sum(c.slice(Math.max(1,i-9),i+1).map((x,j,arr)=>{
-        const global=i-arr.length+1+j;
-        return global>0?Math.abs(c[global]-c[global-1]):0;
-      }));
-      const er=vol>0?change/vol:0,sc=(er*(2/(2+1)-2/(30+1))+2/(30+1))**2;
-      k=k+sc*(c[i]-k);
-    }
-    kama=k;
-  }
+  const kama=last(kamaSeries(c,10,2,30));
 
   const rsi7=last(rsiSeries(c,7)),rsi14s=rsiSeries(c,14),rsi14=last(rsi14s),rsi21=last(rsiSeries(c,21));
   const st=stochSeries(rows,14,3),srsi=last(stochRsiSeries(c,14));
