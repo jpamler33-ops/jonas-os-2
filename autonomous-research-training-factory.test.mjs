@@ -491,3 +491,31 @@ test('factory does not call active PIT collection stalled while history is advan
   assert.equal(state.queue[0].stagnantCycles,0);
   assert.equal(state.queue[0].stalled,false);
 });
+
+
+test('promotion-review terminal governor does not queue a new challenger generation before governance resolves',()=>{
+  const state=createAutonomousResearchTrainingFactory({asOf:1000});
+  const refreshed=refreshAutonomousResearchTrainingFactory(state,{
+    livingResearchState:baseLivingResearch(),
+    experimentGovernorSummary:{
+      status:'COMPLETE_PROMOTION_REVIEW_REQUIRED',
+      generationId:'EXP-REVIEW',
+      generationNumber:4,
+      counts:{PROMOTION_REVIEW_REQUIRED:1},
+      promotionReviewRequired:[{
+        candidateId:'candidate-review',
+        blueprintId:'bp-review',
+        label:'review candidate',
+        evidenceId:'e-review'
+      }],
+      nextGenerationEligible:true
+    },
+    modelPromotionReviewSummary:{
+      decisions:[]
+    },
+    historyStats:{rows:500,progressAt:1900},
+    asOf:2000
+  });
+  assert.equal(refreshed.state.queue.some(x=>x.type==='GENERATE_NEXT_CHALLENGER_GENERATION'),false);
+  assert.equal(refreshed.state.queue.some(x=>x.type==='PREPARE_MODEL_PROMOTION_REVIEW'),true);
+});
