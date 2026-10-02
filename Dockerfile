@@ -75,6 +75,7 @@ ENV TCX_RELEASE_REGISTRY_FILE=/data/tcx-release-registry.jsonl
 ENV TCX_SHADOW_OMS_FILE=/data/tcx-shadow-oms.json
 ENV TCX_SHADOW_PORTFOLIO_FILE=/data/tcx-shadow-portfolio.json
 ENV TCX_STRATEGY_LEAGUE_FILE=/data/tcx-strategy-league.json
+ENV TCX_PARALLEL_STRATEGY_WORLDS_FILE=/data/tcx-parallel-strategy-worlds.json
 ENV TCX_VENUE_QUALITY_MEMORY_FILE=/data/tcx-venue-quality-memory.json
 ENV TCX_FORECAST_RUNTIME_FILE=/data/tcx-forecast-runtime.json
 ENV TCX_SHADOW_COMPETITION_FILE=/data/tcx-shadow-competition.json
