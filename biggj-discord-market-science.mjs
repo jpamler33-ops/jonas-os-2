@@ -64,6 +64,19 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
     (i+1)+'. **'+clip(x.kind||'RESEARCH',34)+'** · '+clip(x.question||x.title||'—',180)+
     '\n   '+clip(x.derivedStatus||'UNKNOWN',28)+' · next '+clip(x.nextExperimentType||'—',42)+' · info '+pct(x.expectedInformationGainProxy)
   ).join('\n\n')||'Keine priorisierte Science-Agenda.';
+  const hall=snapshot?.health?.discoveryLedger||{};
+  const hallRows=arr(hall?.topDiscoveries).slice(0,5).map(x=>
+    '• **'+clip(x?.title||'Discovery',70)+'** · '+clip(x?.currentStatus||'UNKNOWN',34)+
+    ' · n='+fmt(x?.samples)+(x?.robust?' · ROBUST':x?.validated?' · VALIDATED':'')
+  ).join('\n')||'Hall of Discoveries sammelt gerade die ersten Lebensläufe.';
+  const hallText=[
+    'Gespeichert '+fmt(hall.total)+' · validiert '+fmt(hall.validated)+' · robust '+fmt(hall.robust)+' · widerlegt '+fmt(hall.falsified),
+    hallRows,
+    arr(hall?.recentlyChanged).length
+      ?'Letzter Statuswechsel: '+clip(hall.recentlyChanged[0]?.title||'Discovery',70)+' · '+clip(hall.recentlyChanged[0]?.previousStatus||'UNKNOWN',28)+' → '+clip(hall.recentlyChanged[0]?.status||'UNKNOWN',28)
+      :'Noch kein Statuswechsel protokolliert.',
+    'Dauerhafte Forschungschronik · authority NONE'
+  ].join('\n');
   const temple=snapshot?.health?.memecoinRadar?.temporalTemple||{};
   const laws=temple?.transitionLaws||{};
   const candidates=arr(laws?.candidates);
@@ -106,6 +119,7 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
         'Theorien '+fmt(frontier.total)+' · Evidence '+fmt(frontier.evidence)+' · Experimente '+fmt(frontier.experiments),
         'Robust '+fmt(frontier.robust)+' · Broken '+fmt(frontier.broken)+' · Surprises '+fmt(frontier.surprises)
       ].join('\n')),
+      safeField('HALL OF DISCOVERIES · LIFECYCLE',hallText),
       safeField('NEUE ENTDECKUNGEN · TEMPORAL TEMPLE',discoveryText),
       safeField('PARALLEL WORLDS · STRATEGY EVOLUTION',worldText),
       safeField('NÄCHSTE FORSCHUNGSFRAGE',next
