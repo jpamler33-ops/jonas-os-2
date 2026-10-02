@@ -128,6 +128,25 @@ test('wallet 4 learned BLOCK can only abstain from an otherwise eligible shadow 
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
 });
 
+test('wallet 4 THROTTLE keeps learning but reduces destructive cohort notional',()=>{
+  const now=2_750_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'THROTTLED',symbol:'THROTTLED',priceUsd:.01,liquidityUsd:55_000,
+    volumeM5:20_000,buysM5:18,sellsM5:9,priceChangeM5:18,pairCreatedAt:now-14*60_000,
+    score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:['SOCIAL_POSTS_RECENT'],riskFlags:[]},
+    security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32}},
+    memeLearning:{action:'THROTTLE',sizeMultiplier:.15,rankingAdjustment:-.1,evidence:{level:'CHAIN',samples:48,label:'LEARNED_BAD',confidence:.82,severeLossRate:.75}}
+  }]},{now,marginQuote:100});
+  assert.equal(x.results.eligible,1);
+  assert.equal(x.results.learningThrottled,1);
+  assert.equal(x.results.opened,1);
+  const p=x.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.equal(p.marginQuote,15);
+  assert.equal(p.exposureQuote,15);
+  assert.equal(p.entryLearningSizeMultiplier,.15);
+  assert.equal(p.canExecuteLive,false);
+});
+
 test('wallet 4 persists entry microstructure and learning provenance for later outcome learning',()=>{
   const now=2_800_000;
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
