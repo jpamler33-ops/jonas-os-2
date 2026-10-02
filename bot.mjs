@@ -5320,7 +5320,13 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W4_MEME_MAX_OPEN||30))),
       horizonMs:Math.max(30*60_000,Number(process.env.TCX_W4_MEME_HORIZON_MS||12*60*60_000)),
       stopReturn:Math.max(-.95,Math.min(-.05,Number(process.env.TCX_W4_MEME_STOP_RETURN||-.45))),
-      takeReturn:Math.max(.10,Number(process.env.TCX_W4_MEME_TAKE_RETURN||1.50))
+      takeReturn:Math.max(.10,Number(process.env.TCX_W4_MEME_TAKE_RETURN||1.50)),
+      contrarianEnabled:true,
+      contrarianProbeRate:Math.max(0,Math.min(1,Number(process.env.TCX_W4_CONTRARIAN_PROBE_RATE||.15))),
+      contrarianMarginMultiplier:Math.max(.01,Math.min(.20,Number(process.env.TCX_W4_CONTRARIAN_MARGIN_MULTIPLIER||.05))),
+      contrarianMinLiquidityUsd:Math.max(3_000,Number(process.env.TCX_W4_CONTRARIAN_MIN_LIQUIDITY_USD||5_000)),
+      contrarianMaxOpen:Math.max(1,Math.min(8,Number(process.env.TCX_W4_CONTRARIAN_MAX_OPEN||4))),
+      contrarianMaxSoftViolations:1
     });
     specialistWalletState=walletUpdate.state;
     if(walletUpdate.results.opened||walletUpdate.results.closed)await persistSpecialistWallets('memecoin-early:'+reason);
