@@ -103,15 +103,51 @@ function closePosition(wallet,index,{price,at,reason,sourceClose=null,feeBps=10}
   const mark=finite(price,p.lastPrice);
   if(!(mark>0))return null;
   const calc=netPnl({side:p.side,entryPrice:p.entryPrice,markPrice:mark,exposureQuote:p.exposureQuote,feeBps});
+  const partialGross=finite(p?.partialRealizedGrossPnlQuote,0);
+  const partialFees=finite(p?.partialRealizedFeesQuote,0);
+  const partialNet=finite(p?.partialRealizedNetPnlQuote,0);
+  const totalGross=partialGross+finite(calc.gross,0);
+  const totalFees=partialFees+finite(calc.fees,0);
+  const totalNet=partialNet+finite(calc.net,0);
+  const initialExposure=Math.max(EPS,finite(p?.initialExposureQuote,p?.exposureQuote)||EPS);
   const closed={
     ...p,status:'CLOSED',closedAt:Number(at),closePrice:mark,closeReason:String(reason||'SOURCE_EXIT'),
-    realizedGrossPnlQuote:calc.gross,realizedFeesQuote:calc.fees,realizedNetPnlQuote:calc.net,
-    realizedReturnPct:calc.returnPct,sourceClose:sourceClose?clone(sourceClose):null
+    realizedGrossPnlQuote:totalGross,realizedFeesQuote:totalFees,realizedNetPnlQuote:totalNet,
+    realizedReturnPct:totalGross/initialExposure,
+    observedMfeReturnPct:finite(p?.peakUnrealizedReturnPct),
+    observedMaeReturnPct:finite(p?.troughUnrealizedReturnPct),
+    sourceClose:sourceClose?clone(sourceClose):null
   };
   wallet.positions.splice(index,1);
   wallet.closed.push(closed);
   if(wallet.closed.length>2000)wallet.closed=wallet.closed.slice(-2000);
   return closed;
+}
+function reducePosition(p,{price,at,fraction,reason,feeBps=10}={}){
+  const mark=finite(price,p?.lastPrice);
+  const exposure=Math.max(0,finite(p?.exposureQuote,0));
+  const margin=Math.max(0,finite(p?.marginQuote,0));
+  const f=Math.max(0,Math.min(.95,finite(fraction,0)));
+  if(!(mark>0&&exposure>EPS&&f>0))return p;
+  const closedExposure=exposure*f;
+  const calc=netPnl({side:p.side,entryPrice:p.entryPrice,markPrice:mark,exposureQuote:closedExposure,feeBps});
+  const event={
+    at:Number(at),price:mark,fraction:f,reason:String(reason||'MEME_PARTIAL_REDUCE'),
+    exposureQuote:closedExposure,grossPnlQuote:calc.gross,feesQuote:calc.fees,netPnlQuote:calc.net,
+    returnPct:calc.returnPct
+  };
+  const base={
+    ...p,
+    initialExposureQuote:finite(p?.initialExposureQuote,exposure),
+    initialMarginQuote:finite(p?.initialMarginQuote,margin),
+    exposureQuote:Math.max(0,exposure-closedExposure),
+    marginQuote:Math.max(0,margin*(1-f)),
+    partialRealizedGrossPnlQuote:finite(p?.partialRealizedGrossPnlQuote,0)+finite(calc.gross,0),
+    partialRealizedFeesQuote:finite(p?.partialRealizedFeesQuote,0)+finite(calc.fees,0),
+    partialRealizedNetPnlQuote:finite(p?.partialRealizedNetPnlQuote,0)+finite(calc.net,0),
+    partialExits:[...(Array.isArray(p?.partialExits)?p.partialExits:[]),event].slice(-20)
+  };
+  return markPosition(base,mark,at,feeBps);
 }
 function markPosition(p,price,at,feeBps=10){
   const mark=finite(price);
@@ -262,7 +298,7 @@ function memeEntryTailRisk(row={}){
     reason:veryThin?'VERY_THIN_LIQUIDITY':blocked?'THIN_PLUS_SECONDARY_RISK':null
   });
 }
-function memeTailRiskDiagnostics(position,row,marked){
+function memeTailRiskDiagnostics(position,row,marked,{armReturn=-.08}={}){
   const ret=finite(marked?.unrealizedReturnPct);
   const liq=finite(row?.liquidityUsd);
   const entryLiquidity=finite(position?.entryMarketFeatures?.liquidityUsd);
@@ -273,19 +309,30 @@ function memeTailRiskDiagnostics(position,row,marked){
   const trades=buys+sells;
   const sellShare=trades>0?sells/trades:null;
   const flags=new Set(Array.isArray(row?.score?.riskFlags)?row.score.riskFlags:[]);
+  const momentumWeak=p5!=null&&p5<=-25;
   const momentumCrash=p5!=null&&p5<=-50;
+  const liquidityWeak=liquidityRatio!=null&&liquidityRatio<=.75;
   const liquidityDamage=liquidityRatio!=null&&liquidityRatio<=.55;
   const severeLiquidityDamage=liquidityRatio!=null&&liquidityRatio<=.30;
+  const sellPressureWeak=trades>=8&&sellShare>=.62;
   const sellPressure=trades>=8&&sellShare>=.70;
   const severeMomentum=p5!=null&&p5<=-80;
   const riskOnly=String(row?.score?.stage||'').toUpperCase()==='RISK_ONLY';
   const severeFlag=flags.has('M5_CRASH_EXTREME')||flags.has('DATA_ANOMALY_MCAP_LIQUIDITY')||flags.has('DATA_ANOMALY_FDV_LIQUIDITY');
   const signalCount=[momentumCrash,liquidityDamage,sellPressure].filter(Boolean).length;
-  const armed=ret!=null&&ret<=-.12;
-  const trigger=armed&&(severeMomentum||severeLiquidityDamage||signalCount>=2||(riskOnly&&signalCount>=1)||(severeFlag&&signalCount>=1));
+  const warningCount=[momentumWeak,liquidityWeak,sellPressureWeak].filter(Boolean).length;
+  const armed=ret!=null&&ret<=Math.max(-.20,Math.min(-.03,finite(armReturn,-.08)));
+  const exitArmed=ret!=null&&ret<=-.12;
+  const derisk=armed&&(warningCount>=2||signalCount>=1||riskOnly||severeFlag);
+  const trigger=
+    (ret!=null&&ret<=-.03&&severeLiquidityDamage)||
+    (ret!=null&&ret<=-.05&&severeMomentum)||
+    (exitArmed&&(signalCount>=2||(riskOnly&&signalCount>=1)||(severeFlag&&signalCount>=1)));
   return Object.freeze({
     trigger,
+    derisk,
     armed,
+    exitArmed,
     returnPct:ret,
     entryLiquidityUsd:entryLiquidity,
     liquidityUsd:liq,
@@ -294,15 +341,27 @@ function memeTailRiskDiagnostics(position,row,marked){
     buysM5:buys,
     sellsM5:sells,
     sellShare,
+    momentumWeak,
     momentumCrash,
+    liquidityWeak,
     liquidityDamage,
     severeLiquidityDamage,
+    sellPressureWeak,
     sellPressure,
     severeMomentum,
     riskOnly,
     severeFlag,
-    signalCount
+    signalCount,
+    warningCount
   });
+}
+function memeRiskSizeMultiplier(row={}){
+  const liq=Math.max(0,finite(row?.liquidityUsd,0));
+  const score=Math.max(0,finite(row?.score?.researchPriorityScore,0));
+  let m=liq<25_000?.35:liq<75_000?.60:liq<250_000?.80:1;
+  if(memeEntryTailRisk(row).thin)m*=.75;
+  if(score<.65)m*=.75;
+  return Math.max(.20,Math.min(1,m));
 }
 
 export function applyMemecoinScoutSnapshot(input,snapshot,{
@@ -313,8 +372,15 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   minLiquidityUsd=10_000,
   maxOpenOperational=30,
   horizonMs=12*60*60_000,
-  stopReturn=-.45,
+  stopReturn=-.25,
   takeReturn=1.50,
+  tailRiskArmReturn=-.08,
+  riskReduceFraction=.50,
+  riskSizingEnabled=false,
+  runnerEnabled=false,
+  runnerArmReturn=1.00,
+  runnerTrailPct=.35,
+  runnerProfitLockFraction=.25,
   blockThinLiquidityEntries=true,
   contrarianEnabled=false,
   contrarianProbeRate=.15,
@@ -330,7 +396,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   const results={
     opened:0,closed:0,marked:0,eligible:0,
     learningBlocked:0,learningThrottled:0,learningBoosted:0,
-    tailRiskBlocked:0,tailRiskClosed:0,
+    tailRiskBlocked:0,tailRiskClosed:0,riskReduced:0,profitLocked:0,runnerTrailClosed:0,hardStopClosed:0,
     contrarianEligible:0,contrarianOpened:0,contrarianRejectedByHardGuard:0,
     sourceReady:snapshot?.sourceReady===true
   };
@@ -344,26 +410,52 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       const liq=finite(row?.liquidityUsd);
       const peakReturn=Math.max(finite(p?.peakUnrealizedReturnPct,ret??-Infinity),ret??-Infinity);
       const troughReturn=Math.min(finite(p?.troughUnrealizedReturnPct,ret??Infinity),ret??Infinity);
-      const risk=memeTailRiskDiagnostics(p,row,baseMarked);
-      const marked={
+      const risk=memeTailRiskDiagnostics(p,row,baseMarked,{armReturn:tailRiskArmReturn});
+      let marked={
         ...baseMarked,
         peakUnrealizedReturnPct:Number.isFinite(peakReturn)?peakReturn:null,
         troughUnrealizedReturnPct:Number.isFinite(troughReturn)?troughReturn:null,
         lastMemeTailRisk:clone(risk)
       };
       wallet.positions[i]=marked;results.marked++;
+      const hardStop=Math.max(-.95,Math.min(-.05,finite(stopReturn,-.25)));
+      const staticTake=finite(takeReturn);
+      const runnerArm=Math.max(.25,finite(runnerArmReturn,1));
+      const runnerTrail=Math.max(.10,Math.min(.80,finite(runnerTrailPct,.35)));
+      const runnerFloor=Number.isFinite(peakReturn)&&peakReturn>=runnerArm
+        ?(1+peakReturn)*(1-runnerTrail)-1
+        :null;
       let reason=null;
       if(memeSecurityGate(row)==='ABSTAIN'||memeSecurityCritical(row))reason='MEME_SECURITY_ABSTAIN';
       else if(liq!=null&&liq<3_000)reason='MEME_LIQUIDITY_COLLAPSE';
+      else if(risk.severeLiquidityDamage&&ret!=null&&ret<=-.03)reason='MEME_LIQUIDITY_COLLAPSE';
       else if(risk.trigger)reason='MEME_TAIL_RISK_EXIT';
-      else if(ret!=null&&ret<=stopReturn)reason='MEME_STOP';
-      else if(ret!=null&&ret>=takeReturn)reason='MEME_TAKE_PROFIT';
+      else if(ret!=null&&ret<=hardStop)reason='MEME_STOP';
+      else if(runnerEnabled===true&&runnerFloor!=null&&ret!=null&&ret<=runnerFloor)reason='MEME_RUNNER_TRAIL';
+      else if(runnerEnabled!==true&&staticTake!=null&&ret!=null&&ret>=staticTake)reason='MEME_TAKE_PROFIT';
       else if(Number(now)-Number(p.openedAt||now)>=Math.max(60_000,Number(horizonMs)||12*60*60_000))reason='MEME_HORIZON';
       if(reason){
         const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
         if(closed){
           results.closed++;
           if(reason==='MEME_TAIL_RISK_EXIT')results.tailRiskClosed++;
+          if(reason==='MEME_RUNNER_TRAIL')results.runnerTrailClosed++;
+          if(reason==='MEME_STOP')results.hardStopClosed++;
+        }
+      }else{
+        if(risk.derisk&&!marked.riskReductionApplied){
+          const f=Math.max(.10,Math.min(.80,finite(riskReduceFraction,.50)));
+          const reduced=reducePosition(marked,{price:row.priceUsd,at:now,fraction:f,reason:'MEME_RISK_REDUCE',feeBps});
+          marked={...reduced,riskReductionApplied:true,riskReductionAt:Number(now),riskReductionFraction:f};
+          wallet.positions[i]=marked;
+          results.riskReduced++;
+        }
+        if(runnerEnabled===true&&ret!=null&&ret>=runnerArm&&!marked.profitLockApplied){
+          const f=Math.max(.05,Math.min(.60,finite(runnerProfitLockFraction,.25)));
+          const reduced=reducePosition(marked,{price:row.priceUsd,at:now,fraction:f,reason:'MEME_PROFIT_LOCK',feeBps});
+          marked={...reduced,profitLockApplied:true,profitLockAt:Number(now),profitLockFraction:f};
+          wallet.positions[i]=marked;
+          results.profitLocked++;
         }
       }
     }
@@ -449,9 +541,10 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     const key=memePositionKey(row);
     if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key))continue;
 
+    const riskSizeMultiplier=contrarianSelected?1:(riskSizingEnabled===true?memeRiskSizeMultiplier(row):1);
     const sizeMultiplier=contrarianSelected
       ?Math.max(.01,Math.min(.20,Number(contrarianMarginMultiplier)||.05))
-      :normalLearningSizeMultiplier;
+      :Math.max(.05,Math.min(1,normalLearningSizeMultiplier*riskSizeMultiplier));
     const margin=Math.max(1,(Number(marginQuote)||100)*sizeMultiplier);
     const researchLane=contrarianSelected?'CONTRARIAN_PROBE':'STANDARD';
     const position={
@@ -459,6 +552,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       chainId:String(row?.chainId||''),tokenAddress:String(row?.tokenAddress||''),
       symbol:text(row?.symbol||row?.name||'MEME',80),name:text(row?.name||'',120),
       side:'LONG',leverage:1,marginQuote:margin,exposureQuote:margin,
+      initialMarginQuote:margin,initialExposureQuote:margin,
       entryPrice:px,lastPrice:px,openedAt:Number(now),lastMarkedAt:Number(now),
       sourcePairCreatedAt:finite(row?.pairCreatedAt),sourceFirstSeenAt:finite(row?.firstSeenAt),
       entryResearchPriorityScore:score,entryStage:stage,
@@ -495,6 +589,8 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       },
       entryMemeLearning:clone(row?.memeLearning||null),
       entryLearningSizeMultiplier:sizeMultiplier,
+      entryRiskSizeMultiplier:riskSizeMultiplier,
+      entrySizingPolicy:riskSizingEnabled===true?'LIQUIDITY_SCORE_RISK_SIZED':'LEGACY_FLAT_SHADOW_SIZE',
       entrySecurityGate:securityGate,
       entrySecuritySource:text(row?.security?.source||'',160),
       entryHolderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence),
@@ -531,7 +627,7 @@ function walletStats(wallet){
     winRate:closed.length?wins.length/closed.length:null,
     realizedPnlQuote:realized,unrealizedPnlQuote:unrealized,netPnlQuote:realized+unrealized,
     profitFactor:gl>EPS?gp/gl:null,
-    cumulativeMarginUsedQuote:[...open,...closed].reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
+    cumulativeMarginUsedQuote:[...open,...closed].reduce((s,p)=>s+Math.max(0,finite(p?.initialMarginQuote,p?.marginQuote)||0),0),
     currentMarginAtRiskQuote:open.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
     active:open.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(x=>clone(x)),
     recentClosed:closed.slice(-20).reverse().map(x=>clone(x)),
