@@ -77,6 +77,20 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
       :'Noch kein Statuswechsel protokolliert.',
     'Dauerhafte Forschungschronik · authority NONE'
   ].join('\n');
+  const ind=snapshot?.health?.indicatorEvolution||{};
+  const indRows=arr(ind?.top).slice(0,5).map(x=>
+    '• **'+clip(x?.label||x?.id||'Indicator',54)+'** · '+clip(x?.status||'UNKNOWN',28)+
+    ' · OOS '+fmt(x?.oosCases)+' · indep '+fmt(x?.independentEpisodes)+
+    (Number.isFinite(Number(x?.meanBrierDelta))?' · ΔBrier '+Number(x.meanBrierDelta).toFixed(4):'')+
+    (Number.isFinite(Number(x?.q))?' · q '+Number(x.q).toFixed(3):'')
+  ).join('\n')||'Indikator-Pool sammelt noch Point-in-Time/OOS-Evidence.';
+  const indCounts=ind?.counts||{};
+  const indicatorText=[
+    'Arsenal '+fmt(ind.catalogSize)+' · aktiv '+fmt(ind.active)+' · Core '+fmt(indCounts.CORE_CANDIDATE)+' · Specialist '+fmt(indCounts.SPECIALIST_CANDIDATE),
+    indRows,
+    'Retired '+fmt(indCounts.RETIRED)+' · redundant '+fmt(indCounts.REDUNDANT)+' · reactivation '+fmt(indCounts.REACTIVATION_TRIAL),
+    'Walk-forward + FDR · keine automatische Production-Mutation'
+  ].join('\n');
   const temple=snapshot?.health?.memecoinRadar?.temporalTemple||{};
   const laws=temple?.transitionLaws||{};
   const candidates=arr(laws?.candidates);
@@ -120,6 +134,7 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
         'Robust '+fmt(frontier.robust)+' · Broken '+fmt(frontier.broken)+' · Surprises '+fmt(frontier.surprises)
       ].join('\n')),
       safeField('HALL OF DISCOVERIES · LIFECYCLE',hallText),
+      safeField('INDICATOR EVOLUTION · FEATURE SURVIVAL',indicatorText),
       safeField('NEUE ENTDECKUNGEN · TEMPORAL TEMPLE',discoveryText),
       safeField('PARALLEL WORLDS · STRATEGY EVOLUTION',worldText),
       safeField('NÄCHSTE FORSCHUNGSFRAGE',next

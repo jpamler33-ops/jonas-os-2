@@ -47,6 +47,8 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-strategy-league.mjs',
   'parallel-strategy-worlds.mjs',
   'biggj-discovery-ledger.mjs',
+  'technical-indicator-feature-factory.mjs',
+  'indicator-evolution-engine.mjs',
   'multi-venue-shadow-sor.mjs',
   'venue-quality-memory.mjs',
   'execution-research-lab.mjs',

@@ -24,10 +24,10 @@ function statusRank(status){
   const s=String(status||'');
   if(s==='ROBUST_FORWARD_LAW_CANDIDATE')return 7;
   if(s==='FORWARD_LAW_CANDIDATE'||s==='WALK_FORWARD_VALIDATED'||s==='SCALE_INVARIANT_CANDIDATE')return 6;
-  if(s==='NILOMETER_CANDIDATE')return 5;
-  if(s==='GENERATION_COMPLETED')return 4;
-  if(s==='COLLECTING'||s==='MEASURING'||s==='UNVALIDATED')return 2;
-  if(s==='FAILED_FORWARD_VALIDATION'||s==='FAILED_VALIDATION'||s==='CONTEXT_DEPENDENT'||s==='NO_TRAIN_EFFECT')return 1;
+  if(s==='NILOMETER_CANDIDATE'||s==='CORE_CANDIDATE')return 5;
+  if(s==='GENERATION_COMPLETED'||s==='SUPPORTED_ONCE'||s==='SPECIALIST_CANDIDATE')return 4;
+  if(s==='REACTIVATION_TRIAL'||s==='COLLECTING'||s==='MEASURING'||s==='UNVALIDATED')return 2;
+  if(s==='REDUNDANT'||s==='RETIRED'||s==='FAILED_FORWARD_VALIDATION'||s==='FAILED_VALIDATION'||s==='CONTEXT_DEPENDENT'||s==='NO_TRAIN_EFFECT')return 1;
   return 0;
 }
 function entryKey(type,parts){
@@ -240,13 +240,50 @@ function worldRows(worlds={}){
   }
   return out;
 }
-function observationRows({temporalTemple,evidenceFactory,parallelWorlds}={}){
+function indicatorRows(indicatorEvolution={}){
+  const meaningful=new Set([
+    'SUPPORTED_ONCE','CORE_CANDIDATE','SPECIALIST_CANDIDATE',
+    'REDUNDANT','RETIRED','REACTIVATION_TRIAL'
+  ]);
+  const out=[];
+  for(const x of Array.isArray(indicatorEvolution?.indicators)?indicatorEvolution.indicators:[]){
+    if(!meaningful.has(String(x?.status||'')))continue;
+    out.push({
+      key:entryKey('INDICATOR',[x.id]),
+      type:'INDICATOR',
+      title:String(x.label||x.id||'Indicator'),
+      status:String(x.status||'WATCH'),
+      samples:Number(x.independentEpisodes||x.oosCases||0),
+      robust:false,
+      validated:false,
+      summary:{
+        indicatorId:x.id,
+        family:x.family||null,
+        timeframe:x.timeframe||null,
+        oosCases:Number(x.oosCases||0),
+        independentEpisodes:Number(x.independentEpisodes||0),
+        supportMilestones:Number(x.supportMilestones||0),
+        contextSupportMilestones:Number(x.contextSupportMilestones||0),
+        failureMilestones:Number(x.failureMilestones||0),
+        meanBrierDelta:finite(x?.lastEvaluation?.meanBrierDelta),
+        q:finite(x?.lastEvaluation?.q),
+        redundancy:x.redundancy||null,
+        reactivationCount:Number(x.reactivationCount||0)
+      },
+      authority:'NONE',
+      source:'INDICATOR_EVOLUTION'
+    });
+  }
+  return out;
+}
+function observationRows({temporalTemple,evidenceFactory,parallelWorlds,indicatorEvolution}={}){
   const rows=[
     ...lawRows(temporalTemple),
     ...patternRows(evidenceFactory),
     ...nilometerRows(temporalTemple),
     ...invariantRows(temporalTemple),
-    ...worldRows(parallelWorlds)
+    ...worldRows(parallelWorlds),
+    ...indicatorRows(indicatorEvolution)
   ];
   const byKey=new Map();
   for(const row of rows){
@@ -277,13 +314,14 @@ export function refreshBiggjDiscoveryLedger(input,{
   temporalTemple=null,
   evidenceFactory=null,
   parallelWorlds=null,
+  indicatorEvolution=null,
   asOf=Date.now(),
   maxEntries=500,
   maxEventsPerEntry=40
 }={}){
   const state=ensureState(input,asOf);
   const map=new Map(state.entries.map(x=>[String(x.key),clone(x)]));
-  const observed=observationRows({temporalTemple,evidenceFactory,parallelWorlds});
+  const observed=observationRows({temporalTemple,evidenceFactory,parallelWorlds,indicatorEvolution});
   let changed=false,newEntries=0,statusChanges=0,milestones=0;
 
   for(const row of observed){

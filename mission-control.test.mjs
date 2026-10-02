@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V10_HALL_OF_DISCOVERIES');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V11_INDICATOR_EVOLUTION');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);

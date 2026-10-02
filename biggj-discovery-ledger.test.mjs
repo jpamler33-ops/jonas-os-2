@@ -171,6 +171,29 @@ test('sample milestones create sparse lifecycle events instead of one event per 
   assert.ok(state.entries.find(x=>x.key===key).events.some(x=>x.kind==='SAMPLE_MILESTONE'&&x.sampleBucket===16));
 });
 
+test('meaningful indicator lifecycle is kept in Hall without flooding probation entries',()=>{
+  let state=createBiggjDiscoveryLedger({now:1});
+  const indicatorEvolution={indicators:[
+    {id:'TA_5M_RSI',label:'Relative Strength Index · 5M',family:'RSI',timeframe:'5m',status:'PROBATION',oosCases:0,independentEpisodes:0},
+    {id:'TA_1H_ADX',label:'ADX · 1H',family:'ADX_DMI',timeframe:'1h',status:'CORE_CANDIDATE',oosCases:100,independentEpisodes:60,supportMilestones:2,failureMilestones:0,lastEvaluation:{meanBrierDelta:-.008,q:.01}},
+    {id:'TA_5M_STOCH',label:'Stochastic · 5M',family:'STOCHASTIC',timeframe:'5m',status:'REDUNDANT',oosCases:90,independentEpisodes:55,supportMilestones:1,failureMilestones:0,redundancy:{withId:'TA_5M_RSI',rho:.97},lastEvaluation:{meanBrierDelta:-.002,q:.04}}
+  ]};
+  state=refreshBiggjDiscoveryLedger(state,{indicatorEvolution,asOf:100}).state;
+  const indicators=state.entries.filter(x=>x.type==='INDICATOR');
+  assert.equal(indicators.length,2);
+  assert.ok(indicators.some(x=>x.currentStatus==='CORE_CANDIDATE'));
+  assert.ok(indicators.some(x=>x.currentStatus==='REDUNDANT'));
+  assert.ok(!indicators.some(x=>x.currentStatus==='PROBATION'));
+  assert.ok(indicators.every(x=>x.authority==='NONE'));
+
+  indicatorEvolution.indicators[1].status='RETIRED';
+  indicatorEvolution.indicators[1].failureMilestones=3;
+  state=refreshBiggjDiscoveryLedger(state,{indicatorEvolution,asOf:200}).state;
+  const adx=state.entries.find(x=>x.type==='INDICATOR'&&x.current.indicatorId==='TA_1H_ADX');
+  assert.equal(adx.currentStatus,'RETIRED');
+  assert.ok(adx.events.some(x=>x.kind==='STATUS_CHANGE'&&x.previousStatus==='CORE_CANDIDATE'));
+});
+
 test('robust transition law sorts to top but still has no authority',()=>{
   let state=createBiggjDiscoveryLedger({now:1});
   state=refreshBiggjDiscoveryLedger(state,{
