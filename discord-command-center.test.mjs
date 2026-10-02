@@ -12,7 +12,7 @@ test('BIGGJ Discord V13 is user-first while deep intelligence remains callable',
   assert.ok(source.includes('BIGGJ_DISCORD_CHANNEL_UX_V13_FOCUSED'));
   assert.ok(source.includes('buildDiscordMemecoinResearchPayload'));
   assert.ok(source.includes('BIGGJ_MEMECOIN_CONTRARIAN_OVERVIEW_V1'));
-  assert.ok(source.includes('Contrarian abgeschlossen'));
+  assert.ok(source.includes("abgeschlossen **'+String(contra?.samples??0)+'**"));
   assert.ok(source.includes("if(name==='memecoins'){await memecoinResearchCommand(interaction);return;}"));
   assert.ok(source.includes("category:'BIGGJ • HOME'"));
   assert.ok(source.includes("category:'BIGGJ • INTELLIGENCE'"));
