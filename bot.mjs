@@ -7,6 +7,7 @@ import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION
 import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, scoreEarlyMemecoin, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
 import { createMemecoinSecurityProvider, MEMECOIN_SECURITY_PROVIDER_VERSION } from './expansion-runtime/memecoin-security-provider.mjs';
 import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, observeMemecoinSecurityOutcomes, dueMemecoinSecurityOutcomeFollowups, recordMemecoinSecurityOutcomeFollowupAttempt, memecoinSecurityOutcomeSummary, MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION } from './expansion-runtime/memecoin-security-outcome-tracker.mjs';
+import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
 import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
@@ -1369,6 +1370,8 @@ const specialistWalletFile = process.env.TCX_SPECIALIST_WALLETS_FILE || '/data/t
 let loadedSpecialistWallets = await loadSpecialistWalletState(specialistWalletFile);
 const memecoinSecurityOutcomeFile = process.env.TCX_MEME_SECURITY_OUTCOME_FILE || '/data/tcx-meme-security-outcomes.json';
 let loadedMemecoinSecurityOutcomes = await loadMemecoinSecurityOutcomeState(memecoinSecurityOutcomeFile);
+const memecoinEvidenceFactoryFile = process.env.TCX_MEME_EVIDENCE_FACTORY_FILE || '/data/tcx-meme-evidence-factory.json';
+let loadedMemecoinEvidenceFactory = await loadMemecoinEvidenceFactoryState(memecoinEvidenceFactoryFile);
 const strategyLeagueFile = process.env.TCX_STRATEGY_LEAGUE_FILE || '/data/tcx-strategy-league.json';
 let loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
@@ -1401,6 +1404,11 @@ let memecoinSecurityOutcomeHealthy=loadedMemecoinSecurityOutcomes.healthy;
 let memecoinSecurityOutcomeLastError=loadedMemecoinSecurityOutcomes.error||null;
 loadedMemecoinSecurityOutcomes=null;
 let memecoinSecurityOutcomePersistenceQueue=Promise.resolve();
+let memecoinEvidenceFactoryState=loadedMemecoinEvidenceFactory.state;
+let memecoinEvidenceFactoryHealthy=loadedMemecoinEvidenceFactory.healthy;
+let memecoinEvidenceFactoryLastError=loadedMemecoinEvidenceFactory.error||null;
+loadedMemecoinEvidenceFactory=null;
+let memecoinEvidenceFactoryPersistenceQueue=Promise.resolve();
 let strategyLeagueLedger = loadedStrategyLeague.ledger;
 let strategyLeagueHealthy = loadedStrategyLeague.healthy;
 let strategyLeagueLastError = loadedStrategyLeague.error || null;
@@ -1761,6 +1769,28 @@ async function persistMemecoinSecurityOutcomes(reason='mutation'){
     }
   });
   return memecoinSecurityOutcomePersistenceQueue;
+}
+
+async function persistMemecoinEvidenceFactory(reason='mutation'){
+  memecoinEvidenceFactoryPersistenceQueue=memecoinEvidenceFactoryPersistenceQueue.then(async()=>{
+    if(!memecoinEvidenceFactoryHealthy)return false;
+    try{
+      memecoinEvidenceFactoryState=await saveMemecoinEvidenceFactoryState(
+        memecoinEvidenceFactoryFile,
+        memecoinEvidenceFactoryState,
+        {maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))}
+      );
+      memecoinEvidenceFactoryLastError=null;
+      return true;
+    }catch(err){
+      memecoinEvidenceFactoryHealthy=false;
+      memecoinEvidenceFactoryLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'memecoin_evidence_factory.persistence',message:memecoinEvidenceFactoryLastError});
+      console.error('[BIGGJ_MEME_EVIDENCE_PERSIST_FAILED]',reason,memecoinEvidenceFactoryLastError);
+      return false;
+    }
+  });
+  return memecoinEvidenceFactoryPersistenceQueue;
 }
 
 async function persistStrategyLeague(reason='mutation'){
@@ -4828,6 +4858,66 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       }
     };
 
+    const evidenceNow=Date.now();
+    const evidenceObserved=observeMemecoinEvidence(
+      memecoinEvidenceFactoryState,
+      learnedSecuredRows,
+      {
+        now:evidenceNow,
+        maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))
+      }
+    );
+    memecoinEvidenceFactoryState=evidenceObserved.state;
+    const currentEvidenceKeys=new Set(learnedSecuredRows.map(memecoinRowKey));
+    const dueEvidenceFollowups=dueMemecoinEvidenceFollowups(memecoinEvidenceFactoryState,{
+      asOf:evidenceNow,
+      max:Math.max(0,Math.min(10,Number(process.env.TCX_MEME_EVIDENCE_FOLLOWUPS_PER_CYCLE||5))),
+      minRetryMs:Math.max(30_000,Number(process.env.TCX_MEME_EVIDENCE_RETRY_MS||60_000))
+    }).filter(x=>!currentEvidenceKeys.has(String(x.key||'').toLowerCase()));
+    const evidenceFollowupRows=[];
+    for(const due of dueEvidenceFollowups){
+      try{
+        const row=await memecoinEarlyProvider.fetchTokenSnapshot(due.chainId,due.tokenAddress,{force:false});
+        memecoinEvidenceFactoryState=recordMemecoinEvidenceFollowupAttempt(
+          memecoinEvidenceFactoryState,due.key,{at:Date.now(),error:row?null:'TOKEN_SNAPSHOT_EMPTY'}
+        ).state;
+        if(row)evidenceFollowupRows.push(row);
+      }catch(err){
+        const message=err instanceof Error?err.message:String(err);
+        memecoinEvidenceFactoryState=recordMemecoinEvidenceFollowupAttempt(
+          memecoinEvidenceFactoryState,due.key,{at:Date.now(),error:message}
+        ).state;
+        recordError(observability,{scope:'memecoin_evidence_factory.followup',message});
+      }
+    }
+    let evidenceFollowupResult={created:0,observed:0,onTime:0,late:0,cases:memecoinEvidenceFactoryState?.cases?.length||0};
+    if(evidenceFollowupRows.length){
+      const followed=observeMemecoinEvidence(
+        memecoinEvidenceFactoryState,
+        evidenceFollowupRows,
+        {
+          now:Date.now(),
+          maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))
+        }
+      );
+      memecoinEvidenceFactoryState=followed.state;
+      evidenceFollowupResult=followed.results;
+    }
+    if(
+      evidenceObserved.results.created||
+      evidenceObserved.results.observed||
+      evidenceFollowupResult.observed||
+      dueEvidenceFollowups.length
+    ){
+      await persistMemecoinEvidenceFactory('memecoin-early:'+reason);
+    }
+    const evidenceFactorySummary=memecoinEvidenceFactorySummary(memecoinEvidenceFactoryState,{
+      asOf:Date.now(),
+      minPatternTrain:Math.max(12,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_TRAIN||20)),
+      minPatternValidate:Math.max(5,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_VALIDATE||8))
+    });
+    snapshot={...snapshot,evidenceFactory:evidenceFactorySummary};
+
     const outcomeNow=Date.now();
     const outcomeObserved=observeMemecoinSecurityOutcomes(
       memecoinSecurityOutcomeState,
@@ -4953,6 +5043,19 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         bluesky:memecoinSocialSnapshot?.bluesky||null,
         missingSources:memecoinSocialSnapshot?.missingSources||[],
         errors:memecoinSocialSnapshot?.errors||[]
+      },
+      evidenceFactory:{
+        version:MEMECOIN_EVIDENCE_FACTORY_VERSION,
+        independentCases:evidenceFactorySummary.independentCases,
+        complete24h:evidenceFactorySummary.complete24h,
+        followupsRequested:dueEvidenceFollowups.length,
+        followupsObserved:evidenceFollowupRows.length,
+        observedThisCycle:evidenceObserved.results.observed+evidenceFollowupResult.observed,
+        onTimeThisCycle:evidenceObserved.results.onTime+evidenceFollowupResult.onTime,
+        counterfactuals:evidenceFactorySummary.counterfactuals,
+        patternMiner:evidenceFactorySummary.patternMiner,
+        policyMutationAllowed:false,
+        canExecuteLive:false
       },
       learning:{
         version:MEMECOIN_TRADE_LEARNER_VERSION,
@@ -11463,6 +11566,16 @@ function missionControlData(){
       truthBoundary:'THIRD_PARTY_SECURITY_EVIDENCE_NOT_RUG_PROBABILITY'
     },
     learning:memecoinEarlySnapshot?.tradeLearning||memecoinTradeLearningSummary(buildMemecoinTradeLearningModel(specialistWalletState,{asOf:now})),
+    evidenceFactory:{
+      ...(memecoinEarlySnapshot?.evidenceFactory||memecoinEvidenceFactorySummary(memecoinEvidenceFactoryState,{
+        asOf:now,
+        minPatternTrain:Math.max(12,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_TRAIN||20)),
+        minPatternValidate:Math.max(5,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_VALIDATE||8))
+      })),
+      healthy:memecoinEvidenceFactoryHealthy,
+      lastError:memecoinEvidenceFactoryLastError,
+      file:memecoinEvidenceFactoryFile
+    },
     social:{
       version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
       source:memecoinSocialSnapshot?.source||'NO_DIRECT_SOCIAL_SOURCE',
@@ -12053,6 +12166,7 @@ async function gracefulShutdown(signal) {
   await persistShadowOms(`shutdown:${signal}`);
   await persistSpecialistWallets(`shutdown:${signal}`);
   await persistMemecoinSecurityOutcomes(`shutdown:${signal}`);
+  await persistMemecoinEvidenceFactory(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
