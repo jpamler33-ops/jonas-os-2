@@ -326,7 +326,7 @@ function transitionLawStudy(cases,{
     collecting:collecting.slice(0,12),
     thresholds:{
       minTrain:Math.max(1,Number(minTrain)||1),
-      minValidate:foldSize,
+      minValidate:Math.max(1,Number(minValidate)||1),
       minContextSamples:Math.max(1,Number(minContextSamples)||1),
       minContexts:Math.max(1,Number(minContexts)||1),
       maxFolds:Math.max(1,Number(maxFolds)||1),
