@@ -244,12 +244,22 @@ function memeEntryTailRisk(row={}){
   const liq=finite(row?.liquidityUsd);
   const thin=flags.has('LIQUIDITY_THIN')||(liq!=null&&liq<25_000);
   const veryThin=flags.has('LIQUIDITY_VERY_THIN')||flags.has('LIQUIDITY_EXTREME_THIN')||(liq!=null&&liq<10_000);
+  const secondaryFlags=[
+    'M5_CHASE_RISK','EXTREME_TURNOVER','M5_DRAWDOWN_SEVERE',
+    'M5_CRASH_EXTREME','ONE_SIDED_NO_SELLS_OBSERVED',
+    'DATA_ANOMALY_MCAP_LIQUIDITY','DATA_ANOMALY_FDV_LIQUIDITY'
+  ].filter(x=>flags.has(x));
+  // Thin liquidity alone is not enough to kill the trade: the live sample
+  // contains moonshot-positive thin cohorts. Block only when thin liquidity
+  // is paired with an independent deterioration/chase/data-risk signal.
+  const blocked=veryThin||(thin&&secondaryFlags.length>0);
   return Object.freeze({
-    blocked:veryThin||thin,
+    blocked,
     thin,
     veryThin,
+    secondaryFlags:Object.freeze(secondaryFlags),
     liquidityUsd:liq,
-    reason:veryThin?'VERY_THIN_LIQUIDITY':thin?'THIN_LIQUIDITY':null
+    reason:veryThin?'VERY_THIN_LIQUIDITY':blocked?'THIN_PLUS_SECONDARY_RISK':null
   });
 }
 function memeTailRiskDiagnostics(position,row,marked){
