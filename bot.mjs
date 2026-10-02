@@ -2936,6 +2936,7 @@ async function maybePlaceMandatoryShadowDiscovery(issuance,{auditHealthy=false,a
     return {placed:false,eligible:false,reason:'DISCOVERY_SYMBOL_OPEN_CAP',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
 
+  const walletManagerSummary=await refreshWalletResearchManagerRuntime('pre-learned-challenger');
   const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
   const assetClass=assetClassForSymbol(symbol);
   const decision=deriveMandatoryShadowDiscovery(issuance,qualityModel,{
@@ -3240,6 +3241,13 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
   if(!auditHealthy||!auditLedger.healthy||!shadowOmsHealthy||!shadowPortfolioHealthy){
     return {placed:0,eligible:0,reason:'LEARNED_CHALLENGER_RUNTIME_UNHEALTHY',execution:'SHADOW_ONLY',canExecuteLive:false};
   }
+  if(walletResearchManagerEnabled&&!walletResearchManagerHealthy){
+    return {
+      placed:0,eligible:0,reason:'WALLET_RESEARCH_MANAGER_UNHEALTHY',
+      managerError:walletResearchManagerLastError,
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    };
+  }
   if(!portfolioPrepared){
     const reconciled=reconcileShadowPortfolioEntries(shadowPortfolioLedger,shadowOrders,{now});
     if(reconciled.changed){
@@ -3267,7 +3275,12 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
     }
   });
   if(!derived.candidates.length){
-    return {placed:0,eligible:0,reason:derived.reason,lab:learnedChallengerSummary(lab),execution:'SHADOW_ONLY',canExecuteLive:false};
+    return {
+      placed:0,eligible:0,reason:derived.reason,
+      lab:learnedChallengerSummary(lab),
+      walletResearchManager:walletManagerSummary,
+      execution:'SHADOW_ONLY',canExecuteLive:false
+    };
   }
 
   const openAll=(shadowPortfolioLedger.positions||[]).filter(p=>
@@ -3282,6 +3295,21 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
   const results=[];
   for(const candidate of derived.candidates){
     if(remainingGlobal<=0) break;
+    const walletDecision=walletResearchManagerEnabled
+      ?walletResearchCandidateDecision(walletResearchManagerState,candidate)
+      :{
+        allowed:true,reason:'WALLET_RESEARCH_MANAGER_DISABLED',arm:'UNMANAGED',
+        epochId:null,epochNumber:null,cycle:null,activeConstraint:null,lockedConstraints:[],
+        execution:'SHADOW_ONLY',canExecuteLive:false
+      };
+    if(!walletDecision.allowed){
+      results.push({
+        ruleId:candidate.ruleId,placed:false,reason:walletDecision.reason,
+        walletResearchArm:walletDecision.arm,
+        walletResearchEpochId:walletDecision.epochId
+      });
+      continue;
+    }
     if(shadowOrders.some(o=>o?.strategyMeta?.challengerDecisionKey===candidate.challengerDecisionKey)){
       results.push({ruleId:candidate.ruleId,placed:false,reason:'CHALLENGER_DECISION_ALREADY_TRADED'});
       continue;
@@ -3326,6 +3354,20 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
         challengerDiscoveryStrength:candidate.discoveryStrength,
         challengerSourceSamples:candidate.sourceSamples,
         challengerForwardSamples:candidate.forwardSamples,
+        walletResearchManagerVersion:SHADOW_WALLET_RESEARCH_MANAGER_VERSION,
+        walletResearchEpochId:walletDecision.epochId||'',
+        walletResearchEpochNumber:walletDecision.epochNumber,
+        walletResearchCycle:walletDecision.cycle,
+        walletResearchArm:walletDecision.arm,
+        walletResearchWheelId:walletDecision.activeConstraint?.wheelId||'',
+        walletResearchWheelValue:walletDecision.activeConstraint?.value,
+        walletResearchPolicyFingerprint:walletManagerSummary.fingerprint||'',
+        walletResearchDecision:{
+          reason:walletDecision.reason,
+          arm:walletDecision.arm,
+          activeConstraint:walletDecision.activeConstraint,
+          lockedConstraints:walletDecision.lockedConstraints
+        },
         challengerWhyFeature:candidate.why?.[0]?.feature||'',
         challengerWhyValue:candidate.why?.[0]?.value||'',
         challengerRegimeStatus:candidate.regimeStatus,
@@ -3365,6 +3407,10 @@ async function maybePlaceLearnedChallengerTrades(issuance,{auditHealthy=false,re
       regimeStatus:candidate.regimeStatus,regimeMultiplier:candidate.regimeMultiplier,
       stressStatus:candidate.stressStatus,stressMultiplier:candidate.stressMultiplier,
       stressRobustnessScore:candidate.stressRobustnessScore,
+      walletResearchArm:walletDecision.arm,
+      walletResearchEpochId:walletDecision.epochId,
+      walletResearchWheelId:walletDecision.activeConstraint?.wheelId||null,
+      walletResearchWheelValue:walletDecision.activeConstraint?.value??null,
       notionalQuote:candidate.notionalQuote
     });
   }
