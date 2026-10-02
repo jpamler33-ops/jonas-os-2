@@ -31,7 +31,15 @@ const PASSIVE_DATA_NEEDS=new Set([
   'LABELLED_FORWARD_OUTCOMES',
   'POINT_IN_TIME_FORWARD_OBSERVATIONS',
   'FRESH_FORWARD_EVIDENCE',
-  'INDEPENDENT_EPISODES'
+  'INDEPENDENT_EPISODES',
+  // These are deliberately time-maturing world-model validation requirements.
+  // They should only become stalls when the upstream PIT/history clock itself
+  // stops advancing; otherwise the correct state is WAITING_FOR_DATA.
+  'POINT_IN_TIME_WORLD_MODEL_EVIDENCE',
+  'TEMPORAL_HOLDOUT',
+  'REGIME_DIVERSITY',
+  'PLACEBO_LAG_EVIDENCE',
+  'FORWARD_STATE_STABILITY'
 ]);
 const MIN_STALL_AGE_MS=30*60*1000;
 const PASSIVE_DATA_FRESHNESS_MS=6*60*60*1000;

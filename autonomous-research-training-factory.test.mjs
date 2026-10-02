@@ -234,6 +234,8 @@ test('summary gives a concise data-only and next-work contract',()=>{
   assert.equal(summary.automaticPromotion,false);
   assert.equal(summary.nextTasks.length,1);
   assert.equal(summary.nextTasks[0].autoHandler,'AUTOLEARN_AND_COVERAGE_CURRICULUM');
+  assert.equal(typeof summary.leverage.waitingForDataTaskCount,'number');
+  assert.ok(Array.isArray(summary.leverage.stalledTasks));
 });
 
 test('factory state persists and reloads with fingerprint verification',async()=>{
