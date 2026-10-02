@@ -11614,6 +11614,12 @@ function autonomousOperatorOwnerPolicies(){
       maxSilentMs:Math.max(600_000,autonomousResearchFactoryRefreshMs*4),
       recoveryAction:'SYNC_FEATURE_RESEARCH'
     },
+    INDICATOR_EVOLUTION:{
+      enabled:true,
+      operations:['indicator_evolution_sync'],
+      maxSilentMs:Math.max(600_000,autonomousResearchFactoryRefreshMs*4),
+      recoveryAction:'SYNC_INDICATOR_EVOLUTION'
+    },
     MODEL_CANDIDATE_REGISTRY:{
       enabled:shadowCompetitionEnabled===true&&shadowCompetitionServingWorkerEnabled===true,
       operations:['forecast_shadow_competition'],
@@ -11648,10 +11654,13 @@ async function executeAutonomousOperatorAction(action){
       await refreshBiggjLivingResearch('autonomous-operator-recovery');
     }else if(action?.type==='SYNC_FEATURE_RESEARCH'){
       await syncFeatureResearch('autonomous-operator-recovery');
+    }else if(action?.type==='SYNC_INDICATOR_EVOLUTION'){
+      await syncIndicatorEvolution('autonomous-operator-recovery');
     }else if(action?.type==='REFRESH_RESEARCH_STACK'){
       maybeEvaluateClaimAssumptionResearch('autonomous-operator-stall-recovery',{force:false});
       await refreshBiggjLivingResearch('autonomous-operator-stall-recovery');
       await syncFeatureResearch('autonomous-operator-stall-recovery');
+      await syncIndicatorEvolution('autonomous-operator-stall-recovery');
       await refreshAutonomousResearchFactory('OPERATOR_STALL_RECOVERY');
     }else{
       throw new Error('UNSUPPORTED_OPERATOR_ACTION:'+String(action?.type||'UNKNOWN'));
