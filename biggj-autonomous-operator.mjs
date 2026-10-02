@@ -311,14 +311,15 @@ export function refreshBiggjAutonomousOperator(state,{
   }
   incidents=markPlannedRecoveries(incidents,actions,t,p);
 
-  // A stale internal worker is an internal operations incident, not a user task.
-  // Escalate to the human only when there is an actual governance/config decision
-  // or when an automatic recovery path has been exhausted.
+  // A stale worker or weak/missing data is an internal operations incident, not
+  // automatically a user task. Escalate only when there is a concrete human
+  // governance/config action or an automatic recovery path has been exhausted.
+  // DATA_QUALITY_BLOCKED remains visible in factory/incident state but does not
+  // tell the user to "decide" something they cannot directly resolve.
   const escalationIncidents=Object.values(incidents).filter(x=>
     x.kind==='APPROVAL_REQUIRED'||
     x.kind==='AUTOMATION_GAP'||
     (x.kind==='OWNER_DISABLED'&&!x.recoveryAction)||
-    (x.kind==='DATA_QUALITY_BLOCKED'&&x.cycles>=3)||
     x.recoveryAttempts>=p.maxRecoveryAttempts
   );
 
@@ -423,6 +424,7 @@ export function biggjAutonomousOperatorSummary(state){
     automationCoverage:finite(state?.automationCoverage,0),
     activeIncidents:incidents.length,
     internalIncidents:incidents.filter(x=>x.kind==='OWNER_UNHEALTHY').length,
+    dataQualityIncidents:incidents.filter(x=>x.kind==='DATA_QUALITY_BLOCKED').length,
     humanActionIncidents:incidents.filter(x=>
       x.kind==='APPROVAL_REQUIRED'||
       x.kind==='AUTOMATION_GAP'||
