@@ -15,7 +15,8 @@ test('web SuperChart reuses the institutional renderer without mutating episode 
   assert.match(source,/renderCandlestickPng/);
   assert.match(source,/if\(capture\)await captureEpisodeFromState/);
   assert.match(source,/webSuperchartAsset\(symbol,\{mode='FULL',interval='5m'\}/);
-  assert.match(source,/buildSuperchartAsset\(symbol,\{mode,interval,capture:false\}\)/);
+  assert.match(source,/buildSuperchartAsset\(symbol,\{mode,interval,trendScale,capture:false\}\)/);
+  assert.match(source,/webSuperchartAsset\(symbol,\{interval,mode\},trendScale\)/);
 });
 
 test('web SuperChart is bounded, deduplicated and no-store',()=>{
