@@ -74,6 +74,20 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].canExecuteLive,false);
 });
 
+test('wallet 4 keeps thin launches in research but blocks them from the performance scout',()=>{
+  const now=2_300_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'THIN',symbol:'THIN',priceUsd:.01,liquidityUsd:18_000,
+    volumeM5:8_000,buysM5:12,sellsM5:5,priceChangeM5:12,
+    score:{stage:'NEW_NOW',researchPriorityScore:.80,attentionSignals:['NEW_POOL'],riskFlags:['LIQUIDITY_THIN']},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now,minLiquidityUsd:10_000,minScore:.58});
+  assert.equal(x.results.eligible,1);
+  assert.equal(x.results.tailRiskBlocked,1);
+  assert.equal(x.results.opened,0);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
+});
+
 test('wallet 4 refuses hard market-data anomalies even with security pass',()=>{
   const now=2_500_000;
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
@@ -135,6 +149,50 @@ test('wallet 5 learned BLOCK does not interfere with wallet 3 public trader copy
   assert.equal(x.results.learningBlockedW5,1);
   assert.equal(x.state.wallets[WALLET_3_TRADER_COPY].positions.length,1);
   assert.equal(x.state.wallets[WALLET_5_MEME_COPY].positions.length,0);
+});
+
+test('wallet 4 exits deteriorating memes before the static minus-45 percent stop',()=>{
+  const now=3_400_000;
+  let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'TAIL',symbol:'TAIL',priceUsd:1,liquidityUsd:60_000,
+    volumeM5:25_000,buysM5:20,sellsM5:8,priceChangeM5:15,
+    score:{stage:'NEW_NOW',researchPriorityScore:.78,attentionSignals:['NEW_POOL'],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now}).state;
+
+  const next=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'TAIL',symbol:'TAIL',priceUsd:.76,liquidityUsd:24_000,
+    volumeM5:40_000,buysM5:4,sellsM5:18,priceChangeM5:-58,
+    score:{stage:'RISK_ONLY',researchPriorityScore:.12,attentionSignals:[],riskFlags:['M5_DRAWDOWN_SEVERE']},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now:now+30_000,stopReturn:-.45,takeReturn:1.5});
+
+  assert.equal(next.results.closed,1);
+  assert.equal(next.results.tailRiskClosed,1);
+  assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].closed[0].closeReason,'MEME_TAIL_RISK_EXIT');
+  assert.ok(next.state.wallets[WALLET_4_MEME_SCOUT].closed[0].realizedReturnPct>-.45);
+  assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].closed[0].lastMemeTailRisk.trigger,true);
+});
+
+test('wallet 4 does not choke healthy winners before the existing take-profit threshold',()=>{
+  const now=3_600_000;
+  let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUNNER',symbol:'RUNNER',priceUsd:1,liquidityUsd:70_000,
+    volumeM5:25_000,buysM5:18,sellsM5:7,priceChangeM5:20,
+    score:{stage:'NEW_NOW',researchPriorityScore:.82,attentionSignals:['NEW_POOL'],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now}).state;
+
+  const next=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUNNER',symbol:'RUNNER',priceUsd:1.9,liquidityUsd:95_000,
+    volumeM5:40_000,buysM5:25,sellsM5:9,priceChangeM5:45,
+    score:{stage:'EARLY',researchPriorityScore:.74,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now:now+30_000,takeReturn:1.5});
+
+  assert.equal(next.results.closed,0);
+  assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].positions.length,1);
+  assert.ok(next.state.wallets[WALLET_4_MEME_SCOUT].positions[0].peakUnrealizedReturnPct>.8);
 });
 
 test('wallet 4 marks and closes a take-profit research episode from later public price',()=>{
