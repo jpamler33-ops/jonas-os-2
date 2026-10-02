@@ -123,6 +123,12 @@ import {
   LEARNED_CHALLENGER_ENGINE_VERSION
 } from './learned-challenger-engine.mjs';
 import {
+  loadShadowWalletResearchManager, saveShadowWalletResearchManager,
+  refreshShadowWalletResearchManager, shadowWalletResearchManagerSummary,
+  walletResearchCandidateDecision,
+  SHADOW_WALLET_RESEARCH_MANAGER_VERSION
+} from './shadow-wallet-research-manager.mjs';
+import {
   deriveShadowRegimeFingerprint, buildRegimeStrategyMatrix, regimeDecisionForStrategy,
   regimeBrainSummary, SHADOW_REGIME_BRAIN_VERSION
 } from './shadow-regime-brain.mjs';
@@ -533,6 +539,11 @@ const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Numbe
 const learnedChallengerMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_OPEN_TOTAL || 8) || 8));
 const learnedChallengerMaxOpenPerSymbol = Math.max(1, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_OPEN_PER_SYMBOL || 2) || 2));
 const learnedChallengerCooldownMs = Math.max(5*60_000, Number(process.env.TCX_LEARNED_CHALLENGER_COOLDOWN_MS || 30*60_000));
+const walletResearchManagerEnabled = String(process.env.TCX_WALLET_RESEARCH_MANAGER_ENABLED || '1') !== '0';
+const walletResearchTargetArmTrades = Math.max(8, Math.floor(Number(process.env.TCX_WALLET_RESEARCH_TARGET_ARM_TRADES || 25) || 25));
+const walletResearchMinTimedArmTrades = Math.max(4, Math.floor(Number(process.env.TCX_WALLET_RESEARCH_MIN_TIMED_ARM_TRADES || 8) || 8));
+const walletResearchMaxEpochMs = Math.max(60*60_000, Number(process.env.TCX_WALLET_RESEARCH_MAX_EPOCH_MS || 4*60*60_000));
+const walletResearchMinImprovementScore = Math.max(.01, Math.min(.5, Number(process.env.TCX_WALLET_RESEARCH_MIN_IMPROVEMENT_SCORE || .06)));
 const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
 const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
 const shadowStatsTimeZone = String(process.env.TCX_STATS_TIMEZONE || 'Europe/Berlin');
@@ -1367,6 +1378,8 @@ const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.j
 let loadedShadowOms = await loadShadowOms(shadowOmsFile);
 const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-shadow-portfolio.json';
 let loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
+const walletResearchManagerFile = process.env.TCX_WALLET_RESEARCH_MANAGER_FILE || '/data/tcx-wallet-research-manager.json';
+let loadedWalletResearchManager = await loadShadowWalletResearchManager(walletResearchManagerFile,{asOf:Date.now()});
 const specialistWalletFile = process.env.TCX_SPECIALIST_WALLETS_FILE || '/data/tcx-specialist-wallets.json';
 let loadedSpecialistWallets = await loadSpecialistWalletState(specialistWalletFile);
 const memecoinSecurityOutcomeFile = process.env.TCX_MEME_SECURITY_OUTCOME_FILE || '/data/tcx-meme-security-outcomes.json';
@@ -1395,6 +1408,12 @@ let shadowPortfolioLastError = loadedShadowPortfolio.error || null;
 const shadowPortfolioRecoveredFromCorrupt=loadedShadowPortfolio.recoveredFromCorrupt===true;
 loadedShadowPortfolio=null;
 let shadowPortfolioPersistenceQueue = Promise.resolve();
+let walletResearchManagerState = loadedWalletResearchManager.state;
+let walletResearchManagerHealthy = loadedWalletResearchManager.healthy;
+let walletResearchManagerLastError = loadedWalletResearchManager.error || null;
+loadedWalletResearchManager=null;
+let walletResearchManagerPersistenceQueue = Promise.resolve();
+let walletResearchManagerPersistencePrimed=false;
 let specialistWalletState = loadedSpecialistWallets.state;
 let specialistWalletHealthy = loadedSpecialistWallets.healthy;
 let specialistWalletLastError = loadedSpecialistWallets.error || null;
@@ -1731,6 +1750,57 @@ async function persistShadowPortfolio(reason='mutation') {
     }
   });
   return shadowPortfolioPersistenceQueue;
+}
+
+async function persistWalletResearchManager(reason='mutation'){
+  walletResearchManagerPersistenceQueue = walletResearchManagerPersistenceQueue.then(async()=>{
+    if(!walletResearchManagerHealthy) return false;
+    try{
+      walletResearchManagerState = await saveShadowWalletResearchManager(walletResearchManagerFile,walletResearchManagerState);
+      walletResearchManagerLastError=null;
+      walletResearchManagerPersistencePrimed=true;
+      return true;
+    }catch(err){
+      walletResearchManagerHealthy=false;
+      walletResearchManagerLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'wallet_research_manager.persistence',message:walletResearchManagerLastError});
+      console.error('[TCX_WALLET_RESEARCH_MANAGER_PERSIST_FAILED]',reason,walletResearchManagerLastError);
+      return false;
+    }
+  });
+  return walletResearchManagerPersistenceQueue;
+}
+
+async function refreshWalletResearchManagerRuntime(reason='refresh'){
+  if(!walletResearchManagerEnabled||!walletResearchManagerHealthy){
+    return shadowWalletResearchManagerSummary(walletResearchManagerState,shadowPortfolioLedger,{
+      asOf:Date.now(),targetArmTrades:walletResearchTargetArmTrades,maxEpochMs:walletResearchMaxEpochMs
+    });
+  }
+  const at=Date.now();
+  const result=refreshShadowWalletResearchManager(walletResearchManagerState,shadowPortfolioLedger,{
+    asOf:at,
+    targetArmTrades:walletResearchTargetArmTrades,
+    minTimedArmTrades:walletResearchMinTimedArmTrades,
+    maxEpochMs:walletResearchMaxEpochMs,
+    minImprovementScore:walletResearchMinImprovementScore
+  });
+  walletResearchManagerState=result.state;
+  if(result.changed||!walletResearchManagerPersistencePrimed) await persistWalletResearchManager(reason);
+  if(result.reviewed){
+    console.info('[TCX_WALLET_RESEARCH_EPOCH_REVIEW]',JSON.stringify({
+      reason,
+      decision:result.decision,
+      nextEpoch:walletResearchManagerState.epochNumber,
+      nextExperiment:walletResearchManagerState.activeExperiment,
+      lockedConstraints:walletResearchManagerState.lockedConstraints,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+  }
+  return shadowWalletResearchManagerSummary(walletResearchManagerState,shadowPortfolioLedger,{
+    asOf:at,targetArmTrades:walletResearchTargetArmTrades,maxEpochMs:walletResearchMaxEpochMs
+  });
 }
 
 async function persistSpecialistWallets(reason='mutation'){
