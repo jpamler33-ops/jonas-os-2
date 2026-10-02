@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createShadowCompetition } from './forecast-shadow-competition.mjs';
 import {
   runForecastShadowEvaluationWorker,
   FORECAST_SHADOW_EVALUATION_WORKER_VERSION,
@@ -156,4 +157,116 @@ test('autolearn V2 resumes at production idle baseline while retaining issue hea
   });
   assert.equal(issueStillProtected.allowed,false);
   assert.deepEqual(issueStillProtected.exceeded,['HEAP']);
+});
+
+
+function rolloverConfig(){
+  const H5=5*60_000;
+  return {
+    featureIds:['trend','pressure'],
+    horizons:[{
+      id:'5m',horizonMs:H5,flatThreshold:.001,topK:80,minSimilarity:.05,
+      analogBandwidth:1.5,independenceWindowMs:H5
+    }],
+    minTrainingCases:8,minRegimeCases:4,minAnalogCount:4,
+    minAnalogEffectiveSamples:2,minAnalogIndependentEpisodes:2,
+    minDataQuality:.5,minRegimeConfidence:.2,
+    calibrationMinCases:500,reliabilityMinCases:500,intervalCalibrationMinCases:500,
+    driftRecentCases:20,driftBaselineCases:40,pathMinCompleteTrajectories:4,
+    pathMinEffectiveSamples:2,pathTopK:40,pathMinSimilarity:.05,
+    recencyHalfLifeMs:30*24*60*60_000,ridgeLambda:1
+  };
+}
+
+function rolloverRow(i){
+  const H5=5*60_000;
+  const ts=100_000+i*10*60_000;
+  const trend=Math.sin(i/5)*.7;
+  const pressure=.5*trend+.1*Math.cos(i);
+  return {
+    id:'roll-'+i,symbol:'BTCUSDT',timestamp:ts,availableAt:ts,resolvedAt:ts+H5,
+    horizonMs:H5,features:{trend,pressure},
+    regimeId:trend>.2?'TREND_UP':trend<-.2?'TREND_DOWN':'RANGE',
+    forwardReturn:.004*trend+.001*pressure,quality:1
+  };
+}
+
+test('terminal no-promotion governor automatically advances to the next shadow generation',async()=>{
+  const incumbentConfig=rolloverConfig();
+  const historyRows=Array.from({length:50},(_,i)=>rolloverRow(i));
+  const now=historyRows.at(-1).resolvedAt+1000;
+  const competitionState=createShadowCompetition({
+    historyRows,incumbentConfig,parentReleaseId:'R1',now,minSeedRows:40
+  });
+  const result=await runForecastShadowEvaluationWorker({
+    competitionState:{
+      ...competitionState,
+      evaluatedHistoryRows:historyRows.length,
+      evaluatedHistoryThroughAt:forecastHistoryProgressAt(historyRows)
+    },
+    experimentGovernorState:{
+      version:'TCX_FORECAST_EXPERIMENT_GOVERNOR_V1',
+      status:'COMPLETE_NO_PROMOTION',
+      generationId:'EXP-OLD',
+      generationNumber:1,
+      nextGenerationEligible:true,
+      participants:[],
+      executionMode:'SHADOW_ONLY',
+      productionMutationPerformed:false
+    },
+    historyRows,
+    incumbentConfig,
+    releaseId:'R2',
+    minSeedRows:40,
+    minimumTrainCases:8,
+    now:now+1000
+  },{timeoutMs:30_000,maxOldGenerationSizeMb:128});
+
+  assert.equal(result.flags.generationAdvanced,true);
+  assert.equal(result.flags.previousGenerationId,'EXP-OLD');
+  assert.equal(result.experimentGovernorState.generationNumber,2);
+  assert.equal(result.experimentGovernorState.status,'ACTIVE');
+  assert.equal(result.experimentGovernorState.nextGenerationEligible,false);
+  assert.equal(result.competitionState.status,'ACTIVE');
+  assert.equal(result.competitionState.evaluatedHistoryThroughAt,forecastHistoryProgressAt(historyRows));
+  assert.equal(result.competitionState.productionMutationPerformed,false);
+});
+
+test('promotion-review terminal governor is never overwritten by automatic generation rollover',async()=>{
+  const incumbentConfig=rolloverConfig();
+  const historyRows=Array.from({length:50},(_,i)=>rolloverRow(i));
+  const now=historyRows.at(-1).resolvedAt+1000;
+  const competition=createShadowCompetition({
+    historyRows,incumbentConfig,parentReleaseId:'R1',now,minSeedRows:40
+  });
+  const competitionState={
+    ...competition,
+    evaluatedHistoryRows:historyRows.length,
+    evaluatedHistoryThroughAt:forecastHistoryProgressAt(historyRows)
+  };
+  const governor={
+    version:'TCX_FORECAST_EXPERIMENT_GOVERNOR_V1',
+    status:'COMPLETE_PROMOTION_REVIEW_REQUIRED',
+    generationId:'EXP-REVIEW',
+    generationNumber:4,
+    nextGenerationEligible:true,
+    participants:[],
+    executionMode:'SHADOW_ONLY',
+    productionMutationPerformed:false
+  };
+  const result=await runForecastShadowEvaluationWorker({
+    competitionState,
+    experimentGovernorState:governor,
+    historyRows,
+    incumbentConfig,
+    releaseId:'R2',
+    minSeedRows:40,
+    minimumTrainCases:8,
+    now:now+1000
+  },{timeoutMs:30_000,maxOldGenerationSizeMb:128});
+
+  assert.equal(result.flags.generationAdvanced,false);
+  assert.equal(result.experimentGovernorState.status,'COMPLETE_PROMOTION_REVIEW_REQUIRED');
+  assert.equal(result.experimentGovernorState.generationNumber,4);
+  assert.equal(result.experimentGovernorState.generationId,'EXP-REVIEW');
 });
