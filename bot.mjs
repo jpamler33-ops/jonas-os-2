@@ -655,12 +655,20 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
 });
 const memecoinSecurityChecksPerCycle=Math.max(2,Math.min(12,Number(process.env.TCX_MEME_SECURITY_CHECKS_PER_CYCLE||8)));
+const memecoinHolderFallbackChecksPerCycle=Math.max(0,Math.min(6,Number(process.env.TCX_MEME_HOLDER_FALLBACK_CHECKS_PER_CYCLE||3)));
 const memecoinSecurityProvider=createMemecoinSecurityProvider({
   fetchImpl:globalThis.fetch,
   accessToken:String(process.env.TCX_GOPLUS_ACCESS_TOKEN||'').trim(),
   timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_MEME_SECURITY_TIMEOUT_MS||7000))),
   cacheMs:Math.max(60_000,Math.min(30*60_000,Number(process.env.TCX_MEME_SECURITY_CACHE_MS||5*60_000))),
-  minRequestGapMs:Math.max(2000,Number(process.env.TCX_MEME_SECURITY_REQUEST_GAP_MS||2100))
+  minRequestGapMs:Math.max(2000,Number(process.env.TCX_MEME_SECURITY_REQUEST_GAP_MS||2100)),
+  holderFallbackEnabled:String(process.env.TCX_MEME_HOLDER_FALLBACK_ENABLED||'true').toLowerCase()!=='false',
+  holderCacheMs:Math.max(60_000,Math.min(30*60_000,Number(process.env.TCX_MEME_HOLDER_CACHE_MS||10*60_000))),
+  solanaRpcUrl:String(process.env.TCX_SOLANA_PUBLIC_RPC_URL||'https://api.mainnet-beta.solana.com').trim(),
+  blockscoutBaseUrls:{
+    base:String(process.env.TCX_BASE_BLOCKSCOUT_URL||'https://base.blockscout.com').trim(),
+    ethereum:String(process.env.TCX_ETH_BLOCKSCOUT_URL||'https://eth.blockscout.com').trim()
+  }
 });
 const memecoinSocialProvider=createMemecoinSocialAttentionProvider({
   fetchImpl:globalThis.fetch,
@@ -4080,6 +4088,7 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       '• X Recent Search: '+(memecoinSocialSnapshot?.x?.sourceReady?'LIVE':memecoinSocialSnapshot?.x?.configured?'DEGRADED':'TOKEN FEHLT')+'.','',
       'ON-CHAIN SECURITY',
       '• GoPlus: Honeypot/Trade-Sperren · Mint/Freeze/Admin-Rechte · Holder-Konzentration · LP-Lock-Evidenz.',
+      '• Holder-Fallback: Solana RPC + Blockscout Base/Ethereum; nur wenn GoPlus genau bei Holder-Evidenz UNKNOWN ist.',
       '• Kritische Evidenz => ABSTAIN; fehlende Evidenz => UNKNOWN und kein neuer Wallet-4-Entry.',
       '• Security-Flags sind Evidenzfelder, **keine Rug-Pull-Wahrscheinlichkeit**.','',
       'Alles bleibt SHADOW_ONLY / canExecuteLive:false.','',
@@ -4725,7 +4734,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     try{
       secured=await memecoinSecurityProvider.enrichSnapshot(
         {...snapshot,rows:securityPriorityRows},
-        {maxChecks:memecoinSecurityChecksPerCycle,force:false}
+        {maxChecks:memecoinSecurityChecksPerCycle,maxHolderFallbackChecks:memecoinHolderFallbackChecksPerCycle,force:false}
       );
       memecoinSecurityLastError=(secured?.securityProvider?.errors||[]).length
         ?secured.securityProvider.errors.slice(0,8).join(' | ')
@@ -4797,7 +4806,8 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         abstain:securityRows.filter(x=>x?.security?.evidenceGate==='ABSTAIN').length,
         unknown:securityRows.filter(x=>x?.security?.evidenceGate==='UNKNOWN').length,
         errors:secured?.securityProvider?.errors?.length||0,
-        unknownReasonCounts:secured?.securityProvider?.unknownReasonCounts||{}
+        unknownReasonCounts:secured?.securityProvider?.unknownReasonCounts||{},
+        holderFallback:secured?.securityProvider?.holderFallback||null
       },
       social:{
         version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
