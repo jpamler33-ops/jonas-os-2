@@ -5,7 +5,7 @@ import {BIGGJ_MOBILE_WEBAPP_VERSION,biggjWebManifest,biggjAppIconSvg,biggjServic
 
 const sample={generatedAt:1_800_000_000_000,biggj:{science:{frontier:{evidence:294,experiments:3}},worldModel:{markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12,score:.76,price:67842.31,priceChangePercent:1.84,priceChange:1226.4,openPrice:66615.91,highPrice:68410,lowPrice:66102,quoteVolume:38200000000}]}},health:{autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false},biggjObservability:{maturityIndex:.62,trustedSkills:3,totalSkillNodes:12,observedForecasts:44,runtimeRevision:9,evidence:{evidenceTotal:120,validationIndependentEpisodes:18},learningTimeline:{last24h:{total:7},last7d:{total:29},events:[{title:'Regime transfer checked',detail:'OOS evidence advanced'}]},researchQueue:[{title:'Liquidity transfer',nextGate:'FORWARD_SHADOW'}]},biggjProofFeed:{counts:{resolved:20}},marketRadar:{rows:[{symbol:'ETHUSDT',status:'SUPPORTED',regime:'RANGE',witnessAgreement:.7,support:8,score:.61}]}},portfolio:{equityQuote:1012,netPnlQuote:12,openPositions:1,closedTrades:3,positions:[],recentClosed:[]}};
 
-test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V4');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
+test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V5');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
 test('only four user surfaces',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/RESEARCH-REIFE/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','LIVE TICKER','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · FORECAST · LIQUIDITY · CONFLUENCE · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('progress is measurable',()=>{const h=renderBiggjMobileApp(sample);assert.match(h,/Scoreboard/);assert.match(h,/Learning Timeline/);assert.match(h,/Nächster Hebel/);assert.match(h,/validationIndependentEpisodes/);assert.match(h,/maturityIndex/)});
@@ -23,13 +23,15 @@ test('mobile market view merges world-model and radar facts instead of dropping 
   assert.match(h,/SUPERCHART NICHT VERFÜGBAR/);
 });
 
-test('progress view separates research activity from maturity and humanizes machine labels',()=>{
+test('progress view separates research activity from maturity and exposes evidence semantics',()=>{
   const h=renderBiggjMobileApp(sample);
   assert.match(h,/RESEARCH-REIFE/);
   assert.match(h,/Aktivität ≠ Reife/);
-  assert.match(h,/Viele Forecasts oder Revisionen erhöhen ihn nicht automatisch/);
+  assert.match(h,/Evidence kann stark wachsen/);
+  assert.match(h,/unabhängige Episoden/);
+  assert.match(h,/validierungsbereit/);
   assert.match(h,/Outcomes aufgelöst/);
-  assert.match(h,/function HUMAN/);
+  assert.match(h,/function HUMAN_DETAIL/);
 });
 
 test('live badge reflects successful transport refresh age rather than stale research-state timestamps',()=>{
@@ -86,6 +88,41 @@ test('base mobile trading view exposes research activity without mission-control
   x.portfolio.researchActivity={openPositions:20,closedTrades:3998,wins:1900,losses:2098,winRate:.475,netPnlQuote:-12.5,byMode:{COVERAGE_PROBE:{open:20,closed:3998,realizedPnlQuote:-12.5}},active:[{symbol:'BTCUSDT',side:'LONG',entryMode:'COVERAGE_PROBE',entryPrice:60000,horizonId:'15m'}],recentClosed:[]};
   const h=renderBiggjMobileApp(x);
   for(const text of ['PRIMARY +','Research Trading','Research Open','Research Closed','Discovery Pipeline','Aktueller Blocker','Runtime Gates','Aktive Research Positionen']) assert.match(h,new RegExp(text));
-  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V4'/);
+  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V5'/);
   assert.match(h,/next\?\.appVersion&&next\.appVersion!==APP_VERSION/);
+});
+
+
+test('data-quality blocks stay visible without inventing a user action',()=>{
+  const x=structuredClone(sample);
+  x.health.autonomousOperator={
+    mode:'AUTO_MONITORING',
+    operatorNeeded:false,
+    humanJobRemaining:'EXCEPTIONS_ONLY',
+    factoryMode:'DATA_QUALITY_BLOCKED',
+    dataQualityIncidents:1
+  };
+  const h=renderBiggjMobileApp(x);
+  assert.match(h,/BIGGJ SCHÜTZT DIE DATENQUALITÄT/);
+  assert.match(h,/Keine Freigabe von dir nötig/);
+  assert.doesNotMatch(h,/DEINE AKTION IST NÖTIG/);
+});
+
+test('today evidence card distinguishes raw independent episodes from validation-ready episodes',()=>{
+  const x=structuredClone(sample);
+  x.health.biggjObservability.evidence.independentEpisodes=23;
+  x.health.biggjObservability.evidence.validationIndependentEpisodes=4;
+  const h=renderBiggjMobileApp(x);
+  assert.match(h,/23 unabhängige Episoden · 4 validierungsbereit/);
+});
+
+test('timeline translates compound machine labels instead of leaking English fragments',()=>{
+  const x=structuredClone(sample);
+  x.health.biggjObservability.learningTimeline.events=[{
+    title:'THESIS_MECHANISM_SUPPORT_ADEQUATE',
+    detail:'MATERIAL_WITNESS_CONTRADICTION · WITNESS_NOT_SATISFIED'
+  }];
+  const h=renderBiggjMobileApp(x);
+  assert.match(h,/Mechanismus-Unterstützung ausreichend/);
+  assert.match(h,/Materieller Witness-Widerspruch · Witness-Kriterium nicht erfüllt/);
 });
