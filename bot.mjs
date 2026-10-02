@@ -1600,6 +1600,8 @@ try {
       biggjDiscoveryLedger:BIGGJ_DISCOVERY_LEDGER_VERSION,
       technicalIndicatorFactory:TECHNICAL_INDICATOR_FACTORY_VERSION,
       indicatorEvolution:INDICATOR_EVOLUTION_ENGINE_VERSION,
+      trendBoxEngine:TREND_BOX_ENGINE_VERSION,
+      forecastChartOverlay:FORECAST_CHART_OVERLAY_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
