@@ -174,6 +174,7 @@ export function buildTrendBoxes(candlesInput,{
 
       if(active.direction==='UP'){
         if(c.h>=active.high){
+          if(risk)active.status='ACTIVE';
           risk=null;
         }
         const reversalDistance=(active.high-c.c)/a;
@@ -213,6 +214,7 @@ export function buildTrendBoxes(candlesInput,{
         }
       }else{
         if(c.l<=active.low){
+          if(risk)active.status='ACTIVE';
           risk=null;
         }
         const reversalDistance=(c.c-active.low)/a;
