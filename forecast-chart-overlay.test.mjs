@@ -72,3 +72,21 @@ test('historical forecast moments never mix another symbol',()=>{
   assert.equal(out.length,1);
   assert.equal(out[0].anchorPrice,100);
 });
+
+
+test('requested historical forecast horizon fails closed when that issuance never predicted it',()=>{
+  const out=forecastIssuancesToChartMoments([{
+    symbol:'BTCUSDT',
+    forecast:{asOf:1000,price:100,horizons:[{horizonId:'5m',horizonMs:300000,interval:{median:.01}}]}
+  }],{symbol:'BTCUSDT',startAt:0,endAt:2000,horizonId:'1h'});
+  assert.deepEqual(out,[]);
+});
+
+test('historical forecast sampler also works with implicit finite bounds',()=>{
+  const out=forecastIssuancesToChartMoments([
+    {symbol:'BTCUSDT',forecast:{asOf:1000,price:100,horizons:[{horizonId:'5m',horizonMs:300000,interval:{median:.01}}]}},
+    {symbol:'BTCUSDT',forecast:{asOf:2000,price:101,horizons:[{horizonId:'5m',horizonMs:300000,interval:{median:-.01}}]}}
+  ],{symbol:'BTCUSDT',horizonId:'5m',limit:4});
+  assert.equal(out.length,2);
+  assert.ok(out.every(x=>Number.isFinite(x.asOf)&&Number.isFinite(x.medianPrice)));
+});
