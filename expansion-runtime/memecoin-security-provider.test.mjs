@@ -68,6 +68,84 @@ test('clean covered token can pass and unknown source never fabricates pass',asy
   assert.equal(y.securityProvider.unknownReasonCounts.SECURITY_SOURCE_UNAVAILABLE,1);
 });
 
+test('Blockscout holder evidence resolves a holder-only GoPlus UNKNOWN without relaxing other gates',async()=>{
+  const address='0x3333333333333333333333333333333333333333';
+  const values=Array.from({length:10},()=>String(40n*10n**18n));
+  const p=createMemecoinSecurityProvider({
+    minRequestGapMs:0,now:()=>4000,
+    fetchImpl:async url=>{
+      const u=new URL(url);
+      if(u.hostname==='api.gopluslabs.io')return ok({code:1,result:{[address]:{
+        is_honeypot:'0',is_mintable:'0',transfer_pausable:'0',is_blacklisted:'0',
+        owner_change_balance:'0',hidden_owner:'0',can_take_back_ownership:'0',holders:[]
+      }}});
+      if(u.hostname==='base.blockscout.com'&&u.pathname.endsWith('/holders')){
+        return ok({items:values.map((value,i)=>({address:{hash:'0x'+String(i+1).padStart(40,'0')},value}))});
+      }
+      if(u.hostname==='base.blockscout.com'){
+        return ok({total_supply:String(1000n*10n**18n),holders_count:100});
+      }
+      throw new Error('unexpected '+url);
+    }
+  });
+  const out=await p.enrichSnapshot({rows:[{chainId:'base',tokenAddress:address}]},{maxChecks:1,maxHolderFallbackChecks:1});
+  const s=out.rows[0].security;
+  assert.equal(s.evidenceGate,'PASS');
+  assert.equal(s.coverage.holderConcentrationKnown,true);
+  assert.equal(s.coverage.holderConcentrationIndependent,true);
+  assert.equal(s.holderState.independentSource,'BLOCKSCOUT_BASE_TOKEN_HOLDERS');
+  assert.equal(Number(s.holderState.top10Share.toFixed(2)),.4);
+  assert.equal(out.securityProvider.holderFallback.resolvedPass,1);
+  assert.equal(out.securityProvider.unknownReasonCounts.HOLDER_CONCENTRATION_EVIDENCE_MISSING,undefined);
+});
+
+test('Solana RPC holder fallback can convert concentration uncertainty into ABSTAIN',async()=>{
+  const address='So11111111111111111111111111111111111111112';
+  const p=createMemecoinSecurityProvider({
+    minRequestGapMs:0,now:()=>5000,
+    fetchImpl:async (url,init={})=>{
+      const u=new URL(url);
+      if(u.hostname==='api.gopluslabs.io')return ok({code:1,result:{[address]:{
+        mintable:{status:'0'},freezable:{status:'0'},non_transferable:'0',holders:[]
+      }}});
+      if(u.hostname==='api.mainnet-beta.solana.com'){
+        const req=JSON.parse(init.body);
+        if(req.method==='getTokenLargestAccounts')return ok({result:{context:{slot:123},value:[
+          {amount:'700'},{amount:'100'},{amount:'50'}
+        ]}});
+        if(req.method==='getTokenSupply')return ok({result:{context:{slot:123},value:{amount:'1000',decimals:6}}});
+      }
+      throw new Error('unexpected '+url);
+    }
+  });
+  const out=await p.enrichSnapshot({rows:[{chainId:'solana',tokenAddress:address}]},{maxChecks:1,maxHolderFallbackChecks:1});
+  const s=out.rows[0].security;
+  assert.equal(s.evidenceGate,'ABSTAIN');
+  assert.ok(s.criticalRiskFlags.includes('HOLDER_CONCENTRATION_HIGH'));
+  assert.ok(s.criticalRiskFlags.includes('SINGLE_HOLDER_CONCENTRATION_HIGH'));
+  assert.equal(s.holderState.independentSource,'SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS');
+  assert.equal(out.securityProvider.holderFallback.resolvedAbstain,1);
+});
+
+test('secondary holder source failure remains fail-closed UNKNOWN',async()=>{
+  const address='0x4444444444444444444444444444444444444444';
+  const p=createMemecoinSecurityProvider({
+    minRequestGapMs:0,now:()=>6000,
+    fetchImpl:async url=>{
+      const u=new URL(url);
+      if(u.hostname==='api.gopluslabs.io')return ok({code:1,result:{[address]:{
+        is_honeypot:'0',is_mintable:'0',transfer_pausable:'0',is_blacklisted:'0',
+        owner_change_balance:'0',hidden_owner:'0',can_take_back_ownership:'0',holders:[]
+      }}});
+      return {ok:false,status:503,json:async()=>({})};
+    }
+  });
+  const out=await p.enrichSnapshot({rows:[{chainId:'ethereum',tokenAddress:address}]},{maxChecks:1,maxHolderFallbackChecks:1});
+  assert.equal(out.rows[0].security.evidenceGate,'UNKNOWN');
+  assert.ok(out.rows[0].security.unknownReasonCodes.includes('HOLDER_CONCENTRATION_EVIDENCE_MISSING'));
+  assert.equal(out.securityProvider.holderFallback.errors.length,1);
+});
+
 test('enrichment is bounded to protect free-provider rate budget',async()=>{
   let calls=0;
   const p=createMemecoinSecurityProvider({

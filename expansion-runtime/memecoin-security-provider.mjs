@@ -1,4 +1,4 @@
-export const MEMECOIN_SECURITY_PROVIDER_VERSION='BIGGJ_MEMECOIN_SECURITY_V1';
+export const MEMECOIN_SECURITY_PROVIDER_VERSION='BIGGJ_MEMECOIN_SECURITY_V2';
 
 function finite(v){
   if(v===null||v===undefined||v==='')return null;
@@ -65,6 +65,50 @@ function coverageGapCodes(coverage={}){
   if(coverage?.adminAuthorityKnown!==true)out.push('ADMIN_AUTHORITY_EVIDENCE_MISSING');
   if(coverage?.holderConcentrationKnown!==true)out.push('HOLDER_CONCENTRATION_EVIDENCE_MISSING');
   return out;
+}
+function holderSharesFromRaw(values=[],totalSupplyRaw){
+  const total=finite(totalSupplyRaw);
+  if(total==null||total<=0)return null;
+  const xs=(Array.isArray(values)?values:[])
+    .map(x=>finite(x))
+    .filter(x=>x!=null&&x>=0)
+    .sort((a,b)=>b-a)
+    .slice(0,20);
+  if(!xs.length)return null;
+  return {
+    top10Share:clamp01(xs.slice(0,10).reduce((s,x)=>s+x,0)/total),
+    largestHolderShare:clamp01(xs[0]/total),
+    observedHolders:xs.length
+  };
+}
+function mergeIndependentHolderEvidence(security,evidence){
+  if(!security||!evidence?.sourceReady||evidence?.top10Share==null)return security;
+  const holderState={
+    ...(security.holderState||{}),
+    top10Share:evidence.top10Share,
+    largestHolderShare:evidence.largestHolderShare,
+    observedHolders:evidence.observedHolders,
+    independentSource:evidence.source,
+    independentCapturedAt:evidence.capturedAt,
+    independentTotalSupplyRaw:evidence.totalSupplyRaw??null
+  };
+  const critical=[...(security.criticalRiskFlags||[])];
+  if(evidence.top10Share>.60)critical.push('HOLDER_CONCENTRATION_HIGH');
+  if(evidence.largestHolderShare!=null&&evidence.largestHolderShare>.25)critical.push('SINGLE_HOLDER_CONCENTRATION_HIGH');
+  const coverage={...(security.coverage||{}),holderConcentrationKnown:true,holderConcentrationIndependent:true};
+  const uniqueCritical=[...new Set(critical)];
+  const evidenceGate=securityGate({criticalRiskFlags:uniqueCritical,coverage});
+  return freeze({
+    ...security,
+    source:String(security.source||'GOPLUS')+'+'+String(evidence.source),
+    evidenceGate,
+    unknownReasonCodes:evidenceGate==='UNKNOWN'?coverageGapCodes(coverage):[],
+    criticalRiskFlags:uniqueCritical,
+    holderState,
+    coverage,
+    independentHolderEvidence:evidence,
+    epistemic:'MULTI_SOURCE_SECURITY_EVIDENCE_NOT_RUG_PROBABILITY'
+  });
 }
 function evmNormalize(raw={},meta={}){
   const holders=topHolderStats(raw?.holders);
@@ -227,11 +271,21 @@ export function createMemecoinSecurityProvider({
   timeoutMs=7000,
   cacheMs=5*60_000,
   minRequestGapMs=2100,
+  holderFallbackEnabled=true,
+  holderCacheMs=10*60_000,
+  solanaRpcUrl='https://api.mainnet-beta.solana.com',
+  blockscoutBaseUrls={
+    base:'https://base.blockscout.com',
+    ethereum:'https://eth.blockscout.com'
+  },
   now=()=>Date.now()
 }={}){
   if(typeof fetchImpl!=='function')throw new Error('fetch implementation required');
   const base=String(baseUrl).replace(/\/+$/,'');
   const cache=new Map();
+  const holderCache=new Map();
+  const solRpc=String(solanaRpcUrl||'').replace(/\/+$/,'');
+  const blockscoutBases=Object.fromEntries(Object.entries(blockscoutBaseUrls||{}).map(([k,v])=>[normChain(k),String(v||'').replace(/\/+$/,'')]));
   let lastRequestAt=0;
   async function throttle(){
     const wait=Math.max(0,Number(minRequestGapMs)||0)-(Number(now())-lastRequestAt);
@@ -251,6 +305,65 @@ export function createMemecoinSecurityProvider({
       if(body?.code!=null&&String(body.code)!=='1')throw new Error('GOPLUS_CODE_'+String(body.code)+':'+text(body?.message,120));
       return body;
     }finally{clearTimeout(timer);}
+  }
+  async function publicJson(url,{method='GET',body=null}={}){
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),Math.max(1000,Number(timeoutMs)||7000));
+    try{
+      const headers={accept:'application/json','user-agent':'BIGGJ/1.0 meme-holder-evidence'};
+      if(body!=null)headers['content-type']='application/json';
+      const res=await fetchImpl(url,{method,headers,body:body==null?undefined:JSON.stringify(body),signal:ctrl.signal});
+      if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN'));
+      const data=await res.json();
+      if(data?.error)throw new Error('RPC_'+text(data.error?.message||data.error,160));
+      return data;
+    }finally{clearTimeout(timer);}
+  }
+  async function fetchIndependentHolderEvidence(chainId,tokenAddress,{force=false}={}){
+    if(!holderFallbackEnabled)return freeze({sourceReady:false,source:'DISABLED',reason:'HOLDER_FALLBACK_DISABLED'});
+    const chain=normChain(chainId),address=String(tokenAddress||'').trim();
+    const key=chain+':'+address.toLowerCase(),t=Number(now()),hit=holderCache.get(key);
+    if(!force&&hit&&t-hit.at<Math.max(60_000,Number(holderCacheMs)||600_000))return hit.value;
+    let value;
+    if(chain==='solana'){
+      if(!solRpc)throw new Error('SOLANA_RPC_NOT_CONFIGURED');
+      const [largest,supply]=await Promise.all([
+        publicJson(solRpc,{method:'POST',body:{jsonrpc:'2.0',id:1,method:'getTokenLargestAccounts',params:[address,{commitment:'confirmed'}]}}),
+        publicJson(solRpc,{method:'POST',body:{jsonrpc:'2.0',id:2,method:'getTokenSupply',params:[address,{commitment:'confirmed'}]}})
+      ]);
+      const rows=Array.isArray(largest?.result?.value)?largest.result.value:[];
+      const totalSupplyRaw=supply?.result?.value?.amount;
+      const shares=holderSharesFromRaw(rows.map(x=>x?.amount),totalSupplyRaw);
+      if(!shares)throw new Error('SOLANA_HOLDER_EVIDENCE_INCOMPLETE');
+      value=freeze({
+        source:'SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS',
+        sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
+        ...shares,totalSupplyRaw:String(totalSupplyRaw),slot:finite(largest?.result?.context?.slot),
+        sortedByBalance:true,independentFromGoPlus:true
+      });
+    }else if(chain==='base'||chain==='ethereum'){
+      const host=blockscoutBases[chain];
+      if(!host)throw new Error('BLOCKSCOUT_'+chain.toUpperCase()+'_NOT_CONFIGURED');
+      const encoded=encodeURIComponent(address);
+      const [token,holders]=await Promise.all([
+        publicJson(host+'/api/v2/tokens/'+encoded),
+        publicJson(host+'/api/v2/tokens/'+encoded+'/holders')
+      ]);
+      const rows=Array.isArray(holders?.items)?holders.items:[];
+      const totalSupplyRaw=token?.total_supply??token?.totalSupply;
+      const shares=holderSharesFromRaw(rows.map(x=>x?.value??x?.balance),totalSupplyRaw);
+      if(!shares)throw new Error('BLOCKSCOUT_HOLDER_EVIDENCE_INCOMPLETE');
+      value=freeze({
+        source:'BLOCKSCOUT_'+chain.toUpperCase()+'_TOKEN_HOLDERS',
+        sourceReady:true,capturedAt:t,chainId:chain,tokenAddress:address,
+        ...shares,totalSupplyRaw:String(totalSupplyRaw),holderCount:finite(token?.holders_count??token?.holders),
+        sortedByBalance:true,independentFromGoPlus:true
+      });
+    }else{
+      value=freeze({sourceReady:false,source:'UNSUPPORTED',capturedAt:t,chainId:chain,tokenAddress:address,reason:'CHAIN_UNSUPPORTED'});
+    }
+    holderCache.set(key,{at:t,value});
+    return value;
   }
   function pickResult(body,address){
     const result=body?.result;
@@ -282,11 +395,12 @@ export function createMemecoinSecurityProvider({
     cache.set(key,{at:t,value});
     return value;
   }
-  async function enrichSnapshot(snapshot,{maxChecks=5,force=false}={}){
+  async function enrichSnapshot(snapshot,{maxChecks=5,maxHolderFallbackChecks=2,force=false}={}){
     const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
     const out=[];
     const errors=[];
-    let attempted=0;
+    const holderErrors=[];
+    let attempted=0,holderAttempted=0,holderResolvedPass=0,holderResolvedAbstain=0;
     for(const row of rows){
       let security=row?.security||null;
       if(attempted<Math.max(0,Number(maxChecks)||0)){
@@ -304,6 +418,23 @@ export function createMemecoinSecurityProvider({
             coverage:{},epistemic:'NO_SECURITY_EVIDENCE'
           });
         }
+        const needsHolder=security?.evidenceGate==='UNKNOWN'&&
+          Array.isArray(security?.unknownReasonCodes)&&
+          security.unknownReasonCodes.includes('HOLDER_CONCENTRATION_EVIDENCE_MISSING')&&
+          !(security?.criticalRiskFlags||[]).length;
+        if(needsHolder&&holderAttempted<Math.max(0,Number(maxHolderFallbackChecks)||0)){
+          try{
+            const evidence=await fetchIndependentHolderEvidence(row?.chainId,row?.tokenAddress,{force});
+            holderAttempted++;
+            const before=security?.evidenceGate;
+            security=mergeIndependentHolderEvidence(security,evidence);
+            if(before==='UNKNOWN'&&security?.evidenceGate==='PASS')holderResolvedPass++;
+            else if(before==='UNKNOWN'&&security?.evidenceGate==='ABSTAIN')holderResolvedAbstain++;
+          }catch(err){
+            holderAttempted++;
+            holderErrors.push(String(row?.chainId||'')+':'+String(row?.tokenAddress||'')+':'+(err instanceof Error?err.message:String(err)));
+          }
+        }
       }
       out.push(freeze({...row,security}));
     }
@@ -315,9 +446,14 @@ export function createMemecoinSecurityProvider({
       }
     }
     return freeze({...snapshot,rows:out,securityProvider:{
-      version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS',attempted,errors,
-      unknownReasonCounts,freeRateLimitAware:true
+      version:MEMECOIN_SECURITY_PROVIDER_VERSION,source:'GOPLUS_PLUS_INDEPENDENT_ONCHAIN_HOLDER_EVIDENCE',
+      attempted,errors,unknownReasonCounts,freeRateLimitAware:true,
+      holderFallback:{
+        enabled:Boolean(holderFallbackEnabled),attempted:holderAttempted,
+        resolvedPass:holderResolvedPass,resolvedAbstain:holderResolvedAbstain,
+        errors:holderErrors,sources:['SOLANA_RPC_TOKEN_LARGEST_ACCOUNTS','BLOCKSCOUT_BASE_TOKEN_HOLDERS','BLOCKSCOUT_ETHEREUM_TOKEN_HOLDERS']
+      }
     }});
   }
-  return freeze({version:MEMECOIN_SECURITY_PROVIDER_VERSION,fetchTokenSecurity,enrichSnapshot});
+  return freeze({version:MEMECOIN_SECURITY_PROVIDER_VERSION,fetchTokenSecurity,fetchIndependentHolderEvidence,enrichSnapshot});
 }
