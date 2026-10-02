@@ -17,7 +17,7 @@ test('BIGGJ Discord V13 is user-first while deep intelligence remains callable',
   assert.ok(source.includes("category:'BIGGJ • HOME'"));
   assert.ok(source.includes("category:'BIGGJ • INTELLIGENCE'"));
   assert.ok(source.includes("category:'BIGGJ • TRADING'"));
-  for(const name of ['start-here','progress','market-overview','news-feed','memecoins','trader-watch','academy','trade-cockpit','live-trades','closed-trades']){
+  for(const name of ['start-here','progress','market-overview','news-feed','memecoins','longterm-investing','trader-watch','academy','trade-cockpit','live-trades','closed-trades']){
     assert.ok(source.includes("{name:'"+name+"'"),name);
   }
   assert.ok(source.includes("name:'science'"));
@@ -163,15 +163,15 @@ test('BIGGJ V13 keeps one-tap commands and SuperCharts available on demand',()=>
     'SOL SuperChart'
   ]) assert.ok(source.includes(required),required);
 });
-test('BIGGJ V13 manages only ten curated visible surfaces and keeps deep supervisors on demand',()=>{
+test('BIGGJ V13 manages only eleven curated visible surfaces and keeps deep supervisors on demand',()=>{
   const layoutBlock=source.slice(
     source.indexOf('const SERVER_LAYOUT=Object.freeze(['),
     source.indexOf('const BIGGJ_LEGACY_TECH_ARCHIVE_CATEGORY=')
   );
   const visible=[...layoutBlock.matchAll(/\{name:'([^']+)'/g)].map(m=>m[1]);
-  assert.equal(visible.length,10);
+  assert.equal(visible.length,11);
   assert.equal(new Set(visible).size,visible.length);
-  for(const required of ['progress','market-overview','memecoins','trader-watch','academy','trade-cockpit'])assert.ok(visible.includes(required));
+  for(const required of ['progress','market-overview','memecoins','longterm-investing','trader-watch','academy','trade-cockpit'])assert.ok(visible.includes(required));
   for(const hidden of ['chart-desk','performance','mobile-app','alerts','channel-supervisor','channel-improvements','errors','rulebook','science-home','research-queue'])assert.ok(!visible.includes(hidden),hidden);
   for(const required of [
     'createBiggjChannelManagerRuntime',
@@ -187,6 +187,20 @@ test('BIGGJ V13 manages only ten curated visible surfaces and keeps deep supervi
     'buildErrorDeskPayload'
   ]) assert.ok(source.includes(required)||scienceSource.includes(required),required);
 });
+test('BIGGJ exposes long-term future investment research without turning it into a buy signal',()=>{
+  for(const required of [
+    "name:'longterm-investing'",
+    "name:'longterm'",
+    'buildDiscordLongTermInvestingPayload',
+    'BIGGJ_LONGTERM_INVESTING_V1',
+    'FUTURE THEME WATCH',
+    'INVESTMENT GATE',
+    'THEME ≠ BUY',
+    'NO BUY TIMING',
+    'canExecuteLive:false'
+  ]) assert.ok(source.includes(required),required);
+});
+
 test('BIGGJ V7 incoming news is German-first and strict on translation failure',()=>{
   for(const required of [
     'createGermanTranslationProvider',
