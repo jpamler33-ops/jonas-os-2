@@ -71,6 +71,22 @@ test('learns a destructive W4 pattern and can only abstain from otherwise eligib
   assert.equal(scored.canExecuteLive,false);
 });
 
+test('positive moonshot expectancy is not blocked only because most trades lose',()=>{
+  const closed=[
+    ...Array.from({length:8},(_,i)=>scoutClosed(i,2.10)),
+    ...Array.from({length:12},(_,i)=>scoutClosed(i+8,-.55))
+  ];
+  const model=buildMemecoinTradeLearningModel(state(closed),{asOf:20_000_000});
+  const scored=scoreMemecoinScoutCandidate(model,candidate());
+  assert.equal(model.wallet4.global.label,'ASYMMETRIC_EDGE');
+  assert.ok(model.wallet4.global.rawMeanReturn>0);
+  assert.ok(model.wallet4.global.severeLossRate>=.5);
+  assert.ok(model.wallet4.global.moonshotRate>=.3);
+  assert.equal(scored.action,'NEUTRAL');
+  assert.equal(scored.evidence.label,'ASYMMETRIC_EDGE');
+  assert.ok(model.wallet4.topAsymmetric.length>=1);
+});
+
 test('sparse evidence stays neutral',()=>{
   const model=buildMemecoinTradeLearningModel(state([scoutClosed(1,.8),scoutClosed(2,-.3)]));
   const scored=scoreMemecoinScoutCandidate(model,candidate());
