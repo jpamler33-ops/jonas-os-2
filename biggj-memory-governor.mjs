@@ -1,4 +1,6 @@
-export const BIGGJ_MEMORY_GOVERNOR_VERSION='BIGGJ_MEMORY_GOVERNOR_V1';
+import { compactResearchDataPlane, cleanupResearchCompactionArtifacts } from './research-data-plane-maintenance.mjs';
+
+export const BIGGJ_MEMORY_GOVERNOR_VERSION='BIGGJ_MEMORY_GOVERNOR_V2';
 
 const finite=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,finite(v,a)));
@@ -84,16 +86,7 @@ export function createMemoryGovernor({
       triggerHeapMb,maxRssMb,maxExternalMb,cooldownMs,cooldownBypassOverageMb,lastAttemptAt,now
     });
     if(!decision.shouldCollect){
-      lastResult=Object.freeze({
-        attempted:false,
-        executed:false,
-        reason:String(reason),
-        decision,
-        before,
-        after:before,
-        reclaimedHeapMb:0,
-        useful:false
-      });
+      lastResult=Object.freeze({attempted:false,executed:false,reason:String(reason),decision,before,after:before,reclaimedHeapMb:0,useful:false});
       return lastResult;
     }
 
@@ -101,17 +94,7 @@ export function createMemoryGovernor({
     attempts++;
     if(typeof gcFn!=='function'){
       unavailable++;
-      lastResult=Object.freeze({
-        attempted:true,
-        executed:false,
-        unavailable:true,
-        reason:String(reason),
-        decision,
-        before,
-        after:before,
-        reclaimedHeapMb:0,
-        useful:false
-      });
+      lastResult=Object.freeze({attempted:true,executed:false,unavailable:true,reason:String(reason),decision,before,after:before,reclaimedHeapMb:0,useful:false});
       return lastResult;
     }
 
@@ -121,31 +104,10 @@ export function createMemoryGovernor({
       const after=memorySnapshot(memoryUsageFn());
       const reclaimed=Math.max(0,before.heapUsedMb-after.heapUsedMb);
       totalReclaimedHeapMb+=reclaimed;
-      lastResult=Object.freeze({
-        attempted:true,
-        executed:true,
-        unavailable:false,
-        reason:String(reason),
-        decision,
-        before,
-        after,
-        reclaimedHeapMb:reclaimed,
-        useful:reclaimed>=Math.max(1,finite(minReclaimedMb,4))
-      });
+      lastResult=Object.freeze({attempted:true,executed:true,unavailable:false,reason:String(reason),decision,before,after,reclaimedHeapMb:reclaimed,useful:reclaimed>=Math.max(1,finite(minReclaimedMb,4))});
       return lastResult;
     }catch(error){
-      lastResult=Object.freeze({
-        attempted:true,
-        executed:false,
-        unavailable:false,
-        reason:String(reason),
-        decision,
-        before,
-        after:memorySnapshot(memoryUsageFn()),
-        reclaimedHeapMb:0,
-        useful:false,
-        error:error instanceof Error?error.message:String(error)
-      });
+      lastResult=Object.freeze({attempted:true,executed:false,unavailable:false,reason:String(reason),decision,before,after:memorySnapshot(memoryUsageFn()),reclaimedHeapMb:0,useful:false,error:error instanceof Error?error.message:String(error)});
       return lastResult;
     }
   }
@@ -153,22 +115,41 @@ export function createMemoryGovernor({
   function summary(){
     return Object.freeze({
       version:BIGGJ_MEMORY_GOVERNOR_VERSION,
-      gcAvailable:typeof gcFn==='function',
-      cooldownMs:Math.max(5_000,finite(cooldownMs,45_000)),
-      attempts,
-      executed,
-      unavailable,
-      totalReclaimedHeapMb,
-      lastAttemptAt:lastAttemptAt||null,
-      lastResult,
-      semantics:Object.freeze({
-        onlyReclaimsUnreachableRuntimeObjects:true,
-        doesNotDeleteResearchHistory:true,
-        doesNotRelaxMemoryHardLimits:true,
-        stopTheWorldGcRateLimited:true
-      })
+      gcAvailable:typeof gcFn==='function',cooldownMs:Math.max(5_000,finite(cooldownMs,45_000)),attempts,executed,unavailable,totalReclaimedHeapMb,lastAttemptAt:lastAttemptAt||null,lastResult,
+      semantics:Object.freeze({onlyReclaimsUnreachableRuntimeObjects:true,doesNotDeleteResearchHistory:true,doesNotRelaxMemoryHardLimits:true,stopTheWorldGcRateLimited:true})
     });
   }
 
   return Object.freeze({maybeCollect,summary});
 }
+
+let researchMaintenanceInstalled=false;
+let researchMaintenanceRunning=false;
+
+export function installResearchDataPlaneMaintenance({
+  dataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data',
+  intervalMs=Math.max(15_000,finite(process.env.TCX_RDP_COMPACTION_CHECK_MS,30_000)),
+  triggerBytes=Math.max(32*1024*1024,finite(process.env.TCX_RDP_COMPACTION_TRIGGER_BYTES,64*1024*1024)),
+  targetBytes=Math.max(8*1024*1024,finite(process.env.TCX_RDP_COMPACTION_TARGET_BYTES,32*1024*1024)),
+  logger=console
+}={}){
+  if(researchMaintenanceInstalled) return false;
+  researchMaintenanceInstalled=true;
+  const run=async phase=>{
+    if(researchMaintenanceRunning) return;
+    researchMaintenanceRunning=true;
+    try{
+      await cleanupResearchCompactionArtifacts({dataDir});
+      const result=await compactResearchDataPlane({dataDir,triggerBytes,targetBytes,logger});
+      if(result?.compacted) logger.info?.('[TCX_RDP_RUNTIME_MAINTENANCE]',JSON.stringify({...result,phase}));
+    }catch(error){
+      logger.error?.('[TCX_RDP_RUNTIME_MAINTENANCE_FAILED]',JSON.stringify({phase,error:error instanceof Error?error.message:String(error),destructiveRetention:false}));
+    }finally{researchMaintenanceRunning=false;}
+  };
+  void run('startup');
+  const timer=setInterval(()=>void run('interval'),intervalMs);
+  timer.unref?.();
+  return true;
+}
+
+if(String(process.env.TCX_RDP_AUTO_COMPACTION_ENABLED||'1')!=='0') installResearchDataPlaneMaintenance();
