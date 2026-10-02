@@ -144,6 +144,7 @@ test('institutional staged release set hashes forecast, science, admission and t
     'expansion-runtime/memecoin-security-provider.mjs',
     'expansion-runtime/memecoin-security-outcome-tracker.mjs',
     'expansion-runtime/memecoin-evidence-factory.mjs',
+    'expansion-runtime/biggj-temporal-temple.mjs',
     'expansion-runtime/memecoin-social-attention.mjs'
   ]){
     assert.ok(files.includes(required),required+' missing from institutional release identity');
