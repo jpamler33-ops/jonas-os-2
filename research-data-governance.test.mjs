@@ -360,9 +360,75 @@ test('monthly FRED observation age still fails closed when older than its bounde
   assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
 });
 
+function weeklyCftcSnapshot({
+  eventTime,
+  availableAt,
+  ingestedAt=availableAt+1_000,
+  sourceEventId='weekly-cftc'
+}={}){
+  return createResearchFeatureSnapshot({
+    streamKey:'BTCUSDT',
+    domain:'CFTC_POSITIONING',
+    source:'CFTC_TFF_FUTURES_ONLY',
+    sourceVersion:'TEST',
+    sourceEventId,
+    eventTime,
+    availableAt,
+    ingestedAt,
+    ttlMs:8*24*60*60_000,
+    finality:'OBSERVED',
+    quality:{completeness:1,sourceCount:1,expectedSourceCount:1,status:'OFFICIAL_WEEKLY_CFTC_POSITIONING'},
+    features:[{id:'research.cftc.assetManagerLongShare',value:.42}],
+    provenance:{weeklyReport:true,test:true}
+  });
+}
+
+test('weekly CFTC report remains healthy on the next scheduled release day before publication',()=>{
+  const DAY=24*60*60_000;
+  const availableAt=Date.UTC(2026,9,2,9,5,0);
+  const eventTime=Date.UTC(2026,8,22,0,0,0);
+  const state=createResearchDataGovernanceState({createdAt:availableAt});
+  const governed=governResearchSnapshot(state,weeklyCftcSnapshot({eventTime,availableAt}),{evaluatedAt:availableAt+1_000});
+  assert.equal(governed.governance.decision,'ACCEPT');
+  assert.equal(governed.governance.sourceStatus,'HEALTHY');
+  assert.equal(governed.governance.timelinessMetric,'OBSERVATION_AGE');
+  assert.equal(governed.governance.eventTimeSemantics,'OBSERVATION_TIME');
+  assert.ok(governed.governance.observationAgeMs>10*DAY);
+  assert.ok(governed.governance.observationAgeMs<12*DAY);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='PUBLICATION_LAG_SLO_BREACH'),false);
+  assert.equal(governed.governance.reasons.some(x=>x.code==='OBSERVATION_AGE_SLO_BREACH'),false);
+});
+
+test('weekly CFTC report still fails closed when observation age exceeds bounded weekly allowance',()=>{
+  const DAY=24*60*60_000;
+  const availableAt=Date.UTC(2026,9,2,9,5,0);
+  const state=createResearchDataGovernanceState({createdAt:availableAt});
+  const decisions=[];
+  for(let i=0;i<3;i++){
+    const a=availableAt+i*2_000;
+    const governed=governResearchSnapshot(state,weeklyCftcSnapshot({
+      eventTime:a-13*DAY,
+      availableAt:a,
+      ingestedAt:a+500,
+      sourceEventId:'weekly-cftc-stale-'+i
+    }),{evaluatedAt:a+500});
+    decisions.push(governed.governance.decision);
+    assert.ok(governed.governance.reasons.some(x=>x.code==='OBSERVATION_AGE_SLO_BREACH'));
+  }
+  assert.deepEqual(decisions,['DEGRADED','DEGRADED','QUARANTINE']);
+});
+
+test('CFTC contract declares weekly observation-time semantics',async()=>{
+  const { researchSourceContract }=await import('./research-source-contracts.mjs');
+  const contract=researchSourceContract('CFTC_POSITIONING','CFTC_TFF_FUTURES_ONLY');
+  assert.equal(contract.eventTimeSemantics,'OBSERVATION_TIME');
+  assert.equal(contract.cadence,'WEEKLY');
+  assert.equal(contract.maxObservationAgeMs,12*24*60*60_000);
+});
+
 test('both monthly FRED contracts declare explicit observation-period semantics',async()=>{
   const { researchSourceContract, RESEARCH_SOURCE_CONTRACTS_VERSION }=await import('./research-source-contracts.mjs');
-  assert.equal(RESEARCH_SOURCE_CONTRACTS_VERSION,'TCX_RESEARCH_SOURCE_CONTRACTS_V12');
+  assert.equal(RESEARCH_SOURCE_CONTRACTS_VERSION,'TCX_RESEARCH_SOURCE_CONTRACTS_V13');
   for(const source of ['FRED_CPIAUCSL_CURRENT','FRED_UNRATE_CURRENT']){
     const contract=researchSourceContract('MACRO',source);
     assert.equal(contract.eventTimeSemantics,'OBSERVATION_PERIOD_START');

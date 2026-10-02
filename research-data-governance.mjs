@@ -21,6 +21,10 @@ function finite(v){
   const n=Number(v);
   return Number.isFinite(n)?n:null;
 }
+function usesObservationAge(contract){
+  const semantics=String(contract?.eventTimeSemantics||'').toUpperCase();
+  return semantics==='OBSERVATION_PERIOD_START'||semantics==='OBSERVATION_TIME';
+}
 function median(xs){
   const ys=(Array.isArray(xs)?xs:[]).map(finite).filter(x=>x!=null).sort((a,b)=>a-b);
   if(!ys.length) return null;
@@ -175,13 +179,13 @@ export function governResearchSnapshot(state,snapshot,{
   const ingestedAt=finite(snapshot.ingestedAt);
   const completeness=finite(snapshot?.quality?.completeness);
   const publicationLagMs=eventTime!=null&&availableAt!=null?Math.max(0,availableAt-eventTime):null;
-  const observationPeriodStart=String(contract?.eventTimeSemantics||'').toUpperCase()==='OBSERVATION_PERIOD_START';
-  const observationAgeMs=observationPeriodStart?publicationLagMs:null;
-  const timelinessMetric=observationPeriodStart?'OBSERVATION_AGE':'PUBLICATION_LAG';
-  const timelinessLimitMs=observationPeriodStart
+  const observationReference=usesObservationAge(contract);
+  const observationAgeMs=observationReference?publicationLagMs:null;
+  const timelinessMetric=observationReference?'OBSERVATION_AGE':'PUBLICATION_LAG';
+  const timelinessLimitMs=observationReference
     ?finite(contract?.maxObservationAgeMs)
     :finite(contract?.maxPublicationLagMs);
-  const timelinessValueMs=observationPeriodStart?observationAgeMs:publicationLagMs;
+  const timelinessValueMs=observationReference?observationAgeMs:publicationLagMs;
   const ingestLagMs=availableAt!=null&&ingestedAt!=null?Math.max(0,ingestedAt-availableAt):null;
 
   if(publicationLagMs!=null) boundedPush(src.publicationLagMs,publicationLagMs,state.maxSourceHistory);
@@ -197,7 +201,7 @@ export function governResearchSnapshot(state,snapshot,{
     if(timelinessValueMs==null||timelinessLimitMs==null||timelinessValueMs>timelinessLimitMs){
       operationalViolation=true;
       reasons.push({
-        code:observationPeriodStart?'OBSERVATION_AGE_SLO_BREACH':'PUBLICATION_LAG_SLO_BREACH',
+        code:observationReference?'OBSERVATION_AGE_SLO_BREACH':'PUBLICATION_LAG_SLO_BREACH',
         value:timelinessValueMs,
         limit:timelinessLimitMs
       });
@@ -367,8 +371,8 @@ export function researchDataGovernanceSummary(state,{now=Date.now()}={}){
       silenceMs,
       maxSilenceMs:contract.maxSilenceMs,
       eventTimeSemantics:contract.eventTimeSemantics||'EVENT_TIME_IS_PUBLICATION_REFERENCE',
-      timelinessMetric:String(contract.eventTimeSemantics||'').toUpperCase()==='OBSERVATION_PERIOD_START'?'OBSERVATION_AGE':'PUBLICATION_LAG',
-      timelinessLimitMs:String(contract.eventTimeSemantics||'').toUpperCase()==='OBSERVATION_PERIOD_START'
+      timelinessMetric:usesObservationAge(contract)?'OBSERVATION_AGE':'PUBLICATION_LAG',
+      timelinessLimitMs:usesObservationAge(contract)
         ?finite(contract.maxObservationAgeMs)
         :finite(contract.maxPublicationLagMs),
       lastDecision:src?.lastDecision??null,
