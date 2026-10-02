@@ -14,8 +14,10 @@ test('web SuperChart reuses the institutional renderer without mutating episode 
   assert.match(source,/tradeOverlayFromPosition/);
   assert.match(source,/renderCandlestickPng/);
   assert.match(source,/if\(capture\)await captureEpisodeFromState/);
-  assert.match(source,/webSuperchartAsset\(symbol,\{mode='FULL',interval='5m'\}/);
-  assert.match(source,/buildSuperchartAsset\(symbol,\{mode,interval,capture:false\}\)/);
+  assert.match(source,/webSuperchartAsset\(symbol,\{mode='FULL',interval='5m',trendScale='M'\}/);
+  assert.match(source,/buildSuperchartAsset\(symbol,\{mode,interval,trendScale,capture:false\}\)/);
+  assert.match(source,/buildTrendBoxes\(state\.byTf\[interval\]/);
+  assert.match(source,/forecastIssuancesToChartMoments\(forecastRuntime\?\.issuances/);
 });
 
 test('web SuperChart is bounded, deduplicated and no-store',()=>{
@@ -27,6 +29,9 @@ test('web SuperChart is bounded, deduplicated and no-store',()=>{
   assert.match(source,/'cache-control':'no-store'/);
   assert.match(source,/INVALID_SUPERCHART_REQUEST/);
   assert.match(source,/SUPERCHART_UNAVAILABLE/);
+  assert.match(source,/trendScale=String\(u\.searchParams\.get\('trendScale'\)\|\|'M'\)/);
+  assert.match(source,/'x-biggj-trend-box-engine':TREND_BOX_ENGINE_VERSION/);
+  assert.match(source,/'x-biggj-forecast-history-count'/);
 });
 
 test('web SuperChart cannot grant execution authority',()=>{
