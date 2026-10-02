@@ -188,7 +188,7 @@ function fmtCompact(n){
   return n.toFixed(2);
 }
 
-export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null,superchart=null,tradeOverlay=null}={}){
+export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null,forecastMoments=null,trendBoxes=null,trendBoxForecast=null,superchart=null,tradeOverlay=null}={}){
   const candles=candlesInput.slice(-100);
   if(candles.length<2)throw new Error('Need at least 2 candles');
 
@@ -197,6 +197,9 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
   const ema20c=color('#f4c430'),ema50c=color('#4ea1ff'),supportC=color('#3ddc97'),resistanceC=color('#ff8c69');
   const pivotC=color('#d0d7de'),activeC=color('#9aa4ad'),breakC=color('#ffd166'),retestC=color('#b388ff');
   const forecastBaseC=color('#4ea1ff'),forecastUpC=color('#3ddc97'),forecastDownC=color('#ff5c5c'),forecastBandC=color('#4ea1ff',32);
+  const trendUpC=color('#5ef2d6'),trendDownC=color('#ff6474'),trendRiskC=color('#ffcb6b');
+  const trendUpFill=color('#5ef2d6',16),trendDownFill=color('#ff6474',14),trendRiskFill=color('#ffcb6b',18);
+  const forecastHistoryUpC=color('#4ce6a2'),forecastHistoryDownC=color('#ff6474'),forecastHistoryFlatC=color('#69a7ff');
   const volUp=color('#147d68'),volDown=color('#9b3d45'),zoneSupport=color('#3ddc97',35),zoneResistance=color('#ff8c69',35);
   const confluenceC=color('#ffd166'),liqLongC=color('#ff5c5c'),liqShortC=color('#3ddc97'),intelPanel=color('#101720',235);
 
@@ -288,6 +291,56 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     labelBox(buf,width,height,left+6,Math.max(priceTop+4,yOf(analysis.resistance)-14),'RES',resistanceC,panel,2);
   }
 
+  const timeToVisibleIndex=t=>{
+    const at=Number(t);
+    if(!Number.isFinite(at))return null;
+    if(at<=Number(candles[0]?.closeTime))return 0;
+    if(at>=Number(candles.at(-1)?.closeTime))return candles.length-1;
+    let best=0,bestD=Infinity;
+    for(let i=0;i<candles.length;i++){
+      const d=Math.abs(Number(candles[i]?.closeTime)-at);
+      if(d<bestD){best=i;bestD=d;}
+    }
+    return best;
+  };
+
+  if(Array.isArray(trendBoxes)&&trendBoxes.length){
+    const sortedBoxes=[...trendBoxes].sort((a,b)=>Number(a?.startTime)-Number(b?.startTime));
+    for(const box of sortedBoxes){
+      const start=Number(box?.startTime),end=Number(box?.endTime);
+      const visibleStart=Number(candles[0]?.closeTime),visibleEnd=Number(candles.at(-1)?.closeTime);
+      if(!Number.isFinite(start)||!Number.isFinite(end)||end<visibleStart||start>visibleEnd)continue;
+      const si=timeToVisibleIndex(start),ei=timeToVisibleIndex(end);
+      if(si==null||ei==null)continue;
+      const x1=left+Math.max(0,si)*step;
+      const x2=left+(Math.min(candles.length-1,Math.max(si,ei))+1)*step;
+      const hi=Number(box?.high),lo=Number(box?.low);
+      if(!Number.isFinite(hi)||!Number.isFinite(lo))continue;
+      const top=Math.min(yOf(hi),yOf(lo)),bottom=Math.max(yOf(hi),yOf(lo));
+      const direction=String(box?.direction||'').toUpperCase();
+      const status=String(box?.status||'').toUpperCase();
+      const risk=status==='AT_RISK';
+      const fg=risk?trendRiskC:(direction==='DOWN'?trendDownC:trendUpC);
+      const bg=risk?trendRiskFill:(direction==='DOWN'?trendDownFill:trendUpFill);
+      fillRect(buf,width,height,x1,top,Math.max(2,x2-x1),Math.max(2,bottom-top),bg,true);
+      line(buf,width,height,x1,top,x2,top,fg);
+      line(buf,width,height,x1,bottom,x2,bottom,fg);
+      line(buf,width,height,x1,top,x1,bottom,fg);
+      if(status==='CLOSED')line(buf,width,height,x2,top,x2,bottom,fg);
+      const label=String(box?.scale||'M')+' '+(direction==='DOWN'?'DOWN':'UP')+(risk?' RISK':'');
+      const ly=Math.max(priceTop+3,Math.min(priceBottom-13,top+4));
+      labelBox(buf,width,height,Math.min(width-right-82,Math.max(left+2,x1+4)),ly,label,fg,panel,1);
+    }
+  }
+
+  if(trendBoxForecast?.available){
+    const dir=String(trendBoxForecast.boxDirection||'').toUpperCase();
+    const alignment=String(trendBoxForecast.alignment||'NEUTRAL').toUpperCase();
+    const fg=alignment==='ALIGNED'?forecastHistoryUpC:alignment==='OPPOSED'?forecastHistoryDownC:forecastHistoryFlatC;
+    const badge=String(trendBoxForecast.scale||'M')+' '+dir+' · FCST '+alignment;
+    labelBox(buf,width,height,Math.max(left+180,Math.min(width-right-150,left+candlePlotW*.56)),priceTop+8,badge,fg,panel,1);
+  }
+
   const e20=emaSeries(candles,20),e50=emaSeries(candles,50);
   for(let i=1;i<candles.length;i++){
     const x0=left+(i-0.5)*step,x1=left+(i+0.5)*step;
@@ -302,6 +355,25 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     const cc=c.closed===false?activeC:(c.c>=c.o?up:down);
     fillRect(buf,width,height,x-bodyW/2,topY,bodyW,bodyH,cc);
   });
+
+  if(Array.isArray(forecastMoments)&&forecastMoments.length){
+    for(const m of forecastMoments){
+      const ai=timeToVisibleIndex(m?.asOf);
+      if(ai==null)continue;
+      const anchor=Number(m?.anchorPrice),target=Number(m?.medianPrice);
+      if(!Number.isFinite(anchor)||!Number.isFinite(target)||!priceVisible(anchor,scale))continue;
+      const x1=left+(ai+0.5)*step,y1=yOf(anchor);
+      const direction=target>anchor?'UP':target<anchor?'DOWN':'FLAT';
+      const fg=direction==='UP'?forecastHistoryUpC:direction==='DOWN'?forecastHistoryDownC:forecastHistoryFlatC;
+      fillRect(buf,width,height,x1-2,y1-2,5,5,fg);
+      const ti=timeToVisibleIndex(m?.targetAt);
+      if(ti!=null&&Number(m?.targetAt)<=Number(candles.at(-1)?.closeTime)&&priceVisible(target,scale)){
+        const x2=left+(ti+0.5)*step,y2=yOf(target);
+        line(buf,width,height,x1,y1,x2,y2,fg);
+        fillRect(buf,width,height,x2-1,y2-1,3,3,fg);
+      }
+    }
+  }
 
   const maxVol=Math.max(...candles.map(c=>c.v),1);
   candles.forEach((c,i)=>{
