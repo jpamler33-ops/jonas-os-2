@@ -11164,7 +11164,7 @@ async function forecastOutcomeWatcher() {
     try {
       const started=Date.now();
       maybeCollectResearchGarbage('OUTCOME_PRECHECK',{
-        triggerHeapMb:Math.max(300,forecastPersistenceHeapHeadroomMb-20),
+        triggerHeapMb:forecastPersistenceHeapHeadroomMb,
         cooldownBypassOverageMb:10
       });
       const beforeMemory=process.memoryUsage();
