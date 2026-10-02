@@ -315,13 +315,24 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   horizonMs=12*60*60_000,
   stopReturn=-.45,
   takeReturn=1.50,
-  blockThinLiquidityEntries=true
+  blockThinLiquidityEntries=true,
+  contrarianProbeRate=.15,
+  contrarianMarginMultiplier=.05,
+  contrarianMinLiquidityUsd=5_000,
+  contrarianMaxOpen=4,
+  contrarianMaxSoftViolations=1
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
-  const results={opened:0,closed:0,marked:0,eligible:0,learningBlocked:0,learningThrottled:0,learningBoosted:0,tailRiskBlocked:0,tailRiskClosed:0,sourceReady:snapshot?.sourceReady===true};
+  const results={
+    opened:0,closed:0,marked:0,eligible:0,
+    learningBlocked:0,learningThrottled:0,learningBoosted:0,
+    tailRiskBlocked:0,tailRiskClosed:0,
+    contrarianEligible:0,contrarianOpened:0,contrarianRejectedByHardGuard:0,
+    sourceReady:snapshot?.sourceReady===true
+  };
 
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
@@ -341,8 +352,6 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       };
       wallet.positions[i]=marked;results.marked++;
       let reason=null;
-      // Security/liquidity invalidation has priority over price PnL labels so
-      // the learner can distinguish "bad thesis" from "market became unsafe".
       if(memeSecurityGate(row)==='ABSTAIN'||memeSecurityCritical(row))reason='MEME_SECURITY_ABSTAIN';
       else if(liq!=null&&liq<3_000)reason='MEME_LIQUIDITY_COLLAPSE';
       else if(risk.trigger)reason='MEME_TAIL_RISK_EXIT';
@@ -359,6 +368,12 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     }
   }
 
+  const openContrarian=()=>wallet.positions.filter(x=>x?.entryResearchLane==='CONTRARIAN_PROBE').length;
+  const stableProbeScore=row=>{
+    const hex=sha256({lane:'W4_CONTRARIAN_PROBE_V1',key:memePositionKey(row)}).slice(0,8);
+    return parseInt(hex,16)/0xffffffff;
+  };
+
   for(const row of rows){
     const score=finite(row?.score?.researchPriorityScore,0);
     const stage=String(row?.score?.stage||'');
@@ -368,26 +383,68 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     const securityGate=memeSecurityGate(row);
     const learningAction=String(row?.memeLearning?.action||'NEUTRAL').toUpperCase();
     const entryTailRisk=memeEntryTailRisk(row);
-    const baseEligible=['NEW_NOW','EARLY'].includes(stage)&&score>=minScore&&liq>=minLiquidityUsd&&px>0&&!severeMemeRisk(flags)&&securityGate==='PASS'&&!memeSecurityCritical(row);
-    if(!baseEligible)continue;
-    results.eligible++;
-    // Wallet 4 is the performance scout. Very thin launches remain in the
-    // evidence factory, but are not opened here by default because a 15 s
-    // checkpoint cannot protect against an instantaneous liquidity rug.
-    if(blockThinLiquidityEntries&&entryTailRisk.blocked){
+
+    const hardSafe=
+      px>0&&
+      liq>=Math.max(3_000,Number(contrarianMinLiquidityUsd)||5_000)&&
+      !severeMemeRisk(flags)&&
+      securityGate==='PASS'&&
+      !memeSecurityCritical(row);
+
+    const stageOk=['NEW_NOW','EARLY'].includes(stage);
+    const scoreOk=score>=minScore;
+    const liquidityOk=liq>=minLiquidityUsd;
+    const tailRiskOk=!(blockThinLiquidityEntries&&entryTailRisk.blocked);
+    const learningOk=learningAction!=='BLOCK';
+    const baseEligible=stageOk&&scoreOk&&liquidityOk&&px>0&&!severeMemeRisk(flags)&&securityGate==='PASS'&&!memeSecurityCritical(row);
+
+    const softViolations=[];
+    if(!stageOk)softViolations.push('STAGE_OUTSIDE_NORMAL_SCOUT');
+    if(!scoreOk)softViolations.push('SCORE_BELOW_NORMAL_MIN');
+    if(!liquidityOk)softViolations.push('LIQUIDITY_BELOW_NORMAL_MIN');
+    if(!tailRiskOk)softViolations.push('TAIL_RISK_FILTER_WOULD_BLOCK');
+    if(!learningOk)softViolations.push('LEARNED_BLOCK_WOULD_ABSTAIN');
+
+    const contrarianEligible=
+      hardSafe&&
+      softViolations.length>0&&
+      softViolations.length<=Math.max(1,Number(contrarianMaxSoftViolations)||1);
+    if(contrarianEligible)results.contrarianEligible++;
+    else if(softViolations.length>0&&!hardSafe)results.contrarianRejectedByHardGuard++;
+
+    const probeScore=contrarianEligible?stableProbeScore(row):1;
+    const contrarianSelected=
+      contrarianEligible&&
+      probeScore<Math.max(0,Math.min(1,Number(contrarianProbeRate)||0))&&
+      openContrarian()<Math.max(0,Number(contrarianMaxOpen)||0);
+
+    if(!baseEligible&&!contrarianSelected)continue;
+    if(baseEligible)results.eligible++;
+
+    if(!tailRiskOk&&!contrarianSelected){
       results.tailRiskBlocked++;
       continue;
     }
-    if(learningAction==='BLOCK'){results.learningBlocked++;continue;}
-    if(learningAction==='BOOST')results.learningBoosted++;
-    const learningSizeMultiplier=learningAction==='THROTTLE'
+    if(!learningOk&&!contrarianSelected){
+      results.learningBlocked++;
+      continue;
+    }
+
+    if(learningAction==='BOOST'&&!contrarianSelected)results.learningBoosted++;
+    const normalLearningSizeMultiplier=learningAction==='THROTTLE'
       ?Math.max(.05,Math.min(.35,finite(row?.memeLearning?.sizeMultiplier,.15)))
       :1;
-    if(learningAction==='THROTTLE')results.learningThrottled++;
+    if(learningAction==='THROTTLE'&&!contrarianSelected)results.learningThrottled++;
+
     if(wallet.positions.length>=maxOpenOperational)break;
     const key=memePositionKey(row);
     if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key))continue;
-    const margin=Math.max(1,(Number(marginQuote)||100)*learningSizeMultiplier);
+
+    const sizeMultiplier=contrarianSelected
+      ?Math.max(.01,Math.min(.20,Number(contrarianMarginMultiplier)||.05))
+      :normalLearningSizeMultiplier;
+    const margin=Math.max(1,(Number(marginQuote)||100)*sizeMultiplier);
+    const researchLane=contrarianSelected?'CONTRARIAN_PROBE':'STANDARD';
     const position={
       walletId:WALLET_4_MEME_SCOUT,positionKey:key,
       chainId:String(row?.chainId||''),tokenAddress:String(row?.tokenAddress||''),
@@ -399,6 +456,9 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       entryAttentionSignals:clone(row?.score?.attentionSignals||[]),
       entryRiskFlags:clone(flags),
       entryTailRisk:clone(entryTailRisk),
+      entryResearchLane:researchLane,
+      entryContrarianViolations:contrarianSelected?clone(softViolations):[],
+      entryContrarianProbeScore:contrarianSelected?probeScore:null,
       peakUnrealizedReturnPct:0,
       troughUnrealizedReturnPct:0,
       entryMarketFeatures:{
@@ -424,7 +484,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
         holderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence)
       },
       entryMemeLearning:clone(row?.memeLearning||null),
-      entryLearningSizeMultiplier:learningSizeMultiplier,
+      entryLearningSizeMultiplier:sizeMultiplier,
       entrySecurityGate:securityGate,
       entrySecuritySource:text(row?.security?.source||'',160),
       entryHolderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence),
@@ -434,9 +494,14 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       entrySecurityCoverage:clone(row?.security?.coverage||{}),
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
       status:'OPEN',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
-      epistemic:'EARLY_RESEARCH_SCORE_NOT_PROFIT_PROBABILITY'
+      epistemic:contrarianSelected
+        ?'CONTRARIAN_SOFT_RULE_PROBE_NOT_PROFIT_CLAIM'
+        :'EARLY_RESEARCH_SCORE_NOT_PROFIT_PROBABILITY'
     };
-    if(openPosition(wallet,position))results.opened++;
+    if(openPosition(wallet,position)){
+      results.opened++;
+      if(contrarianSelected)results.contrarianOpened++;
+    }
   }
   state.updatedAt=Number(now);
   return {state:freeze(state),results:freeze(results)};
