@@ -1831,6 +1831,72 @@ async function persistStrategyLeague(reason='mutation'){
   return strategyLeaguePersistenceQueue;
 }
 
+async function persistParallelStrategyWorlds(reason='mutation'){
+  parallelStrategyWorldsPersistenceQueue=parallelStrategyWorldsPersistenceQueue.then(async()=>{
+    try{
+      parallelStrategyWorldsState=await saveParallelStrategyWorlds(
+        parallelStrategyWorldsFile,
+        parallelStrategyWorldsState
+      );
+      parallelStrategyWorldsHealthy=true;
+      parallelStrategyWorldsLastError=null;
+      return true;
+    }catch(err){
+      parallelStrategyWorldsHealthy=false;
+      parallelStrategyWorldsLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'parallel_strategy_worlds.persistence',message:parallelStrategyWorldsLastError});
+      console.error('[BIGGJ_PARALLEL_WORLDS_PERSIST_FAILED]',reason,parallelStrategyWorldsLastError);
+      return false;
+    }
+  });
+  return parallelStrategyWorldsPersistenceQueue;
+}
+
+async function refreshParallelStrategyWorldsRuntime(reason='PERIODIC'){
+  const now=Date.now();
+  try{
+    const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
+    const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
+    const leagueSummary=strategyLeagueSummary(strategyLeagueLedger,{asOf:now});
+    const refreshed=refreshParallelStrategyWorlds(parallelStrategyWorldsState,{
+      baseStrategies:SHADOW_STRATEGIES,
+      leaguePositions:strategyLeagueLedger.positions||[],
+      strategySummary:leagueSummary,
+      temporalTemple:memecoinEarlySnapshot?.temporalTemple||null,
+      learnedChallenger:learnedChallengerSummary(challengerLab),
+      asOf:now,
+      minClosedPerGeneration:Math.max(6,Math.min(40,Number(process.env.TCX_PARALLEL_WORLD_MIN_CLOSED||8))),
+      maxHistoryPerWorld:Math.max(8,Math.min(64,Number(process.env.TCX_PARALLEL_WORLD_MAX_HISTORY||24)))
+    });
+    parallelStrategyWorldsState=refreshed.state;
+    if(refreshed.changed) await persistParallelStrategyWorlds(reason);
+    const summary=parallelStrategyWorldsSummary(parallelStrategyWorldsState);
+    if(refreshed.changed){
+      console.log('[BIGGJ_PARALLEL_WORLDS]',JSON.stringify({
+        reason,
+        worlds:summary.worldCount,
+        generations:summary.generations,
+        evolutions:summary.evolutions,
+        convergenceCount:summary.council?.convergences?.length||0,
+        crossPollinationCandidates:summary.council?.crossPollination?.length||0,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false,
+        automaticPrimaryMutation:false
+      }));
+    }
+    recordOperation(observability,{name:'parallel_strategy_worlds_refresh',ok:true,latencyMs:0,error:null});
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    parallelStrategyWorldsHealthy=false;
+    parallelStrategyWorldsLastError=msg;
+    recordError(observability,{scope:'parallel_strategy_worlds',message:msg});
+    recordOperation(observability,{name:'parallel_strategy_worlds_refresh',ok:false,latencyMs:0,error:msg});
+    console.error('[BIGGJ_PARALLEL_WORLDS_ERROR]',reason,msg);
+    return parallelStrategyWorldsSummary(parallelStrategyWorldsState);
+  }
+}
+
 async function persistState(reason='mutation') {
   persistenceQueue = persistenceQueue.then(async () => {
     try {
@@ -9767,6 +9833,7 @@ async function strategyLeagueWatcher(){
       }
 
       if(changed) await persistStrategyLeague('watcher');
+      if(closed>0) await refreshParallelStrategyWorldsRuntime('STRATEGY_LEAGUE_OUTCOME');
       const summary=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()});
       recordOperation(observability,{name:'strategy_league_watch',ok:true,latencyMs:Date.now()-started,error:null});
       if(opened||closed){
@@ -11457,6 +11524,14 @@ function missionControlData(){
     ...biggjResearchAcceleratorSummary(researchAccelerator),
     version:BIGGJ_RESEARCH_ACCELERATOR_VERSION
   },
+  parallelStrategyWorlds:{
+    ...parallelStrategyWorldsSummary(parallelStrategyWorldsState),
+    version:PARALLEL_STRATEGY_WORLDS_VERSION,
+    healthy:parallelStrategyWorldsHealthy,
+    recoveredFromCorrupt:parallelStrategyWorldsRecoveredFromCorrupt,
+    lastError:parallelStrategyWorldsLastError,
+    file:parallelStrategyWorldsFile
+  },
   autonomousOperator:{
     ...biggjAutonomousOperatorSummary(autonomousOperatorState),
     version:BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
@@ -12240,6 +12315,8 @@ async function gracefulShutdown(signal) {
   await persistSpecialistWallets(`shutdown:${signal}`);
   await persistMemecoinSecurityOutcomes(`shutdown:${signal}`);
   await persistMemecoinEvidenceFactory(`shutdown:${signal}`);
+  await persistStrategyLeague(`shutdown:${signal}`);
+  await persistParallelStrategyWorlds(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
@@ -12254,6 +12331,7 @@ await syncFeatureResearch('startup');
 await refreshBiggjWorldModelRuntime('STARTUP');
 await refreshPublicExperienceIntel('startup');
 await refreshMemecoinEarlyRadar('startup');
+await refreshParallelStrategyWorldsRuntime('STARTUP');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
 const startupRulebook=currentBiggjRulebookAssessment();
@@ -12295,6 +12373,10 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowOmsHealthy,
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
+  parallelStrategyWorlds:{
+    healthy:parallelStrategyWorldsHealthy,
+    ...parallelStrategyWorldsSummary(parallelStrategyWorldsState)
+  },
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   autonomousOperator:biggjAutonomousOperatorSummary(autonomousOperatorState),
