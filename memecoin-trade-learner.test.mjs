@@ -94,6 +94,30 @@ test('sparse evidence stays neutral',()=>{
   assert.equal(scored.evidence.level,'PRIOR');
 });
 
+test('broadly destructive W4 chain throttles new research instead of repeatedly paying full notional',()=>{
+  const closed=Array.from({length:32},(_,i)=>{
+    const row=scoutClosed(i,-.55-(i%3)*.05);
+    const stages=['EARLY','NEW_NOW'];
+    const liqs=[12_000,32_000,90_000,300_000];
+    row.entryStage=stages[i%stages.length];
+    row.entryMarketFeatures.stage=row.entryStage;
+    row.entryMarketFeatures.liquidityUsd=liqs[i%liqs.length];
+    row.entryMarketFeatures.ageMinutes=3+(i%4)*7;
+    row.entryMarketFeatures.priceChangeM5=[-8,8,22,70][i%4];
+    row.entryMarketFeatures.buysM5=10+(i%5);
+    row.entryMarketFeatures.sellsM5=8+(i%4);
+    return row;
+  });
+  const model=buildMemecoinTradeLearningModel(state(closed),{asOf:20_000_000});
+  const scored=scoreMemecoinScoutCandidate(model,candidate());
+  assert.equal(scored.action,'THROTTLE');
+  assert.equal(scored.evidence.level,'CHAIN');
+  assert.ok(scored.evidence.severeLossRate>=.6);
+  assert.ok(scored.sizeMultiplier<=.35);
+  assert.ok(scored.sizeMultiplier>=.05);
+  assert.equal(scored.canExecuteLive,false);
+});
+
 test('legacy W4 trades without entry microstructure remain diagnostic and cannot block new candidates',()=>{
   const legacy=Array.from({length:40},(_,i)=>({
     walletId:WALLET_4_MEME_SCOUT,positionKey:'legacy'+i,chainId:'solana',tokenAddress:'L'+i,
