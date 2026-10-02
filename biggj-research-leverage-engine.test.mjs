@@ -177,6 +177,70 @@ test('passive PIT collection is waiting for data rather than stalled while globa
   assert.equal(out.summary.waitingForDataTaskCount,1);
 });
 
+test('temporal world-model validation remains a passive wait while the PIT clock is still fresh',()=>{
+  const t0=1_800_000_000_000;
+  let memory={};
+  let out=null;
+  const worldModelTask=task({
+    taskId:'world-model-placebo-wait',
+    subject:'rq:world-model-placebo',
+    type:'COLLECT_INDEPENDENT_EPISODES',
+    autoHandler:'LIVING_RESEARCH_RUNTIME',
+    dataNeeds:[
+      'POINT_IN_TIME_WORLD_MODEL_EVIDENCE',
+      'INDEPENDENT_EPISODES',
+      'TEMPORAL_HOLDOUT',
+      'REGIME_DIVERSITY',
+      'PLACEBO_LAG_EVIDENCE'
+    ]
+  });
+  for(let i=0;i<12;i++){
+    out=rankBiggjResearchTasks([worldModelTask],{
+      asOf:t0+i*5*60_000,
+      taskMemory:memory,
+      historyStats:{rows:100,progressAt:t0},
+      researchDataPlaneSummary:{seq:500}
+    });
+    memory=out.taskMemory;
+  }
+  assert.ok(out.tasks[0].stagnantCycles>=8);
+  assert.equal(out.tasks[0].waitingForData,true);
+  assert.equal(out.tasks[0].stalled,false);
+  assert.equal(out.summary.stalledTaskCount,0);
+  assert.equal(out.summary.waitingForDataTaskCount,1);
+});
+
+test('temporal world-model validation becomes a real stall when the PIT clock is stale',()=>{
+  const t0=1_800_000_000_000;
+  let memory={};
+  let out=null;
+  const worldModelTask=task({
+    taskId:'world-model-stale',
+    subject:'rq:world-model-stale',
+    type:'COLLECT_INDEPENDENT_EPISODES',
+    autoHandler:'LIVING_RESEARCH_RUNTIME',
+    dataNeeds:[
+      'POINT_IN_TIME_WORLD_MODEL_EVIDENCE',
+      'INDEPENDENT_EPISODES',
+      'TEMPORAL_HOLDOUT',
+      'REGIME_DIVERSITY',
+      'PLACEBO_LAG_EVIDENCE'
+    ]
+  });
+  for(let i=0;i<9;i++){
+    out=rankBiggjResearchTasks([worldModelTask],{
+      asOf:t0+7*60*60_000+i*5*60_000,
+      taskMemory:memory,
+      historyStats:{rows:100,progressAt:t0},
+      researchDataPlaneSummary:{seq:500}
+    });
+    memory=out.taskMemory;
+  }
+  assert.equal(out.tasks[0].waitingForData,false);
+  assert.equal(out.tasks[0].stalled,true);
+  assert.equal(out.summary.stalledTaskCount,1);
+});
+
 test('manual review remains ahead of automatic research regardless of leverage score',()=>{
   const out=rankBiggjResearchTasks([
     task({
