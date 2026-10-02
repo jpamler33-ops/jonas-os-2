@@ -149,6 +149,23 @@ test('wallet 4 contrarian lane intentionally probes one soft rule at tiny shadow
   assert.equal(p.canExecuteLive,false);
 });
 
+test('wallet 4 bootstraps one hard-safe contrarian probe even when random rate is zero',()=>{
+  const now=2_728_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'BOOT',symbol:'BOOT',priceUsd:.01,liquidityUsd:55_000,
+    volumeM5:20_000,buysM5:18,sellsM5:9,priceChangeM5:18,pairCreatedAt:now-14*60_000,
+    score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32}},
+    memeLearning:{action:'BLOCK',rankingAdjustment:-.2,evidence:{level:'EXACT',samples:20,label:'LEARNED_BAD',confidence:.8}}
+  }]},{now,marginQuote:100,contrarianProbeRate:0,contrarianMarginMultiplier:.05});
+  assert.equal(x.results.contrarianEligible,1);
+  assert.equal(x.results.contrarianOpened,1);
+  const p=x.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.equal(p.entryContrarianBootstrap,true);
+  assert.equal(p.marginQuote,5);
+  assert.equal(p.canExecuteLive,false);
+});
+
 test('wallet 4 contrarian lane never bypasses hard security guards',()=>{
   const now=2_730_000;
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
