@@ -135,6 +135,26 @@ test('legacy W4 trades without entry microstructure remain diagnostic and cannot
   assert.equal(scored.evidence.level,'PRIOR');
 });
 
+test('contrarian probe outcomes stay isolated from the primary W4 learner',()=>{
+  const standard=Array.from({length:12},(_,i)=>scoutClosed(i,.20));
+  const contrarian=Array.from({length:6},(_,i)=>{
+    const row=scoutClosed(i+20,-.65);
+    row.entryResearchLane='CONTRARIAN_PROBE';
+    row.entryContrarianViolations=['LEARNED_BLOCK_WOULD_ABSTAIN'];
+    return row;
+  });
+  const model=buildMemecoinTradeLearningModel(state([...standard,...contrarian]),{asOf:20_000_000});
+  assert.equal(model.wallet4.samples,12);
+  assert.equal(model.wallet4.totalSamples,18);
+  assert.equal(model.wallet4.contrarianSamples,6);
+  assert.equal(model.wallet4.contrarian.samples,6);
+  assert.equal(model.wallet4.contrarian.byViolation.LEARNED_BLOCK_WOULD_ABSTAIN.samples,6);
+  assert.ok(model.wallet4.global.rawMeanReturn>0);
+  assert.ok(model.wallet4.contrarian.global.rawMeanReturn<0);
+  const scored=scoreMemecoinScoutCandidate(model,candidate());
+  assert.notEqual(scored.action,'BLOCK');
+});
+
 test('W5 copy outcomes are learned separately from W4 scout policy',()=>{
   const w5=Array.from({length:10},(_,i)=>copyClosed(i,-.25));
   const model=buildMemecoinTradeLearningModel(state([],w5));
