@@ -36,6 +36,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-trade-quality-learner.mjs',
   'memecoin-trade-learner.mjs',
   'expansion-runtime/memecoin-evidence-factory.mjs',
+  'expansion-runtime/biggj-temporal-temple.mjs',
   'mandatory-shadow-discovery.mjs',
   'shadow-coverage-curriculum.mjs',
   'coverage-issuance-pool.mjs',

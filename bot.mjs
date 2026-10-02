@@ -8,6 +8,7 @@ import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, score
 import { createMemecoinSecurityProvider, MEMECOIN_SECURITY_PROVIDER_VERSION } from './expansion-runtime/memecoin-security-provider.mjs';
 import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, observeMemecoinSecurityOutcomes, dueMemecoinSecurityOutcomeFollowups, recordMemecoinSecurityOutcomeFollowupAttempt, memecoinSecurityOutcomeSummary, MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION } from './expansion-runtime/memecoin-security-outcome-tracker.mjs';
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
+import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TEMPLE_VERSION } from './expansion-runtime/biggj-temporal-temple.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
 import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
@@ -1549,7 +1550,8 @@ try {
       forecastProduct:FORECAST_PRODUCT_VERSION,
       researchDataPlane:RESEARCH_DATA_PLANE_VERSION,
       researchDataGovernance:RESEARCH_DATA_GOVERNANCE_VERSION,
-      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION
+      researchCoverageDoctor:RESEARCH_COVERAGE_DOCTOR_VERSION,
+      biggjTemporalTemple:BIGGJ_TEMPORAL_TEMPLE_VERSION
     }
   });
   if(releaseRegistry.healthy){
@@ -4916,7 +4918,17 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       minPatternTrain:Math.max(12,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_TRAIN||20)),
       minPatternValidate:Math.max(5,Number(process.env.TCX_MEME_EVIDENCE_PATTERN_VALIDATE||8))
     });
-    snapshot={...snapshot,evidenceFactory:evidenceFactorySummary};
+    const temporalTemple=buildBiggjTemporalTemple(memecoinEvidenceFactoryState,{
+      asOf:Date.now(),
+      minNilometerTrain:Math.max(12,Number(process.env.TCX_TEMPORAL_TEMPLE_NILOMETER_TRAIN||20)),
+      minNilometerValidate:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_NILOMETER_VALIDATE||8)),
+      minEphemerisSamples:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_EPHEMERIS_MIN||4)),
+      minResonanceSamples:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_RESONANCE_MIN||8)),
+      minInvariantPerContext:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXT_MIN||4)),
+      minInvariantContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXTS||2))
+    });
+    const temporalTempleSummary=biggjTemporalTempleSummary(temporalTemple);
+    snapshot={...snapshot,evidenceFactory:evidenceFactorySummary,temporalTemple:temporalTempleSummary};
 
     const outcomeNow=Date.now();
     const outcomeObserved=observeMemecoinSecurityOutcomes(
@@ -5043,6 +5055,19 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         bluesky:memecoinSocialSnapshot?.bluesky||null,
         missingSources:memecoinSocialSnapshot?.missingSources||[],
         errors:memecoinSocialSnapshot?.errors||[]
+      },
+      temporalTemple:{
+        version:BIGGJ_TEMPORAL_TEMPLE_VERSION,
+        independentCases:temporalTempleSummary.independentCases,
+        transitions:temporalTempleSummary.bookOfChanges?.observedTransitions||0,
+        uniqueTransitions:temporalTempleSummary.bookOfChanges?.uniqueTransitions||0,
+        nilometer1hStatus:temporalTempleSummary.nilometers?.oneHour?.status||'COLLECTING',
+        nilometer4hStatus:temporalTempleSummary.nilometers?.fourHour?.status||'COLLECTING',
+        resonance15m1h:temporalTempleSummary.resonance?.fifteenMinToOneHour?.status||'COLLECTING',
+        invariants:temporalTempleSummary.invariants?.status||'COLLECTING',
+        ephemeris:temporalTempleSummary.ephemeris?.status||'COLLECTING',
+        policyMutationAllowed:false,
+        canExecuteLive:false
       },
       evidenceFactory:{
         version:MEMECOIN_EVIDENCE_FACTORY_VERSION,
@@ -11566,6 +11591,15 @@ function missionControlData(){
       truthBoundary:'THIRD_PARTY_SECURITY_EVIDENCE_NOT_RUG_PROBABILITY'
     },
     learning:memecoinEarlySnapshot?.tradeLearning||memecoinTradeLearningSummary(buildMemecoinTradeLearningModel(specialistWalletState,{asOf:now})),
+    temporalTemple:memecoinEarlySnapshot?.temporalTemple||biggjTemporalTempleSummary(buildBiggjTemporalTemple(memecoinEvidenceFactoryState,{
+      asOf:now,
+      minNilometerTrain:Math.max(12,Number(process.env.TCX_TEMPORAL_TEMPLE_NILOMETER_TRAIN||20)),
+      minNilometerValidate:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_NILOMETER_VALIDATE||8)),
+      minEphemerisSamples:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_EPHEMERIS_MIN||4)),
+      minResonanceSamples:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_RESONANCE_MIN||8)),
+      minInvariantPerContext:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXT_MIN||4)),
+      minInvariantContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXTS||2))
+    })),
     evidenceFactory:{
       ...(memecoinEarlySnapshot?.evidenceFactory||memecoinEvidenceFactorySummary(memecoinEvidenceFactoryState,{
         asOf:now,
