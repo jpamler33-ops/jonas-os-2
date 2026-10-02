@@ -116,6 +116,14 @@ test('feature shape captures the entry microstructure instead of token identity'
   assert.equal(shape.holder,'HOLDER_TOP10_25_45');
 });
 
+test('learner preserves tail-risk exit taxonomy for later policy evaluation',()=>{
+  const row=scoutClosed(1,-.24);
+  row.closeReason='MEME_TAIL_RISK_EXIT';
+  const model=buildMemecoinTradeLearningModel(state([row]));
+  assert.equal(model.wallet4.global.closeReasons.tailRisk,1);
+  assert.equal(model.wallet4.global.closeReasons.stop,0);
+});
+
 test('summary keeps automatic positive override disabled',()=>{
   const model=buildMemecoinTradeLearningModel(state(Array.from({length:12},(_,i)=>scoutClosed(i,.25))));
   const s=memecoinTradeLearningSummary(model);
