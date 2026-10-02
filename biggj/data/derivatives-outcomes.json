@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-10-02T00:44:07.673Z",
+  "updatedAt": "2026-10-02T06:58:42.635Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -387,18 +387,46 @@
           "price": 84818.2,
           "return": 0.002754619011363646,
           "direction": 1
+        },
+        "h4": {
+          "observedAt": "2026-10-02T06:58:42.635Z",
+          "price": 85956.7,
+          "return": 0.016214420489636394,
+          "direction": 1
         }
       },
       "caseId": "f16bf68062ad998bb1641bdf1763a2e2a9f71d53cc3b9a3f02a07c2c543dd005"
+    },
+    {
+      "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
+      "openedAt": "2026-10-02T06:58:42.635Z",
+      "entryPrice": 85956.7,
+      "signal": "CROWDED_LONG_PRESSURE",
+      "reason": "FUNDING_POSITIVE_CROSS_PROVIDER",
+      "evidenceFeatures": {
+        "fundingMedian": 0.4623075509483946,
+        "fundingConsensus": "ALIGNED",
+        "providerCount": 2,
+        "markPriceMedian": 85956.7
+      },
+      "evidenceGuards": {
+        "qualified": true,
+        "crossProviderConflict": false,
+        "oiAggregationDisabled": true
+      },
+      "evidenceClassification": "OBSERVED_DERIVED",
+      "status": "OPEN",
+      "outcomes": {},
+      "caseId": "fdb972a827cf6de0ab145ace65f5cdd2cf01b4356123ab878ca1306c6814ce07"
     }
   ],
   "summary": {
     "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
-    "totalCases": 10,
-    "eligibleCases": 10,
+    "totalCases": 11,
+    "eligibleCases": 11,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 10,
+        "cases": 11,
         "horizons": {
           "h1": {
             "n": 10,
@@ -406,9 +434,9 @@
             "positiveRate": 0.5
           },
           "h4": {
-            "n": 9,
-            "meanReturn": 0.001982532020403105,
-            "positiveRate": 0.5555555555555556
+            "n": 10,
+            "meanReturn": 0.003405720867326434,
+            "positiveRate": 0.6
           },
           "h24": {
             "n": 7,
@@ -428,10 +456,10 @@
       "minN": 30,
       "validationN": 100
     },
-    "eligibleCases": 10,
+    "eligibleCases": 11,
     "bySignal": {
       "CROWDED_LONG_PRESSURE": {
-        "cases": 10,
+        "cases": 11,
         "horizons": {
           "h1": {
             "n": 10,
@@ -442,10 +470,10 @@
             "claimAllowed": false
           },
           "h4": {
-            "n": 9,
-            "meanReturn": 0.001982532020403105,
-            "hitRate": 0.5555555555555556,
-            "wilsonLower95": 0.26664734574402965,
+            "n": 10,
+            "meanReturn": 0.003405720867326434,
+            "hitRate": 0.6,
+            "wilsonLower95": 0.3126695474501863,
             "gate": "INSUFFICIENT_SAMPLE",
             "claimAllowed": false
           },
