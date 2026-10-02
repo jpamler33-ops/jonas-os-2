@@ -484,3 +484,29 @@ test('non-passive repeated data-quality block stays visible without inventing a 
   assert.equal(summary.dataQualityIncidents,1);
   assert.equal(summary.humanActionIncidents,0);
 });
+
+
+test('one unhealthy owner shared by many tasks creates one owner incident',()=>{
+  const state=createBiggjAutonomousOperator({asOf:now-10_000});
+  const tasks=Array.from({length:12},(_,i)=>task({
+    taskId:'shared-'+i,
+    subject:'seed:SHARED_'+i,
+    autoHandler:'SHADOW_COMPETITION_WORKER'
+  }));
+  const out=refreshBiggjAutonomousOperator(state,{
+    factorySummary:factory({
+      mode:'DATA_COLLECTION_ONLY',
+      operatorDataOnly:false,
+      nextTasks:tasks
+    }),
+    operations:{},
+    ownerPolicies:policies(),
+    uptimeMs:600_000,
+    asOf:now
+  });
+  const summary=biggjAutonomousOperatorSummary(out.state);
+  assert.equal(summary.activeIncidents,1);
+  assert.equal(summary.internalIncidents,1);
+  assert.equal(Object.keys(out.state.incidents)[0],'OWNER_UNHEALTHY|SHADOW_COMPETITION_WORKER');
+  assert.equal(out.state.ownerAssessments.length,12);
+});
