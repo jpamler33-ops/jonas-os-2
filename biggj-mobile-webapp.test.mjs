@@ -5,7 +5,7 @@ import {BIGGJ_MOBILE_WEBAPP_VERSION,biggjWebManifest,biggjAppIconSvg,biggjServic
 
 const sample={generatedAt:1_800_000_000_000,biggj:{science:{frontier:{evidence:294,experiments:3}},worldModel:{markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12,score:.76,price:67842.31,priceChangePercent:1.84,priceChange:1226.4,openPrice:66615.91,highPrice:68410,lowPrice:66102,quoteVolume:38200000000}]}},health:{autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false},biggjObservability:{maturityIndex:.62,trustedSkills:3,totalSkillNodes:12,observedForecasts:44,runtimeRevision:9,evidence:{evidenceTotal:120,validationIndependentEpisodes:18},learningTimeline:{last24h:{total:7},last7d:{total:29},events:[{title:'Regime transfer checked',detail:'OOS evidence advanced'}]},researchQueue:[{title:'Liquidity transfer',nextGate:'FORWARD_SHADOW'}]},biggjProofFeed:{counts:{resolved:20}},marketRadar:{rows:[{symbol:'ETHUSDT',status:'SUPPORTED',regime:'RANGE',witnessAgreement:.7,support:8,score:.61}]}},portfolio:{equityQuote:1012,netPnlQuote:12,openPositions:1,closedTrades:3,positions:[],recentClosed:[]}};
 
-test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V7_DISCOVERY_JOURNAL');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
+test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V8_PARALLEL_WORLDS');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
 test('five user surfaces include the dedicated meme wallet',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading','meme'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/BIGGJ DISCOVERY JOURNAL/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','LIVE TICKER','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · FORECAST · LIQUIDITY · CONFLUENCE · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('progress is measurable',()=>{const h=renderBiggjMobileApp(sample);assert.match(h,/Discovery Scoreboard/);assert.match(h,/Research-Reife/);assert.match(h,/Was sich sonst verändert hat/);assert.match(h,/maturityIndex/)});
@@ -88,7 +88,7 @@ test('base mobile trading view exposes research activity without mission-control
   x.portfolio.researchActivity={openPositions:20,closedTrades:3998,wins:1900,losses:2098,winRate:.475,netPnlQuote:-12.5,byMode:{COVERAGE_PROBE:{open:20,closed:3998,realizedPnlQuote:-12.5}},active:[{symbol:'BTCUSDT',side:'LONG',entryMode:'COVERAGE_PROBE',entryPrice:60000,horizonId:'15m'}],recentClosed:[]};
   const h=renderBiggjMobileApp(x);
   for(const text of ['PRIMARY +','Research Trading','Research Open','Research Closed','Discovery Pipeline','Aktueller Blocker','Runtime Gates','Aktive Research Positionen']) assert.match(h,new RegExp(text));
-  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V7_DISCOVERY_JOURNAL'/);
+  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V8_PARALLEL_WORLDS'/);
   assert.match(h,/next\?\.appVersion&&next\.appVersion!==APP_VERSION/);
 });
 
@@ -118,6 +118,27 @@ test('timeline translates compound machine labels instead of passing them throug
   assert.match(h,/x\.detail\?HUMAN_DETAIL\(x\.detail\)/);
 });
 
+
+test('discovery journal renders parallel strategy worlds and preserves research-only semantics',()=>{
+  const x=structuredClone(sample);
+  x.health.parallelStrategyWorlds={
+    version:'BIGGJ_PARALLEL_STRATEGY_WORLDS_V1',
+    worldCount:2,
+    generations:5,
+    evolutions:3,
+    worlds:[
+      {worldId:'WORLD_EDGE_HUNTER',strategyId:'EDGE_HUNTER',label:'Edge Hunter',generation:3,evolutionCount:2,doctrine:{name:'Edge World'},currentGenome:{status:'MEASURING',profile:{minExpectedReturn:.003,minDirectionalProbability:.61,minProbabilityEdge:.155,horizonSelection:'MAX_EDGE'},mutation:{field:'minProbabilityEdge',before:.14,after:.155,direction:'TIGHTEN'},evidence:{closed:5,winRate:.6,meanReturn:.012}}},
+      {worldId:'WORLD_DEFENSIVE',strategyId:'DEFENSIVE',label:'Defensive',generation:2,evolutionCount:1,doctrine:{name:'Robustness World'},currentGenome:{status:'AWAITING_FORWARD_TRADES',profile:{minExpectedReturn:.0035,minDirectionalProbability:.6525,minProbabilityEdge:.16,horizonSelection:'SHORTEST'},mutation:{field:'minDirectionalProbability',before:.64,after:.6525,direction:'TIGHTEN'},evidence:{closed:0,winRate:null,meanReturn:null}}}
+    ],
+    council:{activeWorlds:2,convergences:[{field:'minProbabilityEdge',direction:'TIGHTEN',worlds:['WORLD_EDGE_HUNTER','WORLD_SCOUT']}],crossPollination:[{sourceWorld:'WORLD_EDGE_HUNTER'}]},
+    canExecuteLive:false,
+    automaticPrimaryMutation:false
+  };
+  const h=renderBiggjMobileApp(x);
+  for(const text of ['Parallel Worlds','Strategien entwickeln sich unabhängig weiter','WORLD COUNCIL · KONVERGENZ','Cross-Pollination','Basis-Genome','Forschungshinweis, keine Validierung'])assert.match(h,new RegExp(text));
+  assert.match(h,/WORLD_EDGE_HUNTER/);
+  assert.match(h,/automaticPrimaryMutation/);
+});
 
 test('discovery journal renders validated, rejected and collecting Temporal Temple findings',()=>{
   const x=structuredClone(sample);
