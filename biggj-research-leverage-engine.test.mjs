@@ -241,6 +241,42 @@ test('temporal world-model validation becomes a real stall when the PIT clock is
   assert.equal(out.summary.stalledTaskCount,1);
 });
 
+test('feature research and strategy league remain passive waits while forward history advances',()=>{
+  const t0=1_800_000_000_000;
+  let memory={};
+  let out=null;
+  const tasks=[
+    task({
+      taskId:'feature-forward',
+      type:'CONTINUE_FEATURE_RESEARCH',
+      subject:'FEATURE_RESEARCH',
+      autoHandler:'FORECAST_FEATURE_RESEARCH',
+      dataNeeds:['FEATURE_COMPLETE_FORWARD_ROWS'],
+      metadata:{unresolved:38}
+    }),
+    task({
+      taskId:'league-forward',
+      type:'CONTINUE_STRATEGY_LEAGUE',
+      subject:'SHADOW_STRATEGY_LEAGUE',
+      autoHandler:'SHADOW_STRATEGY_LEAGUE',
+      dataNeeds:['INDEPENDENT_SHADOW_TRADES','MULTI_REGIME_OUTCOMES'],
+      metadata:{open:3,closed:12,strategyCount:7}
+    })
+  ];
+  for(let i=0;i<12;i++){
+    out=rankBiggjResearchTasks(tasks,{
+      asOf:t0+i*5*60_000,
+      taskMemory:memory,
+      historyStats:{rows:500,progressAt:t0},
+      researchDataPlaneSummary:{seq:900}
+    });
+    memory=out.taskMemory;
+  }
+  assert.equal(out.summary.stalledTaskCount,0);
+  assert.equal(out.summary.waitingForDataTaskCount,2);
+  assert.ok(out.tasks.every(x=>x.waitingForData===true&&x.stalled===false));
+});
+
 test('manual review remains ahead of automatic research regardless of leverage score',()=>{
   const out=rankBiggjResearchTasks([
     task({
