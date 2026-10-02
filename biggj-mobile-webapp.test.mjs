@@ -266,9 +266,11 @@ test('meme wallet mirrors the premium mockup structure and binds only live shado
     recentClosed:[{symbol:'OLDPUP',chainId:'solana',openedAt:Date.now()-7200000,closedAt:Date.now()-3600000,realizedNetPnlQuote:50,realizedReturnPct:.5,closeReason:'MEME_TAKE_PROFIT'}]
   },W5_MEME_COPY:{walletId:'W5_MEME_COPY',openPositions:0,closedTrades:0,active:[],recentClosed:[]}}};
   const h=renderBiggjMobileApp(x);
-  for(const text of ['Meme Wallet','Early Meme Scout','SHADOW_ONLY','LIVE DATA','NO REAL ORDERS · PAPER ONLY','Unrealized PnL','Realized PnL','Total PnL','ROI auf Einsatz','Performance Overview','Open Positions','Security Outcome Lab','PASS Holder Fallback','PASS Native','ABSTAIN','UNKNOWN'])assert.match(h,new RegExp(text));
+  for(const text of ['Meme Wallet','Early Meme Scout','SHADOW_ONLY','LIVE DATA','NO REAL ORDERS · PAPER ONLY','Unrealized PnL','Realized PnL','Total PnL','ROI auf Einsatz','Insgesamt eingesetzt','Performance Overview','Open Positions','Security Outcome Lab','PASS Holder Fallback','PASS Native','ABSTAIN','UNKNOWN'])assert.match(h,new RegExp(text));
   assert.match(h,/data-meme-wallet="W4_MEME_SCOUT"/);
   assert.match(h,/data-meme-range="7D"/);
   assert.match(h,/MEME_PANEL='positions'/);
+  assert.match(h,/Insgesamt eingesetzt/);
+  assert.match(h,/cumulativeMarginUsedQuote/);
   assert.match(h,/canExecuteLive:false/);
 });
