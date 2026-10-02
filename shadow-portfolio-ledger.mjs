@@ -151,6 +151,17 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     challengerDiscoveryStrength:finite(order.strategyMeta?.challengerDiscoveryStrength),
     challengerSourceSamples:finite(order.strategyMeta?.challengerSourceSamples),
     challengerForwardSamples:finite(order.strategyMeta?.challengerForwardSamples),
+    walletResearchManagerVersion:String(order.strategyMeta?.walletResearchManagerVersion||''),
+    walletResearchEpochId:String(order.strategyMeta?.walletResearchEpochId||''),
+    walletResearchEpochNumber:finite(order.strategyMeta?.walletResearchEpochNumber),
+    walletResearchCycle:finite(order.strategyMeta?.walletResearchCycle),
+    walletResearchArm:String(order.strategyMeta?.walletResearchArm||''),
+    walletResearchWheelId:String(order.strategyMeta?.walletResearchWheelId||''),
+    walletResearchWheelValue:finite(order.strategyMeta?.walletResearchWheelValue),
+    walletResearchPolicyFingerprint:String(order.strategyMeta?.walletResearchPolicyFingerprint||''),
+    walletResearchDecision:order.strategyMeta?.walletResearchDecision&&typeof order.strategyMeta.walletResearchDecision==='object'
+      ?JSON.parse(JSON.stringify(order.strategyMeta.walletResearchDecision))
+      :null,
     entryRegimeBrainVersion:String(order.strategyMeta?.entryRegimeBrainVersion||''),
     entryRegimeKey:String(order.strategyMeta?.entryRegimeKey||''),
     entryRegimeFingerprint:String(order.strategyMeta?.entryRegimeFingerprint||''),
@@ -471,8 +482,15 @@ export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
   const closed=rows.filter(p=>p.status==='CLOSED').sort((a,b)=>Number(a.closedAt)-Number(b.closedAt));
   const realized=closed.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
   const unrealized=open.reduce((s,p)=>s+Number(p.lastMark?.unrealizedNetPnlQuote||0),0);
-  const wins=closed.filter(p=>Number(p.realizedNetPnlQuote||0)>0).length;
-  const losses=closed.filter(p=>Number(p.realizedNetPnlQuote||0)<0).length;
+  const winsRows=closed.filter(p=>Number(p.realizedNetPnlQuote||0)>0);
+  const lossesRows=closed.filter(p=>Number(p.realizedNetPnlQuote||0)<0);
+  const wins=winsRows.length;
+  const losses=lossesRows.length;
+  const grossProfit=winsRows.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0);
+  const grossLoss=Math.abs(lossesRows.reduce((s,p)=>s+Number(p.realizedNetPnlQuote||0),0));
+  const profitFactor=grossLoss>EPS?grossProfit/grossLoss:grossProfit>EPS?3:null;
+  const expectancyQuote=closed.length?realized/closed.length:null;
+  const meanReturnPct=closed.length?closed.reduce((s,p)=>s+Number(p.realizedReturnPct||0),0)/closed.length:null;
   const byMode={};
   for(const p of rows){
     const mode=String(p.entryMode||'UNKNOWN').toUpperCase();
@@ -491,6 +509,9 @@ export function shadowResearchActivitySummary(ledger,{asOf=Date.now()}={}){
     wins,
     losses,
     winRate:closed.length?wins/closed.length:null,
+    profitFactor,
+    expectancyQuote,
+    meanReturnPct,
     realizedPnlQuote:realized,
     unrealizedPnlQuote:unrealized,
     netPnlQuote:realized+unrealized,

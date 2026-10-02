@@ -41,6 +41,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'shadow-coverage-curriculum.mjs',
   'coverage-issuance-pool.mjs',
   'learned-challenger-engine.mjs',
+  'shadow-wallet-research-manager.mjs',
   'shadow-regime-brain.mjs',
   'adversarial-stress-lab.mjs',
   'shadow-strategy-league.mjs',
