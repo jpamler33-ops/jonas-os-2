@@ -4,6 +4,7 @@ import {
   createMemecoinSecurityOutcomeState,
   observeMemecoinSecurityOutcomes,
   dueMemecoinSecurityOutcomeFollowups,
+  recordMemecoinSecurityOutcomeFollowupAttempt,
   memecoinSecurityOutcomeSummary,
   MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION
 } from './memecoin-security-outcome-tracker.mjs';
@@ -100,6 +101,23 @@ test('schedules bounded direct followups when a tracked token drops out of the r
   assert.equal(due[0].tokenAddress,'DROPPED');
   assert.equal(due[0].dueHorizon,'5m');
   assert.equal(due[0].holderFallbackUsed,true);
+});
+
+test('failed followup attempts are throttled instead of hammering public providers',()=>{
+  let state=createMemecoinSecurityOutcomeState();
+  state=observeMemecoinSecurityOutcomes(state,[row({
+    tokenAddress:'RETRY',
+    holderFallbackUsed:true
+  })],{now:30_000}).state;
+  const first=dueMemecoinSecurityOutcomeFollowups(state,{asOf:30_000+6*60_000,recentObservationMs:60_000,max:3});
+  assert.equal(first.length,1);
+  state=recordMemecoinSecurityOutcomeFollowupAttempt(state,first[0].key,{
+    at:30_000+6*60_000,error:'HTTP_429'
+  }).state;
+  const immediate=dueMemecoinSecurityOutcomeFollowups(state,{asOf:30_000+6*60_000+15_000,recentObservationMs:60_000,max:3});
+  assert.equal(immediate.length,0);
+  const later=dueMemecoinSecurityOutcomeFollowups(state,{asOf:30_000+7*60_000+1,recentObservationMs:60_000,max:3});
+  assert.equal(later.length,1);
 });
 
 test('plain price followups cannot create new security observations',()=>{
