@@ -306,7 +306,8 @@ export function refreshBiggjDiscoveryLedger(input,{
       continue;
     }
 
-    const statusChanged=String(prev.currentStatus)!==String(row.status);
+    const previousStatus=String(prev.currentStatus||'UNKNOWN');
+    const statusChanged=previousStatus!==String(row.status);
     const bucketChanged=Number(prev.sampleBucket||0)!==bucket;
     const robustChanged=Boolean(prev.robust)!==Boolean(row.robust);
     const validatedChanged=Boolean(prev.validated)!==Boolean(row.validated);
@@ -327,7 +328,7 @@ export function refreshBiggjDiscoveryLedger(input,{
 
     if(statusChanged||robustChanged||validatedChanged){
       prev.events=[...(prev.events||[]),lifecycleEvent(row,{
-        at:asOf,kind:'STATUS_CHANGE',previousStatus:prev.currentStatus===row.status?null:prev.currentStatus
+        at:asOf,kind:'STATUS_CHANGE',previousStatus
       })].slice(-Math.max(4,Number(maxEventsPerEntry)||40));
       changed=true;statusChanges++;
     }else if(bucketChanged){
