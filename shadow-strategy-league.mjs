@@ -8,6 +8,7 @@ import {
   shadowPositionFromEntryOrder, markShadowPosition, closeShadowPosition,
   shadowPortfolioSummary
 } from './shadow-portfolio-ledger.mjs';
+import { parallelStrategyWorldProfile } from './parallel-strategy-worlds.mjs';
 
 export const SHADOW_STRATEGY_LEAGUE_VERSION='TCX_SHADOW_STRATEGY_LEAGUE_V1_1';
 export const SHADOW_STRATEGY_LEAGUE_SCHEMA_VERSION=1;
@@ -123,6 +124,11 @@ export function leaguePositionFromEntryOrder(order,{openedAt=null}={}){
     leagueSampleKey:'ls_'+sha256(sampleCore).slice(0,24),
     leagueAllocationWeight:finite(order.strategyMeta?.leagueAllocationWeight),
     leagueNotionalMultiplier:finite(order.strategyMeta?.leagueNotionalMultiplier),
+    leagueWorldId:order.strategyMeta?.leagueWorldId?String(order.strategyMeta.leagueWorldId):null,
+    leagueGenomeId:order.strategyMeta?.leagueGenomeId?String(order.strategyMeta.leagueGenomeId):null,
+    leagueGeneration:finite(order.strategyMeta?.leagueGeneration),
+    leagueMutation:order.strategyMeta?.leagueMutation&&typeof order.strategyMeta.leagueMutation==='object'
+      ?structuredClone(order.strategyMeta.leagueMutation):null,
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
@@ -307,14 +313,17 @@ export function deriveStrategyLeagueCandidates(issuance,ledger,{
   baseNotionalQuote=50,
   memeMinExpectedReturn=.0025,
   memeMinDirectionalProbability=.57,
-  memeMinProbabilityEdge=.09
+  memeMinProbabilityEdge=.09,
+  worldState=null
 }={}){
   const cls=String(assetClass||'CORE').toUpperCase();
   const summary=strategyLeagueSummary(ledger,{asOf:now});
   const byStrategy=new Map(summary.strategies.map(x=>[x.strategyId,x]));
   const candidates=[];
 
-  for(const strategy of SHADOW_STRATEGIES){
+  for(const baseStrategy of SHADOW_STRATEGIES){
+    const world=parallelStrategyWorldProfile(worldState,baseStrategy.id,baseStrategy);
+    const strategy={...baseStrategy,...world.profile};
     if(!strategy.assetClasses.includes(cls)) continue;
     const account=byStrategy.get(strategy.id);
     if(!account||account.riskHold) continue;
@@ -355,6 +364,8 @@ export function deriveStrategyLeagueCandidates(issuance,ledger,{
     const leagueDecisionKey=sha256({
       baseDecisionKey:decision.decisionKey,
       strategyId:strategy.id,
+      leagueGenomeId:world.genomeId,
+      leagueGeneration:world.generation,
       leagueVersion:SHADOW_STRATEGY_LEAGUE_VERSION
     });
     candidates.push(freeze({
@@ -368,6 +379,17 @@ export function deriveStrategyLeagueCandidates(issuance,ledger,{
       leagueEvidenceGrade:account.evidence.grade,
       leagueEvidenceFailedGates:account.evidence.failedGates,
       leagueStatus:account.status,
+      leagueWorldId:world.worldId,
+      leagueGenomeId:world.genomeId,
+      leagueGeneration:world.generation,
+      leagueMutation:world.mutation,
+      leagueWorldProfile:{
+        horizonSelection:strategy.horizonSelection,
+        minExpectedReturn:strategy.minExpectedReturn,
+        minDirectionalProbability:strategy.minDirectionalProbability,
+        minProbabilityEdge:strategy.minProbabilityEdge,
+        notionalMultiplier:strategy.notionalMultiplier
+      },
       assetClass:cls,
       role:'LEAGUE_ENTRY',
       execution:'SHADOW_ONLY',
