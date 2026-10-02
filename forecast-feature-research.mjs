@@ -235,7 +235,10 @@ export function featureResearchRowsFromJournal(entries){
       resolvedAt,
       horizonMs,
       regimeId:String(e.regimeId||'UNKNOWN'),
-      features:clone(e.features||{}),
+      // Read-only research projection: keep the journal feature-map reference here.
+      // Candidate evaluators clone only the rows/features they actually consume,
+      // avoiding a second deep copy of every wide technical-indicator vector.
+      features:e.features||{},
       forwardReturn,
       quality:finite(e.dataQuality)??1
     });

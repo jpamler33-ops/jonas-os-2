@@ -92,6 +92,21 @@ test('journal rows preserve point-in-time feature values and resolved outcomes',
   assert.ok(Number.isFinite(rows[0].forwardReturn));
 });
 
+test('journal row projection reuses wide feature maps without mutating them',()=>{
+  const source=entry(3);
+  const before=structuredClone(source.features);
+  const rows=featureResearchRowsFromJournal([source]);
+  assert.equal(rows[0].features,source.features);
+  createFeatureResearchRound({
+    journalEntries:Array.from({length:24},(_,i)=>entry(i)),
+    incumbentConfig:config(),
+    features:featureDef,
+    now:30_000_000,
+    policy:policy()
+  });
+  assert.deepEqual(source.features,before);
+});
+
 test('feature round waits until enough seed observations exist',()=>{
   const s=createFeatureResearchRound({
     journalEntries:Array.from({length:10},(_,i)=>entry(i)),
