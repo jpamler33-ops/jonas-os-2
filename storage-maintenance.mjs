@@ -197,6 +197,44 @@ export function classifyStorageWriteAdmission(pressure,{scope='HIGH_VOLUME'}={})
   };
 }
 
+export function classifyBoundedResearchDataPlaneWrite(pressure,plane,{
+  criticalFreeBytes=48*1024*1024,
+  reserveAboveCriticalBytes=24*1024*1024
+}={}){
+  const base=classifyStorageWriteAdmission(pressure,{scope:'RESEARCH_DATA_PLANE'});
+  if(base.allowed||base.state!=='WARN')return base;
+  const available=Number(pressure?.availableBytes);
+  const fileBytes=Number(plane?.fileBytes);
+  const warnBytes=Number(plane?.warnBytes);
+  const hardBytes=Number(plane?.hardBytes);
+  const critical=Math.max(0,Number(criticalFreeBytes)||0);
+  const reserve=Math.max(8*1024*1024,Number(reserveAboveCriticalBytes)||0);
+  const freeFloor=critical+reserve;
+  const hasFilesystemHeadroom=Number.isFinite(available)&&available>freeFloor;
+  const withinPlaneWarnBudget=Number.isFinite(fileBytes)&&Number.isFinite(warnBytes)&&fileBytes<warnBytes;
+  const belowHardLimit=Number.isFinite(fileBytes)&&Number.isFinite(hardBytes)&&fileBytes<hardBytes;
+  if(hasFilesystemHeadroom&&withinPlaneWarnBudget&&belowHardLimit){
+    return {
+      ...base,
+      allowed:true,
+      reason:'STORAGE_WARN_BOUNDED_RDP_HEADROOM',
+      fileBytes,
+      warnBytes,
+      hardBytes,
+      freeFloorBytes:freeFloor,
+      remainingPlaneWarnBytes:Math.max(0,warnBytes-fileBytes),
+      remainingFilesystemHeadroomBytes:Math.max(0,available-freeFloor)
+    };
+  }
+  return {
+    ...base,
+    fileBytes:Number.isFinite(fileBytes)?fileBytes:null,
+    warnBytes:Number.isFinite(warnBytes)?warnBytes:null,
+    hardBytes:Number.isFinite(hardBytes)?hardBytes:null,
+    freeFloorBytes:freeFloor
+  };
+}
+
 export async function inspectStoragePressure({
   dataDir='/data',
   warnFreeBytes=96*1024*1024,
