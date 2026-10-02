@@ -118,7 +118,7 @@ function cohortOf(rec){
   if(rec.gate==='ABSTAIN')return 'ABSTAIN';
   return 'UNKNOWN';
 }
-function summarizeRecords(records,horizons=DEFAULT_HORIZONS){
+function summarizeRecords(records,horizons=DEFAULT_HORIZONS,asOf=Date.now()){
   const out={};
   for(const cohort of ['PASS_HOLDER_FALLBACK','PASS_NATIVE','ABSTAIN','UNKNOWN']){
     const rs=records.filter(x=>cohortOf(x)===cohort);
@@ -136,7 +136,7 @@ function summarizeRecords(records,horizons=DEFAULT_HORIZONS){
     }
     out[cohort]={
       records:rs.length,
-      openObservationAgeMs:rs.length?Math.max(...rs.map(x=>Math.max(0,Date.now()-Number(x.observedAt||Date.now())))):0,
+      openObservationAgeMs:rs.length?Math.max(...rs.map(x=>Math.max(0,Number(asOf)-Number(x.observedAt||asOf)))):0,
       horizons:horizonsOut
     };
   }
@@ -159,6 +159,7 @@ export function observeMemecoinSecurityOutcomes(input,rows,{
     const key=keyOf(row?.chainId,row?.tokenAddress);
     if(!key)continue;
     let index=byKey.get(key);
+    let isNew=false;
     if(index==null){
       if(!row?.security)continue;
       const rec=initialRecord(row,now);
@@ -167,11 +168,14 @@ export function observeMemecoinSecurityOutcomes(input,rows,{
       index=state.records.length-1;
       byKey.set(key,index);
       created++;
+      isNew=true;
     }
     const rec=state.records[index];
-    const before=Object.keys(rec.horizons||{}).length;
-    if(updateRecord(rec,row,now,horizons))updated++;
-    matured+=Math.max(0,Object.keys(rec.horizons||{}).length-before);
+    if(!isNew){
+      const before=Object.keys(rec.horizons||{}).length;
+      if(updateRecord(rec,row,now,horizons))updated++;
+      matured+=Math.max(0,Object.keys(rec.horizons||{}).length-before);
+    }
   }
   state.records=state.records
     .sort((a,b)=>Number(a.observedAt||0)-Number(b.observedAt||0))
@@ -189,7 +193,8 @@ export function dueMemecoinSecurityOutcomeFollowups(input,{
   const state=stateFrom(input);
   const due=[];
   for(const rec of state.records){
-    if(Number(asOf)-Number(rec.lastObservedAt||0)<Math.max(0,Number(recentObservationMs)||0))continue;
+    const lastTouch=Math.max(Number(rec.lastObservedAt||0),Number(rec.lastFollowupAttemptAt||0));
+    if(Number(asOf)-lastTouch<Math.max(0,Number(recentObservationMs)||0))continue;
     const elapsed=Math.max(0,Number(asOf)-Number(rec.observedAt||asOf));
     const next=Object.entries(horizons)
       .filter(([label,ms])=>!rec.horizons?.[label]&&elapsed>=Number(ms))
@@ -206,13 +211,28 @@ export function dueMemecoinSecurityOutcomeFollowups(input,{
   return freeze(due.sort((a,b)=>b.overdueMs-a.overdueMs).slice(0,Math.max(0,Number(max)||0)));
 }
 
+export function recordMemecoinSecurityOutcomeFollowupAttempt(input,key,{at=Date.now(),error=null}={}){
+  const state=stateFrom(input);
+  const rec=state.records.find(x=>x.key===String(key||''));
+  if(!rec)return freeze({state,updated:false});
+  rec.lastFollowupAttemptAt=Number(at);
+  if(error){
+    rec.followupFailures=Number(rec.followupFailures||0)+1;
+    rec.lastFollowupError=text(error,240);
+  }else{
+    rec.lastFollowupError=null;
+  }
+  state.updatedAt=Number(at);
+  return freeze({state,updated:true});
+}
+
 export function memecoinSecurityOutcomeSummary(input,{
   asOf=Date.now(),
   horizons=DEFAULT_HORIZONS,
   minComparisonSample=30
 }={}){
   const state=stateFrom(input);
-  const cohorts=summarizeRecords(state.records,horizons);
+  const cohorts=summarizeRecords(state.records,horizons,asOf);
   const fallback1h=cohorts.PASS_HOLDER_FALLBACK?.horizons?.['1h']?.matured||0;
   const native1h=cohorts.PASS_NATIVE?.horizons?.['1h']?.matured||0;
   const comparisonReady=fallback1h>=Number(minComparisonSample)&&native1h>=Number(minComparisonSample);
