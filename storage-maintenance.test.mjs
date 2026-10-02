@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile, readFile, utimes } from 'node:fs/promises';
-import { cleanupOrphanedPersistenceArtifacts, classifyStoragePressure, classifyStorageWriteAdmission, inspectStoragePressure } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, classifyStoragePressure, classifyStorageWriteAdmission, classifyBoundedResearchDataPlaneWrite, inspectStoragePressure } from './storage-maintenance.mjs';
 
 test('removes only stale known artifacts when canonical exists', async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-storage-'));
@@ -88,4 +88,49 @@ test('critical storage blocks only high-volume append classes',()=>{
   assert.equal(warnResearch.reason,'STORAGE_WARN_BACKPRESSURE');
   assert.equal(classifyStorageWriteAdmission({state:'WARN'},{scope:'AUDIT'}).allowed,true);
   assert.equal(classifyStorageWriteAdmission({state:'NORMAL'},{scope:'RESEARCH_DATA_PLANE'}).allowed,true);
+});
+
+
+test('bounded RDP admission uses WARN headroom without weakening critical fail-closed',()=>{
+  const mib=1024*1024;
+  const plane={fileBytes:92*mib,warnBytes:120*mib,hardBytes:160*mib};
+  const warn={state:'WARN',availableBytes:94*mib,utilization:.78};
+  const allowed=classifyBoundedResearchDataPlaneWrite(warn,plane,{
+    criticalFreeBytes:48*mib,
+    reserveAboveCriticalBytes:24*mib
+  });
+  assert.equal(allowed.allowed,true);
+  assert.equal(allowed.reason,'STORAGE_WARN_BOUNDED_RDP_HEADROOM');
+  assert.ok(allowed.remainingPlaneWarnBytes>0);
+  assert.ok(allowed.remainingFilesystemHeadroomBytes>0);
+
+  const planeAtWarn={...plane,fileBytes:120*mib};
+  const blockedByPlane=classifyBoundedResearchDataPlaneWrite(warn,planeAtWarn,{
+    criticalFreeBytes:48*mib,
+    reserveAboveCriticalBytes:24*mib
+  });
+  assert.equal(blockedByPlane.allowed,false);
+  assert.equal(blockedByPlane.reason,'STORAGE_WARN_BACKPRESSURE');
+
+  const lowFree=classifyBoundedResearchDataPlaneWrite(
+    {state:'WARN',availableBytes:70*mib,utilization:.84},
+    plane,
+    {criticalFreeBytes:48*mib,reserveAboveCriticalBytes:24*mib}
+  );
+  assert.equal(lowFree.allowed,false);
+
+  const critical=classifyBoundedResearchDataPlaneWrite(
+    {state:'CRITICAL',availableBytes:40*mib,utilization:.93},
+    plane,
+    {criticalFreeBytes:48*mib,reserveAboveCriticalBytes:24*mib}
+  );
+  assert.equal(critical.allowed,false);
+  assert.equal(critical.reason,'STORAGE_CRITICAL_FAIL_CLOSED');
+});
+
+test('runtime passes live RDP budget into bounded WARN admission',async()=>{
+  const source=await readFile(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.match(source,/classifyBoundedResearchDataPlaneWrite/);
+  assert.match(source,/storageWriteAdmission\('RESEARCH_DATA_PLANE',\{researchPlane:researchDataPlane\}\)/);
+  assert.match(source,/TCX_STORAGE_WARN_BOUNDED_RDP/);
 });
