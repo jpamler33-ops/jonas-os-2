@@ -151,6 +151,17 @@ export function shadowPositionFromEntryOrder(order,{openedAt=null,acceptedRoles=
     challengerDiscoveryStrength:finite(order.strategyMeta?.challengerDiscoveryStrength),
     challengerSourceSamples:finite(order.strategyMeta?.challengerSourceSamples),
     challengerForwardSamples:finite(order.strategyMeta?.challengerForwardSamples),
+    walletResearchManagerVersion:String(order.strategyMeta?.walletResearchManagerVersion||''),
+    walletResearchEpochId:String(order.strategyMeta?.walletResearchEpochId||''),
+    walletResearchEpochNumber:finite(order.strategyMeta?.walletResearchEpochNumber),
+    walletResearchCycle:finite(order.strategyMeta?.walletResearchCycle),
+    walletResearchArm:String(order.strategyMeta?.walletResearchArm||''),
+    walletResearchWheelId:String(order.strategyMeta?.walletResearchWheelId||''),
+    walletResearchWheelValue:finite(order.strategyMeta?.walletResearchWheelValue),
+    walletResearchPolicyFingerprint:String(order.strategyMeta?.walletResearchPolicyFingerprint||''),
+    walletResearchDecision:order.strategyMeta?.walletResearchDecision&&typeof order.strategyMeta.walletResearchDecision==='object'
+      ?JSON.parse(JSON.stringify(order.strategyMeta.walletResearchDecision))
+      :null,
     entryRegimeBrainVersion:String(order.strategyMeta?.entryRegimeBrainVersion||''),
     entryRegimeKey:String(order.strategyMeta?.entryRegimeKey||''),
     entryRegimeFingerprint:String(order.strategyMeta?.entryRegimeFingerprint||''),
