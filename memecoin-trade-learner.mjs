@@ -184,9 +184,28 @@ function topPatterns(groups,label,limit=5){
   }
   return rows.sort((a,b)=>b.samples-a.samples||b.confidence-a.confidence).slice(0,limit);
 }
+function contrarianSummary(rows=[]){
+  const raw=emptyRaw(),byViolation=new Map();
+  for(const row of rows){
+    addRaw(new Map([['ALL',raw]]),'ALL',row);
+    const violations=Array.isArray(row?.entryContrarianViolations)&&row.entryContrarianViolations.length
+      ?row.entryContrarianViolations:['UNKNOWN_SOFT_RULE'];
+    for(const v of violations)addRaw(byViolation,String(v),row);
+  }
+  return Object.freeze({
+    samples:rows.length,
+    global:summarize(raw),
+    byViolation:Object.freeze(Object.fromEntries([...byViolation.entries()].map(([k,v])=>[k,summarize(v)]))),
+    authority:'RESEARCH_ONLY_NO_AUTOMATIC_PRIMARY_MUTATION'
+  });
+}
+
 export function buildMemecoinTradeLearningModel(state,{asOf=Date.now()}={}){
   const w4=state?.wallets?.[WALLET_4_MEME_SCOUT]||{},w5=state?.wallets?.[WALLET_5_MEME_COPY]||{};
-  const c4=eligibleClosed(w4),c4Actionable=c4.filter(hasActionableScoutEntryFeatures),c5=eligibleClosed(w5);
+  const c4All=eligibleClosed(w4);
+  const c4Contrarian=c4All.filter(x=>String(x?.entryResearchLane||'STANDARD')==='CONTRARIAN_PROBE');
+  const c4=c4All.filter(x=>String(x?.entryResearchLane||'STANDARD')!=='CONTRARIAN_PROBE');
+  const c4Actionable=c4.filter(hasActionableScoutEntryFeatures),c5=eligibleClosed(w5);
   const g4=buildGroups(c4Actionable,w4Keys,x=>memecoinScoutFeatureShape(x,x.openedAt||asOf));
   const g4All=buildGroups(c4,w4Keys,x=>memecoinScoutFeatureShape(x,x.openedAt||asOf));
   const g5=buildGroups(c5,w5Keys,memecoinCopyFeatureShape);
@@ -194,10 +213,13 @@ export function buildMemecoinTradeLearningModel(state,{asOf=Date.now()}={}){
     version:MEMECOIN_TRADE_LEARNER_VERSION,asOf:Number(asOf),
     wallet4:{
       samples:c4.length,
+      totalSamples:c4All.length,
+      contrarianSamples:c4Contrarian.length,
       featureCompleteSamples:c4Actionable.length,
       legacyOrIncompleteSamples:Math.max(0,c4.length-c4Actionable.length),
       groups:g4,
       global:g4All?.GLOBAL?.ALL||summarize(null),
+      contrarian:contrarianSummary(c4Contrarian),
       topGood:topPatterns(g4,'LEARNED_GOOD'),
       topAsymmetric:topPatterns(g4,'ASYMMETRIC_EDGE'),
       topBad:topPatterns(g4,'LEARNED_BAD')
@@ -266,9 +288,12 @@ export function memecoinTradeLearningSummary(model){
     version:MEMECOIN_TRADE_LEARNER_VERSION,
     wallet4:{
       samples:model?.wallet4?.samples||0,
+      totalSamples:model?.wallet4?.totalSamples||model?.wallet4?.samples||0,
+      contrarianSamples:model?.wallet4?.contrarianSamples||0,
       featureCompleteSamples:model?.wallet4?.featureCompleteSamples||0,
       legacyOrIncompleteSamples:model?.wallet4?.legacyOrIncompleteSamples||0,
       global:model?.wallet4?.global||null,
+      contrarian:model?.wallet4?.contrarian||null,
       topGood:model?.wallet4?.topGood||[],
       topBad:model?.wallet4?.topBad||[]
     },
