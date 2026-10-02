@@ -8036,7 +8036,16 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     ...episodeExtraFeatures,
     ...researchPlaneExtraFeatures
   ]);
-  const extraFeatures=[...episodeExtraFeatures,...researchPlaneExtraFeatures,...intelligenceExtraFeatures];
+  const technicalIndicatorBundle=buildTechnicalIndicatorFeatures(state.byTf,{
+    asOf:Number(state.availableAt)
+  });
+  const technicalIndicatorExtraFeatures=technicalIndicatorBundle.features;
+  const extraFeatures=[
+    ...episodeExtraFeatures,
+    ...researchPlaneExtraFeatures,
+    ...intelligenceExtraFeatures,
+    ...technicalIndicatorExtraFeatures
+  ];
   const runtimeQuality=deriveForecastRuntimeQuality({
     safety,
     marketAudit,
@@ -10293,6 +10302,74 @@ async function syncFeatureResearch(reason='update'){
   }
 }
 
+async function persistIndicatorEvolution(reason='mutation'){
+  indicatorEvolutionPersistenceQueue=indicatorEvolutionPersistenceQueue.then(async()=>{
+    try{
+      indicatorEvolutionState=await saveIndicatorEvolutionState(indicatorEvolutionFile,indicatorEvolutionState);
+      indicatorEvolutionHealthy=true;
+      indicatorEvolutionLastError=null;
+      return true;
+    }catch(err){
+      indicatorEvolutionHealthy=false;
+      indicatorEvolutionLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'indicator_evolution.persistence',message:indicatorEvolutionLastError});
+      console.error('[BIGGJ_INDICATOR_EVOLUTION_PERSIST_FAILED]',reason,indicatorEvolutionLastError);
+      return false;
+    }
+  });
+  return indicatorEvolutionPersistenceQueue;
+}
+
+async function syncIndicatorEvolution(reason='update'){
+  const started=Date.now();
+  try{
+    const refreshed=refreshIndicatorEvolutionEngine(indicatorEvolutionState,{
+      journalEntries:forecastRuntime.journal.all(),
+      incumbentConfig:forecastRuntime.engine.configSnapshot(),
+      experiments:TECHNICAL_INDICATOR_EXPERIMENTS,
+      asOf:Date.now(),
+      policy:{
+        maxEvaluationsPerCycle:Math.max(1,Math.min(12,Number(process.env.TCX_INDICATOR_EVOLUTION_EVALS_PER_CYCLE||6))),
+        minSeedRows:Math.max(20,Number(process.env.TCX_INDICATOR_EVOLUTION_SEED_ROWS||40)),
+        minOosCases:Math.max(20,Number(process.env.TCX_INDICATOR_EVOLUTION_OOS_CASES||60)),
+        minIndependentEpisodes:Math.max(10,Number(process.env.TCX_INDICATOR_EVOLUTION_INDEPENDENT_EPISODES||30))
+      }
+    });
+    indicatorEvolutionState=refreshed.state;
+    if(refreshed.changed)await persistIndicatorEvolution(reason);
+    const summary=indicatorEvolutionSummary(indicatorEvolutionState);
+    if(refreshed.delta.seeded||refreshed.delta.evaluated||refreshed.delta.reactivated||refreshed.delta.statusChanges){
+      console.log('[BIGGJ_INDICATOR_EVOLUTION]',JSON.stringify({
+        reason,
+        catalogSize:summary.catalogSize,
+        active:summary.active,
+        counts:summary.counts,
+        top:summary.top.slice(0,5).map(x=>({
+          id:x.id,status:x.status,timeframe:x.timeframe,
+          oosCases:x.oosCases,independentEpisodes:x.independentEpisodes,
+          meanBrierDelta:x.meanBrierDelta,q:x.q
+        })),
+        delta:refreshed.delta,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false,
+        automaticProductionMutation:false,
+        automaticPromotion:false
+      }));
+      await refreshBiggjDiscoveryLedgerRuntime('INDICATOR_EVOLUTION:'+reason);
+    }
+    recordOperation(observability,{name:'indicator_evolution_sync',ok:true,latencyMs:Date.now()-started,error:null});
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    indicatorEvolutionHealthy=false;
+    indicatorEvolutionLastError=msg;
+    recordError(observability,{scope:'indicator_evolution',message:msg});
+    recordOperation(observability,{name:'indicator_evolution_sync',ok:false,latencyMs:Date.now()-started,error:msg});
+    console.error('[BIGGJ_INDICATOR_EVOLUTION_ERROR]',reason,msg);
+    return indicatorEvolutionSummary(indicatorEvolutionState);
+  }
+}
+
 async function autoLearnForecastWatcher() {
   await sleep(15000);
   while(running) {
@@ -11163,6 +11240,7 @@ async function forecastOutcomeWatcher() {
           maybeEvaluateClaimAssumptionResearch('resolved-outcomes');
           await refreshBiggjLivingResearch('resolved-outcomes',claimAssumptionResearchLastReport);
           await syncFeatureResearch('resolved-outcomes');
+          await syncIndicatorEvolution('resolved-outcomes');
         }else{
           console.warn('resolved-outcome feature research deferred for memory headroom',JSON.stringify({
             ...postAdmission.memory,
@@ -12554,6 +12632,7 @@ async function gracefulShutdown(signal) {
   await persistStrategyLeague(`shutdown:${signal}`);
   await persistParallelStrategyWorlds(`shutdown:${signal}`);
   await persistBiggjDiscoveryLedger(`shutdown:${signal}`);
+  await persistIndicatorEvolution(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
@@ -12565,6 +12644,7 @@ process.on('SIGTERM',() => void gracefulShutdown('SIGTERM'));
 liquidationResearchStream.start();
 await onchainResearchStartupProbe();
 await syncFeatureResearch('startup');
+await syncIndicatorEvolution('startup');
 await refreshBiggjWorldModelRuntime('STARTUP');
 await refreshPublicExperienceIntel('startup');
 await refreshMemecoinEarlyRadar('startup');
