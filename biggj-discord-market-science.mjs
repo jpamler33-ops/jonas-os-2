@@ -64,6 +64,25 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
     (i+1)+'. **'+clip(x.kind||'RESEARCH',34)+'** · '+clip(x.question||x.title||'—',180)+
     '\n   '+clip(x.derivedStatus||'UNKNOWN',28)+' · next '+clip(x.nextExperimentType||'—',42)+' · info '+pct(x.expectedInformationGainProxy)
   ).join('\n\n')||'Keine priorisierte Science-Agenda.';
+  const temple=snapshot?.health?.memecoinRadar?.temporalTemple||{};
+  const laws=temple?.transitionLaws||{};
+  const candidates=arr(laws?.candidates);
+  const validated=candidates.filter(x=>x?.validated===true).slice(0,3);
+  const failed=candidates.filter(x=>x?.status==='FAILED_FORWARD_VALIDATION').slice(0,2);
+  const lawRows=validated.map(x=>
+    '• **'+clip(x.fromState||'?',12)+' → '+clip(x.toState||'?',12)+'** · danach '+clip(x.forwardHorizon||'?',12)+
+    ' · n='+fmt(x.independentCases)+' · median '+(Number.isFinite(Number(x?.validation?.medianReturn))?(Number(x.validation.medianReturn)*100).toFixed(1)+'%':'—')+
+    ' · contexts '+fmt(x.contextsEligible)
+  ).join('\n');
+  const failedRows=failed.map(x=>
+    '• verworfen: '+clip(x.fromState||'?',12)+' → '+clip(x.toState||'?',12)+' · '+clip(x.forwardHorizon||'?',12)
+  ).join('\n');
+  const discoveryText=[
+    'Fälle '+fmt(temple.independentCases)+' · Transitions '+fmt(temple?.bookOfChanges?.observedTransitions)+' · Hypothesen '+fmt(laws.testedHypotheses),
+    lawRows||'Noch kein Forward-Law-Kandidat validiert.',
+    failedRows,
+    'Status '+clip(laws.status||'COLLECTING_OR_UNVALIDATED',48)+' · keine automatische Promotion'
+  ].filter(Boolean).join('\n');
   return payload(
     'BIGGJ // MARKET SCIENCE',
     '**Das ist BIGGJ.** Trading ist nur eine nachgelagerte Anwendung. Der Kern baut überprüfbares Marktwissen und darf UNKNOWN als Ergebnis behalten.',
@@ -72,6 +91,7 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
         'Theorien '+fmt(frontier.total)+' · Evidence '+fmt(frontier.evidence)+' · Experimente '+fmt(frontier.experiments),
         'Robust '+fmt(frontier.robust)+' · Broken '+fmt(frontier.broken)+' · Surprises '+fmt(frontier.surprises)
       ].join('\n')),
+      safeField('NEUE ENTDECKUNGEN · TEMPORAL TEMPLE',discoveryText),
       safeField('NÄCHSTE FORSCHUNGSFRAGE',next
         ?'**'+clip(next.kind||'QUESTION',40)+'**\n'+clip(next.question||next.nextExperimentPurpose||'—',800)
         :'Noch keine priorisierte Forschungsfrage.'),

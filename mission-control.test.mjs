@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V6_MEME_WALLET');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V7_DISCOVERY_JOURNAL');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);
@@ -33,7 +33,7 @@ test('mobile control plane exposes the curated user command center',()=>{
     },portfolio:{equityQuote:1000,openPositions:0,closedTrades:0,netPnlQuote:0,positions:[],recentClosed:[]}
   });
   const html=renderBiggjMobileApp(s);
-  for(const x of ['data-tab="today"','data-tab="markets"','data-tab="progress"','data-tab="trading"','data-tab="meme"','LIVE TICKER','RESEARCH-REIFE','Security Outcome Lab'])assert.match(html,new RegExp(x));
+  for(const x of ['data-tab="today"','data-tab="markets"','data-tab="progress"','data-tab="trading"','data-tab="meme"','LIVE TICKER','BIGGJ DISCOVERY JOURNAL','Security Outcome Lab'])assert.match(html,new RegExp(x));
   for(const hidden of ['data-tab="science"','data-tab="world"','data-tab="lab"','data-tab="decisions"','data-tab="system"'])assert.doesNotMatch(html,new RegExp(hidden));
   assert.match(html,/app\.webmanifest/);assert.match(html,/serviceWorker/);assert.match(html,/SHADOW_ONLY/);
 });
