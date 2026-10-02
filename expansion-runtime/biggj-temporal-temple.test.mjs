@@ -73,6 +73,20 @@ test('64-state lattice encodes six independent binary axes',()=>{
   assert.equal(Object.keys(state.axes).length,6);
 });
 
+test('Temporal Temple rejects quarantined extreme price ratios before state or event inference',()=>{
+  const c=evidenceCase(99,{expanding:true});
+  c.initialPriceUsd=1e-12;
+  c.observations['15m'].priceUsd=1e-3;
+  c.observations['15m'].returnFromInitial=1e9-1;
+  assert.equal(temporalStateForCase(c,'15m'),null);
+
+  const temple=buildBiggjTemporalTemple({cases:[c]},{minNilometerTrain:50,minNilometerValidate:20});
+  const priceUp=temple.eventClock.milestones.find(x=>x.id==='PRICE_PLUS_25');
+  assert.equal(priceUp.cases,0);
+  assert.equal(temple.returnQualityGuard.action,'QUARANTINE_NOT_CLIP');
+  assert.equal(temple.returnQualityGuard.maxPriceRatio,1_000_000);
+});
+
 test('book of changes learns empirical transitions without execution authority',()=>{
   const cases=Array.from({length:12},(_,i)=>evidenceCase(i,{expanding:i%3!==0,oneHourReturn:i%3!==0?.35:-.30,fourHourReturn:i%3!==0?.55:-.45}));
   const temple=buildBiggjTemporalTemple({cases},{minEphemerisSamples:2,minNilometerTrain:50,minNilometerValidate:20});

@@ -79,6 +79,51 @@ test('counterfactual lab uses discrete checkpoint semantics and does not inflate
   assert.match(s.counterfactuals.semantics,/DO_NOT_INCREASE_INDEPENDENT_CASE_COUNT/);
 });
 
+test('pathological price-ratio jumps are quarantined instead of poisoning counterfactual averages',()=>{
+  let state=createMemecoinEvidenceFactoryState();
+  state=observeMemecoinEvidence(state,[row({token:'Q',price:1e-12})],{now:4_000_000}).state;
+  state=observeMemecoinEvidence(state,[row({token:'Q',price:1e-12})],{now:4_000_000+5*60_000}).state;
+  state=observeMemecoinEvidence(state,[row({token:'Q',price:1e-3})],{now:4_000_000+15*60_000}).state;
+
+  const s=memecoinEvidenceFactorySummary(state,{asOf:4_000_000+15*60_000});
+  assert.equal(s.counterfactuals.delay5m.independentCases,1);
+  assert.equal(s.counterfactuals.delay5m.usableCases,0);
+  assert.equal(s.counterfactuals.delay5m.quarantinedCases,1);
+  assert.equal(s.counterfactuals.delay5m.averageFinalReturn,null);
+  assert.equal(s.counterfactuals.delay5m.quarantineReasons.EXTREME_PRICE_RATIO_QUARANTINED,1);
+  assert.ok(s.counterfactuals.delay5m.largestRawAbsReturn>1e8);
+  assert.equal(s.counterfactuals.delay5m.qualityGuard.action,'QUARANTINE_NOT_CLIP');
+  assert.equal(s.returnQualityGuard.rawObservationPreserved,true);
+});
+
+test('large but non-pathological moonshots remain usable and are not clipped',()=>{
+  let state=createMemecoinEvidenceFactoryState();
+  state=observeMemecoinEvidence(state,[row({token:'M',price:1})],{now:5_000_000}).state;
+  state=observeMemecoinEvidence(state,[row({token:'M',price:2})],{now:5_000_000+5*60_000}).state;
+  state=observeMemecoinEvidence(state,[row({token:'M',price:200})],{now:5_000_000+15*60_000}).state;
+
+  const s=memecoinEvidenceFactorySummary(state,{asOf:5_000_000+15*60_000});
+  assert.equal(s.counterfactuals.delay5m.independentCases,1);
+  assert.equal(s.counterfactuals.delay5m.usableCases,1);
+  assert.equal(s.counterfactuals.delay5m.quarantinedCases,0);
+  assert.equal(Number(s.counterfactuals.delay5m.averageFinalReturn.toFixed(2)),99);
+});
+
+test('old persisted raw returns are requalified from prices during summary',()=>{
+  let state=createMemecoinEvidenceFactoryState();
+  state=observeMemecoinEvidence(state,[row({token:'OLD',price:1e-12})],{now:6_000_000}).state;
+  state=observeMemecoinEvidence(state,[row({token:'OLD',price:1e-12})],{now:6_000_000+5*60_000}).state;
+  state=observeMemecoinEvidence(state,[row({token:'OLD',price:1e-3})],{now:6_000_000+15*60_000}).state;
+  const persisted=JSON.parse(JSON.stringify(state));
+  persisted.cases[0].observations['15m'].returnFromInitial=1e27;
+
+  const s=memecoinEvidenceFactorySummary(persisted,{asOf:6_000_000+15*60_000});
+  assert.equal(s.byHorizon['15m'].quarantined,1);
+  assert.equal(s.byHorizon['15m'].usable,0);
+  assert.equal(s.byHorizon['15m'].averageReturn,null);
+  assert.equal(s.returnQualityGuard.quarantineReasons.EXTREME_PRICE_RATIO_QUARANTINED,1);
+});
+
 test('walk-forward miner stays research-only even when a repeated pattern validates',()=>{
   let state=createMemecoinEvidenceFactoryState();
   let now=10_000_000;
