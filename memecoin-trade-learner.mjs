@@ -101,18 +101,24 @@ function w5Keys(shape){
     ['GLOBAL','ALL']
   ];
 }
-function emptyRaw(){return {samples:0,wins:0,returns:[],pnls:[],severeLosses:0,moonshots:0,stops:0,takeProfits:0,horizons:0,tailRiskExits:0,securityExits:0,liquidityExits:0};}
+function emptyRaw(){return {samples:0,wins:0,returns:[],pnls:[],maes:[],mfes:[],severeLosses:0,moonshots:0,stops:0,takeProfits:0,horizons:0,tailRiskExits:0,securityExits:0,liquidityExits:0,runnerTrails:0,riskReductions:0,profitLocks:0};}
 function addRaw(map,key,row){
   const x=map.get(key)||emptyRaw(),ret=finite(row?.realizedReturnPct),pnl=finite(row?.realizedNetPnlQuote);
   if(ret==null||pnl==null)return;
   x.samples++;x.returns.push(ret);x.pnls.push(pnl);if(pnl>0)x.wins++;
-  if(ret<=-.45)x.severeLosses++;if(ret>=1.5)x.moonshots++;
+  const mae=finite(row?.observedMaeReturnPct??row?.troughUnrealizedReturnPct);
+  const mfe=finite(row?.observedMfeReturnPct??row?.peakUnrealizedReturnPct);
+  if(mae!=null)x.maes.push(mae);if(mfe!=null)x.mfes.push(mfe);
+  if(ret<=-.25)x.severeLosses++;if(ret>=1.5)x.moonshots++;
   const closeReason=String(row?.closeReason||'');
   if(closeReason==='MEME_STOP')x.stops++;if(closeReason==='MEME_TAKE_PROFIT')x.takeProfits++;
   if(closeReason==='MEME_HORIZON')x.horizons++;
   if(closeReason==='MEME_TAIL_RISK_EXIT')x.tailRiskExits++;
   if(closeReason==='MEME_SECURITY_ABSTAIN')x.securityExits++;
   if(closeReason==='MEME_LIQUIDITY_COLLAPSE')x.liquidityExits++;
+  if(closeReason==='MEME_RUNNER_TRAIL')x.runnerTrails++;
+  if(row?.riskReductionApplied===true)x.riskReductions++;
+  if(row?.profitLockApplied===true)x.profitLocks++;
   map.set(key,x);
 }
 function summarize(raw,{priorWinRate=.5,priorStrength=10,returnPriorStrength=8}={}){
@@ -147,11 +153,14 @@ function summarize(raw,{priorWinRate=.5,priorStrength=10,returnPriorStrength=8}=
     samples:n,wins:raw?.wins||0,rawWinRate:n?(raw.wins||0)/n:null,posteriorWinRate,
     rawMeanReturn:rawMean,medianReturn:median(raw?.returns||[]),p10Return:percentile(raw?.returns||[],.10),
     p90Return:percentile(raw?.returns||[],.90),shrinkedMeanReturn,
-    averagePnlQuote:mean(raw?.pnls||[]),severeLossRate,moonshotRate,confidence,qualityScore,label,
+    averagePnlQuote:mean(raw?.pnls||[]),averageMaeReturn:mean(raw?.maes||[]),averageMfeReturn:mean(raw?.mfes||[]),
+    severeLossRate,moonshotRate,confidence,qualityScore,label,
     closeReasons:{
       stop:raw?.stops||0,takeProfit:raw?.takeProfits||0,horizon:raw?.horizons||0,
-      tailRisk:raw?.tailRiskExits||0,security:raw?.securityExits||0,liquidity:raw?.liquidityExits||0
-    }
+      tailRisk:raw?.tailRiskExits||0,security:raw?.securityExits||0,liquidity:raw?.liquidityExits||0,
+      runnerTrail:raw?.runnerTrails||0
+    },
+    interventions:{riskReductions:raw?.riskReductions||0,profitLocks:raw?.profitLocks||0}
   });
 }
 function buildGroups(rows,keyFn,shapeFn){

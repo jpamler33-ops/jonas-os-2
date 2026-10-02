@@ -321,6 +321,99 @@ test('wallet 4 refuses unknown security and exits when later evidence becomes cr
   assert.equal(closed.state.wallets[WALLET_4_MEME_SCOUT].closed[0].closeReason,'MEME_SECURITY_ABSTAIN');
 });
 
+test('wallet 4 hard capital guard closes a plain loss near minus 25 percent instead of waiting for minus 45',()=>{
+  const now=3_800_000;
+  let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'GUARD',symbol:'GUARD',priceUsd:1,liquidityUsd:80_000,
+    volumeM5:20_000,buysM5:12,sellsM5:8,priceChangeM5:2,
+    score:{stage:'NEW_NOW',researchPriorityScore:.75,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now}).state;
+  const next=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'GUARD',symbol:'GUARD',priceUsd:.74,liquidityUsd:80_000,
+    volumeM5:20_000,buysM5:10,sellsM5:10,priceChangeM5:-10,
+    score:{stage:'EARLY',researchPriorityScore:.62,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now:now+30_000});
+  assert.equal(next.results.closed,1);
+  assert.equal(next.results.hardStopClosed,1);
+  assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].closed[0].closeReason,'MEME_STOP');
+  assert.ok(next.state.wallets[WALLET_4_MEME_SCOUT].closed[0].realizedReturnPct<=-.25);
+});
+
+test('wallet 4 reduces exposure once when early deterioration appears before the hard stop',()=>{
+  const now=3_900_000;
+  let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DERISK',symbol:'DERISK',priceUsd:1,liquidityUsd:60_000,
+    volumeM5:20_000,buysM5:18,sellsM5:7,priceChangeM5:12,
+    score:{stage:'NEW_NOW',researchPriorityScore:.78,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now}).state;
+  const next=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DERISK',symbol:'DERISK',priceUsd:.90,liquidityUsd:42_000,
+    volumeM5:30_000,buysM5:4,sellsM5:12,priceChangeM5:-30,
+    score:{stage:'EARLY',researchPriorityScore:.55,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now:now+30_000,riskReduceFraction:.50});
+  assert.equal(next.results.closed,0);
+  assert.equal(next.results.riskReduced,1);
+  const p=next.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.equal(p.riskReductionApplied,true);
+  assert.equal(p.exposureQuote,50);
+  assert.equal(p.marginQuote,50);
+  assert.equal(p.partialExits.length,1);
+  assert.ok(p.partialRealizedNetPnlQuote<0);
+});
+
+test('wallet 4 runner locks a fraction and exits the remainder only after a trailing drawdown',()=>{
+  const now=4_000_000;
+  let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUN2',symbol:'RUN2',priceUsd:1,liquidityUsd:90_000,
+    volumeM5:25_000,buysM5:20,sellsM5:6,priceChangeM5:20,
+    score:{stage:'NEW_NOW',researchPriorityScore:.82,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now}).state;
+  let next=applyMemecoinScoutSnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUN2',symbol:'RUN2',priceUsd:2.1,liquidityUsd:120_000,
+    volumeM5:35_000,buysM5:24,sellsM5:8,priceChangeM5:35,
+    score:{stage:'EARLY',researchPriorityScore:.75,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now:now+30_000,runnerEnabled:true,runnerArmReturn:1,runnerTrailPct:.35,runnerProfitLockFraction:.25,takeReturn:null});
+  assert.equal(next.results.closed,0);
+  assert.equal(next.results.profitLocked,1);
+  assert.equal(next.state.wallets[WALLET_4_MEME_SCOUT].positions[0].exposureQuote,75);
+
+  next=applyMemecoinScoutSnapshot(next.state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUN2',symbol:'RUN2',priceUsd:1.30,liquidityUsd:100_000,
+    volumeM5:28_000,buysM5:10,sellsM5:12,priceChangeM5:-20,
+    score:{stage:'EARLY',researchPriorityScore:.62,attentionSignals:[],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now:now+60_000,runnerEnabled:true,runnerArmReturn:1,runnerTrailPct:.35,runnerProfitLockFraction:.25,takeReturn:null});
+  assert.equal(next.results.closed,1);
+  assert.equal(next.results.runnerTrailClosed,1);
+  const c=next.state.wallets[WALLET_4_MEME_SCOUT].closed[0];
+  assert.equal(c.closeReason,'MEME_RUNNER_TRAIL');
+  assert.equal(c.profitLockApplied,true);
+  assert.ok(c.realizedNetPnlQuote>0);
+  assert.ok(c.observedMfeReturnPct>=1);
+});
+
+test('wallet 4 risk sizing makes low-liquidity lower-score research positions materially smaller',()=>{
+  const now=4_100_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'SIZED',symbol:'SIZED',priceUsd:1,liquidityUsd:18_000,
+    volumeM5:10_000,buysM5:10,sellsM5:6,priceChangeM5:5,
+    score:{stage:'NEW_NOW',researchPriorityScore:.60,attentionSignals:[],riskFlags:['LIQUIDITY_THIN']},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now,marginQuote:100,riskSizingEnabled:true});
+  assert.equal(x.results.opened,1);
+  const p=x.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.ok(p.marginQuote<=35);
+  assert.ok(p.entryRiskSizeMultiplier<=.35);
+  assert.equal(p.initialMarginQuote,p.marginQuote);
+  assert.equal(p.entrySizingPolicy,'LIQUIDITY_SCORE_RISK_SIZED');
+});
+
 test('summary keeps specialist wallets isolated and shadow-only',()=>{
   const s=specialistWalletSummary(createSpecialistWalletState(),{asOf:100});
   assert.ok(s.wallets[WALLET_3_TRADER_COPY]);
