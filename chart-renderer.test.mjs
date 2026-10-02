@@ -90,3 +90,29 @@ test('trade replay caption falls back to stored research lane instead of UNKNOWN
   assert.match(source,/tradeReplayContextLabel\(p\)/);
   assert.match(source,/PRIMARY_UNCLASSIFIED/);
 });
+
+
+test('renders persistent trend boxes and historical forecast moments together',()=>{
+  const candles=[];
+  for(let i=0;i<100;i++){
+    const base=100+Math.sin(i/8)*4+i*.04;
+    candles.push({openTime:i*60000,o:base,h:base+.8,l:base-.8,c:base+.25,v:100+i,closeTime:(i+1)*60000-1,closed:true});
+  }
+  const trendBoxes=[
+    {scale:'M',direction:'UP',status:'CLOSED',startTime:candles[10].closeTime,endTime:candles[38].closeTime,high:106,low:99},
+    {scale:'M',direction:'DOWN',status:'CLOSED',startTime:candles[38].closeTime,endTime:candles[66].closeTime,high:107,low:98},
+    {scale:'M',direction:'UP',status:'ACTIVE',startTime:candles[66].closeTime,endTime:candles[99].closeTime,high:108,low:99}
+  ];
+  const forecastMoments=[
+    {asOf:candles[20].closeTime,anchorPrice:102,targetAt:candles[25].closeTime,medianPrice:104,horizonId:'5m'},
+    {asOf:candles[50].closeTime,anchorPrice:103,targetAt:candles[55].closeTime,medianPrice:101,horizonId:'5m'}
+  ];
+  const png=renderCandlestickPng(candles,{support:98,resistance:109,classifiedPivots:[]},{
+    width:900,height:560,
+    trendBoxes,
+    forecastMoments,
+    trendBoxForecast:{available:true,scale:'M',boxDirection:'UP',alignment:'ALIGNED'}
+  });
+  assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+  assert.ok(png.length>1000);
+});
