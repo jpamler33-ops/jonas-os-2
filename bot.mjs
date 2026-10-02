@@ -4925,7 +4925,13 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       minEphemerisSamples:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_EPHEMERIS_MIN||4)),
       minResonanceSamples:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_RESONANCE_MIN||8)),
       minInvariantPerContext:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXT_MIN||4)),
-      minInvariantContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXTS||2))
+      minInvariantContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXTS||2)),
+      minTransitionLawTrain:Math.max(12,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_TRAIN||16)),
+      minTransitionLawValidate:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_VALIDATE||6)),
+      minTransitionLawContextSamples:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_CONTEXT_MIN||3)),
+      minTransitionLawContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_CONTEXTS||2)),
+      maxTransitionLawFolds:Math.max(1,Math.min(5,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_FOLDS||3))),
+      minTransitionLawMedianEffect:Math.max(0,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_EFFECT_FLOOR||0.02))
     });
     const temporalTempleSummary=biggjTemporalTempleSummary(temporalTemple);
     snapshot={...snapshot,evidenceFactory:evidenceFactorySummary,temporalTemple:temporalTempleSummary};
@@ -5065,6 +5071,9 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         nilometer4hStatus:temporalTempleSummary.nilometers?.fourHour?.status||'COLLECTING',
         resonance15m1h:temporalTempleSummary.resonance?.fifteenMinToOneHour?.status||'COLLECTING',
         invariants:temporalTempleSummary.invariants?.status||'COLLECTING',
+        transitionLaws:temporalTempleSummary.transitionLaws?.status||'COLLECTING_OR_UNVALIDATED',
+        transitionLawCandidates:(temporalTempleSummary.transitionLaws?.candidates||[]).filter(x=>x?.validated===true).length,
+        transitionLawHypotheses:temporalTempleSummary.transitionLaws?.testedHypotheses||0,
         ephemeris:temporalTempleSummary.ephemeris?.status||'COLLECTING',
         policyMutationAllowed:false,
         canExecuteLive:false
@@ -11598,7 +11607,13 @@ function missionControlData(){
       minEphemerisSamples:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_EPHEMERIS_MIN||4)),
       minResonanceSamples:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_RESONANCE_MIN||8)),
       minInvariantPerContext:Math.max(3,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXT_MIN||4)),
-      minInvariantContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXTS||2))
+      minInvariantContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_INVARIANT_CONTEXTS||2)),
+      minTransitionLawTrain:Math.max(12,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_TRAIN||16)),
+      minTransitionLawValidate:Math.max(5,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_VALIDATE||6)),
+      minTransitionLawContextSamples:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_CONTEXT_MIN||3)),
+      minTransitionLawContexts:Math.max(2,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_CONTEXTS||2)),
+      maxTransitionLawFolds:Math.max(1,Math.min(5,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_FOLDS||3))),
+      minTransitionLawMedianEffect:Math.max(0,Number(process.env.TCX_TEMPORAL_TEMPLE_LAW_EFFECT_FLOOR||0.02))
     })),
     evidenceFactory:{
       ...(memecoinEarlySnapshot?.evidenceFactory||memecoinEvidenceFactorySummary(memecoinEvidenceFactoryState,{
