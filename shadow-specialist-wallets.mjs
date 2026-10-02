@@ -250,7 +250,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
-  const results={opened:0,closed:0,marked:0,eligible:0,sourceReady:snapshot?.sourceReady===true};
+  const results={opened:0,closed:0,marked:0,eligible:0,learningBlocked:0,learningBoosted:0,sourceReady:snapshot?.sourceReady===true};
 
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
@@ -277,9 +277,12 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     const px=finite(row?.priceUsd);
     const flags=row?.score?.riskFlags||[];
     const securityGate=memeSecurityGate(row);
-    const eligible=['NEW_NOW','EARLY'].includes(stage)&&score>=minScore&&liq>=minLiquidityUsd&&px>0&&!severeMemeRisk(flags)&&securityGate==='PASS'&&!memeSecurityCritical(row);
-    if(!eligible)continue;
+    const learningAction=String(row?.memeLearning?.action||'NEUTRAL').toUpperCase();
+    const baseEligible=['NEW_NOW','EARLY'].includes(stage)&&score>=minScore&&liq>=minLiquidityUsd&&px>0&&!severeMemeRisk(flags)&&securityGate==='PASS'&&!memeSecurityCritical(row);
+    if(!baseEligible)continue;
     results.eligible++;
+    if(learningAction==='BLOCK'){results.learningBlocked++;continue;}
+    if(learningAction==='BOOST')results.learningBoosted++;
     if(wallet.positions.length>=maxOpenOperational)break;
     const key=memePositionKey(row);
     if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key))continue;
@@ -294,6 +297,29 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
       entryResearchPriorityScore:score,entryStage:stage,
       entryAttentionSignals:clone(row?.score?.attentionSignals||[]),
       entryRiskFlags:clone(flags),
+      entryMarketFeatures:{
+        chainId:String(row?.chainId||''),stage,
+        ageMinutes:finite(row?.score?.ageMinutes),
+        researchPriorityScore:score,
+        liquidityUsd:finite(row?.liquidityUsd),
+        marketCap:finite(row?.marketCap),
+        fdv:finite(row?.fdv),
+        volumeM5:finite(row?.volumeM5),
+        volumeH1:finite(row?.volumeH1),
+        buysM5:finite(row?.buysM5),
+        sellsM5:finite(row?.sellsM5),
+        priceChangeM5:finite(row?.priceChangeM5),
+        priceChangeH1:finite(row?.priceChangeH1),
+        pairCreatedAt:finite(row?.pairCreatedAt),
+        socialPosts:finite(row?.directSocialAttention?.posts),
+        socialAuthors:finite(row?.directSocialAttention?.uniqueAuthors),
+        socialEngagement:finite(row?.directSocialAttention?.engagement),
+        socialAttentionBand:text(row?.directSocialAttention?.attentionBand||'',40),
+        holderTop10Share:finite(row?.security?.holderState?.top10Share),
+        largestHolderShare:finite(row?.security?.holderState?.largestHolderShare),
+        holderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence)
+      },
+      entryMemeLearning:clone(row?.memeLearning||null),
       entrySecurityGate:securityGate,
       entrySecuritySource:text(row?.security?.source||'',160),
       entryHolderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence),
