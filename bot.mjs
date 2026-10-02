@@ -14,7 +14,7 @@ import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTrader
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
 import { buildNewsResearchSnapshots, filterPreviouslyObservedNewsSnapshots, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
-import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission } from './storage-maintenance.mjs';
+import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission, classifyBoundedResearchDataPlaneWrite } from './storage-maintenance.mjs';
 import { rotateVerifiedMarketFabric, reconcileMarketFabricCheckpointFromArchive, MARKET_FABRIC_ROTATION_VERSION } from './market-fabric-rotation.mjs';
 import { archiveMarketFabricSegments, MARKET_FABRIC_ARCHIVE_VERSION } from './market-fabric-archive.mjs';
 import { createS3ColdStoreFromEnv, MARKET_FABRIC_COLD_STORE_VERSION } from './market-fabric-cold-store.mjs';
@@ -382,9 +382,22 @@ async function currentStoragePressure(){
   return storagePressureCache;
 }
 
-async function storageWriteAdmission(scope){
+async function storageWriteAdmission(scope,{researchPlane=null}={}){
   const pressure=await currentStoragePressure();
-  const admission=classifyStorageWriteAdmission(pressure,{scope});
+  let admission=classifyStorageWriteAdmission(pressure,{scope});
+  if(String(scope||'').toUpperCase()==='RESEARCH_DATA_PLANE'&&!admission.allowed&&admission.state==='WARN'&&researchPlane){
+    admission=classifyBoundedResearchDataPlaneWrite(pressure,researchPlane,{
+      criticalFreeBytes:storageCriticalFreeBytes,
+      reserveAboveCriticalBytes:Math.max(16*1024*1024,Number(process.env.TCX_RDP_STORAGE_RESERVE_ABOVE_CRITICAL_BYTES||24*1024*1024))
+    });
+    if(admission.allowed&&Date.now()-storagePressureLastBlockLogAt>=30000){
+      console.warn('[TCX_STORAGE_WARN_BOUNDED_RDP]',JSON.stringify({
+        ...admission,
+        dataDir:persistenceDataDir,
+        destructiveRetention:false
+      }));
+    }
+  }
   if(!admission.allowed&&Date.now()-storagePressureLastBlockLogAt>=30000){
     storagePressureLastBlockLogAt=Date.now();
     console.error('[TCX_STORAGE_WRITE_BLOCKED]',JSON.stringify({
@@ -10198,7 +10211,7 @@ async function appendResearchDataPlaneQueued(inputs,reason='capture',{skipPrevio
   if(!researchDataPlane.healthy) return {ok:false,appended:0,duplicates:0,previouslyObserved:0,reason:'RDP_UNHEALTHY'};
   const job=researchDataPlaneAppendQueue.then(async()=>{
     const started=Date.now();
-    const admission=await storageWriteAdmission('RESEARCH_DATA_PLANE');
+    const admission=await storageWriteAdmission('RESEARCH_DATA_PLANE',{researchPlane:researchDataPlane});
     if(!admission.allowed){
       return {ok:false,appended:0,duplicates:0,previouslyObserved:0,governed:0,restrictedSources:0,governanceFingerprint:null,reason:admission.reason,storagePressure:admission.state};
     }
