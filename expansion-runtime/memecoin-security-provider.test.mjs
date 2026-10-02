@@ -68,6 +68,38 @@ test('clean covered token can pass and unknown source never fabricates pass',asy
   assert.equal(y.securityProvider.unknownReasonCounts.SECURITY_SOURCE_UNAVAILABLE,1);
 });
 
+test('Honeypot.is top holders resolves EVM holder-only UNKNOWN before Blockscout fallback',async()=>{
+  const address='0x5555555555555555555555555555555555555555';
+  let blockscoutCalls=0;
+  const p=createMemecoinSecurityProvider({
+    minRequestGapMs:0,now:()=>3500,
+    fetchImpl:async url=>{
+      const u=new URL(url);
+      if(u.hostname==='api.gopluslabs.io')return ok({code:1,result:{[address]:{
+        is_honeypot:'0',is_mintable:'0',transfer_pausable:'0',is_blacklisted:'0',
+        owner_change_balance:'0',hidden_owner:'0',can_take_back_ownership:'0',holders:[]
+      }}});
+      if(u.hostname==='api.honeypot.is'){
+        assert.equal(u.pathname,'/v1/TopHolders');
+        assert.equal(u.searchParams.get('chainID'),'8453');
+        return ok({
+          totalSupply:'1000',
+          holders:Array.from({length:10},(_,i)=>({address:'0x'+String(i+1).padStart(40,'0'),balance:'30'}))
+        });
+      }
+      if(u.hostname==='base.blockscout.com'){blockscoutCalls++;throw new Error('should not reach blockscout');}
+      throw new Error('unexpected '+url);
+    }
+  });
+  const out=await p.enrichSnapshot({rows:[{chainId:'base',tokenAddress:address}]},{maxChecks:1,maxHolderFallbackChecks:1});
+  const s=out.rows[0].security;
+  assert.equal(s.evidenceGate,'PASS');
+  assert.equal(s.holderState.independentSource,'HONEYPOT_IS_TOP_HOLDERS');
+  assert.equal(Number(s.holderState.top10Share.toFixed(2)),.3);
+  assert.equal(out.securityProvider.holderFallback.resolvedPass,1);
+  assert.equal(blockscoutCalls,0);
+});
+
 test('Blockscout holder evidence resolves a holder-only GoPlus UNKNOWN without relaxing other gates',async()=>{
   const address='0x3333333333333333333333333333333333333333';
   const values=Array.from({length:10},()=>String(40n*10n**18n));
@@ -102,13 +134,13 @@ test('Blockscout holder evidence resolves a holder-only GoPlus UNKNOWN without r
 test('Solana RPC holder fallback can convert concentration uncertainty into ABSTAIN',async()=>{
   const address='So11111111111111111111111111111111111111112';
   const p=createMemecoinSecurityProvider({
-    minRequestGapMs:0,now:()=>5000,
+    minRequestGapMs:0,now:()=>5000,solanaRpcUrls:['https://solana.test'],
     fetchImpl:async (url,init={})=>{
       const u=new URL(url);
       if(u.hostname==='api.gopluslabs.io')return ok({code:1,result:{[address]:{
         mintable:{status:'0'},freezable:{status:'0'},non_transferable:'0',holders:[]
       }}});
-      if(u.hostname==='api.mainnet-beta.solana.com'){
+      if(u.hostname==='solana.test'){
         const req=JSON.parse(init.body);
         if(req.method==='getTokenLargestAccounts')return ok({result:{context:{slot:123},value:[
           {amount:'700'},{amount:'100'},{amount:'50'}
