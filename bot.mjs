@@ -6,6 +6,7 @@ import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } fro
 import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION } from './biggj-public-trader-watch.mjs';
 import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, scoreEarlyMemecoin, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
 import { createMemecoinSecurityProvider, MEMECOIN_SECURITY_PROVIDER_VERSION } from './expansion-runtime/memecoin-security-provider.mjs';
+import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, observeMemecoinSecurityOutcomes, dueMemecoinSecurityOutcomeFollowups, memecoinSecurityOutcomeSummary, MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION } from './expansion-runtime/memecoin-security-outcome-tracker.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
 import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -1365,6 +1366,8 @@ const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-
 let loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
 const specialistWalletFile = process.env.TCX_SPECIALIST_WALLETS_FILE || '/data/tcx-specialist-wallets.json';
 let loadedSpecialistWallets = await loadSpecialistWalletState(specialistWalletFile);
+const memecoinSecurityOutcomeFile = process.env.TCX_MEME_SECURITY_OUTCOME_FILE || '/data/tcx-meme-security-outcomes.json';
+let loadedMemecoinSecurityOutcomes = await loadMemecoinSecurityOutcomeState(memecoinSecurityOutcomeFile);
 const strategyLeagueFile = process.env.TCX_STRATEGY_LEAGUE_FILE || '/data/tcx-strategy-league.json';
 let loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
@@ -1392,6 +1395,11 @@ let specialistWalletHealthy = loadedSpecialistWallets.healthy;
 let specialistWalletLastError = loadedSpecialistWallets.error || null;
 loadedSpecialistWallets=null;
 let specialistWalletPersistenceQueue = Promise.resolve();
+let memecoinSecurityOutcomeState=loadedMemecoinSecurityOutcomes.state;
+let memecoinSecurityOutcomeHealthy=loadedMemecoinSecurityOutcomes.healthy;
+let memecoinSecurityOutcomeLastError=loadedMemecoinSecurityOutcomes.error||null;
+loadedMemecoinSecurityOutcomes=null;
+let memecoinSecurityOutcomePersistenceQueue=Promise.resolve();
 let strategyLeagueLedger = loadedStrategyLeague.ledger;
 let strategyLeagueHealthy = loadedStrategyLeague.healthy;
 let strategyLeagueLastError = loadedStrategyLeague.error || null;
@@ -1730,6 +1738,28 @@ async function persistSpecialistWallets(reason='mutation'){
     }
   });
   return specialistWalletPersistenceQueue;
+}
+
+async function persistMemecoinSecurityOutcomes(reason='mutation'){
+  memecoinSecurityOutcomePersistenceQueue=memecoinSecurityOutcomePersistenceQueue.then(async()=>{
+    if(!memecoinSecurityOutcomeHealthy)return false;
+    try{
+      memecoinSecurityOutcomeState=await saveMemecoinSecurityOutcomeState(
+        memecoinSecurityOutcomeFile,
+        memecoinSecurityOutcomeState,
+        {maxRecords:Math.max(500,Math.min(20_000,Number(process.env.TCX_MEME_SECURITY_OUTCOME_MAX_RECORDS||5000)))}
+      );
+      memecoinSecurityOutcomeLastError=null;
+      return true;
+    }catch(err){
+      memecoinSecurityOutcomeHealthy=false;
+      memecoinSecurityOutcomeLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'memecoin_security_outcomes.persistence',message:memecoinSecurityOutcomeLastError});
+      console.error('[BIGGJ_MEME_SECURITY_OUTCOME_PERSIST_FAILED]',reason,memecoinSecurityOutcomeLastError);
+      return false;
+    }
+  });
+  return memecoinSecurityOutcomePersistenceQueue;
 }
 
 async function persistStrategyLeague(reason='mutation'){
@@ -4768,6 +4798,46 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       }
     };
 
+    const outcomeNow=Date.now();
+    const outcomeObserved=observeMemecoinSecurityOutcomes(
+      memecoinSecurityOutcomeState,
+      secured.rows||securityPriorityRows,
+      {now:outcomeNow,maxRecords:Math.max(500,Math.min(20_000,Number(process.env.TCX_MEME_SECURITY_OUTCOME_MAX_RECORDS||5000)))}
+    );
+    memecoinSecurityOutcomeState=outcomeObserved.state;
+
+    const currentOutcomeKeys=new Set((secured.rows||securityPriorityRows).map(memecoinRowKey));
+    const dueOutcomeFollowups=dueMemecoinSecurityOutcomeFollowups(memecoinSecurityOutcomeState,{
+      asOf:outcomeNow,
+      recentObservationMs:Math.max(30_000,Number(process.env.TCX_MEME_SECURITY_OUTCOME_RECENT_MS||60_000)),
+      max:Math.max(0,Math.min(6,Number(process.env.TCX_MEME_SECURITY_OUTCOME_FOLLOWUPS_PER_CYCLE||3)))
+    }).filter(x=>!currentOutcomeKeys.has(String(x.key||'').toLowerCase()));
+    const outcomeFollowupRows=[];
+    for(const due of dueOutcomeFollowups){
+      try{
+        const row=await memecoinEarlyProvider.fetchTokenSnapshot(due.chainId,due.tokenAddress,{force:false});
+        if(row)outcomeFollowupRows.push(row);
+      }catch(err){
+        recordError(observability,{scope:'memecoin_security_outcomes.followup',message:err instanceof Error?err.message:String(err)});
+      }
+    }
+    let outcomeFollowupResult={created:0,updated:0,matured:0,records:memecoinSecurityOutcomeState?.records?.length||0};
+    if(outcomeFollowupRows.length){
+      const followed=observeMemecoinSecurityOutcomes(memecoinSecurityOutcomeState,outcomeFollowupRows,{
+        now:Date.now(),
+        maxRecords:Math.max(500,Math.min(20_000,Number(process.env.TCX_MEME_SECURITY_OUTCOME_MAX_RECORDS||5000)))
+      });
+      memecoinSecurityOutcomeState=followed.state;
+      outcomeFollowupResult=followed.results;
+    }
+    if(outcomeObserved.results.created||outcomeObserved.results.matured||outcomeFollowupResult.matured){
+      await persistMemecoinSecurityOutcomes('memecoin-early:'+reason);
+    }
+    const securityOutcomeSummary=memecoinSecurityOutcomeSummary(memecoinSecurityOutcomeState,{
+      asOf:Date.now(),
+      minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
+    });
+
     const walletInput={...snapshot,rows:secured.rows||securityPriorityRows};
     const walletUpdate=applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
       now:Date.now(),
@@ -4817,7 +4887,17 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         unknown:securityRows.filter(x=>x?.security?.evidenceGate==='UNKNOWN').length,
         errors:secured?.securityProvider?.errors?.length||0,
         unknownReasonCounts:secured?.securityProvider?.unknownReasonCounts||{},
-        holderFallback:secured?.securityProvider?.holderFallback||null
+        holderFallback:secured?.securityProvider?.holderFallback||null,
+        outcomes:{
+          version:MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION,
+          records:securityOutcomeSummary.records,
+          comparison:securityOutcomeSummary.comparison,
+          fallbackPass1h:securityOutcomeSummary.cohorts?.PASS_HOLDER_FALLBACK?.horizons?.['1h']||null,
+          nativePass1h:securityOutcomeSummary.cohorts?.PASS_NATIVE?.horizons?.['1h']||null,
+          abstain1h:securityOutcomeSummary.cohorts?.ABSTAIN?.horizons?.['1h']||null,
+          followupsRequested:dueOutcomeFollowups.length,
+          followupsObserved:outcomeFollowupRows.length
+        }
       },
       social:{
         version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
@@ -11892,6 +11972,7 @@ async function gracefulShutdown(signal) {
   await saveEntityFlowMemory(entityFlowMemoryFile,entityFlowMemory).catch(()=>{});
   await persistShadowOms(`shutdown:${signal}`);
   await persistSpecialistWallets(`shutdown:${signal}`);
+  await persistMemecoinSecurityOutcomes(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
