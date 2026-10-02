@@ -166,47 +166,45 @@ export function buildTrendBoxes(candles,{
     });
   }
   const atr=atrSeries(rows,atrPeriod);
-  let anchorIndex=Math.max(0,atrPeriod-1);
-  let anchorPrice=rows[anchorIndex].c;
+  const seedIndex=Math.max(0,atrPeriod-1);
+  let candidateLowIndex=seedIndex,candidateLowPrice=rows[seedIndex].l;
+  let candidateHighIndex=seedIndex,candidateHighPrice=rows[seedIndex].h;
   let active=null;
   let generation=0;
   const boxes=[];
 
-  for(let i=anchorIndex+1;i<rows.length;i++){
+  for(let i=seedIndex+1;i<rows.length;i++){
     const candle=rows[i];
     const threshold=thresholdAt(rows,atr,i,s);
     if(!(threshold>0))continue;
 
     if(!active){
-      const upMove=candle.c-anchorPrice;
-      const downMove=anchorPrice-candle.c;
-      if(upMove>=threshold&&i-anchorIndex>=cfg.minBars){
+      if(candle.l<candidateLowPrice){candidateLowPrice=candle.l;candidateLowIndex=i;}
+      if(candle.h>candidateHighPrice){candidateHighPrice=candle.h;candidateHighIndex=i;}
+      const upMove=candle.c-candidateLowPrice;
+      const downMove=candidateHighPrice-candle.c;
+      const upReady=upMove>=threshold&&i-candidateLowIndex>=cfg.minBars;
+      const downReady=downMove>=threshold&&i-candidateHighIndex>=cfg.minBars;
+      if(upReady||downReady){
+        const chooseUp=upReady&&(!downReady||upMove>=downMove);
         generation++;
-        active={
+        active=chooseUp?{
           direction:'UP',
-          startIndex:anchorIndex,
-          startTime:rows[anchorIndex].openTime,
-          startPrice:Math.min(rows[anchorIndex].l,anchorPrice),
+          startIndex:candidateLowIndex,
+          startTime:rows[candidateLowIndex].openTime,
+          startPrice:candidateLowPrice,
           openedAt:candle.closeTime,
           extremeIndex:i,
           extremePrice:candle.h
-        };
-      }else if(downMove>=threshold&&i-anchorIndex>=cfg.minBars){
-        generation++;
-        active={
+        }:{
           direction:'DOWN',
-          startIndex:anchorIndex,
-          startTime:rows[anchorIndex].openTime,
-          startPrice:Math.max(rows[anchorIndex].h,anchorPrice),
+          startIndex:candidateHighIndex,
+          startTime:rows[candidateHighIndex].openTime,
+          startPrice:candidateHighPrice,
           openedAt:candle.closeTime,
           extremeIndex:i,
           extremePrice:candle.l
         };
-      }else{
-        // Before a direction is confirmed, move the anchor only toward the more
-        // extreme uncommitted pivot. This keeps the future confirmation point-in-time.
-        if(candle.l<anchorPrice){anchorIndex=i;anchorPrice=candle.l;}
-        if(candle.h>anchorPrice&&downMove<=0){anchorIndex=i;anchorPrice=candle.h;}
       }
       continue;
     }
