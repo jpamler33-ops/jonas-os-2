@@ -75,6 +75,7 @@ const COMMANDS=[
   {name:'news',description:'BIGGJ relevanten Live-News-Feed öffnen'},
   {name:'world',description:'BIGGJ Weltlage öffnen'},
   {name:'memecoins',description:'BIGGJ Memecoin Live-Radar öffnen'},
+  {name:'longterm',description:'BIGGJ Long-Term Investment Research öffnen'},
   {name:'app',description:'BIGGJ Mobile Command Center öffnen'},
   {name:'progress',description:'BIGGJ Lernfortschritt öffnen'},
   {name:'evidence_log',description:'BIGGJ Evidence Ledger öffnen'},
@@ -100,6 +101,7 @@ const SERVER_LAYOUT=Object.freeze([
   ]},
   {category:'BIGGJ • INTELLIGENCE',channels:[
     {name:'memecoins',topic:'Memecoin Intelligence: DEX-Radar, Liquidität, Risiko, frühe Muster und Rugpull-Warnsignale.'},
+    {name:'longterm-investing',topic:'Langfristige Investment-Research: Zukunftsnutzen, Adoption, Nachfrage, Bewertung, Bilanz, Wettbewerb, Regulierung, Rohstoffe, Supply Chain und technologische Risiken. Kein Buy-Signal.'},
     {name:'trader-watch',topic:'Öffentlich belegbare Trader-/Wallet-Beobachtungen als Research-Evidence. Keine erfundenen PnL-Rankings.'},
     {name:'academy',topic:'Eine einzige BIGGJ Trading Academy: Lektionen, Übungen, Chart-Training und Lernfortschritt ohne Channel-Wildwuchs.'}
   ]},
@@ -149,7 +151,7 @@ const CHANNEL_PROFILE_GROUPS=Object.freeze({
   LIVE_120:new Set([
     'executive-state','brain-pulse','knowledge','research-queue','hypotheses','changes','experiments','skill-tree',
     'review-queue','learning-timeline','progress','evidence-ledger','decision-trace',
-    'btc','eth','sol','memecoins','global-intel'
+    'btc','eth','sol','memecoins','longterm-investing','global-intel'
   ]),
   ACADEMY_120:new Set([
     'academy','academy-start','academy-roadmap','academy-lessons','academy-chart-training',
@@ -223,7 +225,8 @@ const MARKERS=Object.freeze({
   replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
   errors:'BIGGJ_CHANNEL_ERROR_DESK_V7',
   rulebook:'BIGGJ_RULEBOOK_PANEL_V1',
-  memecoinResearch:'BIGGJ_MEMECOIN_CONTRARIAN_OVERVIEW_V1'
+  memecoinResearch:'BIGGJ_MEMECOIN_CONTRARIAN_OVERVIEW_V1',
+  longterm:'BIGGJ_LONGTERM_INVESTING_V1'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -604,6 +607,75 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
       {name:'Safety',value:'SHADOW_ONLY · canExecute:false · canExecuteLive:false · keine Hard-Security-Bypasses',inline:false}
     ],
     footer:{text:MARKERS.memecoinResearch},
+    timestamp:new Date().toISOString()
+  }],components:commandCenterComponents(),allowedMentions:{parse:[]}};
+}
+
+export function buildDiscordLongTermInvestingPayload(snapshot={}){
+  const intel=snapshot?.health?.globalIntel||{};
+  const events=Array.isArray(intel?.recent)?intel.recent:[];
+  const themes=[
+    {id:'AI_COMPUTE',label:'AI Compute & Halbleiter',horizon:'5–15J',use:'Training, Inference, Edge-AI, Rechenzentren',keys:['ai','artificial intelligence','chip','semiconductor','gpu','accelerator','hbm','foundry','rechenzentrum','halbleiter'],risks:['Bewertung','Exportkontrollen','Capex-Zyklus','Technologiesprünge']},
+    {id:'GRID',label:'Stromnetze & Elektrifizierung',horizon:'10–25J',use:'Netzausbau, Lastwachstum, EVs, Industrie, Rechenzentren',keys:['grid','electricity','power demand','transmission','transformer','electrification','stromnetz','transformator','netzausbau'],risks:['Regulierung','Zinsen','Projektverzögerungen','Capex']},
+    {id:'DC_POWER',label:'Data-Center Power & Cooling',horizon:'5–15J',use:'Stromversorgung, Kühlung und Infrastruktur für Compute',keys:['data center','datacenter','cooling','liquid cooling','ups','power supply','rechenzentrum','kühlung'],risks:['Überkapazität','Kommoditisierung','Kundenkonzentration']},
+    {id:'ROBOTICS',label:'Robotik & Automation',horizon:'7–20J',use:'Produktivität, Fachkräftemangel, Fertigung, Logistik',keys:['robot','robotics','automation','industrial automation','humanoid','warehouse automation','robotik','automatisierung'],risks:['Industriezyklus','Wettbewerb','Hardware-Margen']},
+    {id:'CYBER',label:'Cybersecurity',horizon:'5–20J',use:'Cloud, Identität, Infrastruktur- und KI-Sicherheit',keys:['cybersecurity','cyber security','ransomware','zero trust','identity security','cyberangriff','cybersicherheit'],risks:['Hohe Bewertung','Wettbewerb','Plattform-Konsolidierung']},
+    {id:'NUCLEAR',label:'Kernenergie & Uran',horizon:'10–30J',use:'Grundlast, CO₂-arme Energie, hoher Strombedarf',keys:['nuclear','uranium','reactor','smr','nuclear power','kernenergie','uran','reaktor'],risks:['Genehmigung','Projektkosten','Politik','Rohstoffzyklus']},
+    {id:'STORAGE',label:'Energiespeicher & Power Electronics',horizon:'5–20J',use:'Netzstabilität, Speicher, EVs, Leistungselektronik',keys:['battery','energy storage','inverter','power electronics','batterie','energiespeicher','wechselrichter'],risks:['Preisdruck','Chemiewechsel','China-Exposure','Rohstoffe']},
+    {id:'COPPER',label:'Kupfer & kritische Elektro-Materialien',horizon:'7–20J',use:'Netze, Motoren, Rechenzentren, Elektrifizierung',keys:['copper','critical minerals','mine','mining','kupfer','kritische rohstoffe'],risks:['Commodity-Zyklus','Neue Minen','China-Nachfrage','Substitution']},
+    {id:'WATER',label:'Wasser-Infrastruktur',horizon:'10–30J',use:'Alternde Netze, Aufbereitung, Industrie, Knappheit',keys:['water infrastructure','water treatment','desalination','wastewater','wasser','wasseraufbereitung'],risks:['Langsame Projekte','Kommunalbudgets','Regulierung']},
+    {id:'BIOTECH',label:'Biotech Tools & Präzisionsmedizin',horizon:'7–20J',use:'Diagnostik, Drug Discovery, Genomik, personalisierte Medizin',keys:['biotech','genomics','gene therapy','precision medicine','drug discovery','diagnostics','genomik','präzisionsmedizin'],risks:['Binäre Forschung','Regulierung','Kapitalbedarf','Patentrisiko']}
+  ];
+  const norm=x=>String(x||'').toLowerCase();
+  const verified=e=>e?.verified===true||Number(e?.independentConfirmation||0)>=.45;
+  const scored=themes.map(theme=>{
+    const matched=events.filter(e=>{
+      const hay=norm([e?.title,e?.family,(e?.affectedAssets||[]).join(' ')].join(' '));
+      return theme.keys.some(k=>hay.includes(norm(k)));
+    });
+    const sources=new Set(matched.map(e=>String(e?.source||'')).filter(Boolean));
+    const verifiedCount=matched.filter(verified).length;
+    const latest=[...matched].sort((a,b)=>Number(b?.availableAt||0)-Number(a?.availableAt||0))[0]||null;
+    const evidence=matched.length>=4&&verifiedCount>=2&&sources.size>=2?'MULTI_SOURCE'
+      :matched.length>=2?'DEVELOPING'
+      :matched.length===1?'EARLY':'NO_RECENT_EVIDENCE';
+    return {...theme,matched:matched.length,verified:verifiedCount,sources:sources.size,latest,evidence};
+  }).sort((a,b)=>
+    (b.verified-a.verified)||(b.matched-a.matched)||a.label.localeCompare(b.label)
+  );
+  const themeLines=scored.slice(0,8).map((x,i)=>
+    '**'+(i+1)+'. '+x.label+'** · '+x.horizon+' · '+x.evidence+
+    '\nUse: '+x.use+
+    '\nEvidence: '+x.matched+' Events · '+x.verified+' bestätigt · '+x.sources+' Quellen'+
+    '\nRisiken: '+x.risks.join(' · ')
+  ).join('\n\n');
+  const evidenceReady=scored.filter(x=>x.evidence==='MULTI_SOURCE').length;
+  const developing=scored.filter(x=>x.evidence==='DEVELOPING'||x.evidence==='EARLY').length;
+  return {embeds:[{
+    title:'BIGGJ // LONG-TERM INVESTING',
+    description:[
+      '**Langfristige Zukunfts-Research statt Hype-Listen.**',
+      'Ein Thema kann strukturell stark sein und trotzdem aktuell zu teuer oder überlaufen sein. Deshalb trennt BIGGJ **Future Use** von **Investment Timing**.'
+    ].join('\n'),
+    fields:[
+      {name:'FUTURE THEME WATCH',value:themeLines.slice(0,1024),inline:false},
+      {name:'EVIDENCE STATUS',value:'Multi-Source **'+evidenceReady+'** · Developing/Early **'+developing+'** · News-Quelle **'+(intel?.sourceReady?'LIVE':'DEGRADED')+'**',inline:false},
+      {name:'WAS BIGGJ BERÜCKSICHTIGT',value:[
+        'Zukunftsnutzen & reale Use-Cases',
+        'Adoption / Nachfrage / Capex-Richtung',
+        'Wettbewerb, Moat & Margendruck',
+        'Bewertung & erwartetes Wachstum',
+        'Bilanz, Cashflow, Verschuldung & Verwässerung',
+        'Rohstoffe, Energie & Supply Chain',
+        'Regulierung, Politik & geopolitische Exponierung',
+        'Zyklizität, Zinsen & Konjunktur',
+        'Technologische Verdrängung / Obsoleszenz',
+        'Diversifikation & Konzentrationsrisiko'
+      ].map(x=>'• '+x).join('\n'),inline:false},
+      {name:'INVESTMENT GATE',value:'**THEME ≠ BUY.** Bevor ein konkretes Unternehmen/ETF als Kandidat gilt, müssen Bewertung, Bilanz, Cashflow, Marktposition, Verwässerung, Konzentration und Preisrisiko separat geprüft werden. Fehlende Fundamentals → **NO BUY TIMING**.',inline:false},
+      {name:'MODE',value:'Research / Beobachtung · keine Renditegarantie · keine automatische Order · canExecuteLive:false',inline:false}
+    ],
+    footer:{text:MARKERS.longterm},
     timestamp:new Date().toISOString()
   }],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
@@ -1517,6 +1589,12 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const snapshot=await safeMissionSnapshot();
     return managed('memecoins',()=>upsertMarkedAtBottom(c,MARKERS.memecoinResearch,buildDiscordMemecoinResearchPayload(snapshot)),{detail:'Memecoin + Contrarian Übersicht aktualisiert',rethrow:false});
   }
+  async function refreshLongTermInvesting(){
+    const c=channelCache.get('longterm-investing');
+    if(!c)return null;
+    const snapshot=await safeMissionSnapshot();
+    return managed('longterm-investing',()=>upsertMarkedAtBottom(c,MARKERS.longterm,buildDiscordLongTermInvestingPayload(snapshot)),{detail:'Long-Term Investment Research aktualisiert',rethrow:false});
+  }
   async function experienceCommand(interaction,channelName){
     await interaction.deferReply();
     const snapshot=await safeMissionSnapshot();
@@ -1699,6 +1777,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(name==='news-feed'){await refreshNewsFeed();return true;}
     if(name==='world-watch'){await refreshWorldWatch();return true;}
     if(name==='memecoins'){await refreshMemecoinLab();return true;}
+    if(name==='longterm-investing'){await refreshLongTermInvesting();return true;}
     if(name==='signal-lab'){await refreshSignalLabDesk();return true;}
     if(name==='proof-feed'){await refreshProofFeedDesk();return true;}
     if(name==='forecasts'){await refreshForecastDesk();return true;}
@@ -2105,6 +2184,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     addTimer(refreshNewsFeed,120000);
     addTimer(refreshWorldWatch,120000);
     addTimer(refreshMemecoinLab,30000);
+    addTimer(refreshLongTermInvesting,120000);
     addTimer(refreshAuxiliaryDesks,60000);
     addTimer(refreshRulebookPanel,60000);
     addTimer(()=>refreshChannelSupervisor({autoRepair:true}),60000);
@@ -2121,7 +2201,7 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
       await Promise.allSettled([
         refreshTerminal(),refreshSystem(),refreshPerformance(),refreshOverview(),refreshDataHealth(),
         refreshMarketSciencePanels(),refreshBiggjObservabilityPanels(),refreshExperiencePanels(),refreshMarketPanels(),refreshGlobalIntel(),
-        refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),refreshRulebookPanel(),syncTradeCards(),syncHealthAlerts()
+        refreshNewsFeed(),refreshWorldWatch(),refreshMemecoinLab(),refreshLongTermInvesting(),refreshRulebookPanel(),syncTradeCards(),syncHealthAlerts()
       ]);
       await refreshAuxiliaryDesks();
       await refreshChannelSupervisor({autoRepair:true});
@@ -2228,6 +2308,11 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
     if(experienceViews[name]){await experienceCommand(interaction,experienceViews[name]);return;}
     if(name==='memecoins'){await memecoinResearchCommand(interaction);return;}
+    if(name==='longterm'){
+      await interaction.deferReply();
+      await interaction.editReply(buildDiscordLongTermInvestingPayload(await safeMissionSnapshot()));
+      return;
+    }
     const liveSurfaceCallbacks={news:'news:all',world:'news:geopolitics'};
     if(liveSurfaceCallbacks[name]){await runCoreCallback(interaction,liveSurfaceCallbacks[name]);return;}
     const callback=callbackDataForCommand(interaction);
