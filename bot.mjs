@@ -6444,7 +6444,7 @@ async function buildSuperchartAsset(symbol,{mode='PRO',interval='5m',trendScale=
   });
 }
 
-async function webSuperchartAsset(symbol,{mode='FULL',interval='5m',trendScale='M'}={}){
+async function webSuperchartAsset(symbol,{mode='FULL',interval='5m'}={},trendScale='M'){
   const key=[symbol,interval,mode,String(trendScale||'M').toUpperCase()].join('|');
   const cached=webSuperchartCache.get(key);
   if(cached&&Date.now()-cached.generatedAt<WEB_SUPERCHART_TTL_MS)return cached;
@@ -12199,7 +12199,7 @@ const server = http.createServer(async (req,res) => {
         res.end(JSON.stringify({ok:false,error:'INVALID_SUPERCHART_REQUEST',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
         return;
       }
-      const asset=await webSuperchartAsset(symbol,{interval,mode,trendScale});
+      const asset=await webSuperchartAsset(symbol,{interval,mode},trendScale);
       recordOperation(observability,{name:'mobile_superchart',ok:true,latencyMs:Date.now()-started,error:null});
       res.writeHead(200,{
         'content-type':'image/png',
