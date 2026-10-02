@@ -72,6 +72,13 @@ function line(buf,w,h,x0,y0,x1,y1,c){
     if(e2<=dx){err+=dx;y0+=sy;}
   }
 }
+function rectOutline(buf,w,h,x1,y1,x2,y2,c,{right=true}={}){
+  const left=Math.min(x1,x2),rightX=Math.max(x1,x2),top=Math.min(y1,y2),bottom=Math.max(y1,y2);
+  line(buf,w,h,left,top,rightX,top,c);
+  line(buf,w,h,left,bottom,rightX,bottom,c);
+  line(buf,w,h,left,top,left,bottom,c);
+  if(right)line(buf,w,h,rightX,top,rightX,bottom,c);
+}
 
 const FONT={
 ' ': [0,0,0,0,0], A:[2,5,7,5,5], B:[6,5,6,5,6], C:[3,4,4,4,3], D:[6,5,5,5,6],
@@ -188,7 +195,7 @@ function fmtCompact(n){
   return n.toFixed(2);
 }
 
-export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null,superchart=null,tradeOverlay=null}={}){
+export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=760,dashboard=null,tradeReplay=null,forecastOverlay=null,superchart=null,tradeOverlay=null,trendBoxes=null,trendPhaseForecast=null}={}){
   const candles=candlesInput.slice(-100);
   if(candles.length<2)throw new Error('Need at least 2 candles');
 
@@ -199,6 +206,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
   const forecastBaseC=color('#4ea1ff'),forecastUpC=color('#3ddc97'),forecastDownC=color('#ff5c5c'),forecastBandC=color('#4ea1ff',32);
   const volUp=color('#147d68'),volDown=color('#9b3d45'),zoneSupport=color('#3ddc97',35),zoneResistance=color('#ff8c69',35);
   const confluenceC=color('#ffd166'),liqLongC=color('#ff5c5c'),liqShortC=color('#3ddc97'),intelPanel=color('#101720',235);
+  const trendBoxC=color('#39a9ff'),trendBoxFill=color('#2a7cff',18),trendBoxActiveFill=color('#2a7cff',30),trendRiskC=color('#ffd166');
 
   const buf=Buffer.alloc(width*height*4);
   for(let i=0;i<width*height;i++){buf[i*4]=bg[0];buf[i*4+1]=bg[1];buf[i*4+2]=bg[2];buf[i*4+3]=255;}
@@ -286,6 +294,43 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
     fillRect(buf,width,height,left,Math.min(y1,y2),plotW,Math.max(3,Math.abs(y2-y1)),zoneResistance,true);
     line(buf,width,height,left,yOf(analysis.resistance),width-right,yOf(analysis.resistance),resistanceC);
     labelBox(buf,width,height,left+6,Math.max(priceTop+4,yOf(analysis.resistance)-14),'RES',resistanceC,panel,2);
+  }
+
+  if(trendBoxes?.boxes?.length){
+    const firstTime=Number(candles[0]?.openTime);
+    const lastTime=Number(candles.at(-1)?.closeTime);
+    const xForTime=t=>{
+      const n=Number(t);
+      if(!Number.isFinite(n)||n<=firstTime)return left;
+      if(n>=lastTime)return left+candlePlotW;
+      let idx=candles.findIndex(c=>Number(c.openTime)>=n);
+      if(idx<0)idx=candles.length-1;
+      return left+(idx+.5)*step;
+    };
+    for(const b of trendBoxes.boxes){
+      if(Number(b?.endTime)<firstTime||Number(b?.startTime)>lastTime)continue;
+      const x1=Math.max(left,xForTime(b.startTime));
+      const x2=Math.min(left+candlePlotW,b.status==='CLOSED'?xForTime(b.endTime):left+candlePlotW);
+      const hi=Number(b.high),lo=Number(b.low);
+      if(!Number.isFinite(hi)||!Number.isFinite(lo)||x2<=x1)continue;
+      const y1=yOf(hi),y2=yOf(lo);
+      const active=b.status==='ACTIVE'||b.status==='AT_RISK';
+      const fg=b.status==='AT_RISK'?trendRiskC:trendBoxC;
+      fillRect(buf,width,height,x1,Math.min(y1,y2),Math.max(2,x2-x1),Math.max(2,Math.abs(y2-y1)),active?trendBoxActiveFill:trendBoxFill,true);
+      rectOutline(buf,width,height,x1,y1,x2,y2,fg,{right:!active});
+      if(x2-x1>42){
+        const label=String(b.scale||trendBoxes.scale||'M')+' '+String(b.direction||'')+(active?' '+String(b.status):'');
+        labelBox(buf,width,height,Math.min(x2-44,x1+5),Math.max(priceTop+4,Math.min(priceBottom-13,Math.min(y1,y2)+5)),label,fg,panel,1);
+      }
+    }
+    const active=trendBoxes.active;
+    const phase=trendPhaseForecast?.byScale?.[String(trendBoxes.scale||'M').toUpperCase()]||null;
+    if(active){
+      const phaseTxt=phase
+        ?String(active.scale)+' FC '+String(phase.targetHorizonId||'')+' '+(Number(phase.medianReturn)>=0?'+':'')+(Number(phase.medianReturn)*100).toFixed(2)+'% '+String(phase.alignment||'')
+        :String(active.scale)+' '+String(active.direction)+' '+String(active.status);
+      labelBox(buf,width,height,Math.max(left+6,left+candlePlotW-textWidth(phaseTxt,1)-10),priceBottom-18,phaseTxt,phase?.alignment==='CONTRADICTED'?trendRiskC:trendBoxC,panel,1);
+    }
   }
 
   const e20=emaSeries(candles,20),e50=emaSeries(candles,50);
@@ -456,7 +501,7 @@ export function renderCandlestickPng(candlesInput,analysis,{width=1100,height=76
       }
     }
   }
-  drawText(buf,width,height,16,46,tradeOverlay?('BIGGJ TRADE VISUAL  OBSERVED + DERIVED + PROBABILISTIC  SHADOW_ONLY'):superchart?('TCX SUPERCHART '+superchart.mode+'  OBSERVED + DERIVED + PROBABILISTIC  SHADOW_ONLY'):(overlayActive?'OBSERVED OHLCV  DERIVED STRUCTURE  PROBABILISTIC FORECAST PATH  NOT GUARANTEED':'OBSERVED OHLCV  DERIVED STRUCTURE REGIME RIFT  MECHANISM NOT INFERRED'),muted,1);
+  drawText(buf,width,height,16,46,tradeOverlay?('BIGGJ TRADE VISUAL  OBSERVED + DERIVED + PROBABILISTIC  SHADOW_ONLY'):superchart?('TCX SUPERCHART '+superchart.mode+'  TREND BOXES + PROBABILISTIC FORECAST  SHADOW_ONLY'):(overlayActive?'OBSERVED OHLCV  DERIVED STRUCTURE  PROBABILISTIC FORECAST PATH  NOT GUARANTEED':'OBSERVED OHLCV  DERIVED STRUCTURE REGIME RIFT  MECHANISM NOT INFERRED'),muted,1);
 
   return pngEncode(width,height,buf);
 }
