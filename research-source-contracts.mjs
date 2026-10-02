@@ -1,6 +1,6 @@
 import { sha256 } from './institutional-kernel.mjs';
 
-export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V13';
+export const RESEARCH_SOURCE_CONTRACTS_VERSION='TCX_RESEARCH_SOURCE_CONTRACTS_V14';
 
 const contracts=[
   {id:'BINANCE_USDM_DERIVATIVES',domain:'DERIVATIVES',source:'BINANCE_USDM_PUBLIC',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:2700000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
@@ -14,7 +14,7 @@ const contracts=[
   {id:'DERIBIT_PUBLIC_OPTIONS',domain:'OPTIONS',source:'DERIBIT_PUBLIC_OPTIONS',minCompleteness:.5,maxPublicationLagMs:600000,maxIngestLagMs:60000,maxSilenceMs:1800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_DFF_CURRENT',domain:'MACRO',source:'FRED_DFF_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_DGS10_CURRENT',domain:'MACRO',source:'FRED_DGS10_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
-  {id:'FRED_DTWEXBGS_CURRENT',domain:'MACRO',source:'FRED_DTWEXBGS_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
+  {id:'FRED_DTWEXBGS_CURRENT',domain:'MACRO',source:'FRED_DTWEXBGS_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxObservationAgeMs:1036800000,eventTimeSemantics:'OBSERVATION_TIME',cadence:'WEEKLY_BATCH_DAILY_OBSERVATIONS',maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_WALCL_CURRENT',domain:'MACRO',source:'FRED_WALCL_CURRENT',minCompleteness:1,maxPublicationLagMs:864000000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_DFF_DGS10_DERIVED',domain:'MACRO',source:'FRED_DFF_DGS10_DERIVED',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
   {id:'FRED_VIXCLS_CURRENT',domain:'MACRO',source:'FRED_VIXCLS_CURRENT',minCompleteness:1,maxPublicationLagMs:604800000,maxIngestLagMs:1200000,maxSilenceMs:172800000,quarantineAfterConsecutiveViolations:3,recoverAfterConsecutiveHealthy:3,requiredFinality:null},
