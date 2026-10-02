@@ -1,3 +1,8 @@
+import {
+  MEMECOIN_RETURN_QUALITY_GUARD_VERSION,
+  MEMECOIN_RETURN_MAX_PRICE_RATIO
+} from './memecoin-evidence-factory.mjs';
+
 export const BIGGJ_TEMPORAL_TEMPLE_VERSION='BIGGJ_TEMPORAL_TEMPLE_V2';
 
 const HORIZON_ORDER=Object.freeze(['5m','15m','30m','1h','4h','12h','24h']);
@@ -22,7 +27,11 @@ function median(xs=[]){
 }
 function ret(a,b){
   const x=finite(a),y=finite(b);
-  return x>0&&y>0?y/x-1:null;
+  if(!(x>0)||!(y>0))return null;
+  const ratio=y/x;
+  if(!Number.isFinite(ratio)||Math.abs(Math.log(ratio))>Math.log(MEMECOIN_RETURN_MAX_PRICE_RATIO))return null;
+  const r=ratio-1;
+  return Number.isFinite(r)?r:null;
 }
 function rank(values=[]){
   const rows=values.map((v,i)=>({v,i})).filter(x=>Number.isFinite(x.v)).sort((a,b)=>a.v-b.v);
@@ -89,13 +98,14 @@ export function temporalStateForCase(c,label){
   const o=onTime(c,label);
   if(!o)return null;
   const i=c?.initial||{};
+  const guardedPriceReturn=ret(c?.initialPriceUsd,o?.priceUsd);
   const iTurn=ratio(i.volumeM5,i.liquidityUsd);
   const oTurn=ratio(o.volumeM5,o.liquidityUsd);
   const iDepth=ratio(i.liquidityUsd,i.marketCap);
   const oDepth=ratio(o.liquidityUsd,o.marketCap);
   const buys=finite(o.buysM5),sells=finite(o.sellsM5);
   const axes=[
-    bit(finite(o.returnFromInitial)!=null?finite(o.returnFromInitial)>=0:null),
+    bit(guardedPriceReturn!=null?guardedPriceReturn>=0:null),
     bit(finite(i.liquidityUsd)!=null&&finite(o.liquidityUsd)!=null?o.liquidityUsd>=i.liquidityUsd*1.05:null),
     bit(buys!=null&&sells!=null?buys>=sells:null),
     bit(iTurn!=null&&oTurn!=null?oTurn>=iTurn*1.10:null),
@@ -429,7 +439,7 @@ const NILOMETER_FEATURES=Object.freeze([
 
 function horizonReturn(c,label){
   const o=onTime(c,label);
-  return o?finite(o.returnFromInitial):null;
+  return o?ret(c?.initialPriceUsd,o?.priceUsd):null;
 }
 
 function nilometerScreen(cases,{horizon='1h',minTrain=20,minValidate=8}={}){
@@ -511,8 +521,8 @@ function firstMilestone(c,predicate){
 }
 function eventClock(cases){
   const defs=[
-    ['PRICE_PLUS_25',(o)=>finite(o.returnFromInitial)!=null&&o.returnFromInitial>=.25],
-    ['PRICE_MINUS_25',(o)=>finite(o.returnFromInitial)!=null&&o.returnFromInitial<=-.25],
+    ['PRICE_PLUS_25',(o,c)=>{const r=ret(c?.initialPriceUsd,o?.priceUsd);return r!=null&&r>=.25;}],
+    ['PRICE_MINUS_25',(o,c)=>{const r=ret(c?.initialPriceUsd,o?.priceUsd);return r!=null&&r<=-.25;}],
     ['LIQ_PLUS_25',(o,c)=>finite(o.liquidityUsd)!=null&&finite(c?.initial?.liquidityUsd)>0&&o.liquidityUsd>=c.initial.liquidityUsd*1.25],
     ['LIQ_MINUS_25',(o,c)=>finite(o.liquidityUsd)!=null&&finite(c?.initial?.liquidityUsd)>0&&o.liquidityUsd<=c.initial.liquidityUsd*.75],
     ['BUY_PRESSURE_2X',(o)=>{const b=finite(o.buysM5),s=finite(o.sellsM5);return b!=null&&s!=null&&b>=2*Math.max(1,s);}],
@@ -625,7 +635,13 @@ export function buildBiggjTemporalTemple(evidenceState,{
       eventClock:'MEANINGFUL_EVENTS_OVER_WALL_CLOCK',
       invariants:'SCALE_CONTEXT_STABILITY',
       ephemeris:'EMPIRICAL_NEXT_STATE_DISTRIBUTION',
-      transitionLaws:'STATE_TRANSITION_TO_LATER_FORWARD_BEHAVIOR'
+      transitionLaws:'STATE_TRANSITION_TO_LATER_FORWARD_BEHAVIOR',
+      returnQuality:'EXTREME_PRICE_RATIO_QUARANTINE'
+    },
+    returnQualityGuard:{
+      version:MEMECOIN_RETURN_QUALITY_GUARD_VERSION,
+      maxPriceRatio:MEMECOIN_RETURN_MAX_PRICE_RATIO,
+      action:'QUARANTINE_NOT_CLIP'
     },
     axes:AXES,
     eventClock:eventClock(cases),
@@ -666,6 +682,7 @@ export function biggjTemporalTempleSummary(state){
     invariants:state.invariants,
     transitionLaws:state.transitionLaws,
     ephemeris:state.ephemeris,
+    returnQualityGuard:state.returnQualityGuard,
     policyMutationAllowed:false,
     automaticPromotionAllowed:false,
     execution:'SHADOW_ONLY',
