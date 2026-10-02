@@ -222,7 +222,8 @@ const MARKERS=Object.freeze({
   anomalies:'BIGGJ_CHANNEL_ANOMALY_WATCH_V7',
   replay:'BIGGJ_CHANNEL_REPLAY_DESK_V7',
   errors:'BIGGJ_CHANNEL_ERROR_DESK_V7',
-  rulebook:'BIGGJ_RULEBOOK_PANEL_V1'
+  rulebook:'BIGGJ_RULEBOOK_PANEL_V1',
+  memecoinResearch:'BIGGJ_MEMECOIN_CONTRARIAN_OVERVIEW_V1'
 });
 function yesNo(value){return value===true?'● OK':value===false?'● ERROR':'◐ CHECK';}
 function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' USDT':'—';}
@@ -554,6 +555,59 @@ export function buildDiscordPerformancePayload(snapshot={}){
     ]},
     marketSelectRow()
   ],allowedMentions:{parse:[]}};
+}
+
+export function buildDiscordMemecoinResearchPayload(snapshot={}){
+  const h=snapshot?.health||{},radar=h?.memecoinRadar||{},learning=radar?.learning?.wallet4||{},contra=learning?.contrarian||{},g=contra?.global||{};
+  const wallet=h?.specialistWallets?.wallets?.W4_MEME_SCOUT||{};
+  const active=Array.isArray(wallet?.active)?wallet.active:[];
+  const openContrarian=active.filter(x=>String(x?.entryResearchLane||'').toUpperCase()==='CONTRARIAN_PROBE');
+  const radarRows=Array.isArray(radar?.rows)?radar.rows:[];
+  const actions={BLOCK:0,THROTTLE:0,BOOST:0,NEUTRAL:0};
+  for(const row of radarRows){
+    const a=String(row?.memeLearning?.action||'NEUTRAL').toUpperCase();
+    actions[a]=(actions[a]||0)+1;
+  }
+  const ruleName=k=>({
+    LEARNED_BLOCK_WOULD_ABSTAIN:'Learner-BLOCK ignoriert',
+    TAIL_RISK_FILTER_WOULD_BLOCK:'Soft Tail-Risk ignoriert',
+    SCORE_BELOW_NORMAL_MIN:'Score unter Normalgrenze',
+    LIQUIDITY_BELOW_NORMAL_MIN:'Liquidität unter Normalgrenze',
+    STAGE_OUTSIDE_NORMAL_SCOUT:'Stage außerhalb Normal-Scout'
+  }[String(k)]||String(k).replaceAll('_',' '));
+  const ruleRows=Object.entries(contra?.byViolation||{})
+    .sort((a,b)=>Number(b?.[1]?.samples||0)-Number(a?.[1]?.samples||0))
+    .slice(0,6)
+    .map(([k,v])=>'• **'+ruleName(k)+'** · '+String(v?.samples||0)+' Tests · WR '+percent(v?.rawWinRate)+' · Shrunk '+percent(v?.shrinkedMeanReturn));
+  const currentNet=Number(wallet?.netPnlQuote);
+  const currentUsed=Number(wallet?.cumulativeMarginUsedQuote);
+  const avg=Number(g?.rawMeanReturn),med=Number(g?.medianReturn),sev=Number(g?.severeLossRate),moon=Number(g?.moonshotRate);
+  return {embeds:[{
+    title:'BIGGJ // MEMECOIN RESEARCH',
+    description:[
+      '**Normalstrategie + absichtliche Contrarian-Probes auf einen Blick.**',
+      'Contrarian = genau eine weiche Regel bewusst brechen, mit Mini-Shadow-Size. Hard Security Guards bleiben unangetastet.'
+    ].join('\n'),
+    fields:[
+      {name:'Wallet 4 PnL',value:money(currentNet),inline:true},
+      {name:'Gesamt reingeflossen',value:money(currentUsed),inline:true},
+      {name:'Open Wallet 4',value:String(wallet?.openPositions??0),inline:true},
+      {name:'Radar Entscheidungen',value:'BLOCK '+actions.BLOCK+' · THROTTLE '+actions.THROTTLE+' · BOOST '+actions.BOOST+' · NEUTRAL '+actions.NEUTRAL,inline:false},
+      {name:'Contrarian offen',value:String(openContrarian.length),inline:true},
+      {name:'Contrarian abgeschlossen',value:String(contra?.samples??0),inline:true},
+      {name:'Contrarian Winrate',value:percent(g?.rawWinRate),inline:true},
+      {name:'Ø Return',value:Number.isFinite(avg)?percent(avg):'—',inline:true},
+      {name:'Median',value:Number.isFinite(med)?percent(med):'—',inline:true},
+      {name:'Severe Loss',value:Number.isFinite(sev)?percent(sev):'—',inline:true},
+      {name:'Moonshot Rate',value:Number.isFinite(moon)?percent(moon):'—',inline:true},
+      {name:'Normal-Learner Samples',value:String(learning?.samples??0),inline:true},
+      {name:'Absichtlich anders getestet',value:(ruleRows.join('\n')||'Noch keine abgeschlossenen Contrarian-Probes.').slice(0,1024),inline:false},
+      {name:'Interpretation',value:'Contrarian-Ergebnisse bleiben separat. Kein automatisches Überschreiben der Normalstrategie. Erst wiederholte, robuste Evidence darf später eine neue Hypothese auslösen.',inline:false},
+      {name:'Safety',value:'SHADOW_ONLY · canExecute:false · canExecuteLive:false · Hard Security Guards aktiv',inline:false}
+    ],
+    footer:{text:MARKERS.memecoinResearch},
+    timestamp:new Date().toISOString()
+  }],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 
 export function buildDiscordMarketOverviewPayload(snapshot={}){
@@ -1462,7 +1516,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
   async function refreshMemecoinLab(){
     const c=channelCache.get('memecoins');
     if(!c)return null;
-    return managed('memecoins',()=>refreshCorePanel(c,'home:memecoins',{components:[]}),{detail:'Memecoin-Radar aktualisiert',rethrow:false});
+    const snapshot=await safeMissionSnapshot();
+    return managed('memecoins',()=>upsertMarkedAtBottom(c,MARKERS.memecoinResearch,buildDiscordMemecoinResearchPayload(snapshot)),{detail:'Memecoin + Contrarian Übersicht aktualisiert',rethrow:false});
   }
   async function experienceCommand(interaction,channelName){
     await interaction.deferReply();
@@ -1470,6 +1525,10 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     const row=buildBiggjExperiencePanelMap(snapshot,{mobileUrl:publicMobileUrl()}).find(x=>x.channel===channelName);
     if(!row){await interaction.editReply('BIGGJ Experience Panel ist gerade nicht verfügbar.');return;}
     await interaction.editReply(row.payload);
+  }
+  async function memecoinResearchCommand(interaction){
+    await interaction.deferReply();
+    await interaction.editReply(buildDiscordMemecoinResearchPayload(await safeMissionSnapshot()));
   }
   async function marketScienceCommand(interaction,view){
     const component=typeof interaction.isButton==='function'&&interaction.isButton();
@@ -2170,7 +2229,8 @@ export function createDiscordTelegramBridge({token,applicationId,guildId,handleU
     if(operatorViews[name]){await operatorCommand(interaction,operatorViews[name]);return;}
     const experienceViews={needs:'biggj-needs',learned:'learned-playbook',traders:'trader-watch',cockpit:'trade-cockpit',charts:'chart-desk',app:'mobile-app'};
     if(experienceViews[name]){await experienceCommand(interaction,experienceViews[name]);return;}
-    const liveSurfaceCallbacks={news:'news:all',world:'news:geopolitics',memecoins:'home:memecoins'};
+    if(name==='memecoins'){await memecoinResearchCommand(interaction);return;}
+    const liveSurfaceCallbacks={news:'news:all',world:'news:geopolitics'};
     if(liveSurfaceCallbacks[name]){await runCoreCallback(interaction,liveSurfaceCallbacks[name]);return;}
     const callback=callbackDataForCommand(interaction);
     if(callback){await runCoreCallback(interaction,callback);return;}
