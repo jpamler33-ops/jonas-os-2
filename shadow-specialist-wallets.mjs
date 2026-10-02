@@ -615,7 +615,9 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
 
 function walletStats(wallet){
   const open=wallet.positions||[],closed=wallet.closed||[];
-  const realized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
+  const closedRealized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
+  const openPartialRealized=open.reduce((s,p)=>s+finite(p?.partialRealizedNetPnlQuote,0),0);
+  const realized=closedRealized+openPartialRealized;
   const unrealized=open.reduce((s,p)=>s+finite(p?.unrealizedNetPnlQuote,0),0);
   const wins=closed.filter(p=>finite(p?.realizedNetPnlQuote,0)>0);
   const losses=closed.filter(p=>finite(p?.realizedNetPnlQuote,0)<0);
