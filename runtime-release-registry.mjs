@@ -46,6 +46,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'adversarial-stress-lab.mjs',
   'shadow-strategy-league.mjs',
   'parallel-strategy-worlds.mjs',
+  'biggj-discovery-ledger.mjs',
   'multi-venue-shadow-sor.mjs',
   'venue-quality-memory.mjs',
   'execution-research-lab.mjs',
