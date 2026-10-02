@@ -10,7 +10,8 @@ test('five user surfaces include the dedicated meme wallet',()=>{const h=renderB
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','LIVE TICKER','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · TREND PHASES · FORECAST · LIQUIDITY · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('market terminal exposes persistent multi-scale trend boxes and forecast-per-phase controls',()=>{
   const h=renderBiggjMobileApp(sample);
-  for(const x of ['data-trend-scale="XS"','data-trend-scale="S"','data-trend-scale="M"','data-trend-scale="L"','data-trend-scale="XL"','TREND PHASE ENGINE','Trendboxen bleiben nach Trendwechsel sichtbar'])assert.match(h,new RegExp(x));
+  for(const x of ['data-trend-scale','TREND PHASE ENGINE','Trendboxen bleiben nach Trendwechsel sichtbar'])assert.match(h,new RegExp(x));
+  assert.match(h,/trendSizes=\['XS','S','M','L','XL'\]/);
   assert.match(h,/trendScale:localStorage\.getItem\('biggj\.chart\.trendScale'\)\|\|'M'/);
   assert.match(h,/trendScale:CHART\.trendScale/);
   assert.match(h,/localStorage\.setItem\('biggj\.chart\.trendScale',CHART\.trendScale\)/);
