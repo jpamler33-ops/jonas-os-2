@@ -83,6 +83,21 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
     failedRows,
     'Status '+clip(laws.status||'COLLECTING_OR_UNVALIDATED',48)+' · keine automatische Promotion'
   ].filter(Boolean).join('\n');
+  const worlds=snapshot?.health?.parallelStrategyWorlds||{};
+  const worldRows=arr(worlds?.worlds).slice(0,5).map(w=>{
+    const g=w?.currentGenome||{},m=g?.mutation,e=g?.evidence||{};
+    return '• **'+clip(w?.doctrine?.name||w?.label||w?.strategyId||'WORLD',34)+'** · Gen '+fmt(w?.generation)+
+      ' · '+clip(g?.status||'UNKNOWN',28)+
+      '\n  '+(m?clip(m.field||'mutation',24)+' '+clip(String(m.before),18)+'→'+clip(String(m.after),18)+' · '+clip(m.direction||'—',18):'Basis-Genome')+
+      ' · closed '+fmt(e?.closed)+' · win '+pct(e?.winRate);
+  }).join('\n')||'Parallel Worlds initialisieren noch.';
+  const council=worlds?.council||{};
+  const worldText=[
+    'Welten '+fmt(worlds.worldCount)+' · Generationen '+fmt(worlds.generations)+' · Evolutionsschritte '+fmt(worlds.evolutions),
+    worldRows,
+    'Konvergenzen '+fmt(arr(council.convergences).length)+' · Cross-Pollination '+fmt(arr(council.crossPollination).length),
+    'Research-only · automatische PRIMARY-Mutation gesperrt'
+  ].join('\n');
   return payload(
     'BIGGJ // MARKET SCIENCE',
     '**Das ist BIGGJ.** Trading ist nur eine nachgelagerte Anwendung. Der Kern baut überprüfbares Marktwissen und darf UNKNOWN als Ergebnis behalten.',
@@ -92,6 +107,7 @@ export function buildBiggjDiscordScienceHomePayload(snapshot={}){
         'Robust '+fmt(frontier.robust)+' · Broken '+fmt(frontier.broken)+' · Surprises '+fmt(frontier.surprises)
       ].join('\n')),
       safeField('NEUE ENTDECKUNGEN · TEMPORAL TEMPLE',discoveryText),
+      safeField('PARALLEL WORLDS · STRATEGY EVOLUTION',worldText),
       safeField('NÄCHSTE FORSCHUNGSFRAGE',next
         ?'**'+clip(next.kind||'QUESTION',40)+'**\n'+clip(next.question||next.nextExperimentPurpose||'—',800)
         :'Noch keine priorisierte Forschungsfrage.'),

@@ -98,6 +98,11 @@ import {
 } from './shadow-strategy-league.mjs';
 import { STRATEGY_EVIDENCE_ENGINE_VERSION } from './strategy-evidence-engine.mjs';
 import {
+  loadParallelStrategyWorlds, saveParallelStrategyWorlds,
+  refreshParallelStrategyWorlds, parallelStrategyWorldsSummary,
+  PARALLEL_STRATEGY_WORLDS_VERSION
+} from './parallel-strategy-worlds.mjs';
+import {
   buildShadowTradeQualityModel, qualityLearnerSummary,
   SHADOW_TRADE_QUALITY_LEARNER_VERSION
 } from './shadow-trade-quality-learner.mjs';
@@ -1388,6 +1393,11 @@ const memecoinEvidenceFactoryFile = process.env.TCX_MEME_EVIDENCE_FACTORY_FILE |
 let loadedMemecoinEvidenceFactory = await loadMemecoinEvidenceFactoryState(memecoinEvidenceFactoryFile);
 const strategyLeagueFile = process.env.TCX_STRATEGY_LEAGUE_FILE || '/data/tcx-strategy-league.json';
 let loadedStrategyLeague = await loadStrategyLeagueLedger(strategyLeagueFile,{initialEquityPerStrategy:strategyLeagueInitialEquity});
+const parallelStrategyWorldsFile=process.env.TCX_PARALLEL_STRATEGY_WORLDS_FILE||'/data/tcx-parallel-strategy-worlds.json';
+let loadedParallelStrategyWorlds=await loadParallelStrategyWorlds(parallelStrategyWorldsFile,{
+  baseStrategies:SHADOW_STRATEGIES,
+  now:Date.now()
+});
 const venueQualityFile = process.env.TCX_VENUE_QUALITY_MEMORY_FILE || '/data/tcx-venue-quality-memory.json';
 let loadedVenueQuality = await loadVenueQualityMemory(venueQualityFile);
 let venueQualityRecords = loadedVenueQuality.records;
@@ -1434,6 +1444,12 @@ let strategyLeagueHealthy = loadedStrategyLeague.healthy;
 let strategyLeagueLastError = loadedStrategyLeague.error || null;
 loadedStrategyLeague=null;
 let strategyLeaguePersistenceQueue = Promise.resolve();
+let parallelStrategyWorldsState=loadedParallelStrategyWorlds.state;
+let parallelStrategyWorldsHealthy=loadedParallelStrategyWorlds.healthy;
+let parallelStrategyWorldsLastError=loadedParallelStrategyWorlds.error||null;
+const parallelStrategyWorldsRecoveredFromCorrupt=loadedParallelStrategyWorlds.recoveredFromCorrupt===true;
+loadedParallelStrategyWorlds=null;
+let parallelStrategyWorldsPersistenceQueue=Promise.resolve();
 let marketFabricAppendQueue = Promise.resolve();
 let marketFabricMaintenanceQueue = Promise.resolve();
 let marketFabricLastMaintenanceAt = 0;
@@ -1468,6 +1484,7 @@ const institutionalConfig = Object.freeze({
   strategyLeague:{
     version:SHADOW_STRATEGY_LEAGUE_VERSION,
     evidenceEngineVersion:STRATEGY_EVIDENCE_ENGINE_VERSION,
+    parallelWorldsVersion:PARALLEL_STRATEGY_WORLDS_VERSION,
     canExecuteLive:false,
     enabled:strategyLeagueEnabled,
     strategies:SHADOW_STRATEGIES.map(x=>x.id),
@@ -1543,6 +1560,7 @@ try {
       shadowPortfolio:SHADOW_PORTFOLIO_LEDGER_VERSION,
       strategyLeague:SHADOW_STRATEGY_LEAGUE_VERSION,
       strategyEvidence:STRATEGY_EVIDENCE_ENGINE_VERSION,
+      parallelStrategyWorlds:PARALLEL_STRATEGY_WORLDS_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
@@ -1881,6 +1899,72 @@ async function persistStrategyLeague(reason='mutation'){
     }
   });
   return strategyLeaguePersistenceQueue;
+}
+
+async function persistParallelStrategyWorlds(reason='mutation'){
+  parallelStrategyWorldsPersistenceQueue=parallelStrategyWorldsPersistenceQueue.then(async()=>{
+    try{
+      parallelStrategyWorldsState=await saveParallelStrategyWorlds(
+        parallelStrategyWorldsFile,
+        parallelStrategyWorldsState
+      );
+      parallelStrategyWorldsHealthy=true;
+      parallelStrategyWorldsLastError=null;
+      return true;
+    }catch(err){
+      parallelStrategyWorldsHealthy=false;
+      parallelStrategyWorldsLastError=err instanceof Error?err.message:String(err);
+      recordError(observability,{scope:'parallel_strategy_worlds.persistence',message:parallelStrategyWorldsLastError});
+      console.error('[BIGGJ_PARALLEL_WORLDS_PERSIST_FAILED]',reason,parallelStrategyWorldsLastError);
+      return false;
+    }
+  });
+  return parallelStrategyWorldsPersistenceQueue;
+}
+
+async function refreshParallelStrategyWorldsRuntime(reason='PERIODIC'){
+  const now=Date.now();
+  try{
+    const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
+    const challengerLab=buildLearnedChallengerLab(qualityModel,shadowPortfolioLedger,{asOf:now});
+    const leagueSummary=strategyLeagueSummary(strategyLeagueLedger,{asOf:now});
+    const refreshed=refreshParallelStrategyWorlds(parallelStrategyWorldsState,{
+      baseStrategies:SHADOW_STRATEGIES,
+      leaguePositions:strategyLeagueLedger.positions||[],
+      strategySummary:leagueSummary,
+      temporalTemple:memecoinEarlySnapshot?.temporalTemple||null,
+      learnedChallenger:learnedChallengerSummary(challengerLab),
+      asOf:now,
+      minClosedPerGeneration:Math.max(6,Math.min(40,Number(process.env.TCX_PARALLEL_WORLD_MIN_CLOSED||8))),
+      maxHistoryPerWorld:Math.max(8,Math.min(64,Number(process.env.TCX_PARALLEL_WORLD_MAX_HISTORY||24)))
+    });
+    parallelStrategyWorldsState=refreshed.state;
+    if(refreshed.changed) await persistParallelStrategyWorlds(reason);
+    const summary=parallelStrategyWorldsSummary(parallelStrategyWorldsState);
+    if(refreshed.changed){
+      console.log('[BIGGJ_PARALLEL_WORLDS]',JSON.stringify({
+        reason,
+        worlds:summary.worldCount,
+        generations:summary.generations,
+        evolutions:summary.evolutions,
+        convergenceCount:summary.council?.convergences?.length||0,
+        crossPollinationCandidates:summary.council?.crossPollination?.length||0,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false,
+        automaticPrimaryMutation:false
+      }));
+    }
+    recordOperation(observability,{name:'parallel_strategy_worlds_refresh',ok:true,latencyMs:0,error:null});
+    return summary;
+  }catch(err){
+    const msg=err instanceof Error?err.message:String(err);
+    parallelStrategyWorldsHealthy=false;
+    parallelStrategyWorldsLastError=msg;
+    recordError(observability,{scope:'parallel_strategy_worlds',message:msg});
+    recordOperation(observability,{name:'parallel_strategy_worlds_refresh',ok:false,latencyMs:0,error:msg});
+    console.error('[BIGGJ_PARALLEL_WORLDS_ERROR]',reason,msg);
+    return parallelStrategyWorldsSummary(parallelStrategyWorldsState);
+  }
 }
 
 async function persistState(reason='mutation') {
@@ -3455,7 +3539,8 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
     baseNotionalQuote:strategyLeagueBaseNotionalQuote,
     memeMinExpectedReturn:autoShadowMemecoinMinExpectedReturn,
     memeMinDirectionalProbability:autoShadowMemecoinMinDirectionalProbability,
-    memeMinProbabilityEdge:autoShadowMemecoinMinProbabilityEdge
+    memeMinProbabilityEdge:autoShadowMemecoinMinProbabilityEdge,
+    worldState:parallelStrategyWorldsState
   });
 
   let placed=0;
@@ -3500,6 +3585,11 @@ async function maybePlaceStrategyLeagueTrades(issuance,{auditHealthy=false}={}){
         leagueEvidenceGrade:candidate.leagueEvidenceGrade,
         leagueEvidenceFailedGates:candidate.leagueEvidenceFailedGates,
         leagueStatus:candidate.leagueStatus,
+        leagueWorldId:candidate.leagueWorldId,
+        leagueGenomeId:candidate.leagueGenomeId,
+        leagueGeneration:candidate.leagueGeneration,
+        leagueMutation:candidate.leagueMutation,
+        leagueWorldProfile:candidate.leagueWorldProfile,
         decisionKey:candidate.leagueDecisionKey,
         issuanceId:candidate.issuanceId,
         forecastFingerprint:candidate.forecastFingerprint,
@@ -9862,6 +9952,7 @@ async function strategyLeagueWatcher(){
       }
 
       if(changed) await persistStrategyLeague('watcher');
+      if(closed>0) await refreshParallelStrategyWorldsRuntime('STRATEGY_LEAGUE_OUTCOME');
       const summary=strategyLeagueSummary(strategyLeagueLedger,{asOf:Date.now()});
       recordOperation(observability,{name:'strategy_league_watch',ok:true,latencyMs:Date.now()-started,error:null});
       if(opened||closed){
@@ -11552,6 +11643,14 @@ function missionControlData(){
     ...biggjResearchAcceleratorSummary(researchAccelerator),
     version:BIGGJ_RESEARCH_ACCELERATOR_VERSION
   },
+  parallelStrategyWorlds:{
+    ...parallelStrategyWorldsSummary(parallelStrategyWorldsState),
+    version:PARALLEL_STRATEGY_WORLDS_VERSION,
+    healthy:parallelStrategyWorldsHealthy,
+    recoveredFromCorrupt:parallelStrategyWorldsRecoveredFromCorrupt,
+    lastError:parallelStrategyWorldsLastError,
+    file:parallelStrategyWorldsFile
+  },
   autonomousOperator:{
     ...biggjAutonomousOperatorSummary(autonomousOperatorState),
     version:BIGGJ_AUTONOMOUS_OPERATOR_VERSION,
@@ -12346,6 +12445,8 @@ async function gracefulShutdown(signal) {
   await persistSpecialistWallets(`shutdown:${signal}`);
   await persistMemecoinSecurityOutcomes(`shutdown:${signal}`);
   await persistMemecoinEvidenceFactory(`shutdown:${signal}`);
+  await persistStrategyLeague(`shutdown:${signal}`);
+  await persistParallelStrategyWorlds(`shutdown:${signal}`);
   await persistVenueQualityMemory(`shutdown:${signal}`);
   try{ await discordBridge?.stop(); }catch{}
   server.close(() => process.exit(0));
@@ -12360,6 +12461,7 @@ await syncFeatureResearch('startup');
 await refreshBiggjWorldModelRuntime('STARTUP');
 await refreshPublicExperienceIntel('startup');
 await refreshMemecoinEarlyRadar('startup');
+await refreshParallelStrategyWorldsRuntime('STARTUP');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
 const startupRulebook=currentBiggjRulebookAssessment();
@@ -12401,6 +12503,10 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   shadowOmsHealthy,
   shadowPortfolioHealthy,
   strategyLeagueHealthy,
+  parallelStrategyWorlds:{
+    healthy:parallelStrategyWorldsHealthy,
+    ...parallelStrategyWorldsSummary(parallelStrategyWorldsState)
+  },
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   autonomousOperator:biggjAutonomousOperatorSummary(autonomousOperatorState),
