@@ -32,6 +32,8 @@ import { buildTcxProofReport, TCX_PROOF_SYSTEM_VERSION } from './tcx-proof-syste
 import { loadPersistentState, savePersistentState } from './state-store.mjs';
 import { candlesFromKlines, closedCandles, analyzeStructure, analyzeMultiTimeframe } from './market-structure.mjs';
 import { renderCandlestickPng } from './chart-renderer.mjs';
+import { buildMultiScaleTrendBoxes, trendBoxSummary, TREND_BOX_ENGINE_VERSION } from './trend-box-engine.mjs';
+import { buildTrendPhaseForecasts, trendPhaseForecastSummary, TREND_PHASE_FORECAST_VERSION } from './trend-phase-forecast.mjs';
 import { tradeOverlayFromPosition } from './biggj-visual-intelligence.mjs';
 import { buildChartIntelligence, CHART_INTELLIGENCE_VERSION } from './chart-intelligence.mjs';
 import { buildMarketXray, buildMtfMatrix, MARKET_XRAY_VIEW_VERSION } from './market-xray-view.mjs';
@@ -1599,6 +1601,8 @@ try {
       biggjDiscoveryLedger:BIGGJ_DISCOVERY_LEDGER_VERSION,
       technicalIndicatorFactory:TECHNICAL_INDICATOR_FACTORY_VERSION,
       indicatorEvolution:INDICATOR_EVOLUTION_ENGINE_VERSION,
+      trendBoxEngine:TREND_BOX_ENGINE_VERSION,
+      trendPhaseForecast:TREND_PHASE_FORECAST_VERSION,
       shadowTradeQualityLearner:SHADOW_TRADE_QUALITY_LEARNER_VERSION,
       mandatoryShadowDiscovery:MANDATORY_SHADOW_DISCOVERY_VERSION,
       shadowCoverageCurriculum:SHADOW_COVERAGE_CURRICULUM_VERSION,
@@ -6383,7 +6387,7 @@ const WEB_SUPERCHART_CACHE_LIMIT=24;
 const webSuperchartCache=new Map();
 const webSuperchartInflight=new Map();
 
-async function buildSuperchartAsset(symbol,{mode='PRO',interval='5m',capture=false}={}){
+async function buildSuperchartAsset(symbol,{mode='PRO',interval='5m',trendScale='M',capture=false}={}){
   const state=await researchState(symbol,interval);
   if(capture)await captureEpisodeFromState(state,{persist:true});
   const [book,derivatives,external,onchain,walletCohort]=await Promise.all([
@@ -6412,6 +6416,10 @@ async function buildSuperchartAsset(symbol,{mode='PRO',interval='5m',capture=fal
   });
   const latestForecast=latestInstitutionalForecast(forecastRuntime,symbol);
   const forecastOverlay=forecastIssuanceToChartOverlay(latestForecast,{now:state.availableAt,maxAgeMs:6*60*60_000});
+  const trendMulti=buildMultiScaleTrendBoxes(state.byTf[interval],{asOf:state.availableAt});
+  const selectedTrendScale=String(trendScale||'M').toUpperCase();
+  const trendBoxes=trendMulti.byScale[selectedTrendScale]||trendMulti.byScale.M;
+  const trendPhaseForecast=buildTrendPhaseForecasts(trendMulti,forecastOverlay);
   const eventRadar=buildStructureEventRadar({
     symbol,
     analyses:{'1m':state.mtf?.analyses?.['1m'],'5m':state.mtf?.analyses?.['5m'],'15m':state.mtf?.analyses?.['15m'],'1h':state.mtf?.analyses?.['1h'],'4h':state.mtf?.analyses?.['4h']},
@@ -6423,16 +6431,25 @@ async function buildSuperchartAsset(symbol,{mode='PRO',interval='5m',capture=fal
     .filter(p=>p?.symbol===symbol&&p?.status==='OPEN'&&p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false)
     .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
   const tradeOverlay=activeTrade?tradeOverlayFromPosition(activeTrade,{asOf:state.availableAt}):null;
-  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{width:1200,height:820,dashboard:state.dashboard,forecastOverlay,superchart:intel,tradeOverlay});
-  return Object.freeze({png,intel,forecastOverlay,state,tradeOverlay,generatedAt:Date.now()});
+  const png=renderCandlestickPng(state.byTf[interval],state.analysis,{
+    width:1200,height:820,dashboard:state.dashboard,forecastOverlay,superchart:intel,tradeOverlay,
+    trendBoxes,trendPhaseForecast
+  });
+  return Object.freeze({
+    png,intel,forecastOverlay,state,tradeOverlay,trendBoxes,trendPhaseForecast,
+    trendBoxSummary:trendBoxSummary(trendBoxes),
+    trendPhaseSummary:trendPhaseForecastSummary(trendPhaseForecast,selectedTrendScale),
+    trendScale:selectedTrendScale,
+    generatedAt:Date.now()
+  });
 }
 
-async function webSuperchartAsset(symbol,{mode='FULL',interval='5m'}={}){
-  const key=[symbol,interval,mode].join('|');
+async function webSuperchartAsset(symbol,{mode='FULL',interval='5m'}={},trendScale='M'){
+  const key=[symbol,interval,mode,String(trendScale||'M').toUpperCase()].join('|');
   const cached=webSuperchartCache.get(key);
   if(cached&&Date.now()-cached.generatedAt<WEB_SUPERCHART_TTL_MS)return cached;
   if(webSuperchartInflight.has(key))return webSuperchartInflight.get(key);
-  const pending=buildSuperchartAsset(symbol,{mode,interval,capture:false}).then(asset=>{
+  const pending=buildSuperchartAsset(symbol,{mode,interval,trendScale,capture:false}).then(asset=>{
     webSuperchartCache.set(key,asset);
     while(webSuperchartCache.size>WEB_SUPERCHART_CACHE_LIMIT){
       const oldest=[...webSuperchartCache.entries()].sort((a,b)=>Number(a[1]?.generatedAt||0)-Number(b[1]?.generatedAt||0))[0]?.[0];
@@ -6445,12 +6462,13 @@ async function webSuperchartAsset(symbol,{mode='FULL',interval='5m'}={}){
   return pending;
 }
 
-async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=null,edit=false,live=true}={}){
-  const {png,intel,forecastOverlay}=await buildSuperchartAsset(symbol,{mode,interval,capture:true});
+async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',trendScale='M',messageId=null,edit=false,live=true}={}){
+  const {png,intel,forecastOverlay,trendBoxSummary:trendSummary,trendPhaseSummary:phaseSummary}=await buildSuperchartAsset(symbol,{mode,interval,trendScale,capture:true});
   const caption=[
     '🧠 TCX SUPERCHART · '+symbol.replace('USDT','/USDT')+' · '+String(interval).toUpperCase()+' · '+intel.mode,
     'Struktur + Forecast + Confluence + Liquidationen'+(intel.mode==='FULL'?' + Flow + Accuracy + Chain':''),
     forecastOverlay?'Forecast = probabilistische Modellpfade, keine garantierte Kursbahn.':'Kein frischer Forecast-Pfad verfügbar.',
+    trendSummary?.active?('Trend '+String(trendScale).toUpperCase()+' · '+trendSummary.active.direction+' · '+trendSummary.active.status+(phaseSummary?.available?' · Forecast '+phaseSummary.alignment:'')):'Trendboxen sammeln Struktur.',
     'SHADOW_ONLY · canExecute:false'
   ].join('\n').slice(0,1024);
   const keyboard=superchartKeyboard(symbol,intel.mode,interval,live);
@@ -6461,7 +6479,7 @@ async function showSuperchart(chatId,symbol,{mode='PRO',interval='5m',messageId=
     sent=await tgMultipart('sendPhoto',{chat_id:String(chatId),caption,reply_markup:keyboard},'photo',`${symbol}-superchart-${interval}.png`,png,'image/png');
     messageId=sent?.message_id||messageId;
   }
-  sessions.set(String(chatId),{chatId,messageId,symbol,live:Boolean(live),view:'SUPERCHART',interval,mode:intel.mode,lastRefresh:Date.now(),superchartVersion:SUPERCHART_VERSION});
+  sessions.set(String(chatId),{chatId,messageId,symbol,live:Boolean(live),view:'SUPERCHART',interval,mode:intel.mode,trendScale:String(trendScale||'M').toUpperCase(),lastRefresh:Date.now(),superchartVersion:SUPERCHART_VERSION,trendBoxVersion:TREND_BOX_ENGINE_VERSION,trendPhaseForecastVersion:TREND_PHASE_FORECAST_VERSION});
   return sent;
 }
 
@@ -6474,8 +6492,11 @@ async function showChart(chatId, symbol, interval="5m",{messageId=null,edit=fals
     .filter(p=>p?.symbol===symbol&&p?.status==='OPEN'&&p?.execution==='SHADOW_ONLY'&&p?.canExecuteLive===false)
     .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))[0]||null;
   const tradeOverlay=activeTrade?tradeOverlayFromPosition(activeTrade,{asOf:state.availableAt}):null;
+  const trendMulti=buildMultiScaleTrendBoxes(state.byTf[interval],{asOf:state.availableAt});
+  const trendBoxes=trendMulti.byScale.M;
+  const trendPhaseForecast=buildTrendPhaseForecasts(trendMulti,forecastOverlay);
   const png=renderCandlestickPng(state.byTf[interval],state.analysis,{
-    width:1100,height:760,dashboard:state.dashboard,forecastOverlay,tradeOverlay
+    width:1100,height:760,dashboard:state.dashboard,forecastOverlay,tradeOverlay,trendBoxes,trendPhaseForecast
   });
   const caption=chartCaption(symbol,interval,state,live,forecastOverlay);
   const keyboard=chartKeyboard(symbol,interval,live);
@@ -12172,12 +12193,13 @@ const server = http.createServer(async (req,res) => {
       const symbol=String(u.searchParams.get('symbol')||'BTCUSDT').toUpperCase();
       const interval=String(u.searchParams.get('interval')||'5m').toLowerCase();
       const mode=String(u.searchParams.get('mode')||'FULL').toUpperCase();
-      if(!symbolOk(symbol)||!['1m','5m','15m','1h','4h'].includes(interval)||!['PRO','FULL'].includes(mode)){
+      const trendScale=String(u.searchParams.get('trendScale')||'M').toUpperCase();
+      if(!symbolOk(symbol)||!['1m','5m','15m','1h','4h'].includes(interval)||!['PRO','FULL'].includes(mode)||!['XS','S','M','L','XL'].includes(trendScale)){
         res.writeHead(400,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
         res.end(JSON.stringify({ok:false,error:'INVALID_SUPERCHART_REQUEST',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
         return;
       }
-      const asset=await webSuperchartAsset(symbol,{interval,mode});
+      const asset=await webSuperchartAsset(symbol,{interval,mode},trendScale);
       recordOperation(observability,{name:'mobile_superchart',ok:true,latencyMs:Date.now()-started,error:null});
       res.writeHead(200,{
         'content-type':'image/png',
@@ -12186,6 +12208,10 @@ const server = http.createServer(async (req,res) => {
         'x-biggj-chart-symbol':symbol,
         'x-biggj-chart-interval':interval,
         'x-biggj-chart-mode':mode,
+        'x-biggj-trend-scale':trendScale,
+        'x-biggj-trend-status':String(asset.trendBoxSummary?.active?.status||'COLLECTING'),
+        'x-biggj-trend-direction':String(asset.trendBoxSummary?.active?.direction||'UNKNOWN'),
+        'x-biggj-trend-forecast-alignment':String(asset.trendPhaseSummary?.alignment||'NO_FORECAST'),
         'x-biggj-chart-generated-at':String(asset.generatedAt),
         'x-biggj-execution':'SHADOW_ONLY'
       });

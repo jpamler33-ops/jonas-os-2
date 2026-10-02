@@ -40,6 +40,28 @@ test('renders probabilistic forecast path overlay in a future panel',()=>{
 });
 
 
+test('renders persistent trend boxes and active phase forecast without closing the live box',()=>{
+  const candles=[];
+  for(let i=0;i<80;i++)candles.push({openTime:i*300000,o:100+i*.03,h:101+i*.03,l:99+i*.03,c:100.2+i*.03,v:10,closeTime:(i+1)*300000-1,closed:true});
+  const trendBoxes={
+    scale:'M',
+    boxes:[
+      {scale:'M',direction:'UP',status:'CLOSED',startTime:10*300000,endTime:30*300000,high:103,low:99.5},
+      {scale:'M',direction:'DOWN',status:'CLOSED',startTime:30*300000,endTime:50*300000,high:103,low:100},
+      {scale:'M',direction:'UP',status:'ACTIVE',startTime:50*300000,endTime:80*300000,high:104,low:100}
+    ],
+    active:{scale:'M',direction:'UP',status:'ACTIVE'}
+  };
+  const trendPhaseForecast={byScale:{M:{targetHorizonId:'1h',medianReturn:.012,alignment:'ALIGNED'}}};
+  const png=renderCandlestickPng(candles,{support:99,resistance:104,classifiedPivots:[]},{
+    width:900,height:560,
+    forecastOverlay:{anchorPrice:102,status:'ACTIVE',horizons:[{horizonId:'1h',horizonMs:3600000,lowerPrice:98,medianPrice:103,upperPrice:107}],scenarios:[{id:'BASE_PATH',points:[{horizonMs:3600000,targetPrice:103}]}]},
+    trendBoxes,trendPhaseForecast
+  });
+  assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+  assert.ok(png.length>1000);
+});
+
 test('renders full superchart layers with forecast',()=>{
   const candles=[];
   for(let i=0;i<80;i++)candles.push({openTime:i,o:100,h:102,l:98,c:100+i*.02,v:10,closeTime:i+1,closed:true});
