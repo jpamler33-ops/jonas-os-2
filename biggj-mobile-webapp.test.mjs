@@ -143,7 +143,10 @@ test('discovery journal renders validated, rejected and collecting Temporal Temp
     evidenceFactory:{independentCases:40,complete24h:11}
   };
   const h=renderBiggjMobileApp(x);
-  for(const text of ['Übergangsgesetze','S17 → S45','Widerlegt / nicht gehalten','S12 → S03','Noch nicht entscheidbar','Skaleninvarianten','Frühe Informations-Proxies','Market Ephemeris','Event Clock'])assert.match(h,new RegExp(text));
+  for(const text of ['Übergangsgesetze','Widerlegt / nicht gehalten','Noch nicht entscheidbar','Skaleninvarianten','Frühe Informations-Proxies','Market Ephemeris','Event Clock'])assert.match(h,new RegExp(text));
+  assert.match(h,/"fromState":"S17"/);
+  assert.match(h,/"toState":"S45"/);
+  assert.match(h,/E\(x\?\.fromState\|\|'\?'\)\+' → '\+E\(x\?\.toState/);
   assert.match(h,/Median forward/);
   assert.match(h,/negative Erkenntnisse zählen/);
   assert.match(h,/PIT Evidence · Walk-Forward · Cross-Context/);
