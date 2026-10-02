@@ -239,7 +239,7 @@ function tasksFromExperimentGovernor(governor={},modelPromotionReviewSummary=nul
       metadata:{generationNumber:finite(governor.generationNumber),measuring}
     }));
   }
-  if(governor.nextGenerationEligible===true){
+  if(governor.nextGenerationEligible===true&&status==='COMPLETE_NO_PROMOTION'){
     tasks.push(task({
       type:'GENERATE_NEXT_CHALLENGER_GENERATION',
       subject:String(governor.generationId||'CURRENT_GENERATION'),
