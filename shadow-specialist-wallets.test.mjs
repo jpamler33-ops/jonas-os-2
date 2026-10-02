@@ -74,12 +74,26 @@ test('wallet 4 enters only early liquid shadow candidates and ignores risky thin
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions[0].canExecuteLive,false);
 });
 
-test('wallet 4 keeps thin launches in research but blocks them from the performance scout',()=>{
+test('wallet 4 preserves thin-liquidity moonshot candidates when no second risk signal exists',()=>{
   const now=2_300_000;
   const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'THIN',symbol:'THIN',priceUsd:.01,liquidityUsd:18_000,
     volumeM5:8_000,buysM5:12,sellsM5:5,priceChangeM5:12,
     score:{stage:'NEW_NOW',researchPriorityScore:.80,attentionSignals:['NEW_POOL'],riskFlags:['LIQUIDITY_THIN']},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  }]},{now,minLiquidityUsd:10_000,minScore:.58});
+  assert.equal(x.results.eligible,1);
+  assert.equal(x.results.tailRiskBlocked,0);
+  assert.equal(x.results.opened,1);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,1);
+});
+
+test('wallet 4 blocks thin launches when a second independent tail-risk signal is present',()=>{
+  const now=2_350_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'THINCHASE',symbol:'THINCHASE',priceUsd:.01,liquidityUsd:18_000,
+    volumeM5:80_000,buysM5:28,sellsM5:3,priceChangeM5:140,
+    score:{stage:'NEW_NOW',researchPriorityScore:.86,attentionSignals:['NEW_POOL'],riskFlags:['LIQUIDITY_THIN','M5_CHASE_RISK','EXTREME_TURNOVER']},
     security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
   }]},{now,minLiquidityUsd:10_000,minScore:.58});
   assert.equal(x.results.eligible,1);
