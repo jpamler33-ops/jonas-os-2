@@ -575,35 +575,33 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
     LIQUIDITY_BELOW_NORMAL_MIN:'Liquidität unter Normalgrenze',
     STAGE_OUTSIDE_NORMAL_SCOUT:'Stage außerhalb Normal-Scout'
   }[String(k)]||String(k).replaceAll('_',' '));
+  const hasData=Number(contra?.samples||0)>0;
+  const pctMaybe=v=>hasData&&Number.isFinite(Number(v))?percent(v):'—';
   const ruleRows=Object.entries(contra?.byViolation||{})
     .sort((a,b)=>Number(b?.[1]?.samples||0)-Number(a?.[1]?.samples||0))
-    .slice(0,6)
-    .map(([k,v])=>'• **'+ruleName(k)+'** · '+String(v?.samples||0)+' Tests · WR '+percent(v?.rawWinRate)+' · Shrunk '+percent(v?.shrinkedMeanReturn));
-  const currentNet=Number(wallet?.netPnlQuote);
-  const currentUsed=Number(wallet?.cumulativeMarginUsedQuote);
-  const avg=Number(g?.rawMeanReturn),med=Number(g?.medianReturn),sev=Number(g?.severeLossRate),moon=Number(g?.moonshotRate);
+    .slice(0,5)
+    .map(([k,v])=>'• **'+ruleName(k)+'** · '+String(v?.samples||0)+' Tests · WR '+percent(v?.rawWinRate)+' · Edge '+percent(v?.shrinkedMeanReturn));
+  const openRows=openContrarian.slice(0,4).map(p=>
+    '• **'+String(p?.symbol||'MEME')+'** · '+ruleName((p?.entryContrarianViolations||[])[0]||'SOFT_RULE')+
+    ' · '+money(p?.unrealizedNetPnlQuote)+' · '+percent(p?.unrealizedReturnPct)
+  );
+  const state=hasData?'DATA LIVE':openContrarian.length?'PROBES RUNNING':'WARTE AUF ERSTE PROBE';
   return {embeds:[{
     title:'BIGGJ // MEMECOIN RESEARCH',
     description:[
-      '**Normalstrategie + absichtliche Contrarian-Probes auf einen Blick.**',
-      'Contrarian = genau eine weiche Regel bewusst brechen, mit Mini-Shadow-Size. Hard Security Guards bleiben unangetastet.'
+      '**'+state+'**',
+      'Wallet 4: **'+money(wallet?.netPnlQuote)+' PnL** · '+money(wallet?.cumulativeMarginUsedQuote)+' kumulierter Einsatz · '+String(wallet?.openPositions??0)+' offen',
+      'Radar: **BLOCK '+actions.BLOCK+'** · THROTTLE '+actions.THROTTLE+' · BOOST '+actions.BOOST+' · NEUTRAL '+actions.NEUTRAL,
+      '',
+      '**CONTRARIAN** · 1 Soft-Regel absichtlich brechen · 5% Shadow-Size · Hard Guards bleiben aktiv'
     ].join('\n'),
     fields:[
-      {name:'Wallet 4 PnL',value:money(currentNet),inline:true},
-      {name:'Gesamt reingeflossen',value:money(currentUsed),inline:true},
-      {name:'Open Wallet 4',value:String(wallet?.openPositions??0),inline:true},
-      {name:'Radar Entscheidungen',value:'BLOCK '+actions.BLOCK+' · THROTTLE '+actions.THROTTLE+' · BOOST '+actions.BOOST+' · NEUTRAL '+actions.NEUTRAL,inline:false},
-      {name:'Contrarian offen',value:String(openContrarian.length),inline:true},
-      {name:'Contrarian abgeschlossen',value:String(contra?.samples??0),inline:true},
-      {name:'Contrarian Winrate',value:percent(g?.rawWinRate),inline:true},
-      {name:'Ø Return',value:Number.isFinite(avg)?percent(avg):'—',inline:true},
-      {name:'Median',value:Number.isFinite(med)?percent(med):'—',inline:true},
-      {name:'Severe Loss',value:Number.isFinite(sev)?percent(sev):'—',inline:true},
-      {name:'Moonshot Rate',value:Number.isFinite(moon)?percent(moon):'—',inline:true},
-      {name:'Normal-Learner Samples',value:String(learning?.samples??0),inline:true},
-      {name:'Absichtlich anders getestet',value:(ruleRows.join('\n')||'Noch keine abgeschlossenen Contrarian-Probes.').slice(0,1024),inline:false},
-      {name:'Interpretation',value:'Contrarian-Ergebnisse bleiben separat. Kein automatisches Überschreiben der Normalstrategie. Erst wiederholte, robuste Evidence darf später eine neue Hypothese auslösen.',inline:false},
-      {name:'Safety',value:'SHADOW_ONLY · canExecute:false · canExecuteLive:false · Hard Security Guards aktiv',inline:false}
+      {name:'Probes',value:'Offen **'+openContrarian.length+'** · abgeschlossen **'+String(contra?.samples??0)+'** · Normal-Learner **'+String(learning?.samples??0)+'**',inline:false},
+      {name:'Outcome',value:'WR **'+pctMaybe(g?.rawWinRate)+'** · Ø **'+pctMaybe(g?.rawMeanReturn)+'** · Median **'+pctMaybe(g?.medianReturn)+'** · Severe **'+pctMaybe(g?.severeLossRate)+'** · Moonshot **'+pctMaybe(g?.moonshotRate)+'**',inline:false},
+      {name:'Aktive Contrarian-Probes',value:(openRows.join('\n')||'Noch keine aktive Probe.').slice(0,1024),inline:false},
+      {name:'Was wurde absichtlich anders getestet?',value:(ruleRows.join('\n')||'Noch keine abgeschlossenen Contrarian-Probes.').slice(0,1024),inline:false},
+      {name:'Auswertung',value:hasData?'Contrarian-Evidence ist getrennt vom normalen Learner. Wiederholbare Edge muss erst robust bestätigt werden.':'Noch keine Performance-Aussage möglich — 0 abgeschlossene Contrarian-Samples.',inline:false},
+      {name:'Safety',value:'SHADOW_ONLY · canExecute:false · canExecuteLive:false · keine Hard-Security-Bypasses',inline:false}
     ],
     footer:{text:MARKERS.memecoinResearch},
     timestamp:new Date().toISOString()
