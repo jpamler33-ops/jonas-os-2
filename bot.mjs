@@ -1680,6 +1680,10 @@ function scheduleForecastRuntimePersist(delayMs){
 async function flushForecastRuntimePersistence(force=false){
   if(forecastRuntimePersistRunning) return forecastRuntimePersistRunning;
   if(!forecastRuntimePersistDirty||!forecastRuntime.healthy) return false;
+  maybeCollectResearchGarbage('FORECAST_PERSIST_PRECHECK',{
+    triggerHeapMb:Math.max(300,forecastPersistenceHeapHeadroomMb-20),
+    cooldownBypassOverageMb:10
+  });
   const beforeMemory=process.memoryUsage();
   const persistenceAdmission=evaluateAutoLearnMemoryAdmission({
     phase:'ISSUE',
@@ -10289,7 +10293,7 @@ async function syncFeatureResearch(reason='update'){
     }
     if(!featureResearchState){
       featureResearchState=createFeatureResearchRound({
-        journalEntries:forecastRuntime.journal.all(),
+        journalEntries:forecastRuntime.journal.entries,
         incumbentConfig:forecastRuntime.engine.configSnapshot(),
         features:activeFeatureResearchFeatures,
         generationNumber:1,
@@ -10297,7 +10301,7 @@ async function syncFeatureResearch(reason='update'){
       });
     }else{
       featureResearchState=advanceFeatureResearchRound(featureResearchState,{
-        journalEntries:forecastRuntime.journal.all(),
+        journalEntries:forecastRuntime.journal.entries,
         incumbentConfig:forecastRuntime.engine.configSnapshot(),
         now:Date.now(),
         minimumTrainCases:40
@@ -10345,13 +10349,20 @@ async function persistIndicatorEvolution(reason='mutation'){
 async function syncIndicatorEvolution(reason='update'){
   const started=Date.now();
   try{
+    maybeCollectResearchGarbage('INDICATOR_EVOLUTION_PRECHECK',{
+      triggerHeapMb:Math.max(280,servingGuardHeapMb-20),
+      cooldownBypassOverageMb:10
+    });
+    const indicatorMemory=servingMemoryPressure();
+    const configuredIndicatorEvalBudget=Math.max(1,Math.min(12,Number(process.env.TCX_INDICATOR_EVOLUTION_EVALS_PER_CYCLE||6)));
+    const effectiveIndicatorEvalBudget=indicatorMemory.pressured?1:configuredIndicatorEvalBudget;
     const refreshed=refreshIndicatorEvolutionEngine(indicatorEvolutionState,{
-      journalEntries:forecastRuntime.journal.all(),
+      journalEntries:forecastRuntime.journal.entries,
       incumbentConfig:forecastRuntime.engine.configSnapshot(),
       experiments:TECHNICAL_INDICATOR_EXPERIMENTS,
       asOf:Date.now(),
       policy:{
-        maxEvaluationsPerCycle:Math.max(1,Math.min(12,Number(process.env.TCX_INDICATOR_EVOLUTION_EVALS_PER_CYCLE||6))),
+        maxEvaluationsPerCycle:effectiveIndicatorEvalBudget,
         minSeedRows:Math.max(20,Number(process.env.TCX_INDICATOR_EVOLUTION_SEED_ROWS||40)),
         minOosCases:Math.max(20,Number(process.env.TCX_INDICATOR_EVOLUTION_OOS_CASES||60)),
         minIndependentEpisodes:Math.max(10,Number(process.env.TCX_INDICATOR_EVOLUTION_INDEPENDENT_EPISODES||30))
@@ -10372,6 +10383,7 @@ async function syncIndicatorEvolution(reason='update'){
           meanBrierDelta:x.meanBrierDelta,q:x.q
         })),
         delta:refreshed.delta,
+        memoryBudget:{pressured:indicatorMemory.pressured,maxEvaluationsPerCycle:effectiveIndicatorEvalBudget},
         execution:'SHADOW_ONLY',
         canExecuteLive:false,
         automaticProductionMutation:false,
@@ -11152,7 +11164,8 @@ async function forecastOutcomeWatcher() {
     try {
       const started=Date.now();
       maybeCollectResearchGarbage('OUTCOME_PRECHECK',{
-        triggerHeapMb:forecastPersistenceHeapHeadroomMb
+        triggerHeapMb:Math.max(300,forecastPersistenceHeapHeadroomMb-20),
+        cooldownBypassOverageMb:10
       });
       const beforeMemory=process.memoryUsage();
       const admission=evaluateAutoLearnMemoryAdmission({
