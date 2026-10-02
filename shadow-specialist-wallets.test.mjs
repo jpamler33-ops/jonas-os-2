@@ -85,6 +85,58 @@ test('wallet 4 refuses hard market-data anomalies even with security pass',()=>{
   assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
 });
 
+test('wallet 4 learned BLOCK can only abstain from an otherwise eligible shadow entry',()=>{
+  const now=2_700_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'LEARNBAD',symbol:'LEARNBAD',priceUsd:.01,liquidityUsd:55_000,
+    volumeM5:20_000,buysM5:18,sellsM5:9,priceChangeM5:18,pairCreatedAt:now-14*60_000,
+    score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:['SOCIAL_POSTS_RECENT'],riskFlags:[]},
+    security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32}},
+    memeLearning:{action:'BLOCK',rankingAdjustment:-.2,evidence:{level:'EXACT',samples:12,label:'LEARNED_BAD',confidence:.55}}
+  }]},{now});
+  assert.equal(x.results.eligible,1);
+  assert.equal(x.results.learningBlocked,1);
+  assert.equal(x.results.opened,0);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
+});
+
+test('wallet 4 persists entry microstructure and learning provenance for later outcome learning',()=>{
+  const now=2_800_000;
+  const x=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'LEARNGOOD',symbol:'LEARNGOOD',priceUsd:.01,liquidityUsd:55_000,
+    marketCap:320_000,fdv:350_000,volumeM5:20_000,volumeH1:70_000,buysM5:18,sellsM5:9,
+    priceChangeM5:18,priceChangeH1:55,pairCreatedAt:now-14*60_000,
+    directSocialAttention:{posts:4,uniqueAuthors:3,engagement:80,attentionBand:'RISING'},
+    score:{stage:'EARLY',ageMinutes:14,researchPriorityScore:.68,attentionSignals:['SOCIAL_POSTS_RECENT'],riskFlags:[]},
+    security:{evidenceGate:'PASS',source:'GOPLUS+RUGCHECK',criticalRiskFlags:[],warningFlags:[],coverage:{holderConcentrationKnown:true,holderConcentrationIndependent:true},holderState:{top10Share:.32,largestHolderShare:.08}},
+    memeLearning:{action:'BOOST',rankingAdjustment:.05,evidence:{level:'EXACT',samples:12,label:'LEARNED_GOOD',confidence:.55}}
+  }]},{now});
+  const p=x.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.equal(x.results.learningBoosted,1);
+  assert.equal(p.entryMarketFeatures.liquidityUsd,55_000);
+  assert.equal(p.entryMarketFeatures.buysM5,18);
+  assert.equal(p.entryMarketFeatures.sellsM5,9);
+  assert.equal(p.entryMarketFeatures.holderTop10Share,.32);
+  assert.equal(p.entryMemeLearning.action,'BOOST');
+  assert.equal(p.canExecuteLive,false);
+});
+
+test('wallet 5 learned BLOCK does not interfere with wallet 3 public trader copy',()=>{
+  const snap={sourceReady:true,traders:[{
+    uniqueCode:'T1',nickname:'Alpha',providerRank:1,recentClosed:[],
+    openPositions:[{
+      id:'M',instId:'PEPE-USDT-SWAP',side:'LONG',leverage:3,markPx:.001,openAvgPx:.0009,openTime:1,protectedFields:false,
+      memeLearning:{action:'BLOCK',evidence:{level:'TRADER_SYMBOL',samples:12,label:'LEARNED_BAD'}}
+    }]
+  }]};
+  const x=applyPublicTraderCopySnapshot(createSpecialistWalletState(),snap,{now:3000});
+  assert.equal(x.results.openedW3,1);
+  assert.equal(x.results.openedW5,0);
+  assert.equal(x.results.learningBlockedW5,1);
+  assert.equal(x.state.wallets[WALLET_3_TRADER_COPY].positions.length,1);
+  assert.equal(x.state.wallets[WALLET_5_MEME_COPY].positions.length,0);
+});
+
 test('wallet 4 marks and closes a take-profit research episode from later public price',()=>{
   const now=2_000_000;
   let state=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
