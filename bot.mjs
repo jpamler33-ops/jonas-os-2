@@ -665,8 +665,9 @@ const memecoinSecurityProvider=createMemecoinSecurityProvider({
   holderFallbackEnabled:String(process.env.TCX_MEME_HOLDER_FALLBACK_ENABLED||'true').toLowerCase()!=='false',
   holderCacheMs:Math.max(60_000,Math.min(30*60_000,Number(process.env.TCX_MEME_HOLDER_CACHE_MS||10*60_000))),
   solanaRpcUrl:String(process.env.TCX_SOLANA_PUBLIC_RPC_URL||'').trim(),
-  solanaRpcUrls:String(process.env.TCX_SOLANA_PUBLIC_RPC_URLS||'https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com')
+  solanaRpcUrls:String(process.env.TCX_SOLANA_PUBLIC_RPC_URLS||'https://solana.api.onfinality.io/public,https://solana.drpc.org,https://solana-rpc.publicnode.com,https://api.mainnet.solana.com')
     .split(',').map(x=>x.trim()).filter(Boolean),
+  honeypotBaseUrl:String(process.env.TCX_HONEYPOT_API_URL||'https://api.honeypot.is').trim(),
   evmRpcUrls:{
     base:String(process.env.TCX_BASE_PUBLIC_RPC_URLS||'https://base-rpc.publicnode.com,https://mainnet.base.org')
       .split(',').map(x=>x.trim()).filter(Boolean),
