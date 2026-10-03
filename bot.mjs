@@ -4155,7 +4155,7 @@ function favoritesKeyboard(chatId) {
 
 async function snapshot(symbol) {
   const started = Date.now();
-  const { ticker, book, depth, base } = await fetchMarketParts(symbol);
+  const { ticker, book, depth, base, provider='BINANCE' } = await fetchMarketParts(symbol);
   const bids = (depth.bids || []).slice(0,10).map(([p,q]) => [Number(p),Number(q)]);
   const asks = (depth.asks || []).slice(0,10).map(([p,q]) => [Number(p),Number(q)]);
   const bid = Number(book.bidPrice);
@@ -4178,15 +4178,16 @@ async function snapshot(symbol) {
     bid, ask, spreadBps, imbalance,
     timestamp:now,
     availableAt:now,
-    source:'BINANCE_PUBLIC_REST',
-    version:'v3',
-    provenance:`ticker24hr+bookTicker+depth20; host=${new URL(base).host}; fetched_ms=${now-started}`
+    provider,
+    source:provider==='OKX'?'OKX_PUBLIC_REST':'BINANCE_PUBLIC_REST',
+    version:provider==='OKX'?'v5':'v3',
+    provenance:`market+book+depth; provider=${provider}; host=${new URL(base).host}; fetched_ms=${now-started}`
   };
 }
 
 async function timeframeSnapshot(symbol, interval) {
   const started = Date.now();
-  const { rows, base } = await fetchKlines(symbol, interval, 30);
+  const { rows, base, provider='BINANCE' } = await fetchKlines(symbol, interval, 30);
   const availableAt = Date.now();
   const candles = candlesFromKlines(rows, availableAt);
   const closed = closedCandles(candles);
@@ -4202,9 +4203,10 @@ async function timeframeSnapshot(symbol, interval) {
     symbol, interval, bars:closed.length, firstOpen, lastClose, high, low, quoteVolume, movePct, rangePct,
     timestamp:closed.at(-1).closeTime,
     availableAt,
-    source:"BINANCE_PUBLIC_REST_KLINES",
-    version:"v3",
-    provenance:`closed_klines; interval=${interval}; host=${new URL(base).host}; fetched_ms=${availableAt-started}`
+    provider,
+    source:provider==='OKX'?"OKX_PUBLIC_REST_KLINES":"BINANCE_PUBLIC_REST_KLINES",
+    version:provider==='OKX'?"v5":"v3",
+    provenance:`closed_klines; interval=${interval}; provider=${provider}; host=${new URL(base).host}; fetched_ms=${availableAt-started}`
   };
 }
 
@@ -4246,7 +4248,7 @@ function renderMarket(s, live) {
   const dir = s.changePct >= 0 ? '▲' : '▼';
   const im = s.imbalance > 0.12 ? 'Bid-lastig' : s.imbalance < -0.12 ? 'Ask-lastig' : 'ausgeglichen';
   return [
-    `📊 ${s.symbol.replace('USDT','/USDT')} · Binance`,'',
+    `📊 ${s.symbol.replace('USDT','/USDT')} · ${s.provider||'BINANCE'}`,'',
     `💰 ${fmt(s.price, s.price < 1 ? 6 : 2)} USDT`,
     `${dir} 24h: ${s.changePct >= 0 ? '+' : ''}${fmt(s.changePct,2)} %`,
     `↕️ 24h: ${fmt(s.low,2)} – ${fmt(s.high,2)}`,

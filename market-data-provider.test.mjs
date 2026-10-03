@@ -52,6 +52,64 @@ test("market parts fall back to second Binance base",async()=>{
   assert.ok(seen.some(x=>x.includes("b.binance.test")));
 });
 
+test("market parts fall back to OKX when Binance is unavailable",async()=>{
+  const p=provider(async url=>{
+    if(url.includes("binance.test")) return response(451,{msg:"restricted"});
+    if(url.includes("/market/ticker")) return response(200,{code:"0",data:[{
+      last:"101",open24h:"100",high24h:"110",low24h:"90",volCcy24h:"12345",bidPx:"100.5",askPx:"101.5"
+    }]});
+    if(url.includes("/market/books")) return response(200,{code:"0",data:[{
+      bids:[["100.5","2","0","1"]],asks:[["101.5","3","0","1"]],ts:"1700000000000",seqId:42
+    }]});
+    return response(500,{});
+  });
+  const x=await p.fetchMarketParts("BTCUSDT");
+  assert.equal(x.provider,"OKX");
+  assert.equal(x.ticker.lastPrice,"101");
+  assert.equal(Number(x.ticker.priceChangePercent),1);
+  assert.equal(x.book.bidPrice,"100.5");
+  assert.equal(x.depth.bids[0][0],"100.5");
+});
+
+test("klines fall back to OKX, paginate and normalize into chronological Binance-like rows",async()=>{
+  const seen=[];
+  const p=provider(async url=>{
+    seen.push(url);
+    if(url.includes("binance.test")) return response(451,{msg:"restricted"});
+    if(url.includes("okx.test")){
+      const u=new URL(url);
+      const after=u.searchParams.get("after");
+      if(after===null) return response(200,{code:"0",data:[
+        ["300000","3","4","2","3.5","10","20","30","1"],
+        ["0","1","2","0.5","1.5","10","20","30","1"]
+      ]});
+      return response(200,{code:"0",data:[]});
+    }
+    return response(500,{});
+  });
+  const x=await p.fetchKlines("BTCUSDT","5m",2);
+  assert.equal(x.provider,"OKX");
+  assert.deepEqual(x.rows.map(row=>row[0]),[0,300000]);
+  assert.equal(x.rows[0][6],299999);
+  assert.equal(x.rows[0][7],"30");
+  assert.ok(seen.some(url=>url.includes("okx.test")));
+});
+
+test("historical OKX fallback uses after=endTime for PIT-safe older candles",async()=>{
+  const seen=[];
+  const p=provider(async url=>{
+    seen.push(url);
+    if(url.includes("binance.test")) return response(451,{msg:"restricted"});
+    return response(200,{code:"0",data:[
+      ["600000","2","3","1","2.5","1","2","3","1"],
+      ["300000","1","2","0.5","1.5","1","2","3","1"]
+    ]});
+  });
+  await p.fetchKlines("BTCUSDT","5m",2,{endTime:900000});
+  const okxUrl=seen.find(url=>url.includes("okx.test")&&url.includes("/market/candles"));
+  assert.equal(new URL(okxUrl).searchParams.get("after"),"900000");
+});
+
 test("klines reject unsupported intervals before network",async()=>{
   let calls=0;
   const p=provider(async()=>{calls++;return response(200,[]);});
@@ -80,6 +138,19 @@ test("execution book is normalized with provenance",async()=>{
   assert.equal(b.symbol,"BTCUSDT");
   assert.equal(b.source,"BINANCE_PUBLIC_REST_DEPTH100");
   assert.match(b.provenance,/lastUpdateId=42/);
+});
+
+test("execution book falls back to OKX after Binance failure",async()=>{
+  const p=provider(async url=>{
+    if(url.includes("binance.test")) return response(451,{msg:"restricted"});
+    if(url.includes("okx.test")) return response(200,{code:"0",data:[{
+      bids:[["99","2","0","1"]],asks:[["101","3","0","1"]],ts:"123",seqId:77
+    }]});
+    return response(500,{});
+  });
+  const b=await p.fetchExecutionBook("BTCUSDT");
+  assert.equal(b.source,"OKX_PUBLIC_BOOKS100");
+  assert.match(b.provenance,/seqId=77/);
 });
 
 test("SOR returns partial success without failing whole collection",async()=>{
