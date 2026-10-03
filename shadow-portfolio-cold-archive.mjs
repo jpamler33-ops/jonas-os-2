@@ -133,8 +133,11 @@ export async function archiveClosedShadowPositions(archive,positions,{archivedAt
   }
 
   const before=archive.bytes;
+  function* archiveLines(){
+    for(const row of rows) yield JSON.stringify(row)+'\n';
+  }
   await pipeline(
-    Readable.from(rows.map(row=>JSON.stringify(row)+'\n')),
+    Readable.from(archiveLines()),
     createGzip({level:1}),
     createWriteStream(archive.filePath,{flags:'a',mode:0o600})
   );
