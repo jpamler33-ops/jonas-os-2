@@ -9,6 +9,9 @@ import {
   simulateShadowPositionExit,
   markShadowPosition,
   closeShadowPosition,
+  compactClosedShadowPosition,
+  compactShadowPortfolioLedgerClosedPositions,
+  SHADOW_CLOSED_POSITION_COMPACTION_VERSION,
   createEmptyShadowPortfolioLedger,
   reconcileShadowPortfolioEntries,
   replaceShadowPortfolioPosition,
@@ -589,4 +592,55 @@ test('untrusted thesis evidence never fabricates a directional exit',()=>{
   assert.equal(m.position.lifecycleEvidence.reason,'FORECAST_STALE');
   assert.equal(m.lifecycle.thesisHealth,.5);
   assert.equal(m.lifecycle.oppositeThesisStrength,0);
+});
+
+
+test('closed-position compaction preserves empirical learning fields while removing bulky nested hot state',()=>{
+  const e=entry({
+    id:'sh_compact',
+    strategyMeta:{
+      ...entry().strategyMeta,
+      walletResearchEpochId:'epoch_1',
+      walletResearchArm:'EXPERIMENT',
+      entryRegimeKey:'CORE|TREND_UP',
+      entryRegimeState:{trend:'UP',volatility:'HIGH',liquidity:'DEEP',huge:'x'.repeat(5000)},
+      frozenPolicyParameters:{strategy:'TEST',horizonId:'1m',nested:{blob:'x'.repeat(5000)}},
+      walletResearchDecision:{arm:'EXPERIMENT',nested:{blob:'x'.repeat(5000)}}
+    }
+  });
+  let p=shadowPositionFromEntryOrder(e);
+  p=markShadowPosition(p,book({bid:102}),{at:61_000,feeBps:0}).position;
+  p={...p,lifecycleEvidence:{trusted:true,reason:'TEST',issuanceId:'iss',forecastFingerprint:'f'.repeat(64),huge:'x'.repeat(5000)}};
+  p=closeShadowPosition(p,{reason:'TAKE_PROFIT',at:61_000});
+
+  const beforeBytes=Buffer.byteLength(JSON.stringify(p));
+  const compact=compactClosedShadowPosition(p);
+  const afterBytes=Buffer.byteLength(JSON.stringify(compact));
+
+  assert.equal(compact.status,'CLOSED');
+  assert.equal(compact.realizedNetPnlQuote,p.realizedNetPnlQuote);
+  assert.equal(compact.realizedReturnPct,p.realizedReturnPct);
+  assert.equal(compact.assetClass,p.assetClass);
+  assert.equal(compact.entryMode,p.entryMode);
+  assert.equal(compact.walletResearchEpochId,'epoch_1');
+  assert.equal(compact.walletResearchArm,'EXPERIMENT');
+  assert.equal(compact.entryRegimeKey,'CORE|TREND_UP');
+  assert.equal(compact.entryRegimeState.trend,'UP');
+  assert.equal(compact.lifecycleEvidence.issuanceId,'iss');
+  assert.equal(compact.closedCompactionVersion,SHADOW_CLOSED_POSITION_COMPACTION_VERSION);
+  assert.equal(compact.fullPositionArchived,true);
+  assert.match(compact.fullPositionHash,/^[a-f0-9]{64}$/);
+  assert.ok(afterBytes<beforeBytes*0.55,{beforeBytes,afterBytes});
+});
+
+test('ledger closed-position compaction leaves open positions untouched',()=>{
+  const open=shadowPositionFromEntryOrder(entry({id:'sh_open_hot'}));
+  let closed=shadowPositionFromEntryOrder(entry({id:'sh_closed_cold'}));
+  closed=markShadowPosition(closed,book({bid:102}),{at:61_000,feeBps:0}).position;
+  closed=closeShadowPosition(closed,{reason:'TAKE_PROFIT',at:61_000});
+  const ledger={...createEmptyShadowPortfolioLedger(),positions:[open,closed]};
+  const next=compactShadowPortfolioLedgerClosedPositions(ledger);
+  assert.equal(next.positions[0],open);
+  assert.equal(next.positions[1].closedCompactionVersion,SHADOW_CLOSED_POSITION_COMPACTION_VERSION);
+  assert.equal(shadowPortfolioSummary(next,{asOf:70_000}).closedTrades,1);
 });
