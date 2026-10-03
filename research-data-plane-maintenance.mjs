@@ -1,18 +1,66 @@
 import path from 'node:path';
+import { createReadStream } from 'node:fs';
 import { open, stat, rename, unlink } from 'node:fs/promises';
+import readline from 'node:readline';
+
+import {
+  validateResearchDataRecord,
+  saveResearchDataPlaneAnchor,
+  withResearchDataPlaneMutationLock
+} from './research-data-plane.mjs';
 
 const MiB=1024*1024;
 
-async function exists(p){try{await stat(p);return true;}catch{return false;}}
+async function inspectCompactedChain(filePath){
+  const input=createReadStream(filePath,{encoding:'utf8'});
+  const rl=readline.createInterface({input,crlfDelay:Infinity});
+  let first=null;
+  let previous=null;
+  let count=0;
+  try{
+    for await(const line of rl){
+      if(!line.trim()) continue;
+      let record;
+      try{record=JSON.parse(line);}
+      catch(err){throw new Error('RDP_COMPACT_PARSE_FAILURE:'+String(err instanceof Error?err.message:err));}
+      const shape=validateResearchDataRecord(record);
+      if(!shape.ok) throw new Error('RDP_COMPACT_RECORD_INVALID:'+shape.errors.join(','));
+      if(!first) first=record;
+      if(previous){
+        if(Number(record.seq)!==Number(previous.seq)+1){
+          throw new Error('RDP_COMPACT_SEQ_GAP:'+record.seq+':'+(Number(previous.seq)+1));
+        }
+        if(record.prevHash!==previous.recordHash){
+          throw new Error('RDP_COMPACT_PREV_HASH_MISMATCH:'+record.seq);
+        }
+      }
+      previous=record;
+      count++;
+    }
+  }finally{
+    rl.close();
+    input.destroy();
+  }
+  if(!first||!previous||count<1) throw new Error('RDP_COMPACT_EMPTY_RESULT');
+  return {
+    count,
+    firstSeq:Number(first.seq),
+    firstPrevHash:String(first.prevHash),
+    firstRecordHash:String(first.recordHash),
+    lastSeq:Number(previous.seq),
+    lastRecordHash:String(previous.recordHash)
+  };
+}
 
-export async function compactResearchDataPlane({
+async function compactResearchDataPlaneUnlocked({
   dataDir='/data',
   fileName='tcx-research-data-plane.jsonl',
   triggerBytes=64*MiB,
   targetBytes=32*MiB,
   minFreeBytes=128*MiB,
   pressure=null,
-  logger=console
+  logger=console,
+  minTargetBytes=8*MiB
 }={}){
   const filePath=path.join(dataDir,fileName);
   let meta;
@@ -24,7 +72,7 @@ export async function compactResearchDataPlane({
   const underPressure=String(pressure?.state||'NORMAL')!=='NORMAL'||(Number.isFinite(available)&&available<minFreeBytes);
   if(meta.size<triggerBytes&&!underPressure) return {ok:true,compacted:false,reason:'BELOW_TRIGGER',bytes:meta.size};
 
-  const keep=Math.min(meta.size,Math.max(8*MiB,Math.floor(targetBytes)));
+  const keep=Math.min(meta.size,Math.max(Math.max(256,Math.floor(minTargetBytes)),Math.floor(targetBytes)));
   const start=Math.max(0,meta.size-keep);
   const src=await open(filePath,'r');
   const tmp=`${filePath}.compact-${process.pid}-${Date.now()}`;
@@ -49,11 +97,48 @@ export async function compactResearchDataPlane({
     }
     await dst.sync();
   }finally{await src.close();await dst.close();}
+
+  let verified;
+  try{
+    verified=await inspectCompactedChain(tmp);
+  }catch(error){
+    try{await unlink(tmp);}catch{}
+    const message=error instanceof Error?error.message:String(error);
+    logger.error?.('[TCX_RESEARCH_DATA_PLANE_COMPACT_VERIFY_FAILED]',JSON.stringify({
+      error:message,beforeBytes:meta.size,underPressure,destructiveRetention:false
+    }));
+    return {ok:false,compacted:false,reason:'VERIFY_FAILED',error:message,beforeBytes:meta.size};
+  }
+
   await rename(tmp,filePath);
+  const anchor=await saveResearchDataPlaneAnchor(filePath,{
+    firstSeq:verified.firstSeq,
+    anchorPrevHash:verified.firstPrevHash,
+    firstRecordHash:verified.firstRecordHash,
+    reason:'VERIFIED_TAIL_COMPACTION'
+  });
   const after=await stat(filePath);
   const freed=Math.max(0,meta.size-after.size);
-  logger.info?.('[TCX_RESEARCH_DATA_PLANE_COMPACT]',JSON.stringify({beforeBytes:meta.size,afterBytes:after.size,freedBytes:freed,underPressure}));
-  return {ok:true,compacted:true,beforeBytes:meta.size,afterBytes:after.size,freedBytes:freed};
+  logger.info?.('[TCX_RESEARCH_DATA_PLANE_COMPACT]',JSON.stringify({
+    beforeBytes:meta.size,afterBytes:after.size,freedBytes:freed,underPressure,
+    retainedRecords:verified.count,firstSeq:verified.firstSeq,lastSeq:verified.lastSeq,
+    anchorVersion:anchor.version
+  }));
+  return {
+    ok:true,compacted:true,beforeBytes:meta.size,afterBytes:after.size,freedBytes:freed,
+    retainedRecords:verified.count,firstSeq:verified.firstSeq,lastSeq:verified.lastSeq,
+    anchorVersion:anchor.version
+  };
+}
+
+export async function compactResearchDataPlane(options={}){
+  const dataDir=options?.dataDir||'/data';
+  const fileName=options?.fileName||'tcx-research-data-plane.jsonl';
+  const filePath=path.join(dataDir,fileName);
+  return withResearchDataPlaneMutationLock(
+    filePath,
+    ()=>compactResearchDataPlaneUnlocked(options)
+  );
 }
 
 export async function cleanupResearchCompactionArtifacts({dataDir='/data',minAgeMs=5*60_000,now=Date.now()}={}){
@@ -68,4 +153,4 @@ export async function cleanupResearchCompactionArtifacts({dataDir='/data',minAge
   return {removed};
 }
 
-export const RESEARCH_DATA_PLANE_MAINTENANCE_VERSION='TCX_RDP_MAINTENANCE_V1';
+export const RESEARCH_DATA_PLANE_MAINTENANCE_VERSION='TCX_RDP_MAINTENANCE_V2';

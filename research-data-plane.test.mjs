@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { appendFile, mkdtemp } from 'node:fs/promises';
+import { appendFile, mkdtemp, unlink } from 'node:fs/promises';
 
 import {
   createResearchFeatureSnapshot,
@@ -10,8 +10,10 @@ import {
   appendResearchDataPlane,
   preflightResearchDataPlaneInputs,
   researchFeaturesAsOf,
-  researchDataPlaneSummary
+  researchDataPlaneSummary,
+  researchDataPlaneAnchorPath
 } from './research-data-plane.mjs';
+import { compactResearchDataPlane } from './research-data-plane-maintenance.mjs';
 
 async function plane(opts={}){
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-rdp-'));
@@ -361,4 +363,89 @@ test('preflight still throws on source-event conflict by default',async()=>{
   await appendResearchDataPlane(p,[original]);
   const conflict=snap({sourceEventId:'strict-event',features:[{id:'research.x',value:3}]});
   assert.throws(()=>preflightResearchDataPlaneInputs(p,[conflict]),/SOURCE_EVENT_ID_CONFLICT:strict-event/);
+});
+
+
+test('verified tail compaction preserves original sequence/hash lineage across restart',async()=>{
+  const p=await plane();
+  for(let i=0;i<16;i++){
+    await appendResearchDataPlane(p,[snap({
+      sourceEventId:'compact-'+i,
+      eventTime:1_000_000+i*1_000,
+      availableAt:1_001_000+i*1_000,
+      ingestedAt:1_001_100+i*1_000,
+      features:[{id:'research.compact.value',value:i}]
+    })]);
+  }
+  const beforeSeq=p.seq;
+  const result=await compactResearchDataPlane({
+    dataDir:path.dirname(p.filePath),
+    fileName:path.basename(p.filePath),
+    triggerBytes:1,
+    targetBytes:1800,
+    minTargetBytes:256,
+    minFreeBytes:0,
+    logger:{info(){},error(){}}
+  });
+  assert.equal(result.ok,true);
+  assert.equal(result.compacted,true);
+  assert.ok(result.firstSeq>1);
+  assert.equal(result.lastSeq,beforeSeq);
+
+  const reopened=await openResearchDataPlane(p.filePath,{warnBytes:1024*1024,hardBytes:2*1024*1024});
+  assert.equal(reopened.healthy,true,reopened.error);
+  assert.equal(reopened.seq,beforeSeq);
+  assert.equal(reopened.anchorMode,'CHECKPOINT');
+  assert.equal(reopened.compactedHead,true);
+
+  const appended=await appendResearchDataPlane(reopened,[snap({
+    sourceEventId:'after-compact',
+    eventTime:2_000_000,
+    availableAt:2_001_000,
+    ingestedAt:2_001_100
+  })]);
+  assert.equal(appended.appended.length,1);
+  assert.equal(reopened.seq,beforeSeq+1);
+
+  const restarted=await openResearchDataPlane(p.filePath,{warnBytes:1024*1024,hardBytes:2*1024*1024});
+  assert.equal(restarted.healthy,true,restarted.error);
+  assert.equal(restarted.seq,beforeSeq+1);
+  assert.equal(restarted.anchorMode,'CHECKPOINT');
+});
+
+test('legacy tail-only compaction is recovered once and upgraded to a strict anchor',async()=>{
+  const p=await plane();
+  for(let i=0;i<12;i++){
+    await appendResearchDataPlane(p,[snap({
+      sourceEventId:'legacy-compact-'+i,
+      eventTime:1_000_000+i*1_000,
+      availableAt:1_001_000+i*1_000,
+      ingestedAt:1_001_100+i*1_000,
+      features:[{id:'research.legacy.value',value:i}]
+    })]);
+  }
+  const beforeSeq=p.seq;
+  const result=await compactResearchDataPlane({
+    dataDir:path.dirname(p.filePath),
+    fileName:path.basename(p.filePath),
+    triggerBytes:1,
+    targetBytes:1500,
+    minTargetBytes:256,
+    minFreeBytes:0,
+    logger:{info(){},error(){}}
+  });
+  assert.equal(result.compacted,true);
+  await unlink(researchDataPlaneAnchorPath(p.filePath));
+
+  const recovered=await openResearchDataPlane(p.filePath,{warnBytes:1024*1024,hardBytes:2*1024*1024});
+  assert.equal(recovered.healthy,true,recovered.error);
+  assert.equal(recovered.seq,beforeSeq);
+  assert.equal(recovered.anchorMode,'LEGACY_RECOVERY');
+  assert.equal(recovered.legacyAnchorRecovered,true);
+
+  const strict=await openResearchDataPlane(p.filePath,{warnBytes:1024*1024,hardBytes:2*1024*1024});
+  assert.equal(strict.healthy,true,strict.error);
+  assert.equal(strict.seq,beforeSeq);
+  assert.equal(strict.anchorMode,'CHECKPOINT');
+  assert.equal(strict.legacyAnchorRecovered,false);
 });

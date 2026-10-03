@@ -1,15 +1,30 @@
 import path from 'node:path';
 import { createReadStream } from 'node:fs';
-import { mkdir, open as openFile, stat } from 'node:fs/promises';
+import { mkdir, open as openFile, stat, readFile, writeFile, rename } from 'node:fs/promises';
 import readline from 'node:readline';
 
 import { canonicalJson, sha256 } from './institutional-kernel.mjs';
 
 export const RESEARCH_DATA_PLANE_VERSION='TCX_RESEARCH_DATA_PLANE_V1';
 export const RESEARCH_DATA_PLANE_SCHEMA_VERSION=1;
+export const RDP_COMPACTION_ANCHOR_VERSION='TCX_RDP_COMPACTION_ANCHOR_V1';
 
 const GENESIS='0'.repeat(64);
 const FINALITY=new Set(['OBSERVED','PROVISIONAL','CONFIRMED','FINALIZED']);
+const RDP_MUTATION_TAILS=new Map();
+
+export async function withResearchDataPlaneMutationLock(filePath,task){
+  if(typeof task!=='function') throw new Error('RDP_MUTATION_TASK_REQUIRED');
+  const key=path.resolve(String(filePath||''));
+  const previous=RDP_MUTATION_TAILS.get(key)||Promise.resolve();
+  let tail;
+  const run=previous.catch(()=>{}).then(()=>task());
+  tail=run.finally(()=>{
+    if(RDP_MUTATION_TAILS.get(key)===tail) RDP_MUTATION_TAILS.delete(key);
+  });
+  RDP_MUTATION_TAILS.set(key,tail);
+  return run;
+}
 
 function finite(v){
   const n=Number(v);
@@ -108,6 +123,61 @@ function dedupeKey(record){
     sourceEventId:record.sourceEventId,
     sourceEventPayloadHash:sourceEventPayloadHash(record)
   });
+}
+
+function validHash(v){ return typeof v==='string'&&/^[a-f0-9]{64}$/i.test(v); }
+
+export function researchDataPlaneAnchorPath(filePath){
+  return String(filePath)+'.anchor.json';
+}
+
+export async function loadResearchDataPlaneAnchor(filePath){
+  const anchorPath=researchDataPlaneAnchorPath(filePath);
+  try{
+    const raw=JSON.parse(await readFile(anchorPath,'utf8'));
+    if(
+      raw?.version!==RDP_COMPACTION_ANCHOR_VERSION||
+      !Number.isInteger(Number(raw?.firstSeq))||
+      Number(raw.firstSeq)<1||
+      !validHash(raw?.anchorPrevHash)||
+      !validHash(raw?.firstRecordHash)
+    ) return null;
+    return Object.freeze({
+      version:RDP_COMPACTION_ANCHOR_VERSION,
+      firstSeq:Number(raw.firstSeq),
+      anchorPrevHash:String(raw.anchorPrevHash),
+      firstRecordHash:String(raw.firstRecordHash),
+      createdAt:Number(raw.createdAt)||null,
+      reason:String(raw.reason||'COMPACTION')
+    });
+  }catch{
+    return null;
+  }
+}
+
+export async function saveResearchDataPlaneAnchor(filePath,{
+  firstSeq,
+  anchorPrevHash,
+  firstRecordHash,
+  createdAt=Date.now(),
+  reason='COMPACTION'
+}={}){
+  const seq=Number(firstSeq);
+  if(!Number.isInteger(seq)||seq<1) throw new Error('RDP_ANCHOR_SEQ_INVALID');
+  if(!validHash(anchorPrevHash)||!validHash(firstRecordHash)) throw new Error('RDP_ANCHOR_HASH_INVALID');
+  const anchorPath=researchDataPlaneAnchorPath(filePath);
+  const value={
+    version:RDP_COMPACTION_ANCHOR_VERSION,
+    firstSeq:seq,
+    anchorPrevHash:String(anchorPrevHash),
+    firstRecordHash:String(firstRecordHash),
+    createdAt:Number(createdAt)||Date.now(),
+    reason:String(reason||'COMPACTION')
+  };
+  const tmp=anchorPath+'.tmp-'+process.pid+'-'+Date.now();
+  await writeFile(tmp,JSON.stringify(value,null,2)+'\n',{encoding:'utf8',mode:0o600});
+  await rename(tmp,anchorPath);
+  return Object.freeze(value);
 }
 
 export function hashResearchDataRecord(record){
@@ -243,6 +313,13 @@ export async function openResearchDataPlane(filePath,{
   const countsByDomain={},countsBySource={},countsByFinality={};
   const sourcePayload=new Map();
   let fileBytes=0;
+  const persistedAnchor=await loadResearchDataPlaneAnchor(filePath);
+  let anchorMode='GENESIS';
+  let legacyAnchorRecovered=false;
+  let firstRetainedSeq=null;
+  let firstRetainedPrevHash=null;
+  let firstRetainedRecordHash=null;
+  let firstRecord=true;
 
   try{
     const info=await stat(filePath);
@@ -264,6 +341,40 @@ export async function openResearchDataPlane(filePath,{
         error='RDP_RECORD_INVALID:'+shape.errors.join(',');
         break;
       }
+
+      if(firstRecord){
+        firstRecord=false;
+        firstRetainedSeq=Number(record.seq);
+        firstRetainedPrevHash=String(record.prevHash);
+        firstRetainedRecordHash=String(record.recordHash);
+        if(firstRetainedSeq===1&&firstRetainedPrevHash===GENESIS){
+          expectedSeq=1;
+          prev=GENESIS;
+          anchorMode='GENESIS';
+        }else if(
+          persistedAnchor&&
+          firstRetainedSeq===persistedAnchor.firstSeq&&
+          firstRetainedPrevHash===persistedAnchor.anchorPrevHash&&
+          firstRetainedRecordHash===persistedAnchor.firstRecordHash
+        ){
+          expectedSeq=firstRetainedSeq;
+          prev=firstRetainedPrevHash;
+          anchorMode='CHECKPOINT';
+        }else if(!persistedAnchor&&firstRetainedSeq>1&&validHash(firstRetainedPrevHash)){
+          // One-time migration for files produced by the legacy tail-copy compactor.
+          // We only accept the existing first record as an anchor; every record
+          // after it still has to pass full record/hash/sequence validation.
+          expectedSeq=firstRetainedSeq;
+          prev=firstRetainedPrevHash;
+          anchorMode='LEGACY_RECOVERY';
+          legacyAnchorRecovered=true;
+        }else{
+          healthy=false;
+          error='RDP_COMPACTION_ANCHOR_MISMATCH:'+firstRetainedSeq;
+          break;
+        }
+      }
+
       if(Number(record.seq)!==expectedSeq){
         healthy=false;
         error='RDP_SEQ_GAP:'+record.seq+':'+expectedSeq;
@@ -304,6 +415,26 @@ export async function openResearchDataPlane(filePath,{
     }
   }
 
+  if(
+    healthy&&
+    legacyAnchorRecovered&&
+    firstRetainedSeq!=null&&
+    firstRetainedPrevHash&&
+    firstRetainedRecordHash
+  ){
+    try{
+      await saveResearchDataPlaneAnchor(filePath,{
+        firstSeq:firstRetainedSeq,
+        anchorPrevHash:firstRetainedPrevHash,
+        firstRecordHash:firstRetainedRecordHash,
+        reason:'LEGACY_TAIL_COMPACTION_RECOVERY'
+      });
+    }catch(err){
+      healthy=false;
+      error='RDP_ANCHOR_RECOVERY_WRITE_FAILED:'+String(err instanceof Error?err.message:err);
+    }
+  }
+
   let records;
   if(total<=keep){
     records=retained.slice(0,retainedCount);
@@ -330,6 +461,11 @@ export async function openResearchDataPlane(filePath,{
     countsByDomain:healthy?countsByDomain:{},
     countsBySource:healthy?countsBySource:{},
     countsByFinality:healthy?countsByFinality:{},
+    anchorMode:healthy?anchorMode:'INVALID',
+    compactedHead:healthy&&firstRetainedSeq!=null&&firstRetainedSeq>1,
+    legacyAnchorRecovered:healthy&&legacyAnchorRecovered,
+    firstRetainedSeq:healthy?firstRetainedSeq:null,
+    anchor:persistedAnchor,
     fileBytes,
     warnBytes:warn,
     hardBytes:hard,
@@ -378,7 +514,7 @@ export function preflightResearchDataPlaneInputs(plane,inputs,{conflictPolicy='T
   });
 }
 
-export async function appendResearchDataPlane(plane,inputs){
+async function appendResearchDataPlaneUnlocked(plane,inputs){
   if(!plane?.healthy) throw new Error('Research Data Plane unhealthy: fail closed');
   if(!Array.isArray(inputs)||!inputs.length) return {appended:[],duplicates:0};
   const prepared=[];
@@ -455,6 +591,14 @@ export async function appendResearchDataPlane(plane,inputs){
   }
   plane.capacityState=plane.fileBytes>=plane.hardBytes?'WRITE_BLOCKED':plane.fileBytes>=plane.warnBytes?'NEAR_LIMIT':'NORMAL';
   return {appended:prepared.map(x=>x.record),duplicates};
+}
+
+export async function appendResearchDataPlane(plane,inputs){
+  if(!plane?.filePath) return appendResearchDataPlaneUnlocked(plane,inputs);
+  return withResearchDataPlaneMutationLock(
+    plane.filePath,
+    ()=>appendResearchDataPlaneUnlocked(plane,inputs)
+  );
 }
 
 export function researchFeaturesAsOf(plane,{
@@ -550,6 +694,10 @@ export function researchDataPlaneSummary(plane){
     capacityState:String(plane?.capacityState||'UNKNOWN'),
     countsByDomain:{...(plane?.countsByDomain||{})},
     countsBySource:{...(plane?.countsBySource||{})},
-    countsByFinality:{...(plane?.countsByFinality||{})}
+    countsByFinality:{...(plane?.countsByFinality||{})},
+    anchorMode:String(plane?.anchorMode||'UNKNOWN'),
+    compactedHead:plane?.compactedHead===true,
+    legacyAnchorRecovered:plane?.legacyAnchorRecovered===true,
+    firstRetainedSeq:Number.isFinite(Number(plane?.firstRetainedSeq))?Number(plane.firstRetainedSeq):null
   };
 }
