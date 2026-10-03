@@ -7,6 +7,7 @@ import { atomicWriteCanonicalObjectWithArray } from './streaming-json-persistenc
 
 export const SHADOW_PORTFOLIO_LEDGER_VERSION='TCX_SHADOW_PORTFOLIO_LEDGER_V1';
 export const SHADOW_PORTFOLIO_SCHEMA_VERSION=1;
+export const SHADOW_CLOSED_POSITION_COMPACTION_VERSION='TCX_SHADOW_CLOSED_POSITION_COMPACTION_V1';
 export const SHADOW_PORTFOLIO_CAPABILITIES=Object.freeze({
   execution:'SHADOW_ONLY',
   canExecuteLive:false,
@@ -379,6 +380,95 @@ export function createEmptyShadowPortfolioLedger({initialEquityQuote=10_000}={})
     version:SHADOW_PORTFOLIO_LEDGER_VERSION,
     initialEquityQuote:Math.max(1,Number(initialEquityQuote)||10_000),
     positions:[],
+    updatedAt:Date.now(),
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+}
+
+function compactObjectScalars(value,keys=[]){
+  if(!value||typeof value!=='object'||Array.isArray(value)) return null;
+  const out={};
+  for(const key of keys){
+    const v=value[key];
+    if(v===null||['string','number','boolean'].includes(typeof v)) out[key]=v;
+  }
+  return Object.keys(out).length?out:null;
+}
+
+export function compactClosedShadowPosition(position){
+  if(!position||String(position.status||'')!=='CLOSED') return position;
+  if(position.closedCompactionVersion===SHADOW_CLOSED_POSITION_COMPACTION_VERSION) return position;
+
+  const fullPositionHash=sha256(position);
+  const out={};
+  for(const [key,value] of Object.entries(position)){
+    if(value===null||['string','number','boolean'].includes(typeof value)) out[key]=value;
+  }
+
+  out.probeAdmissionReasons=Array.isArray(position.probeAdmissionReasons)
+    ?position.probeAdmissionReasons.map(String).slice(0,12)
+    :[];
+  out.entryStressFailedChecks=Array.isArray(position.entryStressFailedChecks)
+    ?position.entryStressFailedChecks.map(String).slice(0,20)
+    :[];
+
+  out.coverageProbabilityVector=compactObjectScalars(position.coverageProbabilityVector,['up','down','flat']);
+  out.lastMark=compactObjectScalars(position.lastMark,[
+    'markedAt','fullyExecutable','fillRatio','executableExitPrice',
+    'unrealizedGrossPnlQuote','unrealizedNetPnlQuote','unrealizedReturnPct',
+    'unrealizedPriceReturnPct','unrealizedMarginRoePct','estimatedExitFeesQuote',
+    'source','availableAt','epistemic'
+  ]);
+  out.lifecycle=compactObjectScalars(position.lifecycle,[
+    'action','reason','at','marginRoePct','thesisHealth','oppositeThesisStrength',
+    'maxHoldAt','reviewAt'
+  ]);
+  out.lifecycleEvidence=compactObjectScalars(position.lifecycleEvidence,[
+    'trusted','reason','issuanceId','forecastFingerprint','generatedAt',
+    'forecastAgeMs','thesisHealth','oppositeThesisStrength',
+    'hardStopReached','structureInvalidationConfirmed'
+  ]);
+  out.entryRegimeState=compactObjectScalars(position.entryRegimeState,[
+    'regime','trend','structure','flow','volatility','liquidity',
+    'dominantPressure','mtfBias','bias'
+  ]);
+  out.walletResearchDecision=compactObjectScalars(position.walletResearchDecision,[
+    'arm','epochId','epochNumber','cycle','wheelId','wheelValue','reason'
+  ]);
+  out.tradeAttribution=compactObjectScalars(position.tradeAttribution,[
+    'setupType','assetClass','side','horizonId','entryMode','closeReason',
+    'realizedNetPnlQuote','realizedReturnPct','realizedPriceReturnPct',
+    'realizedMarginRoePct','mfeMarginRoePct','maeMarginRoePct',
+    'exitRegretMarginRoePct','captureEfficiency'
+  ]);
+  out.frozenPolicyParameters=compactObjectScalars(position.frozenPolicyParameters,[
+    'strategy','tradingPolicyVersion','horizonSelection','assetClass',
+    'horizonId','side','admissionGate','academyStage','trainingMissionType',
+    'setupType','setupScore'
+  ]);
+
+  out.closedCompactionVersion=SHADOW_CLOSED_POSITION_COMPACTION_VERSION;
+  out.fullPositionHash=fullPositionHash;
+  out.fullPositionArchived=true;
+  out.execution='SHADOW_ONLY';
+  out.canExecuteLive=false;
+  return out;
+}
+
+export function compactShadowPortfolioLedgerClosedPositions(ledger){
+  if(!ledger||!Array.isArray(ledger.positions)) return ledger;
+  let changed=false;
+  const positions=ledger.positions.map(position=>{
+    if(String(position?.status||'')!=='CLOSED') return position;
+    const compacted=compactClosedShadowPosition(position);
+    if(compacted!==position) changed=true;
+    return compacted;
+  });
+  if(!changed) return ledger;
+  return {
+    ...ledger,
+    positions,
     updatedAt:Date.now(),
     execution:'SHADOW_ONLY',
     canExecuteLive:false
