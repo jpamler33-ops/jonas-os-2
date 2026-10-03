@@ -11,6 +11,20 @@ export const RDP_COMPACTION_ANCHOR_VERSION='TCX_RDP_COMPACTION_ANCHOR_V1';
 
 const GENESIS='0'.repeat(64);
 const FINALITY=new Set(['OBSERVED','PROVISIONAL','CONFIRMED','FINALIZED']);
+const RDP_MUTATION_TAILS=new Map();
+
+export async function withResearchDataPlaneMutationLock(filePath,task){
+  if(typeof task!=='function') throw new Error('RDP_MUTATION_TASK_REQUIRED');
+  const key=path.resolve(String(filePath||''));
+  const previous=RDP_MUTATION_TAILS.get(key)||Promise.resolve();
+  let tail;
+  const run=previous.catch(()=>{}).then(()=>task());
+  tail=run.finally(()=>{
+    if(RDP_MUTATION_TAILS.get(key)===tail) RDP_MUTATION_TAILS.delete(key);
+  });
+  RDP_MUTATION_TAILS.set(key,tail);
+  return run;
+}
 
 function finite(v){
   const n=Number(v);
@@ -500,7 +514,7 @@ export function preflightResearchDataPlaneInputs(plane,inputs,{conflictPolicy='T
   });
 }
 
-export async function appendResearchDataPlane(plane,inputs){
+async function appendResearchDataPlaneUnlocked(plane,inputs){
   if(!plane?.healthy) throw new Error('Research Data Plane unhealthy: fail closed');
   if(!Array.isArray(inputs)||!inputs.length) return {appended:[],duplicates:0};
   const prepared=[];
@@ -577,6 +591,14 @@ export async function appendResearchDataPlane(plane,inputs){
   }
   plane.capacityState=plane.fileBytes>=plane.hardBytes?'WRITE_BLOCKED':plane.fileBytes>=plane.warnBytes?'NEAR_LIMIT':'NORMAL';
   return {appended:prepared.map(x=>x.record),duplicates};
+}
+
+export async function appendResearchDataPlane(plane,inputs){
+  if(!plane?.filePath) return appendResearchDataPlaneUnlocked(plane,inputs);
+  return withResearchDataPlaneMutationLock(
+    plane.filePath,
+    ()=>appendResearchDataPlaneUnlocked(plane,inputs)
+  );
 }
 
 export function researchFeaturesAsOf(plane,{
