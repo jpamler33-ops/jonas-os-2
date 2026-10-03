@@ -18,8 +18,11 @@ export async function withResearchDataPlaneMutationLock(filePath,task){
   const key=path.resolve(String(filePath||''));
   const previous=RDP_MUTATION_TAILS.get(key)||Promise.resolve();
   let tail;
-  const run=previous.catch(()=>{}).then(()=>task());
-  tail=run.finally(()=>{
+  const run=previous.then(()=>task(),()=>task());
+  tail=run.then(
+    ()=>undefined,
+    ()=>undefined
+  ).finally(()=>{
     if(RDP_MUTATION_TAILS.get(key)===tail) RDP_MUTATION_TAILS.delete(key);
   });
   RDP_MUTATION_TAILS.set(key,tail);
