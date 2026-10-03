@@ -8108,6 +8108,20 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
     extraFeatureCount:episodeExtraFeatures.length,
     expectedExtraFeatureCount:forecastRuntime.engine.configSnapshot().featureIds.length
   });
+  if(silent&&issuanceSource==='TCX_AUTOLEARN_V1'&&String(safety?.state||'UNKNOWN')!=='NORMAL'){
+    console.info('[TCX_FORECAST_SAFETY_DIAGNOSTIC]',JSON.stringify({
+      symbol,
+      state:String(safety?.state||'UNKNOWN'),
+      hardReasons:[...(safety?.hardReasons||[])],
+      softReasons:[...(safety?.softReasons||[])],
+      marketWarnings:[...(marketAudit?.warnings||[])],
+      witnessWarnings:[...(witnessAudit?.warnings||[])],
+      engineWarnings:[...(engineAudit?.warnings||[])],
+      marketAgeMs:marketAudit?.ageMs??null,
+      externalWitnessCount:witnessAudit?.externalWitnessCount??null,
+      witnessAgreement:witnessAudit?.agreementScore??null
+    }));
+  }
   if(silent&&issuanceSource==='TCX_AUTOLEARN_V1'){
     const cleanAudit=
       marketAudit?.ok===true&&
