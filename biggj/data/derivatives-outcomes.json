@@ -3,7 +3,7 @@
   "purpose": "RESEARCH_ONLY",
   "mode": "SHADOW_ONLY",
   "canExecuteLive": false,
-  "updatedAt": "2026-10-02T06:58:42.635Z",
+  "updatedAt": "2026-10-03T22:51:43.007Z",
   "cases": [
     {
       "schema": "BIGGJ_DERIVATIVES_OUTCOME_CASE_V1",
@@ -310,7 +310,7 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
+      "status": "CLOSED",
       "outcomes": {
         "h1": {
           "observedAt": "2026-10-01T15:25:20.791Z",
@@ -323,6 +323,12 @@
           "price": 84116.8,
           "return": -0.0003992850895538913,
           "direction": -1
+        },
+        "h24": {
+          "observedAt": "2026-10-02T13:49:18.031Z",
+          "price": 86822.8,
+          "return": 0.031757424801308165,
+          "direction": 1
         }
       },
       "caseId": "f7e95a8b9fc83862192618c1c3a9cad59f5abf2cf26b6e2a8f63a0072a69684e"
@@ -345,7 +351,7 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
+      "status": "CLOSED",
       "outcomes": {
         "h1": {
           "observedAt": "2026-10-01T21:00:24.999Z",
@@ -358,6 +364,12 @@
           "price": 84585.2,
           "return": 0.005568447682270383,
           "direction": 1
+        },
+        "h24": {
+          "observedAt": "2026-10-02T19:14:44.160Z",
+          "price": 84073.4,
+          "return": -0.0005159492515169894,
+          "direction": -1
         }
       },
       "caseId": "eff4fd47b089a0e7020663b869f38a0f0a0864a31b5c71b0e5fe2ed45608b495"
@@ -380,7 +392,7 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
+      "status": "CLOSED",
       "outcomes": {
         "h1": {
           "observedAt": "2026-10-02T00:44:07.673Z",
@@ -393,6 +405,12 @@
           "price": 85956.7,
           "return": 0.016214420489636394,
           "direction": 1
+        },
+        "h24": {
+          "observedAt": "2026-10-02T23:45:07.662Z",
+          "price": 84532.1,
+          "return": -0.0006277693970102582,
+          "direction": -1
         }
       },
       "caseId": "f16bf68062ad998bb1641bdf1763a2e2a9f71d53cc3b9a3f02a07c2c543dd005"
@@ -415,37 +433,36 @@
         "oiAggregationDisabled": true
       },
       "evidenceClassification": "OBSERVED_DERIVED",
-      "status": "OPEN",
-      "outcomes": {},
+      "status": "CLOSED",
+      "outcomes": {
+        "h1": {
+          "observedAt": "2026-10-02T13:49:18.031Z",
+          "price": 86822.8,
+          "return": 0.010076003383098664,
+          "direction": 1
+        },
+        "h4": {
+          "observedAt": "2026-10-02T13:49:18.031Z",
+          "price": 86822.8,
+          "return": 0.010076003383098664,
+          "direction": 1
+        },
+        "h24": {
+          "observedAt": "2026-10-03T11:35:03.989Z",
+          "price": 84603,
+          "return": -0.015748626924951714,
+          "direction": -1
+        }
+      },
       "caseId": "fdb972a827cf6de0ab145ace65f5cdd2cf01b4356123ab878ca1306c6814ce07"
     }
   ],
   "summary": {
     "schema": "BIGGJ_DERIVATIVES_OUTCOME_SUMMARY_V1",
     "totalCases": 11,
-    "eligibleCases": 11,
-    "bySignal": {
-      "CROWDED_LONG_PRESSURE": {
-        "cases": 11,
-        "horizons": {
-          "h1": {
-            "n": 10,
-            "meanReturn": 0.0015662873896473916,
-            "positiveRate": 0.5
-          },
-          "h4": {
-            "n": 10,
-            "meanReturn": 0.003405720867326434,
-            "positiveRate": 0.6
-          },
-          "h24": {
-            "n": 7,
-            "meanReturn": 0.005659957019597444,
-            "positiveRate": 0.7142857142857143
-          }
-        }
-      }
-    },
+    "eligibleCases": 0,
+    "excludedCases": 11,
+    "bySignal": {},
     "warning": "Descriptive forward evidence only. No causal or profitable-edge claim without adequate sample size and out-of-sample validation."
   },
   "scorecard": {
@@ -456,38 +473,9 @@
       "minN": 30,
       "validationN": 100
     },
-    "eligibleCases": 11,
-    "bySignal": {
-      "CROWDED_LONG_PRESSURE": {
-        "cases": 11,
-        "horizons": {
-          "h1": {
-            "n": 10,
-            "meanReturn": 0.0015662873896473916,
-            "hitRate": 0.5,
-            "wilsonLower95": 0.2365895936154873,
-            "gate": "INSUFFICIENT_SAMPLE",
-            "claimAllowed": false
-          },
-          "h4": {
-            "n": 10,
-            "meanReturn": 0.003405720867326434,
-            "hitRate": 0.6,
-            "wilsonLower95": 0.3126695474501863,
-            "gate": "INSUFFICIENT_SAMPLE",
-            "claimAllowed": false
-          },
-          "h24": {
-            "n": 7,
-            "meanReturn": 0.005659957019597444,
-            "hitRate": 0.7142857142857143,
-            "wilsonLower95": 0.35892909014821267,
-            "gate": "INSUFFICIENT_SAMPLE",
-            "claimAllowed": false
-          }
-        }
-      }
-    },
+    "eligibleCases": 0,
+    "excludedCases": 11,
+    "bySignal": {},
     "interpretation": "Descriptive forward scorecard only. RESEARCH_READY permits analysis, not an edge claim. VALIDATION_READY permits frozen out-of-sample validation, not live execution."
   }
 }
