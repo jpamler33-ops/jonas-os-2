@@ -1419,7 +1419,11 @@ let researchGovernanceHealthy=true;
 let researchGovernanceLastError=researchDataGovernance.lastLoadError||null;
 const researchGovernanceMonitorStartedAt=Date.now();
 const releaseRegistryFile = process.env.TCX_RELEASE_REGISTRY_FILE || '/data/tcx-release-registry.jsonl';
-const releaseRegistry = await openReleaseRegistry(releaseRegistryFile);
+const releaseRegistryMaxBytes=Math.max(
+  8*1024*1024,
+  Math.min(64*1024*1024,Number(process.env.TCX_RELEASE_REGISTRY_MAX_BYTES||16*1024*1024))
+);
+const releaseRegistry = await openReleaseRegistry(releaseRegistryFile,{maxFileBytes:releaseRegistryMaxBytes});
 const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.json';
 let loadedShadowOms = await loadShadowOms(shadowOmsFile);
 const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-shadow-portfolio.json';
@@ -12779,6 +12783,12 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   operationalReadiness:startupReadiness.state,
   operationalReadinessReasons:{hard:startupReadiness.hardReasons,warnings:startupReadiness.warningReasons},
   releaseRegistryVerification:releaseRegistry.verification,
+  releaseRegistryStorage:{
+    fileBytes:Number(releaseRegistry.fileBytes||0),
+    maxFileBytes:Number(releaseRegistry.maxFileBytes||releaseRegistryMaxBytes),
+    utilization:Number(releaseRegistry.maxFileBytes)>0?Number(releaseRegistry.fileBytes||0)/Number(releaseRegistry.maxFileBytes):null,
+    writeBlocked:releaseRegistry.writeBlocked===true
+  },
   runtimeReleaseRegistered:Boolean(runtimeReleaseRecord),
   persistenceHealthy,
   shadowOmsHealthy,

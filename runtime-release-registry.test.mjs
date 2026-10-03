@@ -174,3 +174,44 @@ test('runtime release identity is transitively closed over local source imports'
   }
   assert.deepEqual(missing.sort(),[]);
 });
+
+
+test('release registry byte cap rejects append before write and preserves verified history',async()=>{
+  const dir=await fixture();
+  const file=path.join(dir,'registry-cap.jsonl');
+  const registry=await openReleaseRegistry(file,{maxFileBytes:1024*1024});
+  const first=await buildRuntimeManifest({rootDir:dir,files:['a.mjs'],config:{x:1}});
+  await registerRuntimeRelease(registry,first,{registeredAt:1});
+  const before=await readFile(file,'utf8');
+  registry.maxFileBytes=registry.fileBytes+1;
+
+  const second=await buildRuntimeManifest({rootDir:dir,files:['a.mjs'],config:{x:2}});
+  await assert.rejects(
+    ()=>registerRuntimeRelease(registry,second,{registeredAt:2}),
+    err=>err?.code==='RELEASE_REGISTRY_SIZE_LIMIT'
+  );
+  assert.equal(registry.healthy,false);
+  assert.equal(registry.writeBlocked,true);
+  assert.equal(registry.verification.error,'REGISTRY_SIZE_LIMIT');
+  assert.equal(await readFile(file,'utf8'),before);
+
+  const reopened=await openReleaseRegistry(file,{maxFileBytes:1024*1024});
+  assert.equal(reopened.healthy,true);
+  assert.equal(reopened.seq,1);
+  assert.equal(verifyReleaseRegistry(reopened.records).ok,true);
+});
+
+test('release registry refuses oversized file before loading records into memory',async()=>{
+  const dir=await fixture();
+  const file=path.join(dir,'registry-pre-read-cap.jsonl');
+  const registry=await openReleaseRegistry(file,{maxFileBytes:1024*1024});
+  const manifest=await buildRuntimeManifest({rootDir:dir,files:['a.mjs'],config:{x:1}});
+  await registerRuntimeRelease(registry,manifest,{registeredAt:1});
+
+  const capped=await openReleaseRegistry(file,{maxFileBytes:1});
+  assert.equal(capped.healthy,false);
+  assert.equal(capped.writeBlocked,true);
+  assert.equal(capped.verification.error,'REGISTRY_SIZE_LIMIT');
+  assert.deepEqual(capped.records,[]);
+  assert.ok(capped.fileBytes>1);
+});
