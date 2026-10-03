@@ -1,4 +1,5 @@
 import { compactResearchDataPlane, cleanupResearchCompactionArtifacts } from './research-data-plane-maintenance.mjs';
+import { inspectStoragePressure } from './storage-maintenance.mjs';
 
 export const BIGGJ_MEMORY_GOVERNOR_VERSION='BIGGJ_MEMORY_GOVERNOR_V3';
 
@@ -40,7 +41,12 @@ let researchMaintenanceInstalled=false,researchMaintenanceRunning=false;
 
 export function installResearchDataPlaneMaintenance({dataDir=process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.TCX_DATA_DIR||'/data',intervalMs=Math.max(15_000,finite(process.env.TCX_RDP_COMPACTION_CHECK_MS,30_000)),triggerBytes=Math.max(32*1048576,finite(process.env.TCX_RDP_COMPACTION_TRIGGER_BYTES,64*1048576)),targetBytes=Math.max(8*1048576,finite(process.env.TCX_RDP_COMPACTION_TARGET_BYTES,24*1048576)),minFreeBytes=Math.max(64*1048576,finite(process.env.TCX_RDP_MIN_FREE_BYTES,128*1048576)),logger=console}={}){
   if(researchMaintenanceInstalled)return false;researchMaintenanceInstalled=true;
-  const run=async phase=>{if(researchMaintenanceRunning)return;researchMaintenanceRunning=true;try{await cleanupResearchCompactionArtifacts({dataDir});const result=await compactResearchDataPlane({dataDir,triggerBytes,targetBytes,minFreeBytes,logger});if(result?.compacted)logger.info?.('[TCX_RDP_RUNTIME_MAINTENANCE]',JSON.stringify({...result,phase}));}catch(error){logger.error?.('[TCX_RDP_RUNTIME_MAINTENANCE_FAILED]',JSON.stringify({phase,error:error instanceof Error?error.message:String(error),destructiveRetention:false}));}finally{researchMaintenanceRunning=false;}};
+  const run=async phase=>{if(researchMaintenanceRunning)return;researchMaintenanceRunning=true;try{
+    await cleanupResearchCompactionArtifacts({dataDir});
+    const pressure=await inspectStoragePressure({dataDir});
+    const result=await compactResearchDataPlane({dataDir,triggerBytes,targetBytes,minFreeBytes,pressure,logger});
+    if(result?.compacted)logger.info?.('[TCX_RDP_RUNTIME_MAINTENANCE]',JSON.stringify({...result,phase,storagePressure:pressure?.state||'UNKNOWN',availableBytes:pressure?.availableBytes??null}));
+  }catch(error){logger.error?.('[TCX_RDP_RUNTIME_MAINTENANCE_FAILED]',JSON.stringify({phase,error:error instanceof Error?error.message:String(error),destructiveRetention:false}));}finally{researchMaintenanceRunning=false;}};
   void run('startup');const timer=setInterval(()=>void run('interval'),intervalMs);timer.unref?.();return true;
 }
 
