@@ -5,7 +5,8 @@ import readline from 'node:readline';
 
 import {
   validateResearchDataRecord,
-  saveResearchDataPlaneAnchor
+  saveResearchDataPlaneAnchor,
+  withResearchDataPlaneMutationLock
 } from './research-data-plane.mjs';
 
 const MiB=1024*1024;
@@ -51,7 +52,7 @@ async function inspectCompactedChain(filePath){
   };
 }
 
-export async function compactResearchDataPlane({
+async function compactResearchDataPlaneUnlocked({
   dataDir='/data',
   fileName='tcx-research-data-plane.jsonl',
   triggerBytes=64*MiB,
@@ -128,6 +129,16 @@ export async function compactResearchDataPlane({
     retainedRecords:verified.count,firstSeq:verified.firstSeq,lastSeq:verified.lastSeq,
     anchorVersion:anchor.version
   };
+}
+
+export async function compactResearchDataPlane(options={}){
+  const dataDir=options?.dataDir||'/data';
+  const fileName=options?.fileName||'tcx-research-data-plane.jsonl';
+  const filePath=path.join(dataDir,fileName);
+  return withResearchDataPlaneMutationLock(
+    filePath,
+    ()=>compactResearchDataPlaneUnlocked(options)
+  );
 }
 
 export async function cleanupResearchCompactionArtifacts({dataDir='/data',minAgeMs=5*60_000,now=Date.now()}={}){
