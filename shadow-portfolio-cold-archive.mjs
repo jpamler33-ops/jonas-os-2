@@ -138,7 +138,7 @@ export async function archiveClosedShadowPositions(archive,positions,{archivedAt
     createGzip({level:1}),
     createWriteStream(archive.filePath,{flags:'a',mode:0o600})
   );
-  const fh=await openFile(archive.filePath,'r');
+  const fh=await openFile(archive.filePath,'r+');
   try{await fh.sync();}finally{await fh.close();}
   const after=Number((await stat(archive.filePath)).size||0);
 
