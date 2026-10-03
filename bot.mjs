@@ -83,10 +83,14 @@ import { deriveAutonomousShadowTrade, AUTONOMOUS_SHADOW_TRADER_VERSION } from '.
 import {
   loadShadowPortfolioLedger, saveShadowPortfolioLedger,
   reconcileShadowPortfolioEntries, replaceShadowPortfolioPosition,
-  markShadowPosition, closeShadowPosition, shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
+  markShadowPosition, closeShadowPosition, compactClosedShadowPosition, compactShadowPortfolioLedgerClosedPositions,
+  shadowPortfolioSummary, shadowResearchProbeSummary, shadowResearchActivitySummary,
   shadowPortfolioPeriodStats, shadowPortfolioStatistics,
-  SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES
+  SHADOW_PORTFOLIO_LEDGER_VERSION, SHADOW_PORTFOLIO_CAPABILITIES, SHADOW_CLOSED_POSITION_COMPACTION_VERSION
 } from './shadow-portfolio-ledger.mjs';
+import {
+  openShadowPortfolioColdArchive, archiveClosedShadowPositions, shadowPortfolioColdArchiveSummary
+} from './shadow-portfolio-cold-archive.mjs';
 import { deriveBiggjThesisEvidence, deriveBiggjPrimaryLeveragePolicy, BIGGJ_TRADING_POLICY_VERSION } from './biggj-trading-policy.mjs';
 import {
   evaluateShadowCapitalAcademy, academyTradeBudget,
@@ -1424,6 +1428,54 @@ const shadowOmsFile = process.env.TCX_SHADOW_OMS_FILE || '/data/tcx-shadow-oms.j
 let loadedShadowOms = await loadShadowOms(shadowOmsFile);
 const shadowPortfolioFile = process.env.TCX_SHADOW_PORTFOLIO_FILE || '/data/tcx-shadow-portfolio.json';
 let loadedShadowPortfolio = await loadShadowPortfolioLedger(shadowPortfolioFile,{initialEquityQuote:shadowPortfolioInitialEquity});
+const shadowPortfolioColdArchiveFile=process.env.TCX_SHADOW_PORTFOLIO_COLD_ARCHIVE_FILE||'/data/tcx-shadow-portfolio-cold.jsonl.gz';
+let shadowPortfolioColdArchive=await openShadowPortfolioColdArchive(shadowPortfolioColdArchiveFile);
+let shadowPortfolioColdArchiveHealthy=shadowPortfolioColdArchive.healthy===true;
+let shadowPortfolioColdArchiveLastError=shadowPortfolioColdArchive.error||null;
+if(shadowPortfolioColdArchiveHealthy){
+  const legacyFullClosed=(loadedShadowPortfolio.ledger?.positions||[]).filter(position=>
+    position?.status==='CLOSED'&&
+    position?.closedCompactionVersion!==SHADOW_CLOSED_POSITION_COMPACTION_VERSION
+  );
+  if(legacyFullClosed.length){
+    try{
+      const before=process.memoryUsage();
+      const archived=await archiveClosedShadowPositions(shadowPortfolioColdArchive,legacyFullClosed,{archivedAt:Date.now()});
+      loadedShadowPortfolio={
+        ...loadedShadowPortfolio,
+        ledger:compactShadowPortfolioLedgerClosedPositions(loadedShadowPortfolio.ledger)
+      };
+      loadedShadowPortfolio.ledger=await saveShadowPortfolioLedger(
+        shadowPortfolioFile,
+        loadedShadowPortfolio.ledger,
+        {maxPositions:5000}
+      );
+      if(typeof globalThis.gc==='function') globalThis.gc();
+      const after=process.memoryUsage();
+      console.info('[TCX_SHADOW_PORTFOLIO_HOT_COMPACTION]',JSON.stringify({
+        migratedClosed:legacyFullClosed.length,
+        archived,
+        hotPositions:loadedShadowPortfolio.ledger.positions.length,
+        rssBeforeMb:Math.round(before.rss/1048576),
+        rssAfterMb:Math.round(after.rss/1048576),
+        heapBeforeMb:Math.round(before.heapUsed/1048576),
+        heapAfterMb:Math.round(after.heapUsed/1048576),
+        archive:shadowPortfolioColdArchiveSummary(shadowPortfolioColdArchive),
+        destructiveRetention:false,
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      }));
+    }catch(err){
+      shadowPortfolioColdArchiveHealthy=false;
+      shadowPortfolioColdArchiveLastError=err instanceof Error?err.message:String(err);
+      console.error('[TCX_SHADOW_PORTFOLIO_COLD_MIGRATION_FAILED]',JSON.stringify({
+        error:shadowPortfolioColdArchiveLastError,
+        retainedFullHotState:true,
+        destructiveRetention:false
+      }));
+    }
+  }
+}
 const walletResearchManagerFile = process.env.TCX_WALLET_RESEARCH_MANAGER_FILE || '/data/tcx-wallet-research-manager.json';
 let loadedWalletResearchManager = await loadShadowWalletResearchManager(walletResearchManagerFile,{asOf:Date.now()});
 const specialistWalletFile = process.env.TCX_SPECIALIST_WALLETS_FILE || '/data/tcx-specialist-wallets.json';
@@ -9949,7 +10001,24 @@ async function shadowPortfolioWatcher(){
         if(marked.trigger){
           const academyBefore=evaluateShadowCapitalAcademy(shadowPortfolioLedger,{asOf:Number(book.availableAt||Date.now()),timeZone:shadowStatsTimeZone});
           const closedPosition=closeShadowPosition(marked.position,{reason:marked.trigger,at:Number(book.availableAt||Date.now())});
-          shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,closedPosition);
+          let storedClosedPosition=closedPosition;
+          if(shadowPortfolioColdArchiveHealthy){
+            try{
+              await archiveClosedShadowPositions(shadowPortfolioColdArchive,[closedPosition],{archivedAt:Date.now()});
+              storedClosedPosition=compactClosedShadowPosition(closedPosition);
+              shadowPortfolioColdArchiveLastError=null;
+            }catch(err){
+              shadowPortfolioColdArchiveHealthy=false;
+              shadowPortfolioColdArchiveLastError=err instanceof Error?err.message:String(err);
+              console.error('[TCX_SHADOW_PORTFOLIO_COLD_APPEND_FAILED]',JSON.stringify({
+                positionId:closedPosition.positionId,
+                error:shadowPortfolioColdArchiveLastError,
+                retainedFullHotState:true,
+                destructiveRetention:false
+              }));
+            }
+          }
+          shadowPortfolioLedger=replaceShadowPortfolioPosition(shadowPortfolioLedger,storedClosedPosition);
           changed=true;closed++;
           if(String(closedPosition.entryMode||'').toUpperCase()==='COVERAGE_PROBE'){
             const bootstrap=recordCoverageProbeCalibration(forecastRuntime,{position:closedPosition,closeReason:marked.trigger,resolvedPrice:Number(book.mid)});
