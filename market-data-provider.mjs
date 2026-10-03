@@ -1,4 +1,4 @@
-export const MARKET_DATA_PROVIDER_VERSION="TCX_MARKET_DATA_PROVIDER_V1";
+export const MARKET_DATA_PROVIDER_VERSION="TCX_MARKET_DATA_PROVIDER_V2";
 
 export function providerNameFromUrl(url){
   try{
@@ -14,6 +14,45 @@ export function providerNameFromUrl(url){
 
 function defaultNow(){ return Date.now(); }
 function noop(){}
+
+const OKX_BAR=Object.freeze({"1m":"1m","5m":"5m","15m":"15m","1h":"1H","4h":"4H"});
+const INTERVAL_MS=Object.freeze({"1m":60_000,"5m":300_000,"15m":900_000,"1h":3_600_000,"4h":14_400_000});
+
+function okxTickerAsBinanceLike(row={}){
+  const last=Number(row.last);
+  const open=Number(row.open24h);
+  const change=Number.isFinite(last)&&Number.isFinite(open)&&open!==0?(last-open)/open*100:0;
+  return {
+    lastPrice:String(row.last??""),
+    priceChangePercent:String(change),
+    openPrice:String(row.open24h??""),
+    highPrice:String(row.high24h??""),
+    lowPrice:String(row.low24h??""),
+    quoteVolume:String(row.volCcy24h??row.vol24h??"")
+  };
+}
+
+function okxCandlesAsBinanceLike(rows,interval){
+  const span=INTERVAL_MS[interval];
+  return (Array.isArray(rows)?rows:[])
+    .map(row=>{
+      const ts=Number(row?.[0]);
+      if(!Number.isFinite(ts)||!span) return null;
+      return [
+        ts,
+        String(row?.[1]??""),
+        String(row?.[2]??""),
+        String(row?.[3]??""),
+        String(row?.[4]??""),
+        String(row?.[5]??"0"),
+        ts+span-1,
+        String(row?.[7]??row?.[6]??"0"),
+        0,0,0,0
+      ];
+    })
+    .filter(Boolean)
+    .sort((a,b)=>Number(a[0])-Number(b[0]));
+}
 
 export function createMarketDataProvider({
   binanceBases,
@@ -201,14 +240,46 @@ export function createMarketDataProvider({
           fetchJson(base+"/api/v3/ticker/bookTicker?symbol="+encoded),
           fetchJson(base+"/api/v3/depth?symbol="+encoded+"&limit=20")
         ]);
-        return {ticker,book,depth,base};
+        return {ticker,book,depth,base,provider:"BINANCE"};
       }catch(err){
         const msg=err instanceof Error?err.message:String(err);
         errors.push(base+": "+msg);
         logger?.warn?.("market-data endpoint failed",base,msg);
       }
     }
-    throw new Error("All Binance market-data endpoints failed: "+errors.join(" | "));
+
+    const instId=okxInstrument(symbol);
+    if(instId&&okx){
+      try{
+        const [tickerPayload,bookPayload]=await Promise.all([
+          fetchJson(okx+"/api/v5/market/ticker?instId="+encodeURIComponent(instId)),
+          fetchJson(okx+"/api/v5/market/books?instId="+encodeURIComponent(instId)+"&sz=20")
+        ]);
+        if(String(tickerPayload?.code)!=="0"||String(bookPayload?.code)!=="0"){
+          throw new Error("OKX market response error");
+        }
+        const tickerRow=tickerPayload?.data?.[0];
+        const depthRow=bookPayload?.data?.[0];
+        if(!tickerRow||!depthRow) throw new Error("OKX market data missing");
+        const ticker=okxTickerAsBinanceLike(tickerRow);
+        const book={
+          bidPrice:String(tickerRow.bidPx??depthRow.bids?.[0]?.[0]??""),
+          askPrice:String(tickerRow.askPx??depthRow.asks?.[0]?.[0]??"")
+        };
+        const depth={
+          bids:depthRow.bids||[],
+          asks:depthRow.asks||[],
+          lastUpdateId:depthRow.seqId??depthRow.ts??null
+        };
+        logger?.warn?.("market-data provider fallback","OKX",symbol);
+        return {ticker,book,depth,base:okx,provider:"OKX"};
+      }catch(err){
+        const msg=err instanceof Error?err.message:String(err);
+        errors.push(okx+": "+msg);
+        logger?.warn?.("market-data endpoint failed",okx,msg);
+      }
+    }
+    throw new Error("All market-data endpoints failed: "+errors.join(" | "));
   }
 
   async function fetchKlines(symbol,interval,limit=30,{endTime=null}={}){
@@ -221,9 +292,44 @@ export function createMarketDataProvider({
         const end=endTime!=null&&endTime!==""&&Number.isFinite(Number(endTime))?"&endTime="+Math.floor(Number(endTime)):"";
         const rows=await fetchJson(base+"/api/v3/klines?symbol="+encoded+"&interval="+interval+"&limit="+limit+end);
         if(!Array.isArray(rows)||rows.length<2) throw new Error("Insufficient kline data");
-        return {rows,base};
+        return {rows,base,provider:"BINANCE"};
       }catch(err){
         errors.push(base+": "+(err instanceof Error?err.message:String(err)));
+      }
+    }
+
+    const instId=okxInstrument(symbol);
+    if(instId&&okx){
+      try{
+        const target=Math.max(2,Math.floor(Number(limit)||30));
+        const bar=OKX_BAR[interval];
+        const byTs=new Map();
+        let cursor=endTime!=null&&endTime!==""&&Number.isFinite(Number(endTime))
+          ?Math.floor(Number(endTime))
+          :null;
+        for(let page=0;page<8&&byTs.size<target;page++){
+          const pageLimit=Math.min(300,target-byTs.size);
+          let url=okx+"/api/v5/market/candles?instId="+encodeURIComponent(instId)+"&bar="+encodeURIComponent(bar)+"&limit="+pageLimit;
+          if(cursor!=null) url+="&after="+cursor;
+          const payload=await fetchJson(url);
+          if(String(payload?.code)!=="0") throw new Error("OKX candles error "+String(payload?.code||"UNKNOWN"));
+          const data=Array.isArray(payload?.data)?payload.data:[];
+          if(!data.length) break;
+          for(const row of data){
+            const ts=Number(row?.[0]);
+            if(Number.isFinite(ts)) byTs.set(ts,row);
+          }
+          const oldest=Math.min(...data.map(row=>Number(row?.[0])).filter(Number.isFinite));
+          if(!Number.isFinite(oldest)||oldest===cursor) break;
+          cursor=oldest;
+          if(data.length<pageLimit) break;
+        }
+        const rows=okxCandlesAsBinanceLike([...byTs.values()],interval).slice(-target);
+        if(rows.length<2) throw new Error("Insufficient OKX kline data");
+        logger?.warn?.("kline provider fallback","OKX",symbol,interval);
+        return {rows,base:okx,provider:"OKX"};
+      }catch(err){
+        errors.push(okx+": "+(err instanceof Error?err.message:String(err)));
       }
     }
     throw new Error("Klines unavailable: "+errors.join(" | "));
@@ -246,6 +352,28 @@ export function createMarketDataProvider({
         });
       }catch(err){
         errors.push(base+": "+(err instanceof Error?err.message:String(err)));
+      }
+    }
+
+    const instId=okxInstrument(symbol);
+    if(instId&&okx){
+      try{
+        const payload=await fetchJson(okx+"/api/v5/market/books?instId="+encodeURIComponent(instId)+"&sz=100");
+        if(String(payload?.code)!=="0") throw new Error("OKX book error "+String(payload?.code||"UNKNOWN"));
+        const depth=payload?.data?.[0];
+        if(!depth) throw new Error("OKX execution book missing");
+        const availableAt=now();
+        logger?.warn?.("execution-book provider fallback","OKX",symbol);
+        return normalizeExecutionBook({
+          symbol,
+          bids:depth.bids||[],
+          asks:depth.asks||[],
+          availableAt,
+          source:"OKX_PUBLIC_BOOKS100",
+          provenance:"host="+new URL(okx).host+"; seqId="+(depth.seqId??"UNKNOWN")+"; exchangeTs="+(depth.ts??"UNKNOWN")
+        });
+      }catch(err){
+        errors.push(okx+": "+(err instanceof Error?err.message:String(err)));
       }
     }
     throw new Error("Execution book unavailable: "+errors.join(" | "));
