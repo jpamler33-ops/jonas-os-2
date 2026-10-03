@@ -70,9 +70,20 @@ async function compactResearchDataPlaneUnlocked({
   }
   const available=Number(pressure?.availableBytes);
   const underPressure=String(pressure?.state||'NORMAL')!=='NORMAL'||(Number.isFinite(available)&&available<minFreeBytes);
+  const target=Math.max(Math.max(256,Math.floor(minTargetBytes)),Math.floor(targetBytes));
   if(meta.size<triggerBytes&&!underPressure) return {ok:true,compacted:false,reason:'BELOW_TRIGGER',bytes:meta.size};
+  if(underPressure&&meta.size<=target){
+    return {
+      ok:true,
+      compacted:false,
+      reason:'AT_TARGET_UNDER_PRESSURE',
+      bytes:meta.size,
+      targetBytes:target,
+      availableBytes:Number.isFinite(available)?available:null
+    };
+  }
 
-  const keep=Math.min(meta.size,Math.max(Math.max(256,Math.floor(minTargetBytes)),Math.floor(targetBytes)));
+  const keep=Math.min(meta.size,target);
   const start=Math.max(0,meta.size-keep);
   const src=await open(filePath,'r');
   const tmp=`${filePath}.compact-${process.pid}-${Date.now()}`;
