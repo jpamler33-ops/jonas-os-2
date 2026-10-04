@@ -21,6 +21,19 @@ function validClosedShadowPosition(position){
   );
 }
 
+function immutableIdentityHash(position){
+  return sha256({
+    positionId:String(position?.positionId||''),
+    entryOrderId:String(position?.entryOrderId||''),
+    symbol:String(position?.symbol||''),
+    side:String(position?.side||''),
+    openedAt:Number(position?.openedAt)||null,
+    closedAt:Number(position?.closedAt)||null,
+    execution:String(position?.execution||''),
+    canExecuteLive:position?.canExecuteLive===true
+  });
+}
+
 function envelopeFor(position,archivedAt=Date.now()){
   const recordHash=sha256(position);
   return {
@@ -29,6 +42,7 @@ function envelopeFor(position,archivedAt=Date.now()){
     closedAt:Number(position.closedAt)||null,
     archivedAt:Number(archivedAt)||Date.now(),
     recordHash,
+    identityHash:immutableIdentityHash(position),
     position
   };
 }
@@ -39,12 +53,15 @@ function verifyEnvelope(value){
   if(String(value.positionId)!==String(value.position.positionId)) return {ok:false,reason:'POSITION_ID_MISMATCH'};
   const expected=sha256(value.position);
   if(String(value.recordHash)!==expected) return {ok:false,reason:'HASH_MISMATCH'};
-  return {ok:true,recordHash:expected};
+  const expectedIdentity=immutableIdentityHash(value.position);
+  if(value.identityHash!=null&&String(value.identityHash)!==expectedIdentity) return {ok:false,reason:'IDENTITY_HASH_MISMATCH'};
+  return {ok:true,recordHash:expected,identityHash:expectedIdentity};
 }
 
 export async function openShadowPortfolioColdArchive(filePath){
   await mkdir(path.dirname(filePath),{recursive:true});
   const hashes=new Map();
+  const identities=new Map();
   let records=0;
   let revisions=0;
   let bytes=0;
@@ -54,12 +71,12 @@ export async function openShadowPortfolioColdArchive(filePath){
     if(err?.code==='ENOENT'){
       return {
         version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
-        filePath,hashes,records:0,revisions:0,bytes:0,healthy:true,error:null
+        filePath,hashes,identities,records:0,revisions:0,bytes:0,healthy:true,error:null
       };
     }
     return {
       version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
-      filePath,hashes,records:0,revisions:0,bytes:0,healthy:false,
+      filePath,hashes,identities,records:0,revisions:0,bytes:0,healthy:false,
       error:'STAT_FAILED:'+String(err instanceof Error?err.message:err)
     };
   }
@@ -74,32 +91,41 @@ export async function openShadowPortfolioColdArchive(filePath){
       try{value=JSON.parse(line);}
       catch{
         return {
-          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,revisions:0,bytes,
+          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),identities:new Map(),records:0,revisions:0,bytes,
           healthy:false,error:'PARSE_FAILURE'
         };
       }
       const verified=verifyEnvelope(value);
       if(!verified.ok){
         return {
-          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,revisions:0,bytes,
+          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),identities:new Map(),records:0,revisions:0,bytes,
           healthy:false,error:'VERIFY_FAILURE:'+verified.reason
         };
       }
       const id=String(value.positionId);
       const prior=hashes.get(id);
+      const priorIdentity=identities.get(id);
+      if(priorIdentity&&priorIdentity!==verified.identityHash){
+        return {
+          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),identities:new Map(),records:0,revisions:0,bytes,
+          healthy:false,error:'POSITION_IDENTITY_CONFLICT:'+id
+        };
+      }
       if(prior&&prior!==verified.recordHash){
         hashes.set(id,verified.recordHash);
+        identities.set(id,verified.identityHash);
         revisions++;
         continue;
       }
       if(!prior){
         hashes.set(id,verified.recordHash);
+        identities.set(id,verified.identityHash);
         records++;
       }
     }
   }catch(err){
     return {
-      version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,revisions:0,bytes,
+      version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),identities:new Map(),records:0,revisions:0,bytes,
       healthy:false,error:'READ_FAILURE:'+String(err instanceof Error?err.message:err)
     };
   }finally{
@@ -109,7 +135,7 @@ export async function openShadowPortfolioColdArchive(filePath){
 
   return {
     version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
-    filePath,hashes,records,revisions,bytes,healthy:true,error:null
+    filePath,hashes,identities,records,revisions,bytes,healthy:true,error:null
   };
 }
 
@@ -122,6 +148,10 @@ export async function archiveClosedShadowPositions(archive,positions,{archivedAt
     if(!validClosedShadowPosition(position)) continue;
     const env=envelopeFor(position,archivedAt);
     const prior=archive.hashes.get(env.positionId);
+    const priorIdentity=archive.identities?.get?.(env.positionId);
+    if(priorIdentity&&priorIdentity!==env.identityHash){
+      throw new Error('SHADOW_COLD_ARCHIVE_IDENTITY_CONFLICT:'+env.positionId);
+    }
     if(prior===env.recordHash){
       skipped++;
       continue;
@@ -150,7 +180,7 @@ export async function archiveClosedShadowPositions(archive,positions,{archivedAt
   try{await fh.sync();}finally{await fh.close();}
   const after=Number((await stat(archive.filePath)).size||0);
 
-  for(const row of rows) archive.hashes.set(row.positionId,row.recordHash);
+  for(const row of rows){ archive.hashes.set(row.positionId,row.recordHash); archive.identities?.set?.(row.positionId,row.identityHash); }
   archive.records+=rows.length-revised;
   archive.revisions=Number(archive.revisions||0)+revised;
   archive.bytes=after;
