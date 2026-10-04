@@ -79,3 +79,14 @@ test('research spine exposes weak layers instead of pretending missing systems a
   assert.ok(x.summary.weakestLayers.includes('L3_CONTEXT_REGIME_EVENT'));
   assert.equal(x.execution,'SHADOW_ONLY');
 });
+
+
+test('research spine accepts canonical market fabric events and world-model marketCount readiness fields',()=>{
+  const h=healthyHealth();
+  h.marketRadar={rows:[]};
+  h.marketDataFabric={healthy:true,events:500};
+  h.biggjWorldModel={healthy:true,marketCount:12,stateCount:12};
+  const x=buildBiggjResearchSpine({health:h,portfolio:{},discovery:{},asOf:123456});
+  assert.equal(x.layers.find(x=>x.id==='L0_REALITY').runtime.state,'READY');
+  assert.equal(x.layers.find(x=>x.id==='L3_CONTEXT_REGIME_EVENT').runtime.state,'READY');
+});
