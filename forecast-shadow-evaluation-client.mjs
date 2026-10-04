@@ -145,7 +145,7 @@ export function deriveShadowWorkerReplayPlan({
     );
     const adaptiveAutoRssMb=Math.min(
       Math.max(1,Number(maxAdaptiveAutoRssMb)||720),
-      Math.max(1,Number(baseAutoRssMb)||620)+Math.round((1-replayWindowRatio)*140)
+      Math.max(1,Number(baseAutoRssMb)||620)+Math.round((1-replayWindowRatio)*150)
     );
     const adaptiveHardHeapMb=Math.min(
       Math.max(1,Number(maxAdaptiveHardHeapMb)||370),
