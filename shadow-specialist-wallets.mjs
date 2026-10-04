@@ -829,7 +829,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
-    marketCapExit:0,scenarioTargetHits:0,
+    marketCapExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION
   };
@@ -862,8 +862,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const afterHits=profitTargetScenarios.filter(x=>x?.targetHit===true).length;
     results.scenarioTargetHits+=Math.max(0,afterHits-beforeHits);
     const holdSeconds=Math.max(0,(Number(now)-Number(p?.openedAt||now))/1000);
+    const priorHoldLab=p?.holdLab||user99k60sHoldLabScenarios(notionalScenariosSol);
+    const priorHoldClosed=priorHoldLab.filter(x=>x?.status==='CLOSED').length;
     const holdLab=updateUser99k60sHoldLab(
-      p?.holdLab||user99k60sHoldLabScenarios(notionalScenariosSol),
+      priorHoldLab,
       {
         returnPct:ret,
         holdSeconds,
@@ -875,6 +877,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         minHoldSeconds
       }
     );
+    results.holdScenarioCloses+=Math.max(0,holdLab.filter(x=>x?.status==='CLOSED').length-priorHoldClosed);
     const marked={
       ...baseMarked,
       lastMarketCapUsd:marketCapUsd,
