@@ -503,7 +503,7 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
   assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[2,5,10,20,40,60,80]);
   assert.equal(p.minHoldSeconds,180);
-  assert.equal(p.holdLab.length,15);
+  assert.equal(p.holdLab.length,21);
   assert.equal(p.canExecuteLive,false);
 });
 
@@ -537,7 +537,7 @@ test('user 99k/60s V1 observes a +10 SOL reference without auto-closing the posi
   assert.equal(p.profitTargetScenarios.find(x=>x.entryNotionalSol===80).targetHit,true);
 });
 
-test('user 99k/60s V1 tracks separate 10/20/40/80 SOL profit-target scenarios when actual stake varies',()=>{
+test('user 99k/60s V1 tracks separate 2/5/10/20/40/60/80 SOL profit-reference scenarios when actual stake varies',()=>{
   const now=14_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'SIZEGRID',symbol:'SIZEGRID',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000
@@ -656,7 +656,7 @@ test('W6 hold lab compares 5m 10m and runner policies across seven SOL sizes',()
   p=at10.state.wallets[WALLET_6_USER_99K_60S].positions[0];
   assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='CLOSED').length,7);
   assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,7);
-  assert.equal(p.holdLabSummary.closed,10);
+  assert.equal(p.holdLabSummary.closed,14);
   assert.equal(p.holdLabSummary.best.policyId,'HOLD_10M');
   assert.ok(p.holdLabSummary.best.estimatedSolNeededFor10SolReference>0);
   assert.equal(p.canExecuteLive,false);
