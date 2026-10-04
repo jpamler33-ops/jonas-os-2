@@ -155,3 +155,36 @@ test('W6 ultra-early feed keeps fresh Solana launch age while enriching market c
   assert.equal(calls.filter(x=>x.includes('/tokens/v1/solana/')).length,1);
 });
 
+test('W6 candidate memory stays entry-eligible and preserves original launch age while Dex data refreshes',async()=>{
+  const now=2_200_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='api.geckoterminal.com')return json({data:[],included:[]});
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'DEXPAIR',dexId:'raydium',
+      baseToken:{address:'HOTMINT',symbol:'HOT',name:'Hot Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.002',liquidity:{usd:60000},volume:{m5:9000,h1:9000,h24:9000},
+      txns:{m5:{buys:30,sells:8},h1:{buys:30,sells:8}},priceChange:{m5:18,h1:18},
+      marketCap:125000,fdv:130000,pairCreatedAt:now-500_000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const candidate={
+    chainId:'solana',tokenAddress:'HOTMINT',pairAddress:'ORIGINALPAIR',
+    pairCreatedAt:now-45_000,firstSeenAt:now-40_000,
+    symbol:'HOT',name:'Hot Meme',marketCap:70000,priceUsd:.001
+  };
+  const out=await p.fetchUltraEarlySolana({force:true,candidateRows:[candidate]});
+  assert.equal(out.rows.length,1);
+  assert.equal(out.rows[0].candidateTracking,true);
+  assert.equal(out.rows[0].w6TrackingOnly,false);
+  assert.equal(out.rows[0].pairCreatedAt,now-45_000);
+  assert.equal(out.rows[0].pairAddress,'ORIGINALPAIR');
+  assert.equal(out.rows[0].marketCap,125000);
+  assert.equal(out.rows[0].ageSeconds,45);
+});
+
