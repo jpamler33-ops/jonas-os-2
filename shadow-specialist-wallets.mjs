@@ -640,12 +640,15 @@ function user99k60sAgeSeconds(row,now){
 export function evaluateUser99k60sEntry(row,{
   now=Date.now(),
   maxAgeSeconds=60,
-  minMarketCapUsd=99_000
+  minMarketCapUsd=99_000,
+  requireTrending=false
 }={}){
   const ageSeconds=user99k60sAgeSeconds(row,now);
   const marketCapUsd=finite(row?.marketCap);
   const priceUsd=finite(row?.priceUsd);
   const blockers=[];
+  const trendVisible=row?.signalTrending===true||row?.candidateTracking===true||row?.w6TrendVisible===true;
+  if(requireTrending&&!trendVisible)blockers.push('NOT_IN_TREND_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
   else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||60))blockers.push('OLDER_THAN_MAX_AGE');
   if(marketCapUsd==null)blockers.push('MARKET_CAP_UNKNOWN');
@@ -656,9 +659,11 @@ export function evaluateUser99k60sEntry(row,{
     version:USER_99K_60S_STRATEGY_VERSION,
     match,
     action:match?'BUY_SHADOW':'IGNORE',
-    rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY',
+    rule:requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY',
     ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),
     marketCapUsd,
+    trendVisible,
+    trendRank:finite(row?.trendRank),
     thresholdUsd:Math.max(1,Number(minMarketCapUsd)||99_000),
     maxAgeSeconds:Math.max(1,Number(maxAgeSeconds)||60),
     observedTimeTo99kSeconds:match&&ageSeconds!=null?Number(ageSeconds.toFixed(3)):null,
@@ -843,7 +848,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   notionalScenariosSol=[2,5,10,20,40,60,80],
   minHoldSeconds=180,
   solPriceUsd=null,
-  maxOpenOperational=30
+  maxOpenOperational=30,
+  requireTrending=false
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
@@ -952,7 +958,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   }
 
   for(const row of entryRows){
-    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd});
+    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,requireTrending});
     const ageKnown=signal.ageSeconds!=null;
     const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
     const marketCapKnown=signal.marketCapUsd!=null;
@@ -1008,6 +1014,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:marketCapUsd,
       launchTracker:row?.w6LaunchTracker?clone(row.w6LaunchTracker):null,
+      trendRankAtEntry:finite(row?.trendRank),
+      trendVisibleAtEntry:row?.signalTrending===true||row?.candidateTracking===true,
       firstObservedAgeSeconds:finite(row?.w6LaunchTracker?.firstObservedAgeSeconds),
       first99kObservedAgeSeconds:finite(row?.w6LaunchTracker?.first99kObservedAgeSeconds),
       troughMarketCapUsd:marketCapUsd,
@@ -1024,7 +1032,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
       entryStrategySignal:clone(signal),
       strategyVersion:USER_99K_60S_STRATEGY_VERSION,
-      entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      entryRule:requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
