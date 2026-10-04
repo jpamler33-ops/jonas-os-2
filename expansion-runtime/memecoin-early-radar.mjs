@@ -444,7 +444,7 @@ export function createMemecoinEarlyRadarProvider({
     return Object.freeze({...row,score:scoreEarlyMemecoin(row,{now:capturedAt})});
   }
 
-  async function fetchUltraEarlySolana({limit=30,maxAgeSeconds=180,trackTokenAddresses=[],force=false}={}){
+  async function fetchUltraEarlySolana({limit=30,maxAgeSeconds=180,trackTokenAddresses=[],candidateRows=[],force=false}={}){
     const capturedAt=Number(now());
     const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
     const errors=[];
@@ -462,7 +462,14 @@ export function createMemecoinEarlyRadarProvider({
     }).sort((a,b)=>(finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0)).slice(0,30);
 
     const tracked=[...new Set((Array.isArray(trackTokenAddresses)?trackTokenAddresses:[]).map(x=>String(x||'').trim()).filter(Boolean))];
-    const allAddresses=[...new Set([...fresh.map(x=>x.tokenAddress),...tracked])];
+    const candidateMap=new Map();
+    for(const row of Array.isArray(candidateRows)?candidateRows:[]){
+      const address=String(row?.tokenAddress||'').trim();
+      if(!address)continue;
+      candidateMap.set(tokenKey('solana',address),row);
+    }
+    const candidateAddresses=[...candidateMap.values()].map(x=>String(x?.tokenAddress||'')).filter(Boolean);
+    const allAddresses=[...new Set([...fresh.map(x=>x.tokenAddress),...candidateAddresses,...tracked])];
     const chunks=[];
     for(let i=0;i<allAddresses.length;i+=30)chunks.push(allAddresses.slice(i,i+30));
     const dexRows=[];
@@ -506,9 +513,30 @@ export function createMemecoinEarlyRadarProvider({
       };
     });
     const freshKeys=new Set(freshRows.map(x=>tokenKey('solana',x.tokenAddress)));
+    const candidateTrackingRows=[...candidateMap.entries()].map(([key,candidate])=>{
+      if(freshKeys.has(key))return null;
+      const dexRow=byToken.get(key);
+      if(!dexRow)return null;
+      if(!firstSeen.has(key))firstSeen.set(key,finite(candidate?.firstSeenAt)??capturedAt);
+      const merged=mergeCandidate(candidate,dexRow);
+      return {
+        ...merged,
+        chainId:'solana',
+        tokenAddress:String(candidate?.tokenAddress||dexRow?.tokenAddress||''),
+        pairAddress:String(candidate?.pairAddress||merged?.pairAddress||''),
+        pairCreatedAt:finite(candidate?.pairCreatedAt)??finite(dexRow?.pairCreatedAt),
+        firstSeenAt:finite(candidate?.firstSeenAt)??firstSeen.get(key),
+        signalNewPool:true,
+        ultraEarly:true,
+        candidateTracking:true,
+        w6TrackingOnly:false,
+        ultraSource:'W6_CANDIDATE_MEMORY_PLUS_DEXSCREENER_BATCH'
+      };
+    }).filter(Boolean);
+    const candidateKeys=new Set(candidateTrackingRows.map(x=>tokenKey('solana',x.tokenAddress)));
     const trackingRows=tracked.map(address=>{
       const key=tokenKey('solana',address);
-      if(freshKeys.has(key))return null;
+      if(freshKeys.has(key)||candidateKeys.has(key))return null;
       const dexRow=byToken.get(key);
       if(!dexRow)return null;
       if(!firstSeen.has(key))firstSeen.set(key,capturedAt);
@@ -516,12 +544,13 @@ export function createMemecoinEarlyRadarProvider({
         ...dexRow,
         firstSeenAt:firstSeen.get(key),
         ultraEarly:false,
+        candidateTracking:false,
         w6TrackingOnly:true,
         ultraSource:'DEXSCREENER_BATCH_POSITION_TRACKING'
       };
     }).filter(Boolean);
 
-    const rows=[...freshRows,...trackingRows].filter(row=>!obviousNonMeme(row)).map(row=>{
+    const rows=[...freshRows,...candidateTrackingRows,...trackingRows].filter(row=>!obviousNonMeme(row)).map(row=>{
       const created=finite(row?.pairCreatedAt);
       const ageSeconds=created==null?null:Math.max(0,(capturedAt-created)/1000);
       return Object.freeze({...row,ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),score:scoreEarlyMemecoin(row,{now:capturedAt})});
@@ -540,6 +569,7 @@ export function createMemecoinEarlyRadarProvider({
       source:'GECKOTERMINAL_SOLANA_NEW_POOLS_PLUS_DEXSCREENER_BATCH',
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
+      candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,
       trackingRows:selected.filter(x=>x?.w6TrackingOnly===true).length,
       pollTargetSeconds:Number((Math.max(1000,Number(ultraGeckoCacheMs)||5000)/1000).toFixed(1)),
       maxAgeSeconds:maxAge,
