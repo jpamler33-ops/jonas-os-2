@@ -422,3 +422,30 @@ test('summary keeps specialist wallets isolated and shadow-only',()=>{
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.wallets[WALLET_3_TRADER_COPY].capitalLimitQuote,null);
 });
+
+
+test('wallet 4 enforced signal gate opens only explicit BUY candidates',()=>{
+  const now=4_300_000;
+  const base={
+    chainId:'solana',tokenAddress:'GATED',symbol:'GATED',priceUsd:1,liquidityUsd:80_000,
+    volumeM5:30_000,buysM5:24,sellsM5:8,priceChangeM5:18,
+    score:{stage:'NEW_NOW',researchPriorityScore:.82,attentionSignals:['SOCIAL_ATTENTION_SPIKE'],riskFlags:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]},
+    memeLearning:{action:'BOOST'}
+  };
+  const blocked=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{
+    sourceReady:true,rows:[{...base,memeSignal:{action:'READY',label:'⏳ READY'}}]
+  },{now,requireBuySignal:true});
+  assert.equal(blocked.results.opened,0);
+  assert.equal(blocked.results.signalBlocked,1);
+
+  const opened=applyMemecoinScoutSnapshot(createSpecialistWalletState(),{
+    sourceReady:true,rows:[{...base,memeSignal:{action:'BUY',label:'🟢 KAUFEN',entryReadinessScore:.84}}]
+  },{now,requireBuySignal:true});
+  assert.equal(opened.results.opened,1);
+  assert.equal(opened.results.signalBlocked,0);
+  const p=opened.state.wallets[WALLET_4_MEME_SCOUT].positions[0];
+  assert.equal(p.entrySignalAction,'BUY');
+  assert.equal(p.entryMemeSignal.label,'🟢 KAUFEN');
+  assert.equal(p.canExecuteLive,false);
+});
