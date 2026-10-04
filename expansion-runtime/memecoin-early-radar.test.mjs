@@ -116,8 +116,8 @@ test('W6 exact GMGN Trends 1m feed keeps launch age and displayed green percenta
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
       assert.equal(u.searchParams.get('chain'),'sol');
       assert.equal(u.searchParams.get('interval'),'1m');
-      assert.equal(u.searchParams.get('order_by'),'default');
-      assert.equal(u.searchParams.get('direction'),'desc');
+      assert.equal(u.searchParams.get('order_by'),null);
+      assert.equal(u.searchParams.get('direction'),null);
       assert.equal(opts?.headers?.['X-APIKEY'],'personal-test-key');
       assert.equal(opts?.headers?.['user-agent'],'gmgn-cli/1.6.6');
       return json({
@@ -166,6 +166,40 @@ test('W6 exact GMGN Trends 1m feed keeps launch age and displayed green percenta
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
+});
+
+test('W6 can push the green percent threshold into GMGN OpenAPI discovery',async()=>{
+  const now=2_110_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const fetchImpl=async (url)=>{
+    const u=new URL(url);
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
+      assert.equal(u.searchParams.get('interval'),'1m');
+      assert.equal(u.searchParams.get('order_by'),null);
+      assert.equal(u.searchParams.get('min_price_change_percent'),'99000');
+      return json({code:0,data:{rank:[{
+        address:'GREENMINT',symbol:'GREEN',name:'Green Meme',price:.001,market_cap:47800,
+        price_change_percent:999000,open_timestamp:Math.floor((now-50_000)/1000)
+      }]}});
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'GREENPAIR',dexId:'raydium',
+      baseToken:{address:'GREENMINT',symbol:'GREEN',name:'Green Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.001',liquidity:{usd:50000},volume:{m5:5000,h1:5000,h24:5000},
+      txns:{m5:{buys:10,sells:2},h1:{buys:10,sells:2}},priceChange:{m5:20,h1:20},
+      marketCap:47800,fdv:50000,pairCreatedAt:now-50_000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,gmgnApiKey:'personal-test-key',gmgnTrendInterval:'1m',
+    gmgnTrendOrderBy:'default',gmgnTrendMinPriceChangePct:99000,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:60});
+  assert.equal(out.rows.length,1);
+  assert.equal(out.rows[0].priceChangeSelectedPct,999000);
+  assert.equal(out.minPriceChangePct,99000);
+  assert.equal(out.exactGmgn,true);
 });
 
 
