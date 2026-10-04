@@ -12335,6 +12335,18 @@ function missionControlData(){
       canExecuteLive:false,
       enforcedForWallet4:true
     },
+    user99k60s:memecoinEarlySnapshot?.user99k60s||{
+      version:USER_99K_60S_STRATEGY_VERSION,
+      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      exitRule:'TARGET_10_SOL_DEPENDS_ON_ENTRY_NOTIONAL_OR_MARKET_CAP_BELOW_FLOOR',
+      targetPnlSol:10,
+      sizingScenariosSol:[10,20,40,80],
+      results:{matched:0,opened:0,closed:0,marketCapExit:0,targetPnlExit:0,scenarioTargetHits:0},
+      wallet:specialistWalletSummary(specialistWalletState,{asOf:now}).wallets?.[WALLET_6_USER_99K_60S]||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false
+    },
     learning:memecoinEarlySnapshot?.tradeLearning||memecoinTradeLearningSummary(buildMemecoinTradeLearningModel(specialistWalletState,{asOf:now})),
     temporalTemple:memecoinEarlySnapshot?.temporalTemple||biggjTemporalTempleSummary(buildBiggjTemporalTemple(memecoinEvidenceFactoryState,{
       asOf:now,
