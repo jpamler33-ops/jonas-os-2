@@ -301,6 +301,56 @@ function normalizeGeckoPool(row={},includedMap=new Map(),network=''){
   };
 }
 
+function unixMs(v){
+  const n=finite(v);
+  if(n==null)return null;
+  return n<10_000_000_000?n*1000:n;
+}
+function normalizeGmgnTrend(row={},rank=null){
+  const links=[
+    row?.twitter_username?{type:'x',label:text(row.twitter_username,80),url:'https://x.com/'+String(row.twitter_username).replace(/^@/,'')}:null,
+    row?.website?{type:'website',label:'website',url:text(row.website,500)}:null,
+    row?.telegram?{type:'telegram',label:'telegram',url:text(row.telegram,500)}:null
+  ].filter(Boolean);
+  const gmgnAgeAt=unixMs(row?.open_timestamp)??unixMs(row?.pool_creation_timestamp);
+  return {
+    chainId:'solana',
+    tokenAddress:text(row?.address,200),
+    pairAddress:text(row?.pool_address||row?.pair_address||'',200),
+    dexId:'gmgn',
+    url:row?.address?'https://gmgn.ai/sol/token/'+encodeURIComponent(String(row.address)):'',
+    symbol:text(row?.symbol,80),
+    name:text(row?.name||row?.symbol,120),
+    quoteSymbol:'SOL',
+    priceUsd:finite(row?.price),
+    liquidityUsd:finite(row?.liquidity),
+    volumeM5:finite(row?.volume),
+    volumeH1:finite(row?.volume_1h??row?.volume),
+    volumeH24:finite(row?.volume_24h),
+    buysM5:Math.max(0,Math.floor(finite(row?.buys)??0)),
+    sellsM5:Math.max(0,Math.floor(finite(row?.sells)??0)),
+    buysH1:Math.max(0,Math.floor(finite(row?.buys_1h??row?.buys)??0)),
+    sellsH1:Math.max(0,Math.floor(finite(row?.sells_1h??row?.sells)??0)),
+    priceChangeM5:finite(row?.price_change_percent5m),
+    priceChangeH1:finite(row?.price_change_percent1h),
+    marketCap:finite(row?.market_cap),
+    fdv:finite(row?.fdv),
+    pairCreatedAt:gmgnAgeAt,
+    gmgnOpenTimestamp:unixMs(row?.open_timestamp),
+    gmgnPoolCreationTimestamp:unixMs(row?.pool_creation_timestamp),
+    holderCount:finite(row?.holder_count),
+    smartBuy24h:finite(row?.smart_buy_24h),
+    smartSell24h:finite(row?.smart_sell_24h),
+    links,
+    xLinked:xLinked(links),
+    websiteLinked:websiteLinked(links),
+    signalTrending:true,
+    gmgnExactTrend:true,
+    trendRank:rank==null?null:Number(rank),
+    trendSource:'GMGN_TRENDS_PUBLIC_1M_DEFAULT'
+  };
+}
+
 function mergeCandidate(base={},extra={}){
   const pick=(a,b)=>a!=null&&a!==''?a:b;
   return {
@@ -360,11 +410,13 @@ export function createMemecoinEarlyRadarProvider({
   fetchImpl=globalThis.fetch,
   dexBase='https://api.dexscreener.com',
   geckoBase='https://api.geckoterminal.com/api/v2',
+  gmgnBase='https://gmgn.ai',
   timeoutMs=7000,
   dexCacheMs=15000,
   geckoCacheMs=60000,
   ultraGeckoCacheMs=5000,
   ultraDexCacheMs=5000,
+  gmgnTrendCacheMs=5000,
   networks=['solana','base','ethereum'],
   pairLookupLimit=10,
   now=()=>Date.now()
@@ -374,6 +426,7 @@ export function createMemecoinEarlyRadarProvider({
   const firstSeen=new Map();
   const dex=String(dexBase).replace(/\/+$/,'');
   const gecko=String(geckoBase).replace(/\/+$/,'');
+  const gmgn=String(gmgnBase).replace(/\/+$/,'');
 
   async function getJson(url){
     const controller=new AbortController();
@@ -422,6 +475,15 @@ export function createMemecoinEarlyRadarProvider({
       })).filter(x=>x.tokenAddress);
     },{force});
   }
+  async function gmgnTrendingUltraSolana({force=false}={}){
+    return cached('ultra:gmgn:solana:trending:1m:default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+      const body=await getJson(gmgn+'/defi/quotation/v1/rank/sol/swaps/1m?orderby=default&direction=desc');
+      const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
+      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_CODE_'+String(body.code)+'_'+text(body?.msg,120));
+      if(!raw.length)throw new Error('GMGN_TREND_EMPTY');
+      return raw.map((x,i)=>normalizeGmgnTrend(x,i+1)).filter(x=>x.tokenAddress);
+    },{force});
+  }
   async function dexBatchTokens(chain,addresses,{force=false}={}){
     const xs=[...new Set((Array.isArray(addresses)?addresses:[]).map(x=>String(x||'').trim()).filter(Boolean))].slice(0,30);
     if(!xs.length)return [];
@@ -453,10 +515,19 @@ export function createMemecoinEarlyRadarProvider({
     const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
     const errors=[];
     let pools=[];
+    let trendSource='GMGN_TRENDS_PUBLIC_1M_DEFAULT';
+    let exactGmgn=true;
     try{
-      pools=await geckoTrendingPoolsUltraSolana({force});
+      pools=await gmgnTrendingUltraSolana({force});
     }catch(err){
-      errors.push('gecko:solana:trending:'+(err instanceof Error?err.message:String(err)));
+      errors.push('gmgn:solana:trending:'+(err instanceof Error?err.message:String(err)));
+      trendSource='GECKOTERMINAL_SOLANA_TRENDING_FALLBACK';
+      exactGmgn=false;
+      try{
+        pools=await geckoTrendingPoolsUltraSolana({force});
+      }catch(fallbackErr){
+        errors.push('gecko:solana:trending:'+(fallbackErr instanceof Error?fallbackErr.message:String(fallbackErr)));
+      }
     }
     const fresh=pools.filter(row=>{
       const created=finite(row?.pairCreatedAt);
@@ -512,6 +583,8 @@ export function createMemecoinEarlyRadarProvider({
         firstSeenAt:firstSeen.get(key),
         signalNewPool:false,
         signalTrending:true,
+        gmgnExactTrend:pool?.gmgnExactTrend===true,
+        trendSource:text(pool?.trendSource||trendSource,80),
         trendRank:finite(pool?.trendRank),
         ultraEarly:true,
         w6TrackingOnly:false,
@@ -533,7 +606,10 @@ export function createMemecoinEarlyRadarProvider({
         pairCreatedAt:finite(candidate?.pairCreatedAt)??finite(dexRow?.pairCreatedAt),
         firstSeenAt:finite(candidate?.firstSeenAt)??firstSeen.get(key),
         signalNewPool:false,
-        signalTrending:true,
+        signalTrending:false,
+        wasTrending:true,
+        gmgnExactTrend:candidate?.gmgnExactTrend===true,
+        trendSource:text(candidate?.trendSource||'W6_TREND_MEMORY',80),
         ultraEarly:true,
         candidateTracking:true,
         w6TrackingOnly:false,
@@ -573,7 +649,8 @@ export function createMemecoinEarlyRadarProvider({
       capturedAt,
       rows:Object.freeze(selected),
       errors:Object.freeze(errors),
-      source:'GECKOTERMINAL_SOLANA_TRENDING_PLUS_DEXSCREENER_BATCH',
+      source:trendSource,
+      exactGmgn,
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
       candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,
