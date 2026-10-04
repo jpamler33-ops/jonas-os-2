@@ -4557,7 +4557,7 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'WALLET 6 · 99K IN 60S · USER STRATEGY V1',
       'Open '+Number(w6.openPositions||0)+' · Closed '+Number(w6.closedTrades||0)+' · Winrate '+(w6.winRate==null?'—':Math.round(Number(w6.winRate)*100)+'%'),
       'Regel: Alter ≤60s + Market Cap ≥99k => sofortiger Shadow-Entry.',
-      'Exit: Market Cap fällt unter 99k oder +10 SOL Ziel bei bekannter Entry-Größe.',
+      'Exit: +10 SOL Ziel bei bekannter Entry-Größe; dein „MC zu klein“-Exit wird beobachtet, aber noch nicht mit erfundener Grenze automatisiert.',
       'Sizing-Lab: 10 / 20 / 40 / 80 SOL getrennt; 80 SOL braucht ca. +12,5% brutto für +10 SOL vor Kosten.','',
       'ATTENTION-QUELLEN',
       '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
@@ -5487,7 +5487,9 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
       maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
       minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
-      minExitMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||99_000)),
+      minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
+        ?Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD)
+        :null,
       targetPnlSol:Math.max(.01,Number(process.env.TCX_W6_USER_99K_60S_TARGET_PNL_SOL||10)),
       entryNotionalSol:Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL||0)>0
         ?Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL)
@@ -5506,7 +5508,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     snapshot={...snapshot,tradeLearning:postTradeLearningSummary,user99k60s:{
       version:USER_99K_60S_STRATEGY_VERSION,
       rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-      exitRule:'TARGET_10_SOL_DEPENDS_ON_ENTRY_NOTIONAL_OR_MARKET_CAP_BELOW_FLOOR',
+      exitRule:'TARGET_10_SOL_DEPENDS_ON_ENTRY_NOTIONAL_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
       targetPnlSol:10,
       sizingScenariosSol:[10,20,40,80],
       results:user99k60sUpdate.results,
@@ -12338,7 +12340,7 @@ function missionControlData(){
     user99k60s:memecoinEarlySnapshot?.user99k60s||{
       version:USER_99K_60S_STRATEGY_VERSION,
       rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-      exitRule:'TARGET_10_SOL_DEPENDS_ON_ENTRY_NOTIONAL_OR_MARKET_CAP_BELOW_FLOOR',
+      exitRule:'TARGET_10_SOL_DEPENDS_ON_ENTRY_NOTIONAL_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
       targetPnlSol:10,
       sizingScenariosSol:[10,20,40,80],
       results:{matched:0,opened:0,closed:0,marketCapExit:0,targetPnlExit:0,scenarioTargetHits:0},
