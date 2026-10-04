@@ -726,7 +726,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
-    marketCapExit:0,targetPnlExit:0,scenarioTargetHits:0,
+    marketCapExit:0,scenarioTargetHits:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION
   };
@@ -773,20 +773,12 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
     if(marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
-    }else if(
-      configuredNotionalSol>0&&
-      finite(targetPnlSol)>0&&
-      pnlSolEstimate!=null&&
-      pnlSolEstimate>=finite(targetPnlSol)
-    ){
-      reason='USER_99K_60S_TARGET_PNL_SOL';
     }
     if(reason){
       const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
       if(closed){
         results.closed++;
         if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
-        if(reason==='USER_99K_60S_TARGET_PNL_SOL')results.targetPnlExit++;
       }
     }
   }
@@ -833,12 +825,12 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         entryStrategySignal:clone(signal),
         strategyVersion:USER_99K_60S_STRATEGY_VERSION,
         entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-        exitRule:'TARGET_PNL_SOL_IF_NOTIONAL_KNOWN_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
-        targetTracking:configuredNotionalSol>0?'ACTIVE_EXACT_NOTIONAL':'SCENARIO_MATRIX_10_20_40_80_SOL',
+        exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
+        targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
         source:'BIGGJ_MEMECOIN_EARLY_RADAR',
         status:'OPEN',
         execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
-        epistemic:'USER_DISCOVERED_RULE_FROZEN_V1_SHADOW_TEST_NO_OPTIMIZATION_VARIABLE_ENTRY_NOTIONAL'
+        epistemic:'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
       };
       if(openPosition(wallet,position))results.opened++;
     }
