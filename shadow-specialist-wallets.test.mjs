@@ -498,12 +498,12 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.observedTimeTo99kSeconds,25);
   assert.equal(p.entryMarketCapUsd,120_000);
   assert.equal(p.entryRule,'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
-  assert.equal(p.targetTracking,'SCENARIO_MATRIX_10_20_40_80_SOL');
+  assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
   assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[10,20,40,80]);
   assert.equal(p.canExecuteLive,false);
 });
 
-test('user 99k/60s V1 exits when market cap falls below the frozen 99k floor',()=>{
+test('user 99k/60s V1 can apply a market-cap exit only when an explicit floor is configured',()=>{
   const now=12_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
@@ -517,7 +517,7 @@ test('user 99k/60s V1 exits when market cap falls below the frozen 99k floor',()
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
 });
 
-test('user 99k/60s V1 can represent the 10 SOL profit exit when entry SOL notional is configured',()=>{
+test('user 99k/60s V1 observes a +10 SOL reference without auto-closing the position',()=>{
   const now=13_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:1,marketCap:150_000,pairCreatedAt:now-15_000
@@ -525,10 +525,12 @@ test('user 99k/60s V1 can represent the 10 SOL profit exit when entry SOL notion
   const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:1.14,marketCap:171_000,pairCreatedAt:now-45_000
   }]},{now:now+30_000,entryNotionalSol:80,targetPnlSol:10});
-  assert.equal(next.results.closed,1);
-  assert.equal(next.results.targetPnlExit,1);
-  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_TARGET_PNL_SOL');
-  assert.ok(next.state.wallets[WALLET_6_USER_99K_60S].closed[0].estimatedNetPnlSolBeforeSlippage>=10);
+  assert.equal(next.results.closed,0);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
+  const p=next.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.ok(p.estimatedNetPnlSolBeforeSlippage>=10);
+  assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
+  assert.equal(p.profitTargetScenarios.find(x=>x.entryNotionalSol===80).targetHit,true);
 });
 
 test('user 99k/60s V1 tracks separate 10/20/40/80 SOL profit-target scenarios when actual stake varies',()=>{
