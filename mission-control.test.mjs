@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V19_RESEARCH_SPINE');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V20_W6_CAPITAL_LAB');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);
@@ -78,7 +78,7 @@ test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Dis
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("user99k60s:memecoinEarlySnapshot?.user99k60s"));
   assert.ok(source.includes("version:USER_99K_60S_STRATEGY_VERSION"));
-  assert.ok(source.includes("sizingScenariosSol:[5,10,20,40,80]"));
+  assert.ok(source.includes("sizingScenariosSol:[2,5,10,20,40,60,80]"));
   assert.ok(source.includes("WALLET_6_USER_99K_60S"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
@@ -96,7 +96,7 @@ test('mission-control exposes W6 descriptive exit learner without automatic poli
 test('mission-control source exposes W6 three-minute loss protection and hold lab',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180"));
-  assert.ok(source.includes("notionalScenariosSol:[5,10,20,40,80]"));
+  assert.ok(source.includes("notionalScenariosSol:[2,5,10,20,40,60,80]"));
   assert.ok(source.includes("holdScenarioCloses"));
   assert.ok(source.includes("DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION"));
   assert.ok(source.includes("canExecuteLive:false"));
@@ -108,4 +108,12 @@ test('mission control source exposes layered research spine',()=>{
   assert.ok(source.includes("buildBiggjResearchSpine"));
   assert.ok(source.includes("health.biggjResearchSpine"));
   assert.ok(source.includes("BIGGJ_RESEARCH_SPINE_VERSION"));
+});
+
+
+test('mission-control source wires live SOL price into W6 liquidity-aware sizing',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("currentW6SolPriceUsd"));
+  assert.ok(source.includes("solPriceUsd:w6SolPriceUsd"));
+  assert.ok(source.includes("RUNNER_60M"));
 });
