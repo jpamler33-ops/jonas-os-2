@@ -12388,10 +12388,10 @@ function missionControlData(){
     user99k60s:memecoinEarlySnapshot?.user99k60s||{
       version:USER_99K_60S_STRATEGY_VERSION,
       rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
+      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetPnlSol:10,
       sizingScenariosSol:[5,10,20,40,80],
-      results:{matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0},
+      results:{matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0,holdScenarioCloses:0},
       wallet:specialistWalletSummary(specialistWalletState,{asOf:now}).wallets?.[WALLET_6_USER_99K_60S]||null,
       exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:now}),
       execution:'SHADOW_ONLY',

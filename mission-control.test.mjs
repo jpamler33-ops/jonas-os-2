@@ -98,5 +98,6 @@ test('mission-control source exposes W6 three-minute loss protection and hold la
   assert.ok(source.includes("TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180"));
   assert.ok(source.includes("notionalScenariosSol:[5,10,20,40,80]"));
   assert.ok(source.includes("holdScenarioCloses"));
+  assert.ok(source.includes("DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
