@@ -272,7 +272,8 @@ test('meme wallet mirrors the premium mockup structure and binds only live shado
   assert.match(h,/99K IN 60S/);
   assert.match(h,/HOLD-LAB/);
   assert.match(h,/3 Minuten/);
-  assert.match(h,/2\/5\/10\/20\/40\/60\/80 SOL/);
+  assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
+  assert.match(h,/REALISTISCH MAX/);
   assert.match(h,/EXIT-LERNEN/);
   assert.match(h,/ruleProposalReady/);
   assert.match(h,/data-meme-range="7D"/);
