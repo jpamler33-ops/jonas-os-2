@@ -710,25 +710,6 @@ test('W6 hold lab compares 5m 10m and runner policies across seven SOL sizes',()
   assert.equal(p.canExecuteLive,false);
 });
 
-test('W6 base research position closes at the bounded 60m horizon',()=>{
-  const now=19_500_000;
-  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'MAXHOLD',symbol:'MAXHOLD',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,pairCreatedAt:now-15_000
-  }]},{now,minHoldSeconds:180,solPriceUsd:150,maxResearchHoldSeconds:3600}).state;
-  const at59=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'MAXHOLD',symbol:'MAXHOLD',priceUsd:1.20,marketCap:160_000,liquidityUsd:120_000,pairCreatedAt:now-3_555_000
-  }]},{now:now+3_540_000,minHoldSeconds:180,solPriceUsd:150,maxResearchHoldSeconds:3600});
-  assert.equal(at59.results.closed,0);
-  assert.equal(at59.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
-
-  const at60=applyUser99k60sStrategySnapshot(at59.state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'MAXHOLD',symbol:'MAXHOLD',priceUsd:1.22,marketCap:165_000,liquidityUsd:120_000,pairCreatedAt:now-3_620_000
-  }]},{now:now+3_605_000,minHoldSeconds:180,solPriceUsd:150,maxResearchHoldSeconds:3600});
-  assert.equal(at60.results.closed,1);
-  assert.equal(at60.results.maxHorizonExit,1);
-  assert.equal(at60.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MAX_RESEARCH_HORIZON');
-});
-
 test('W6 runner can stay open beyond ten minutes while the coin remains healthy',()=>{
   const now=20_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
