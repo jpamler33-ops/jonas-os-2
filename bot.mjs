@@ -11800,6 +11800,10 @@ async function forecastOutcomeWatcher() {
         await persistForecastRuntime('outcome-watch');
       } catch {}
 
+      maybeCollectResearchGarbage('OUTCOME_POST_RESOLVE',{
+        triggerHeapMb:Math.max(280,autoLearnHeapHeadroomMb-20),
+        cooldownBypassOverageMb:10
+      });
       const postMemory=process.memoryUsage();
       const postAdmission=evaluateAutoLearnMemoryAdmission({
         phase:'ISSUE',
