@@ -106,14 +106,14 @@ test('provider merges keyless new pools with DexScreener launch-attention signal
   assert.equal(out.canExecuteLive,false);
 });
 
-test('W6 ultra-early feed keeps fresh Solana launch age while enriching market cap in one Dex batch',async()=>{
+test('W6 trend-first feed keeps fresh Solana launch age while enriching market cap in one Dex batch',async()=>{
   const now=2_100_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const calls=[];
   const fetchImpl=async url=>{
     calls.push(url);
     const u=new URL(url);
-    if(u.hostname==='api.geckoterminal.com'&&u.pathname==='/api/v2/networks/solana/new_pools')return json({
+    if(u.hostname==='api.geckoterminal.com'&&u.pathname==='/api/v2/networks/solana/trending_pools')return json({
       data:[{
         id:'solana_PAIRFAST',
         attributes:{
@@ -150,6 +150,8 @@ test('W6 ultra-early feed keeps fresh Solana launch age while enriching market c
   assert.equal(out.rows[0].pairCreatedAt,now-22_000);
   assert.equal(out.rows[0].ageSeconds,22);
   assert.equal(out.rows[0].ultraEarly,true);
+  assert.equal(out.rows[0].signalTrending,true);
+  assert.equal(out.rows[0].trendRank,1);
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
   assert.equal(calls.filter(x=>x.includes('/tokens/v1/solana/')).length,1);
