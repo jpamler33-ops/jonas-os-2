@@ -613,9 +613,12 @@ export function createMemecoinEarlyRadarProvider({
         qs.set('order_by',gmgnTrendSort);
         qs.set('direction','desc');
       }
-      if(gmgnTrendMinChange!=null&&gmgnTrendMinChange>=0){
-        qs.set('min_price_change_percent',String(gmgnTrendMinChange));
-      }
+      // Keep discovery independent from the W6 strategy threshold. Sending the
+      // extreme green-% threshold to GMGN can make a healthy rank endpoint
+      // return data:null when nothing currently matches, which looks identical
+      // to a broken source and prevents us from observing threshold crossings.
+      // Fetch the rank feed unfiltered and let the W6 point-in-time gate apply
+      // gmgnTrendMinChange locally to the observed GMGN value.
       const body=await getJson(gmgnOpenApi+'/v1/market/rank?'+qs.toString(),{
         headers:{
           'X-APIKEY':gmgnReadApiKey,
