@@ -628,7 +628,7 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
         'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
         'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
         'Funnel: **'+String(user99Funnel?.rowsSeen??0)+' gesehen → '+String(user99Funnel?.ageWithinLimit??0)+' ≤60s → '+String(user99Funnel?.marketCapQualifiedAfterAge??0)+' ≥99k → '+String(user99Funnel?.dataCompleteAfterThreshold??0)+' Daten OK → '+String(user99Funnel?.eligible??0)+' Match → '+String(user99Funnel?.opened??0)+' opened**',
-        'Ultra: **~'+(Number(user99Ultra?.pollMs||0)/1000).toFixed(1)+'s** · Hot **'+String(user99Ultra?.candidateBookSize??0)+'** · ≤60s entdeckt **'+String(user99LaunchStats?.discoveredWithin60??0)+'** · ≥99k≤60s beobachtet **'+String(user99LaunchStats?.first99kObservedWithin60??0)+'**',
+        'Ultra: **~'+(Number(user99Ultra?.pollMs||0)/1000).toFixed(1)+'s** · Hot **'+String(user99Ultra?.candidateBookSize??0)+'** · ≤60s entdeckt **'+String(user99LaunchStats?.discoveredWithin60??0)+'** · ≥99k≤60s **'+String(user99LaunchStats?.first99kObservedWithin60??0)+'** · ≥99k erst >60s **'+String(user99LaunchStats?.first99kObservedAfter60??0)+'**',
         'Blocker: '+user99BlockerText+' · Varianten gestartet: **'+String(user99Funnel?.capitalVariantsStarted??0)+' Size / '+String(user99Funnel?.holdVariantsStarted??0)+' Hold**',
         'Sizing parallel: **2 / 5 / 10 / 20 / 40 / 60 / 80 SOL** auf demselben Entry · Liquiditäts-Impact wird heuristisch berücksichtigt.',
         'Hold-Lab: **3 Min Verlustschutz** · danach **5m / 10m / Runner** bis max. 60m vergleichen.',
