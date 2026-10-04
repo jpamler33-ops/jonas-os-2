@@ -115,9 +115,10 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
     const u=new URL(url);
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
       assert.equal(u.searchParams.get('chain'),'sol');
-      assert.equal(u.searchParams.get('interval'),'1m');
+      assert.equal(u.searchParams.get('interval'),'1h');
       assert.equal(u.searchParams.get('order_by'),'default');
       assert.equal(opts?.headers?.['X-APIKEY'],'gmgn_solbscbaseethmonadtron');
+      assert.equal(opts?.headers?.['user-agent'],'gmgn-cli/1.6.6');
       return json({
       code:0,msg:'success',data:{rank:[{
         chain:'sol',address:'FASTMINT',symbol:'FAST',name:'Fast Meme',
@@ -152,10 +153,11 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
   assert.equal(out.rows[0].ultraEarly,true);
   assert.equal(out.rows[0].signalTrending,true);
   assert.equal(out.rows[0].gmgnExactTrend,true);
-  assert.equal(out.rows[0].trendSource,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
+  assert.equal(out.rows[0].trendSource,'GMGN_OPENAPI_TRENDS_1H_DEFAULT');
   assert.equal(out.rows[0].trendRank,1);
   assert.equal(out.exactGmgn,true);
-  assert.equal(out.source,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
+  assert.equal(out.trendInterval,'1h');
+  assert.equal(out.source,'GMGN_OPENAPI_TRENDS_1H_DEFAULT');
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
