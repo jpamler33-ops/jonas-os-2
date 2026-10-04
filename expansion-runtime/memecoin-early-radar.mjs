@@ -427,6 +427,7 @@ export function createMemecoinEarlyRadarProvider({
   gmgnTrendCacheMs=5000,
   gmgnTrendInterval='1m',
   gmgnTrendOrderBy='default',
+  gmgnTrendMinPriceChangePct=null,
   networks=['solana','base','ethereum'],
   pairLookupLimit=10,
   now=()=>Date.now()
@@ -445,6 +446,7 @@ export function createMemecoinEarlyRadarProvider({
     :'1h';
   const gmgnTrendWindowLabel=gmgnTrendWindow.toUpperCase();
   const gmgnTrendSort=String(gmgnTrendOrderBy||'default').trim()||'default';
+  const gmgnTrendMinChange=finite(gmgnTrendMinPriceChangePct);
 
   async function getJson(url,{headers={}}={}){
     const controller=new AbortController();
@@ -600,11 +602,20 @@ export function createMemecoinEarlyRadarProvider({
         chain:'sol',
         interval:gmgnTrendWindow,
         limit:demoKey?'3':'100',
-        order_by:gmgnTrendSort,
-        direction:'desc',
         timestamp:String(timestamp),
         client_id:String(clientId)
       });
+      // Mirror the official GMGN CLI: when the requested sort is "default",
+      // omit order_by/direction entirely. Some OpenAPI tiers return data:null
+      // for an explicit order_by=default even though the same request works
+      // when those optional parameters are absent.
+      if(gmgnTrendSort!=='default'){
+        qs.set('order_by',gmgnTrendSort);
+        qs.set('direction','desc');
+      }
+      if(gmgnTrendMinChange!=null&&gmgnTrendMinChange>=0){
+        qs.set('min_price_change_percent',String(gmgnTrendMinChange));
+      }
       const body=await getJson(gmgnOpenApi+'/v1/market/rank?'+qs.toString(),{
         headers:{
           'X-APIKEY':gmgnReadApiKey,
@@ -841,6 +852,7 @@ export function createMemecoinEarlyRadarProvider({
       exactGmgn,
       trendInterval:gmgnTrendWindow,
       trendOrderBy:gmgnTrendSort,
+      minPriceChangePct:gmgnTrendMinChange,
       setup:'GMGN_TRENDS_1M',
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
