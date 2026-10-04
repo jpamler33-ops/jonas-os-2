@@ -46,6 +46,7 @@ export async function openShadowPortfolioColdArchive(filePath){
   await mkdir(path.dirname(filePath),{recursive:true});
   const hashes=new Map();
   let records=0;
+  let revisions=0;
   let bytes=0;
   try{
     bytes=Number((await stat(filePath)).size||0);
@@ -53,12 +54,12 @@ export async function openShadowPortfolioColdArchive(filePath){
     if(err?.code==='ENOENT'){
       return {
         version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
-        filePath,hashes,records:0,bytes:0,healthy:true,error:null
+        filePath,hashes,records:0,revisions:0,bytes:0,healthy:true,error:null
       };
     }
     return {
       version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
-      filePath,hashes,records:0,bytes:0,healthy:false,
+      filePath,hashes,records:0,revisions:0,bytes:0,healthy:false,
       error:'STAT_FAILED:'+String(err instanceof Error?err.message:err)
     };
   }
@@ -73,24 +74,23 @@ export async function openShadowPortfolioColdArchive(filePath){
       try{value=JSON.parse(line);}
       catch{
         return {
-          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,bytes,
+          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,revisions:0,bytes,
           healthy:false,error:'PARSE_FAILURE'
         };
       }
       const verified=verifyEnvelope(value);
       if(!verified.ok){
         return {
-          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,bytes,
+          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,revisions:0,bytes,
           healthy:false,error:'VERIFY_FAILURE:'+verified.reason
         };
       }
       const id=String(value.positionId);
       const prior=hashes.get(id);
       if(prior&&prior!==verified.recordHash){
-        return {
-          version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,bytes,
-          healthy:false,error:'POSITION_CONFLICT:'+id
-        };
+        hashes.set(id,verified.recordHash);
+        revisions++;
+        continue;
       }
       if(!prior){
         hashes.set(id,verified.recordHash);
@@ -99,7 +99,7 @@ export async function openShadowPortfolioColdArchive(filePath){
     }
   }catch(err){
     return {
-      version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,bytes,
+      version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,filePath,hashes:new Map(),records:0,revisions:0,bytes,
       healthy:false,error:'READ_FAILURE:'+String(err instanceof Error?err.message:err)
     };
   }finally{
@@ -109,7 +109,7 @@ export async function openShadowPortfolioColdArchive(filePath){
 
   return {
     version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
-    filePath,hashes,records,bytes,healthy:true,error:null
+    filePath,hashes,records,revisions,bytes,healthy:true,error:null
   };
 }
 
@@ -117,19 +117,24 @@ export async function archiveClosedShadowPositions(archive,positions,{archivedAt
   if(!archive?.healthy) throw new Error('SHADOW_COLD_ARCHIVE_UNHEALTHY:'+String(archive?.error||'UNKNOWN'));
   const rows=[];
   let skipped=0;
+  let revised=0;
   for(const position of Array.isArray(positions)?positions:[]){
     if(!validClosedShadowPosition(position)) continue;
     const env=envelopeFor(position,archivedAt);
     const prior=archive.hashes.get(env.positionId);
-    if(prior){
-      if(prior!==env.recordHash) throw new Error('SHADOW_COLD_ARCHIVE_CONFLICT:'+env.positionId);
+    if(prior===env.recordHash){
       skipped++;
       continue;
+    }
+    if(prior&&prior!==env.recordHash){
+      env.supersedesHash=prior;
+      env.archiveRevision=true;
+      revised++;
     }
     rows.push(env);
   }
   if(!rows.length){
-    return {archived:0,skipped,bytesAdded:0,totalRecords:archive.records,totalBytes:archive.bytes};
+    return {archived:0,revised:0,skipped,bytesAdded:0,totalRecords:archive.records,totalRevisions:Number(archive.revisions||0),totalBytes:archive.bytes};
   }
 
   const before=archive.bytes;
@@ -146,13 +151,16 @@ export async function archiveClosedShadowPositions(archive,positions,{archivedAt
   const after=Number((await stat(archive.filePath)).size||0);
 
   for(const row of rows) archive.hashes.set(row.positionId,row.recordHash);
-  archive.records+=rows.length;
+  archive.records+=rows.length-revised;
+  archive.revisions=Number(archive.revisions||0)+revised;
   archive.bytes=after;
   return {
     archived:rows.length,
+    revised,
     skipped,
     bytesAdded:Math.max(0,after-before),
     totalRecords:archive.records,
+    totalRevisions:archive.revisions,
     totalBytes:archive.bytes
   };
 }
@@ -162,6 +170,7 @@ export function shadowPortfolioColdArchiveSummary(archive){
     version:SHADOW_PORTFOLIO_COLD_ARCHIVE_VERSION,
     healthy:archive?.healthy===true,
     records:Number(archive?.records||0),
+    revisions:Number(archive?.revisions||0),
     bytes:Number(archive?.bytes||0),
     error:archive?.error||null,
     destructiveRetention:false,
