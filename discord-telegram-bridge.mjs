@@ -527,7 +527,7 @@ export function buildDiscordTerminalPayload(snapshot={}){
 }
 export function buildDiscordSystemPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{},oms=h?.shadowOms||{},fabric=h?.marketDataFabric||{},tg=h?.telegramPolling||{},rb=h?.biggjRulebook?.runtime||{};
-  const world=h?.biggjWorldModel||{},memeGate=h?.memecoinRadar?.signalController||{},gateCounts=memeGate?.counts||{};
+  const world=h?.biggjWorldModel||{},memeGate=h?.memecoinRadar?.signalController||{},gateCounts=memeGate?.counts||{},backbone=h?.biggjLayerBackbone||{},backboneArch=backbone?.architecture||{};
   const rulebookState=String(rb?.state||'UNKNOWN').toUpperCase();
   const worldMode=String(world?.refreshMode||'UNKNOWN').toUpperCase();
   const worldState=worldMode==='FULL'?'● FULL':worldMode==='COMPACT'?'◐ COMPACT':worldMode==='DEFERRED'?'○ DEFERRED':'· '+worldMode;
@@ -536,6 +536,7 @@ export function buildDiscordSystemPayload(snapshot={}){
     {name:'OMS',value:'Active '+String(oms?.active??0)+' · Filled '+String(oms?.filled??0),inline:true},
     {name:'Market Events',value:String(fabric?.events??'—'),inline:true},
     {name:'Meme Entry Gate',value:'BUY '+String(gateCounts?.BUY??0)+' · READY '+String(gateCounts?.READY??0)+' · WATCH '+String(gateCounts?.WATCH??0)+' · BLOCKED '+String(gateCounts?.BLOCKED??0),inline:false},
+    {name:'System Backbone',value:String(backboneArch?.readyLayers??0)+'/'+String(backboneArch?.totalLayers??8)+' Ebenen READY · '+Math.round(Number(backboneArch?.wiringCoverage||0)*100)+'% verkabelt · Bottlenecks '+String((backbone?.bottlenecks||[]).length),inline:false},
     {name:'Safety',value:'W4 öffnet nur bei BUY · ABSTAIN / SHADOW_ONLY',inline:false}
   ],footer:{text:MARKERS.system},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
