@@ -559,7 +559,7 @@ export function createMemecoinEarlyRadarProvider({
       return (finite(a?.ageSeconds)??Infinity)-(finite(b?.ageSeconds)??Infinity);
     });
     const discoveryCount=rows.filter(x=>x?.w6TrackingOnly!==true).length;
-    const selected=rows.filter(x=>x?.w6TrackingOnly===true||rows.indexOf(x)<Math.max(1,Math.min(30,Number(limit)||30)));
+    const selected=rows.filter(x=>x?.w6TrackingOnly===true||x?.candidateTracking===true||rows.indexOf(x)<Math.max(1,Math.min(30,Number(limit)||30)));
 
     return Object.freeze({
       version:W6_ULTRA_EARLY_FEED_VERSION,
