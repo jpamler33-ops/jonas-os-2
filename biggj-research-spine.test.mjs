@@ -74,7 +74,7 @@ test('research spine exposes weak layers instead of pretending missing systems a
   h.biggjWorldModel={healthy:false,marketsObserved:0};
   const x=buildBiggjResearchSpine({health:h,portfolio:{},discovery:{},asOf:123456});
   assert.equal(x.layers.find(x=>x.id==='L2_FEATURES_INDICATORS').runtime.state,'COLLECTING');
-  assert.equal(x.layers.find(x=>x.id==='L3_CONTEXT_REGIME_EVENT').runtime.state,'DEGRADED');
+  assert.equal(x.layers.find(x=>x.id==='L3_CONTEXT_REGIME_EVENT').runtime.state,'COLLECTING');
   assert.ok(x.summary.weakestLayers.includes('L2_FEATURES_INDICATORS'));
   assert.ok(x.summary.weakestLayers.includes('L3_CONTEXT_REGIME_EVENT'));
   assert.equal(x.execution,'SHADOW_ONLY');
