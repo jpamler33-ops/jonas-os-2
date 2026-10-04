@@ -1,0 +1,1 @@
+Registry repair in progress.
