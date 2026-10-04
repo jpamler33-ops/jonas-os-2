@@ -711,7 +711,7 @@ export function evaluateUser99k60sEntry(row,{
   });
 }
 
-function user99k60sSolScenarios(values=[2,5,10,20,40,60,80]){
+function user99k60sSolScenarios(values=[0.5,1,2,3,5,10,20,40,60,80]){
   return [...new Set((Array.isArray(values)?values:[])
     .map(x=>finite(x))
     .filter(x=>x>0&&x<=10_000))]
@@ -756,7 +756,15 @@ function user99k60sImpactPct(notionalSol,solPriceUsd,liquidityUsd){
   const quoteReserveUsd=liq/2;
   return Math.max(0,Math.min(.95,notionalUsd/(quoteReserveUsd+notionalUsd)));
 }
-function user99k60sHoldLabScenarios(values=[2,5,10,20,40,60,80],{solPriceUsd=null,liquidityUsd=null}={}){
+function user99k60sMaxEntrySolForImpact(solPriceUsd,liquidityUsd,maxImpactPct=.03){
+  const sol=finite(solPriceUsd),liq=finite(liquidityUsd);
+  const impact=Math.max(.0001,Math.min(.50,finite(maxImpactPct,.03)));
+  if(!(sol>0&&liq>0))return null;
+  const quoteReserveUsd=liq/2;
+  const maxNotionalUsd=quoteReserveUsd*impact/(1-impact);
+  return maxNotionalUsd/sol;
+}
+function user99k60sHoldLabScenarios(values=[0.5,1,2,3,5,10,20,40,60,80],{solPriceUsd=null,liquidityUsd=null}={}){
 
   const policies=[
     {id:'HOLD_5M',reviewAtSeconds:300,maxHoldSeconds:300},
@@ -858,6 +866,17 @@ function user99k60sHoldLabSummary(scenarios=[]){
   })[0]||null;
   const bestAbsolute=closed.filter(x=>finite(x?.estimatedNetPnlSol)!=null).slice().sort((a,b)=>finite(b?.estimatedNetPnlSol,-Infinity)-finite(a?.estimatedNetPnlSol,-Infinity))[0]||null;
   const refHits=closed.filter(x=>finite(x?.estimatedNetPnlSol)!=null&&finite(x.estimatedNetPnlSol)>=10).sort((a,b)=>finite(a?.entryNotionalSol,Infinity)-finite(b?.entryNotionalSol,Infinity));
+  const entryRef=rows.find(x=>finite(x?.solPriceUsdAtEntry)>0&&finite(x?.entryLiquidityUsd)>0)||null;
+  const solAtEntry=finite(entryRef?.solPriceUsdAtEntry);
+  const liquidityAtEntry=finite(entryRef?.entryLiquidityUsd);
+  const normalMaxEntrySol=user99k60sMaxEntrySolForImpact(solAtEntry,liquidityAtEntry,.03);
+  const aggressiveMaxEntrySol=user99k60sMaxEntrySolForImpact(solAtEntry,liquidityAtEntry,.05);
+  const uniqueSizes=[...new Map(rows.filter(x=>finite(x?.entryNotionalSol)>0).map(x=>[finite(x.entryNotionalSol),x])).values()]
+    .sort((a,b)=>finite(a.entryNotionalSol,0)-finite(b.entryNotionalSol,0));
+  const largestTestedUnder=limit=>{
+    const row=uniqueSizes.filter(x=>finite(x?.entryImpactPct)!=null&&finite(x.entryImpactPct)<=limit).slice(-1)[0];
+    return row?finite(row.entryNotionalSol):null;
+  };
   const eff=finite(best?.capitalEfficiency);
   const compact=x=>x?{id:x.id,policyId:x.policyId,entryNotionalSol:x.entryNotionalSol,estimatedNetPnlSol:x.estimatedNetPnlSol,estimatedNetPnlSolBeforeImpact:x.estimatedNetPnlSolBeforeImpact,capitalEfficiency:x.capitalEfficiency,entryImpactPct:x.entryImpactPct,exitImpactPct:x.exitImpactPct,closeHoldSeconds:x.closeHoldSeconds,closeReason:x.closeReason}:null;
   return {
@@ -868,6 +887,17 @@ function user99k60sHoldLabSummary(scenarios=[]){
     bestAbsolutePnl:compact(bestAbsolute),
     minimumScenarioFor10SolReference:compact(refHits[0]||null),
     priceImpactCoverage:closed.length?efficiencyRows.length/closed.length:0,
+    entrySizingGuide:{
+      liquidityUsdAtEntry:liquidityAtEntry,
+      solPriceUsdAtEntry:solAtEntry,
+      normalMaxImpactPct:.03,
+      normalMaxEntrySol,
+      aggressiveMaxImpactPct:.05,
+      aggressiveMaxEntrySol,
+      largestTestedNormalSol:largestTestedUnder(.03),
+      largestTestedAggressiveSol:largestTestedUnder(.05),
+      semantics:'HEURISTIC_CONSTANT_PRODUCT_50_50_POOL_ENTRY_CAP_NOT_LIVE_EXECUTION_QUOTE'
+    },
     semantics:'BEST_PRICE_PERFORMANCE_IS_HIGHEST_LIQUIDITY_IMPACT_ADJUSTED_RETURN_PER_SOL;_ABSOLUTE_PNL_REPORTED_SEPARATELY'
   };
 }
@@ -883,7 +913,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   minExitMarketCapUsd=null,
   targetPnlSol=10,
   entryNotionalSol=null,
-  notionalScenariosSol=[2,5,10,20,40,60,80],
+  notionalScenariosSol=[0.5,1,2,3,5,10,20,40,60,80],
   minHoldSeconds=180,
   solPriceUsd=null,
   maxOpenOperational=30,

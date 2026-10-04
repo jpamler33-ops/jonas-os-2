@@ -630,8 +630,11 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
         'Funnel: **'+String(user99Funnel?.rowsSeen??0)+' gesehen → '+String(user99Funnel?.ageWithinLimit??0)+' ≤60s → '+String(user99Funnel?.marketCapQualifiedAfterAge??0)+' ≥99k → '+String(user99Funnel?.dataCompleteAfterThreshold??0)+' Daten OK → '+String(user99Funnel?.eligible??0)+' Match → '+String(user99Funnel?.opened??0)+' opened**',
         'Ultra: **~'+(Number(user99Ultra?.pollMs||0)/1000).toFixed(1)+'s** · Hot **'+String(user99Ultra?.candidateBookSize??0)+'** · ≤60s entdeckt **'+String(user99LaunchStats?.discoveredWithin60??0)+'** · ≥99k≤60s **'+String(user99LaunchStats?.first99kObservedWithin60??0)+'** · ≥99k erst >60s **'+String(user99LaunchStats?.first99kObservedAfter60??0)+'**',
         'Blocker: '+user99BlockerText+' · Varianten gestartet: **'+String(user99Funnel?.capitalVariantsStarted??0)+' Size / '+String(user99Funnel?.holdVariantsStarted??0)+' Hold**',
-        'Sizing parallel: **2 / 5 / 10 / 20 / 40 / 60 / 80 SOL** auf demselben Entry · Liquiditäts-Impact wird heuristisch berücksichtigt.',
+        'Sizing parallel: **0.5 / 1 / 2 / 3 / 5 / 10 / 20 / 40 / 60 / 80 SOL** auf demselben Entry · Liquiditäts-Impact wird heuristisch berücksichtigt.',
         'Hold-Lab: **3 Min Verlustschutz** · danach **5m / 10m / Runner** bis max. 60m vergleichen.',
+        user99Active[0]?.holdLabSummary?.entrySizingGuide?.normalMaxEntrySol
+          ?'Entry-Cap: **~'+Number(user99Active[0].holdLabSummary.entrySizingGuide.normalMaxEntrySol).toFixed(2)+' SOL bei ~3% Impact** · aggressiv **~'+Number(user99Active[0].holdLabSummary.entrySizingGuide.aggressiveMaxEntrySol).toFixed(2)+' SOL bei ~5%**'
+          :'Entry-Cap: wartet auf SOL-Preis + Pool-Liquidität.',
         'Exit-Lernen: **'+String(user99Exit?.samples??0)+'/20** markiert · Regelvorschlag **'+(user99Exit?.ruleProposalReady?'BEREIT ZUR PRÜFUNG':'GESPERRT')+'**.',
         user99Active[0]?.holdLabSummary?.best
           ?'Bestes Preis/Leistungs-Szenario: **'+String(user99Active[0].holdLabSummary.best.policyId||'—')+'** · Effizienz **'+percent(user99Active[0].holdLabSummary.best.capitalEfficiency)+'** · ~**'+(Number(user99Active[0].holdLabSummary.best.estimatedSolNeededFor10SolReference||0).toFixed(1))+' SOL** für +10 SOL Referenz'
