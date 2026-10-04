@@ -790,10 +790,11 @@ function user99k60sHoldLabSummary(scenarios=[]){
   const rows=Array.isArray(scenarios)?scenarios:[];
   const closed=rows.filter(x=>x?.status==='CLOSED');
   const best=closed.slice().sort((a,b)=>{
-    const ar=finite(a?.estimatedNetPnlSol,-Infinity),br=finite(b?.estimatedNetPnlSol,-Infinity);
-    if(br!==ar)return br-ar;
-    return finite(b?.capitalEfficiency,-Infinity)-finite(a?.capitalEfficiency,-Infinity);
+    const ae=finite(a?.capitalEfficiency,-Infinity),be=finite(b?.capitalEfficiency,-Infinity);
+    if(be!==ae)return be-ae;
+    return finite(a?.entryNotionalSol,Infinity)-finite(b?.entryNotionalSol,Infinity);
   })[0]||null;
+  const eff=finite(best?.capitalEfficiency);
   return {
     scenarios:rows.length,
     open:rows.length-closed.length,
@@ -805,8 +806,10 @@ function user99k60sHoldLabSummary(scenarios=[]){
       estimatedNetPnlSol:best.estimatedNetPnlSol,
       capitalEfficiency:best.capitalEfficiency,
       closeHoldSeconds:best.closeHoldSeconds,
-      closeReason:best.closeReason
-    }:null
+      closeReason:best.closeReason,
+      estimatedSolNeededFor10SolReference:eff>0?10/eff:null
+    }:null,
+    semantics:'BEST_PRICE_PERFORMANCE_IS_HIGHEST_FEE_ADJUSTED_RETURN_PER_SOL_THEN_LOWEST_CAPITAL'
   };
 }
 
