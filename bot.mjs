@@ -5733,12 +5733,13 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     });
     specialistWalletState=walletUpdate.state;
     const w6SolPriceUsd=await currentW6SolPriceUsd();
-    const user99k60sUpdate=applyUser99k60sStrategySnapshot(specialistWalletState,walletInput,w6StrategyRuntimeOptions(w6SolPriceUsd));
-    specialistWalletState=user99k60sUpdate.state;
-    if(
-      walletUpdate.results.opened||walletUpdate.results.closed||
-      user99k60sUpdate.results.opened||user99k60sUpdate.results.closed||user99k60sUpdate.results.holdScenarioCloses||user99k60sUpdate.results.scenarioTargetHits
-    )await persistSpecialistWallets('memecoin-early:'+reason);
+    const user99k60sResults=w6UltraEarlySnapshot?.results||{
+      matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+      entryFunnel:{rowsSeen:0,ageKnown:0,ageWithinLimit:0,marketCapKnown:0,marketCapQualifiedAfterAge:0,priceKnown:0,dataCompleteAfterThreshold:0,eligible:0,duplicateBlocked:0,capacityBlocked:0,sourceNotReadyBlocked:0,opened:0,capitalVariantsStarted:0,holdVariantsStarted:0},
+      entryBlockers:{},
+      strategyVersion:USER_99K_60S_STRATEGY_VERSION
+    };
+    if(walletUpdate.results.opened||walletUpdate.results.closed)await persistSpecialistWallets('memecoin-early:'+reason);
     const postTradeLearningModel=buildMemecoinTradeLearningModel(specialistWalletState,{asOf:Date.now()});
     const postTradeLearningSummary=memecoinTradeLearningSummary(postTradeLearningModel);
     const user99k60sWallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
@@ -5751,13 +5752,16 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       solPriceUsd:w6SolPriceUsd,
       minHoldSeconds:180,
       holdPolicies:['5M','10M','RUNNER_60M'],
-      results:w6UltraEarlySnapshot?.results||user99k60sUpdate.results,
+      results:user99k60sResults,
       ultraFeed:w6UltraEarlySnapshot?{
         version:W6_ULTRA_EARLY_FEED_VERSION,
         capturedAt:w6UltraEarlySnapshot.capturedAt,
         source:w6UltraEarlySnapshot.source,
         sourceReady:w6UltraEarlySnapshot.sourceReady,
         discoveryRows:w6UltraEarlySnapshot.discoveryRows||0,
+        candidateTrackingRows:w6UltraEarlySnapshot.candidateTrackingRows||0,
+        candidateBookSize:w6UltraEarlySnapshot.candidateBookSize||0,
+        launchStats:w6UltraEarlySnapshot.launchStats||{},
         trackingRows:w6UltraEarlySnapshot.trackingRows||0,
         pollMs:w6UltraEarlyRefreshMs,
         errors:w6UltraEarlySnapshot.errors||[]
@@ -5883,14 +5887,14 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       },
       user99k60s:{
         version:USER_99K_60S_STRATEGY_VERSION,
-        matched:user99k60sUpdate.results.matched||0,
-        opened:user99k60sUpdate.results.opened||0,
-        closed:user99k60sUpdate.results.closed||0,
-        marketCapExit:user99k60sUpdate.results.marketCapExit||0,
-        scenarioTargetHits:user99k60sUpdate.results.scenarioTargetHits||0,
-        holdScenarioCloses:user99k60sUpdate.results.holdScenarioCloses||0,
-        entryFunnel:user99k60sUpdate.results.entryFunnel||{},
-        entryBlockers:user99k60sUpdate.results.entryBlockers||{},
+        matched:user99k60sResults.matched||0,
+        opened:user99k60sResults.opened||0,
+        closed:user99k60sResults.closed||0,
+        marketCapExit:user99k60sResults.marketCapExit||0,
+        scenarioTargetHits:user99k60sResults.scenarioTargetHits||0,
+        holdScenarioCloses:user99k60sResults.holdScenarioCloses||0,
+        entryFunnel:user99k60sResults.entryFunnel||{},
+        entryBlockers:user99k60sResults.entryBlockers||{},
         active:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.openPositions||0,
         closedTrades:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.closedTrades||0,
         winRate:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.winRate??null,
