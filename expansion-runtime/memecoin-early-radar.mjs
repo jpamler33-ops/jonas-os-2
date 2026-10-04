@@ -657,7 +657,7 @@ export function createMemecoinEarlyRadarProvider({
     let pools=[];
     const demoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
     const hasPersonalGmgnKey=Boolean(gmgnReadApiKey)&&!demoKey;
-    let trendSource=hasPersonalGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER';
+    let trendSource=hasPersonalGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
     let exactGmgn=false;
     if(hasPersonalGmgnKey){
       try{
@@ -665,6 +665,19 @@ export function createMemecoinEarlyRadarProvider({
         exactGmgn=true;
       }catch(err){
         errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
+      }
+    }
+    // Preserve the user's Trends-tab semantics even without a personal key.
+    // The public GMGN Trends surface is attempted before the broader free
+    // trend composite. If it is unavailable we still fail over to independent
+    // GeckoTerminal + DexScreener trend sources.
+    if(!pools.length){
+      trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
+      try{
+        pools=await gmgnPublicTrendingUltraSolana({force});
+        exactGmgn=true;
+      }catch(publicErr){
+        errors.push('gmgn:public:solana:trending:'+(publicErr instanceof Error?publicErr.message:String(publicErr)));
       }
     }
     if(!pools.length){

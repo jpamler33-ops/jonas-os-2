@@ -165,11 +165,64 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
 });
 
 
+test('W6 uses public GMGN Trends before free composite when no personal key is configured',async()=>{
+  const now=2_125_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const calls=[];
+  const fetchImpl=async (url,opts={})=>{
+    calls.push({url,opts});
+    const u=new URL(url);
+    if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1h'){
+      assert.equal(u.searchParams.get('orderby'),'default');
+      assert.equal(u.searchParams.get('direction'),'desc');
+      assert.equal(opts?.headers?.referer,'https://gmgn.ai/trend');
+      return json({code:0,msg:'success',data:{rank:[{
+        address:'PUBMINT',symbol:'PUB',name:'Public Trend Meme',
+        price:0.001,liquidity:42000,volume:7000,market_cap:118000,
+        buys:28,sells:6,price_change_percent5m:14,price_change_percent1h:14,
+        creation_timestamp:Math.floor((now-25_000)/1000),
+        holder_count:91
+      }]}});
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'PUBPAIR',dexId:'raydium',
+      baseToken:{address:'PUBMINT',symbol:'PUB',name:'Public Trend Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.0011',liquidity:{usd:52000},volume:{m5:8000,h1:9000,h24:9000},
+      txns:{m5:{buys:31,sells:7},h1:{buys:31,sells:7}},priceChange:{m5:16,h1:16},
+      marketCap:124000,fdv:128000,pairCreatedAt:now-600_000
+    }]);
+    if(u.hostname==='api.geckoterminal.com'||u.pathname==='/token-boosts/top/v1'){
+      throw new Error('free fallback must not run while public GMGN Trends is healthy');
+    }
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],gmgnApiKey:'',gmgnTrendInterval:'1h',
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,gmgnTrendCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(out.sourceReady,true);
+  assert.equal(out.exactGmgn,true);
+  assert.equal(out.source,'GMGN_PUBLIC_TRENDS_1H_DEFAULT');
+  assert.equal(out.trendInterval,'1h');
+  assert.equal(out.rows.length,1);
+  assert.equal(out.rows[0].tokenAddress,'PUBMINT');
+  assert.equal(out.rows[0].gmgnExactTrend,true);
+  assert.equal(out.rows[0].trendSource,'GMGN_PUBLIC_TRENDS_1H_DEFAULT');
+  assert.equal(out.rows[0].ageSeconds,25);
+  assert.equal(out.rows[0].marketCap,124000);
+  assert.equal(calls.some(x=>x.url.includes('api.geckoterminal.com')),false);
+  assert.equal(calls.some(x=>x.url.includes('/token-boosts/top/v1')),false);
+});
+
 test('W6 free trends composite uses DexScreener boosts when exact GMGN is unavailable',async()=>{
   const now=2_150_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const fetchImpl=async url=>{
     const u=new URL(url);
+    if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1h'){
+      return {ok:false,status:503,json:async()=>({})};
+    }
     if(u.hostname==='api.geckoterminal.com'){
       return {ok:false,status:429,json:async()=>({})};
     }
@@ -191,6 +244,7 @@ test('W6 free trends composite uses DexScreener boosts when exact GMGN is unavai
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
   assert.equal(out.exactGmgn,false);
   assert.equal(out.source,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
+  assert.ok(out.errors.some(x=>String(x).startsWith('gmgn:public:solana:trending:HTTP_503')));
   assert.equal(out.rows.length,1);
   assert.equal(out.rows[0].tokenAddress,'BOOSTMINT');
   assert.equal(out.rows[0].signalTrending,true);
