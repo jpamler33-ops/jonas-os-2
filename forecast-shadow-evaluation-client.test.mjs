@@ -145,6 +145,28 @@ test('adaptive replay still defers when compact soft headroom is fully exhausted
   });
   assert.equal(plan.allowed,false);
   assert.equal(plan.replayMode,'DEFERRED');
+  assert.equal(plan.reason,'ADAPTIVE_MEMORY_PRESSURE');
+});
+
+test('adaptive replay shrinks past candidate-local hard gate at observed 355 MB runtime floor',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:355,rssMb:714,externalMb:6,
+    configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:400
+  });
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.replayMode,'COMPACT');
+  assert.equal(plan.historyRows,400);
+  assert.equal(plan.limits.autoHeapMb,357);
+  assert.equal(plan.limits.hardHeapMb,370);
+});
+
+test('adaptive replay remains fail-closed at the absolute heap hard limit',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:370,rssMb:714,externalMb:6,
+    configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:400
+  });
+  assert.equal(plan.allowed,false);
+  assert.equal(plan.replayMode,'DEFERRED');
   assert.equal(plan.reason,'HARD_MEMORY_PRESSURE');
 });
 
