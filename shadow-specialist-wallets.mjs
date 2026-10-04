@@ -670,6 +670,44 @@ export function evaluateUser99k60sEntry(row,{
   });
 }
 
+function user99k60sSolScenarios(values=[10,20,40,80]){
+  return [...new Set((Array.isArray(values)?values:[])
+    .map(x=>finite(x))
+    .filter(x=>x>0&&x<=10_000))]
+    .sort((a,b)=>a-b);
+}
+function user99k60sTargetScenarios(targetPnlSol,values,feeBps){
+  const target=Math.max(.0001,finite(targetPnlSol,10));
+  const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+  return user99k60sSolScenarios(values).map(notionalSol=>({
+    entryNotionalSol:notionalSol,
+    targetPnlSol:target,
+    targetNetReturn:target/notionalSol,
+    targetPriceReturnApprox:target/notionalSol+roundTripFeeRate,
+    targetHit:false,
+    targetHitAt:null,
+    targetHitObservedReturn:null,
+    estimatedNetPnlSol:null,
+    feeModel:'ROUND_TRIP_FEE_BPS_NO_SLIPPAGE'
+  }));
+}
+function updateUser99k60sTargetScenarios(existing,returnPct,now,feeBps){
+  const ret=finite(returnPct);
+  const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+  return (Array.isArray(existing)?existing:[]).map(s=>{
+    const notionalSol=Math.max(0,finite(s?.entryNotionalSol,0));
+    const estimatedNetPnlSol=ret==null||!(notionalSol>0)?null:notionalSol*(ret-roundTripFeeRate);
+    const hit=s?.targetHit===true||(estimatedNetPnlSol!=null&&estimatedNetPnlSol>=Math.max(.0001,finite(s?.targetPnlSol,10)));
+    return {
+      ...s,
+      estimatedNetPnlSol,
+      targetHit:hit,
+      targetHitAt:s?.targetHitAt??(hit?Number(now):null),
+      targetHitObservedReturn:s?.targetHitObservedReturn??(hit?ret:null)
+    };
+  });
+}
+
 export function applyUser99k60sStrategySnapshot(input,snapshot,{
   now=Date.now(),
   marginQuote=100,
@@ -679,6 +717,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   minExitMarketCapUsd=99_000,
   targetPnlSol=10,
   entryNotionalSol=null,
+  notionalScenariosSol=[10,20,40,80],
   maxOpenOperational=30
 }={}){
   const state=mutableState(input);
@@ -687,7 +726,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
-    marketCapExit:0,targetPnlExit:0,
+    marketCapExit:0,targetPnlExit:0,scenarioTargetHits:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION
   };
@@ -707,15 +746,25 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       marketCapUsd??Infinity
     );
     const configuredNotionalSol=finite(p?.entryNotionalSol,finite(entryNotionalSol));
-    const pnlSolEstimate=configuredNotionalSol>0&&finite(baseMarked?.unrealizedReturnPct)!=null
-      ?configuredNotionalSol*finite(baseMarked.unrealizedReturnPct,0)
+    const ret=finite(baseMarked?.unrealizedReturnPct);
+    const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+    const pnlSolEstimate=configuredNotionalSol>0&&ret!=null
+      ?configuredNotionalSol*(ret-roundTripFeeRate)
       :null;
+    const beforeHits=(p?.profitTargetScenarios||[]).filter(x=>x?.targetHit===true).length;
+    const profitTargetScenarios=updateUser99k60sTargetScenarios(
+      p?.profitTargetScenarios||user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
+      ret,now,feeBps
+    );
+    const afterHits=profitTargetScenarios.filter(x=>x?.targetHit===true).length;
+    results.scenarioTargetHits+=Math.max(0,afterHits-beforeHits);
     const marked={
       ...baseMarked,
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
       troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
-      estimatedPnlSol:pnlSolEstimate
+      estimatedNetPnlSolBeforeSlippage:pnlSolEstimate,
+      profitTargetScenarios
     };
     wallet.positions[i]=marked;
     results.marked++;
@@ -753,7 +802,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       if(!(px>0))continue;
       const marketCapUsd=finite(row?.marketCap);
       const margin=Math.max(1,Number(marginQuote)||100);
-      const configuredNotionalSol=finite(entryNotionalSol);
+      const rowNotionalSol=finite(row?.userStrategy?.entryNotionalSol);
+      const configuredNotionalSol=rowNotionalSol>0?rowNotionalSol:finite(entryNotionalSol);
       const position={
         walletId:WALLET_6_USER_99K_60S,
         positionKey:key,
@@ -776,16 +826,17 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         troughMarketCapUsd:marketCapUsd,
         entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
         targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
+        profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
         minExitMarketCapUsd:Math.max(1,Number(minExitMarketCapUsd)||99_000),
         entryStrategySignal:clone(signal),
         strategyVersion:USER_99K_60S_STRATEGY_VERSION,
         entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
         exitRule:'TARGET_PNL_SOL_IF_NOTIONAL_KNOWN_OR_MARKET_CAP_BELOW_FLOOR',
-        targetTracking:configuredNotionalSol>0?'ACTIVE':'WAITING_FOR_ENTRY_NOTIONAL_SOL',
+        targetTracking:configuredNotionalSol>0?'ACTIVE_EXACT_NOTIONAL':'SCENARIO_MATRIX_10_20_40_80_SOL',
         source:'BIGGJ_MEMECOIN_EARLY_RADAR',
         status:'OPEN',
         execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
-        epistemic:'USER_DISCOVERED_RULE_FROZEN_V1_SHADOW_TEST_NO_OPTIMIZATION'
+        epistemic:'USER_DISCOVERED_RULE_FROZEN_V1_SHADOW_TEST_NO_OPTIMIZATION_VARIABLE_ENTRY_NOTIONAL'
       };
       if(openPosition(wallet,position))results.opened++;
     }
