@@ -270,6 +270,11 @@ import {
   BIGGJ_MARKET_SCIENCE_OS_VERSION
 } from './biggj-market-science-os.mjs';
 import {
+  buildBiggjLayerBackbone,
+  biggjLayerBackboneSummary,
+  BIGGJ_LAYER_BACKBONE_VERSION
+} from './biggj-layer-backbone.mjs';
+import {
   buildBiggjWorldModelRuntime,
   biggjWorldModelRuntimeSummary,
   BIGGJ_WORLD_MODEL_RUNTIME_VERSION
@@ -12511,6 +12516,23 @@ function missionControlData(){
  health.biggjMarketScienceOs={
    ...biggjMarketScienceOsSummary(marketScienceOs),
    version:BIGGJ_MARKET_SCIENCE_OS_VERSION
+ };
+ const layerBackbone=buildBiggjLayerBackbone({
+   health,
+   portfolio:portfolioView,
+   discovery,
+   asOf:now
+ });
+ health.biggjLayerBackbone={
+   ...biggjLayerBackboneSummary(layerBackbone),
+   version:BIGGJ_LAYER_BACKBONE_VERSION
+ };
+ health.biggjMarketScienceOs.architecture={
+   ...health.biggjMarketScienceOs.architecture,
+   backboneVersion:BIGGJ_LAYER_BACKBONE_VERSION,
+   wiringCoverage:health.biggjLayerBackbone.architecture?.wiringCoverage??null,
+   readyLayers:health.biggjLayerBackbone.architecture?.readyLayers??0,
+   activeLayers:health.biggjLayerBackbone.architecture?.activeLayers??0
  };
  health.experienceNeeds=deriveBiggjExperienceNeeds({health});
  return missionControlSnapshot({health,portfolio:portfolioView,discovery,storage:{persistentStorageMounted}});
