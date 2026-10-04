@@ -50,7 +50,7 @@ test('cold archive appends verified closed positions and reopens concatenated gz
   assert.equal(shadowPortfolioColdArchiveSummary(reopened).destructiveRetention,false);
 });
 
-test('cold archive deduplicates identical positions and fails closed on changed immutable record',async()=>{
+test('cold archive deduplicates identical positions and appends verified revisions for post-close enrichment',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-shadow-cold-dedupe-'));
   const file=path.join(dir,'cold.jsonl.gz');
   const archive=await openShadowPortfolioColdArchive(file);
@@ -60,10 +60,17 @@ test('cold archive deduplicates identical positions and fails closed on changed 
   assert.equal(duplicate.archived,0);
   assert.equal(duplicate.skipped,1);
 
-  await assert.rejects(
-    ()=>archiveClosedShadowPositions(archive,[closedPosition('sp_same',{realizedNetPnlQuote:999})]),
-    /SHADOW_COLD_ARCHIVE_CONFLICT/
-  );
+  const revised=await archiveClosedShadowPositions(archive,[closedPosition('sp_same',{realizedNetPnlQuote:999})]);
+  assert.equal(revised.archived,1);
+  assert.equal(revised.revised,1);
+  assert.equal(revised.totalRecords,1);
+  assert.equal(revised.totalRevisions,1);
+
+  const reopened=await openShadowPortfolioColdArchive(file);
+  assert.equal(reopened.healthy,true,reopened.error);
+  assert.equal(reopened.records,1);
+  assert.equal(reopened.revisions,1);
+  assert.equal(shadowPortfolioColdArchiveSummary(reopened).revisions,1);
 });
 
 test('open position is never admitted into closed cold archive',async()=>{
