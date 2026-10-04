@@ -284,6 +284,7 @@ test('W6 free trends composite can use DexScreener as enrichment when GMGN is un
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
   assert.equal(out.exactGmgn,false);
   assert.equal(out.source,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
+  assert.equal(out.setup,'TRENDS_PROXY_RESEARCH');
   assert.ok(out.errors.some(x=>String(x).startsWith('gmgn:public:solana:trending:HTTP_503')));
   assert.equal(out.rows.length,1);
   assert.equal(out.rows[0].tokenAddress,'BOOSTMINT');
