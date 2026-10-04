@@ -714,7 +714,7 @@ const marketDataProvider=createMarketDataProvider({
 });
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const memecoinEarlyRefreshMs=Math.max(15_000,Math.min(120_000,Number(process.env.TCX_MEMECOIN_EARLY_REFRESH_MS||15_000)));
-const w6UltraEarlyRefreshMs=Math.max(5_000,Math.min(30_000,Number(process.env.TCX_W6_ULTRA_EARLY_REFRESH_MS||7_000)));
+const w6UltraEarlyRefreshMs=Math.max(3_000,Math.min(30_000,Number(process.env.TCX_W6_ULTRA_EARLY_REFRESH_MS||5_000)));
 const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   fetchImpl:globalThis.fetch,
   timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_MEMECOIN_EARLY_TIMEOUT_MS||7000))),
@@ -5180,6 +5180,8 @@ let memecoinSecurityLastError=null;
 let w6UltraEarlySnapshot=null;
 let w6UltraEarlyLastError=null;
 let w6UltraEarlyLastRefreshAt=null;
+const w6UltraCandidateBook=new Map();
+const w6UltraLaunchStats={discoveredWithin60:0,first99kObservedWithin60:0,expiredWithout99k:0};
 let w6SolPriceCache={value:null,at:0,error:null};
 async function currentW6SolPriceUsd({force=false}={}){
   const now=Date.now();
@@ -5217,17 +5219,90 @@ function w6StrategyRuntimeOptions(solPriceUsd){
   };
 }
 
+function w6UltraCandidateKey(row){
+  return String(row?.chainId||'solana').toLowerCase()+':'+String(row?.tokenAddress||'');
+}
+function currentW6UltraCandidates(now=Date.now()){
+  const maxKeepSeconds=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)));
+  for(const [key,row] of w6UltraCandidateBook){
+    const created=Number(row?.pairCreatedAt);
+    const age=Number.isFinite(created)?Math.max(0,(Number(now)-created)/1000):Infinity;
+    if(age>maxKeepSeconds){
+      if(row?.first99kObservedAt==null)w6UltraLaunchStats.expiredWithout99k++;
+      w6UltraCandidateBook.delete(key);
+    }
+  }
+  return [...w6UltraCandidateBook.values()];
+}
+function enrichW6UltraCandidateRows(snapshot){
+  const capturedAt=Number(snapshot?.capturedAt||Date.now());
+  const threshold=Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000));
+  const rows=(Array.isArray(snapshot?.rows)?snapshot.rows:[]).map(row=>{
+    if(row?.w6TrackingOnly===true)return row;
+    const created=Number(row?.pairCreatedAt);
+    const ageSeconds=Number.isFinite(created)?Math.max(0,(capturedAt-created)/1000):null;
+    const key=w6UltraCandidateKey(row);
+    const prior=w6UltraCandidateBook.get(key);
+    const firstObservedAt=Number(prior?.firstObservedAt)||capturedAt;
+    const firstObservedAgeSeconds=Number.isFinite(Number(prior?.firstObservedAgeSeconds))
+      ?Number(prior.firstObservedAgeSeconds)
+      :ageSeconds;
+    const marketCap=Number(row?.marketCap);
+    const marketCapKnown=Number.isFinite(marketCap);
+    const priorMax=Number(prior?.maxObservedMarketCapUsd);
+    const maxObservedMarketCapUsd=marketCapKnown
+      ?Math.max(Number.isFinite(priorMax)?priorMax:-Infinity,marketCap)
+      :(Number.isFinite(priorMax)?priorMax:null);
+    let first99kObservedAt=Number(prior?.first99kObservedAt)||null;
+    let first99kObservedAgeSeconds=Number.isFinite(Number(prior?.first99kObservedAgeSeconds))
+      ?Number(prior.first99kObservedAgeSeconds)
+      :null;
+    if(first99kObservedAt==null&&marketCapKnown&&marketCap>=threshold&&ageSeconds!=null&&ageSeconds<=60){
+      first99kObservedAt=capturedAt;
+      first99kObservedAgeSeconds=ageSeconds;
+      w6UltraLaunchStats.first99kObservedWithin60++;
+    }
+    if(!prior&&ageSeconds!=null&&ageSeconds<=60)w6UltraLaunchStats.discoveredWithin60++;
+    const tracker={
+      firstObservedAt,
+      firstObservedAgeSeconds,
+      lastObservedAt:capturedAt,
+      lastObservedAgeSeconds:ageSeconds,
+      lastObservedMarketCapUsd:marketCapKnown?marketCap:null,
+      maxObservedMarketCapUsd:Number.isFinite(maxObservedMarketCapUsd)?maxObservedMarketCapUsd:null,
+      first99kObservedAt,
+      first99kObservedAgeSeconds,
+      observed99kWithin60:first99kObservedAt!=null&&first99kObservedAgeSeconds!=null&&first99kObservedAgeSeconds<=60,
+      observationSemantics:'FIRST_OBSERVED_NOT_EXACT_CROSSING_TIME'
+    };
+    const enriched={...row,w6LaunchTracker:tracker};
+    if(ageSeconds!=null&&ageSeconds<=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)))){
+      w6UltraCandidateBook.set(key,enriched);
+    }
+    return enriched;
+  });
+  currentW6UltraCandidates(capturedAt);
+  return {
+    ...snapshot,
+    rows,
+    candidateBookSize:w6UltraCandidateBook.size,
+    launchStats:{...w6UltraLaunchStats}
+  };
+}
+
 async function refreshW6UltraEarly(reason='periodic'){
   const started=Date.now();
   const force=reason==='startup'||reason==='manual';
   try{
     const open=(specialistWalletState?.wallets?.[WALLET_6_USER_99K_60S]?.positions||[]);
-    const ultra=await memecoinEarlyProvider.fetchUltraEarlySolana({
+    const ultraRaw=await memecoinEarlyProvider.fetchUltraEarlySolana({
       limit:30,
       maxAgeSeconds:Math.max(90,Math.min(300,Number(process.env.TCX_W6_ULTRA_DISCOVERY_MAX_AGE_SECONDS||180))),
       trackTokenAddresses:open.map(x=>String(x?.tokenAddress||'')).filter(Boolean),
+      candidateRows:currentW6UltraCandidates(),
       force
     });
+    const ultra=enrichW6UltraCandidateRows(ultraRaw);
     const solPriceUsd=await currentW6SolPriceUsd();
     const update=applyUser99k60sStrategySnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
     specialistWalletState=update.state;
@@ -5255,6 +5330,9 @@ async function refreshW6UltraEarly(reason='periodic'){
           source:ultra.source,
           sourceReady:ultra.sourceReady,
           discoveryRows:ultra.discoveryRows||0,
+          candidateTrackingRows:ultra.candidateTrackingRows||0,
+          candidateBookSize:ultra.candidateBookSize||0,
+          launchStats:ultra.launchStats||{},
           trackingRows:ultra.trackingRows||0,
           pollMs:w6UltraEarlyRefreshMs,
           errors:ultra.errors||[]
@@ -5273,6 +5351,9 @@ async function refreshW6UltraEarly(reason='periodic'){
       source:ultra.source,
       sourceReady:ultra.sourceReady,
       discoveryRows:ultra.discoveryRows||0,
+      candidateTrackingRows:ultra.candidateTrackingRows||0,
+      candidateBookSize:ultra.candidateBookSize||0,
+      launchStats:ultra.launchStats||{},
       trackingRows:ultra.trackingRows||0,
       pollMs:w6UltraEarlyRefreshMs,
       funnel:update.results.entryFunnel||{},
