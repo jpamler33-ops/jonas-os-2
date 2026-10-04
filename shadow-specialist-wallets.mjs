@@ -840,6 +840,98 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   return {state:freeze(state),results:freeze(results)};
 }
 
+
+function medianFinite(values=[]){
+  const xs=(Array.isArray(values)?values:[]).map(x=>finite(x)).filter(x=>x!=null).sort((a,b)=>a-b);
+  if(!xs.length)return null;
+  const m=Math.floor(xs.length/2);
+  return xs.length%2?xs[m]:(xs[m-1]+xs[m])/2;
+}
+export function recordUser99k60sExitObservation(input,{
+  positionKey,
+  reason,
+  now=Date.now(),
+  priceUsd=null,
+  marketCapUsd=null,
+  feeBps=30
+}={}){
+  const state=mutableState(input);
+  const wallet=state.wallets[WALLET_6_USER_99K_60S];
+  const allowed=new Set(['USER_PROFIT_ENOUGH','USER_MCAP_TOO_SMALL']);
+  const why=String(reason||'').toUpperCase();
+  if(!allowed.has(why))return {state:freeze(state),recorded:false,error:'INVALID_EXIT_REASON',closed:null};
+  const idx=wallet.positions.findIndex(x=>String(x?.positionKey||'')===String(positionKey||''));
+  if(idx<0)return {state:freeze(state),recorded:false,error:'POSITION_NOT_FOUND',closed:null};
+  const p=wallet.positions[idx];
+  const mark=finite(priceUsd,finite(p?.lastPrice));
+  if(!(mark>0))return {state:freeze(state),recorded:false,error:'PRICE_UNAVAILABLE',closed:null};
+  const cap=finite(marketCapUsd,finite(p?.lastMarketCapUsd));
+  const marked=markPosition(p,mark,now,feeBps);
+  const peakMarketCapUsd=Math.max(finite(p?.peakMarketCapUsd,cap??-Infinity),cap??-Infinity);
+  const troughMarketCapUsd=Math.min(finite(p?.troughMarketCapUsd,cap??Infinity),cap??Infinity);
+  const holdSeconds=Math.max(0,(Number(now)-Number(p?.openedAt||now))/1000);
+  const marketCapDrawdownFromPeakPct=cap!=null&&peakMarketCapUsd>0?cap/peakMarketCapUsd-1:null;
+  const ret=finite(marked?.unrealizedReturnPct);
+  const notionalSol=finite(p?.entryNotionalSol);
+  const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+  const estimatedNetPnlSolBeforeSlippage=notionalSol>0&&ret!=null?notionalSol*(ret-roundTripFeeRate):null;
+  wallet.positions[idx]={
+    ...marked,
+    lastMarketCapUsd:cap,
+    peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
+    troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
+    userExitObservation:{
+      version:'BIGGJ_USER_99K_60S_EXIT_OBSERVATION_V1',
+      reason:why,
+      at:Number(now),
+      priceUsd:mark,
+      marketCapUsd:cap,
+      holdSeconds,
+      returnPct:ret,
+      entryNotionalSol:notionalSol>0?notionalSol:null,
+      estimatedNetPnlSolBeforeSlippage,
+      peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
+      marketCapDrawdownFromPeakPct,
+      semantics:'USER_MARKED_DISCRETIONARY_EXIT_OBSERVATION_NOT_AUTOMATIC_POLICY'
+    }
+  };
+  const closeReason=why==='USER_PROFIT_ENOUGH'?'USER_99K_60S_PROFIT_ENOUGH':'USER_99K_60S_MCAP_TOO_SMALL';
+  const closed=closePosition(wallet,idx,{price:mark,at:now,reason:closeReason,feeBps});
+  state.updatedAt=Number(now);
+  return {state:freeze(state),recorded:Boolean(closed),error:closed?null:'CLOSE_FAILED',closed:closed?freeze(clone(closed)):null};
+}
+
+export function user99k60sExitLearningSummary(input,{asOf=Date.now()}={}){
+  const state=mutableState(input);
+  const wallet=state.wallets[WALLET_6_USER_99K_60S];
+  const rows=(wallet.closed||[]).filter(x=>x?.userExitObservation?.version==='BIGGJ_USER_99K_60S_EXIT_OBSERVATION_V1');
+  const summarize=(reason)=>{
+    const xs=rows.filter(x=>x?.userExitObservation?.reason===reason);
+    return {
+      samples:xs.length,
+      medianHoldSeconds:medianFinite(xs.map(x=>x?.userExitObservation?.holdSeconds)),
+      medianReturnPct:medianFinite(xs.map(x=>x?.userExitObservation?.returnPct)),
+      medianEstimatedNetPnlSol:medianFinite(xs.map(x=>x?.userExitObservation?.estimatedNetPnlSolBeforeSlippage)),
+      medianExitMarketCapUsd:medianFinite(xs.map(x=>x?.userExitObservation?.marketCapUsd)),
+      medianMarketCapDrawdownFromPeakPct:medianFinite(xs.map(x=>x?.userExitObservation?.marketCapDrawdownFromPeakPct))
+    };
+  };
+  return freeze({
+    version:'BIGGJ_USER_99K_60S_EXIT_LEARNER_V1',
+    asOf:Number(asOf),
+    samples:rows.length,
+    profitEnough:summarize('USER_PROFIT_ENOUGH'),
+    marketCapTooSmall:summarize('USER_MCAP_TOO_SMALL'),
+    minimumSamplesBeforeRuleProposal:20,
+    ruleProposalReady:rows.length>=20,
+    automaticPolicyMutation:false,
+    execution:'SHADOW_ONLY',
+    canExecute:false,
+    canExecuteLive:false,
+    semantics:'DESCRIBE_USER_EXIT_BEHAVIOR_ONLY_DO_NOT_OPTIMIZE_OR_AUTOMATE_YET'
+  });
+}
+
 function walletStats(wallet){
   const open=wallet.positions||[],closed=wallet.closed||[];
   const closedRealized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);

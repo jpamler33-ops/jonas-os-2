@@ -569,6 +569,7 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
   const world=h?.biggjWorldModel||{},signalController=radar?.signalController||{},signalCounts=signalController?.counts||{};
   const wallet=h?.specialistWallets?.wallets?.W4_MEME_SCOUT||{};
   const user99=h?.specialistWallets?.wallets?.W6_USER_99K_60S||{};
+  const user99Exit=radar?.user99k60s?.exitLearning||{};
   const user99Active=Array.isArray(user99?.active)?user99.active:[];
   const active=Array.isArray(wallet?.active)?wallet.active:[];
   const openContrarian=active.filter(x=>String(x?.entryResearchLane||'').toUpperCase()==='CONTRARIAN_PROBE');
@@ -622,6 +623,7 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
         'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
         'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
         'Sizing getrennt: **10 / 20 / 40 / 80 SOL** · **+10 SOL nur Vergleichsmarke**, kein Auto-Exit.',
+        'Exit-Lernen: **'+String(user99Exit?.samples??0)+'/20** markiert · Regelvorschlag **'+(user99Exit?.ruleProposalReady?'BEREIT ZUR PRÜFUNG':'GESPERRT')+'**.',
         user99Active[0]?.profitTargetScenarios?.length
           ?user99Active[0].profitTargetScenarios.map(s=>'`'+String(s.entryNotionalSol)+' SOL` '+(s.targetHit?'✅ Ziel erreicht':'→ ca. '+(Number(s.targetPriceReturnApprox||0)*100).toFixed(1)+'% Preisbewegung nötig')).join(' · ')
           :'Noch kein aktiver W6-Trade.'

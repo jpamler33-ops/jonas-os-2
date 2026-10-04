@@ -10,7 +10,7 @@ import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, obs
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
 import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TEMPLE_VERSION } from './expansion-runtime/biggj-temporal-temple.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
-import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
+import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
 import { applyMemecoinEntrySignals, MEMECOIN_SIGNAL_CONTROLLER_VERSION } from './memecoin-signal-controller.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -4482,6 +4482,36 @@ function pairAgeText(createdAt,now=Date.now()){
   return Math.floor(h/24)+'d alt';
 }
 
+function w6ExitRef(positionKey=''){return sha256(String(positionKey||'')).slice(0,10);}
+function w6PositionByExitRef(ref=''){
+  const wallet=specialistWalletState?.wallets?.[WALLET_6_USER_99K_60S];
+  return (wallet?.positions||[]).find(p=>w6ExitRef(p?.positionKey)===String(ref||''))||null;
+}
+async function recordW6UserExit({ref,reason}={}){
+  const p=w6PositionByExitRef(ref);
+  if(!p)return {ok:false,error:'W6_POSITION_NOT_FOUND'};
+  let row=(memecoinEarlySnapshot?.rows||[]).find(x=>
+    String(x?.chainId||'')===String(p?.chainId||'')&&
+    String(x?.tokenAddress||'')===String(p?.tokenAddress||'')
+  )||null;
+  if(!row){
+    try{row=await memecoinEarlyProvider.fetchTokenSnapshot(p.chainId,p.tokenAddress,{force:true});}catch{}
+  }
+  const result=recordUser99k60sExitObservation(specialistWalletState,{
+    positionKey:p.positionKey,
+    reason,
+    now:Date.now(),
+    priceUsd:row?.priceUsd??p?.lastPrice,
+    marketCapUsd:row?.marketCap??p?.lastMarketCapUsd,
+    feeBps:30
+  });
+  if(!result.recorded)return {ok:false,error:result.error||'W6_EXIT_NOT_RECORDED'};
+  specialistWalletState=result.state;
+  await persistSpecialistWallets('w6-user-exit:'+String(reason||'unknown'));
+  await refreshMemecoinEarlyRadar('w6-user-exit');
+  return {ok:true,closed:result.closed,learning:user99k60sExitLearningSummary(specialistWalletState,{asOf:Date.now()})};
+}
+
 async function showMemecoinRadar(chatId,messageId,{force=false}={}){
   const started=Date.now();
   try{
@@ -4537,6 +4567,7 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
     });
     const wallets=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets||{};
     const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{},w6=wallets[WALLET_6_USER_99K_60S]||{};
+    const w6ExitLearning=user99k60sExitLearningSummary(specialistWalletState,{asOf:Date.now()});
     const outcome=memecoinSecurityOutcomeSummary(memecoinSecurityOutcomeState,{
       asOf:Date.now(),
       minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
@@ -4558,7 +4589,8 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'Open '+Number(w6.openPositions||0)+' · Closed '+Number(w6.closedTrades||0)+' · Winrate '+(w6.winRate==null?'—':Math.round(Number(w6.winRate)*100)+'%'),
       'Regel: Alter ≤60s + Market Cap ≥99k => sofortiger Shadow-Entry.',
       'Exit: diskretionär/positionsgrößenabhängig; +10 SOL ist nur ein Beispiel für „Gewinn reicht“. Dein „MC zu klein“-Exit wird beobachtet, aber nicht erfunden automatisiert.',
-      'Sizing-Lab: 10 / 20 / 40 / 80 SOL getrennt; +10 SOL wird nur als Vergleichsmarke mitgerechnet, NICHT als Auto-Exit.','',
+      'Sizing-Lab: 10 / 20 / 40 / 80 SOL getrennt; +10 SOL wird nur als Vergleichsmarke mitgerechnet, NICHT als Auto-Exit.',
+      'Exit-Lernen: '+Number(w6ExitLearning.samples||0)+'/20 markierte Exits · Regelvorschlag '+(w6ExitLearning.ruleProposalReady?'BEREIT ZUR PRÜFUNG':'NOCH GESPERRT')+'.','',
       'ATTENTION-QUELLEN',
       '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
       '• öffentliche News-Erwähnungen + X-verknüpfte Projektprofile.',
@@ -4581,6 +4613,10 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
     return deliverTelegramTextCard(tg,chatId,messageId,{
       text:text.slice(0,4096),
       reply_markup:{inline_keyboard:[
+        ...((w6.active||[]).slice(0,3).flatMap((p,i)=>[
+          [{text:'⚡ W6 '+String(p.symbol||('#'+(i+1)))+' · ✅ Gewinn reicht',callback_data:'w6exit:'+w6ExitRef(p.positionKey)+':profit'}],
+          [{text:'⚡ W6 '+String(p.symbol||('#'+(i+1)))+' · 📉 MC zu klein',callback_data:'w6exit:'+w6ExitRef(p.positionKey)+':mcap'}]
+        ])),
         [{text:'🔄 Early Scan',callback_data:'home:memecoins'},{text:'🧭 Trends',callback_data:'home:trends'}],
         [{text:'🏠 Start',callback_data:'home'}]
       ]}
@@ -5513,6 +5549,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       sizingScenariosSol:[10,20,40,80],
       results:user99k60sUpdate.results,
       wallet:user99k60sWallet,
+      exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:Date.now()}),
       execution:'SHADOW_ONLY',
       canExecute:false,
       canExecuteLive:false
@@ -8975,6 +9012,7 @@ function parseAction(data='') {
   if (data === 'compare') return { kind:'COMPARE' };
   if (data === 'searchhelp') return { kind:'SEARCH_HELP' };
   const p = String(data).split(':');
+  if (p[0] === 'w6exit' && p[1] && ['profit','mcap'].includes(p[2])) return { kind:'W6_EXIT', ref:p[1], reason:p[2]==='profit'?'USER_PROFIT_ENOUGH':'USER_MCAP_TOO_SMALL' };
   if (p[0] === 'market' && p[1]) return { kind:'MARKET', symbol:p[1] };
   if (p[0] === 'refresh' && p[1]) return { kind:'REFRESH', symbol:p[1] };
   if (p[0] === 'tcx' && p[1]) return { kind:'TCX', symbol:p[1] };
@@ -9228,6 +9266,14 @@ async function handle(update) {
 
   const a = parseAction(q.data);
   try {
+    if (a.kind === 'W6_EXIT') {
+      const result=await recordW6UserExit({ref:a.ref,reason:a.reason});
+      if(!result.ok){await ack(q.id,'W6 Exit nicht gespeichert');return;}
+      const label=a.reason==='USER_PROFIT_ENOUGH'?'Gewinn reicht':'MC zu klein';
+      await showMemecoinRadar(chatId,messageId,{force:false});
+      await ack(q.id,'W6 Shadow-Exit gespeichert: '+label);
+      return;
+    }
     if (a.kind === 'COMMANDS') { await showCommandMenu(chatId,messageId); await ack(q.id); return; }
     if (a.kind === 'COMMAND_PICK') {
       if(a.command==='system'){ await showHomeSection(chatId,messageId,'SYSTEM'); await ack(q.id); return; }
@@ -12344,6 +12390,7 @@ function missionControlData(){
       sizingScenariosSol:[10,20,40,80],
       results:{matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0},
       wallet:specialistWalletSummary(specialistWalletState,{asOf:now}).wallets?.[WALLET_6_USER_99K_60S]||null,
+      exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:now}),
       execution:'SHADOW_ONLY',
       canExecute:false,
       canExecuteLive:false

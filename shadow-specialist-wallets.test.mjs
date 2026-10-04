@@ -6,6 +6,8 @@ import {
   applyMemecoinScoutSnapshot,
   evaluateUser99k60sEntry,
   applyUser99k60sStrategySnapshot,
+  recordUser99k60sExitObservation,
+  user99k60sExitLearningSummary,
   specialistWalletSummary,
   WALLET_3_TRADER_COPY,
   WALLET_4_MEME_SCOUT,
@@ -562,4 +564,52 @@ test('user 99k/60s V1 does not invent a market-cap exit threshold',()=>{
   assert.equal(next.results.marketCapExit,0);
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions[0].marketCapExitTracking,'WAITING_FOR_OBSERVED_USER_EXIT_RULE');
+});
+
+
+test('W6 user-marked profit exit closes only the shadow position and records context',()=>{
+  const now=16_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'USEREXIT',symbol:'USEREXIT',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:80}).state;
+  const p=state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  const x=recordUser99k60sExitObservation(state,{
+    positionKey:p.positionKey,reason:'USER_PROFIT_ENOUGH',now:now+45_000,priceUsd:1.2,marketCapUsd:180_000
+  });
+  assert.equal(x.recorded,true);
+  assert.equal(x.state.wallets[WALLET_6_USER_99K_60S].positions.length,0);
+  const closed=x.state.wallets[WALLET_6_USER_99K_60S].closed[0];
+  assert.equal(closed.closeReason,'USER_99K_60S_PROFIT_ENOUGH');
+  assert.equal(closed.userExitObservation.reason,'USER_PROFIT_ENOUGH');
+  assert.equal(closed.userExitObservation.holdSeconds,45);
+  assert.equal(closed.userExitObservation.marketCapUsd,180_000);
+  assert.ok(closed.userExitObservation.estimatedNetPnlSolBeforeSlippage>15);
+  assert.equal(closed.canExecuteLive,false);
+});
+
+test('W6 exit learner remains descriptive until at least 20 marked exits',()=>{
+  const now=17_000_000;
+  let state=createSpecialistWalletState();
+  for(let i=0;i<2;i++){
+    const token='LEARN'+i;
+    state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+      chainId:'solana',tokenAddress:token,symbol:token,priceUsd:1,marketCap:120_000,pairCreatedAt:now+i*1000-10_000
+    }]},{now:now+i*1000}).state;
+    const p=state.wallets[WALLET_6_USER_99K_60S].positions.find(x=>x.tokenAddress===token);
+    state=recordUser99k60sExitObservation(state,{
+      positionKey:p.positionKey,
+      reason:i===0?'USER_PROFIT_ENOUGH':'USER_MCAP_TOO_SMALL',
+      now:now+i*1000+30_000,
+      priceUsd:i===0?1.1:.85,
+      marketCapUsd:i===0?160_000:80_000
+    }).state;
+  }
+  const s=user99k60sExitLearningSummary(state,{asOf:now+40_000});
+  assert.equal(s.samples,2);
+  assert.equal(s.profitEnough.samples,1);
+  assert.equal(s.marketCapTooSmall.samples,1);
+  assert.equal(s.ruleProposalReady,false);
+  assert.equal(s.minimumSamplesBeforeRuleProposal,20);
+  assert.equal(s.automaticPolicyMutation,false);
+  assert.equal(s.canExecuteLive,false);
 });
