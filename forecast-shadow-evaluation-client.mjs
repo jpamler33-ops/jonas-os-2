@@ -113,7 +113,7 @@ export function deriveShadowWorkerReplayPlan({
   baseAutoRssMb=620,
   autoExternalMb=64,
   hardExternalMb=160,
-  maxAdaptiveAutoHeapMb=345,
+  maxAdaptiveAutoHeapMb=350,
   maxAdaptiveAutoRssMb=720,
   maxAdaptiveHardHeapMb=370,
   hardRssMb=900

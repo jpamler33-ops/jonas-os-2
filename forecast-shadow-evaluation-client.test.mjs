@@ -113,14 +113,26 @@ test('adaptive replay never bypasses genuine hard rss or external pressure',()=>
   assert.equal(external.reason,'HARD_MEMORY_PRESSURE');
 });
 
-test('adaptive replay still defers when even the minimum replay cannot create headroom',()=>{
+test('adaptive replay admits the observed production boundary by shrinking below 500 rows',()=>{
   const plan=deriveShadowWorkerReplayPlan({
-    mode:'AUTO',heapUsedMb:349,rssMb:670,externalMb:4,
-    configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:500
+    mode:'AUTO',heapUsedMb:345,rssMb:704,externalMb:4,
+    configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:400
+  });
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.replayMode,'COMPACT');
+  assert.ok(plan.historyRows<=422);
+  assert.equal(plan.limits.autoHeapMb,350);
+  assert.ok(plan.limits.autoRssMb>=704);
+  assert.equal(plan.limits.hardHeapMb,370);
+});
+
+test('adaptive replay still defers when compact soft headroom is fully exhausted',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:350,rssMb:704,externalMb:4,
+    configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:400
   });
   assert.equal(plan.allowed,false);
   assert.equal(plan.replayMode,'DEFERRED');
-  assert.equal(plan.historyRows,500);
   assert.equal(plan.reason,'ADAPTIVE_MEMORY_PRESSURE');
 });
 

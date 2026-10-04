@@ -11068,7 +11068,7 @@ async function shadowCompetitionWatcher(){
           externalMb,
           configuredHistoryRows:shadowCompetitionHistoryRows,
           effectiveHistoryRows:acceleratedHistoryRows,
-          minHistoryRows:Math.max(500,shadowCompetitionMinSeedRows,shadowCompetitionMinTrainCases),
+          minHistoryRows:Math.max(400,shadowCompetitionMinSeedRows,shadowCompetitionMinTrainCases),
           baseAutoHeapMb:shadowCompetitionAutoHeapMb,
           baseAutoRssMb:shadowCompetitionAutoRssMb,
           autoExternalMb:shadowCompetitionAutoExternalMb,
@@ -13008,7 +13008,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     shadowWorker:{
       auto:{heapUsedMb:shadowCompetitionAutoHeapMb,rssMb:shadowCompetitionAutoRssMb,externalMb:shadowCompetitionAutoExternalMb},
       hard:{heapUsedMb:300,rssMb:900,externalMb:shadowCompetitionHardExternalMb},
-      adaptiveReducedReplayWindow:{maxAutoHeapMb:345,maxHardHeapMb:370,minHistoryRows:500,minWorkerHeapMb:128,compactHypotheses:2}
+      adaptiveReducedReplayWindow:{maxAutoHeapMb:350,maxHardHeapMb:370,minHistoryRows:400,minWorkerHeapMb:128,compactHypotheses:2}
     },
     forecastPersistence:{
       heapUsedMb:forecastPersistenceHeapHeadroomMb,
