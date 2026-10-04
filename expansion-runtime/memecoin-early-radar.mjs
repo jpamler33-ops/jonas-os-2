@@ -347,7 +347,7 @@ function normalizeGmgnTrend(row={},rank=null){
     signalTrending:true,
     gmgnExactTrend:true,
     trendRank:rank==null?null:Number(rank),
-    trendSource:'GMGN_TRENDS_PUBLIC_1M_DEFAULT'
+    trendSource:'GMGN_OPENAPI_TRENDS_1M_DEFAULT'
   };
 }
 
@@ -411,6 +411,8 @@ export function createMemecoinEarlyRadarProvider({
   dexBase='https://api.dexscreener.com',
   geckoBase='https://api.geckoterminal.com/api/v2',
   gmgnBase='https://gmgn.ai',
+  gmgnOpenApiBase='https://openapi.gmgn.ai',
+  gmgnApiKey='gmgn_solbscbaseethmonadtron',
   timeoutMs=7000,
   dexCacheMs=15000,
   geckoCacheMs=60000,
@@ -427,12 +429,14 @@ export function createMemecoinEarlyRadarProvider({
   const dex=String(dexBase).replace(/\/+$/,'');
   const gecko=String(geckoBase).replace(/\/+$/,'');
   const gmgn=String(gmgnBase).replace(/\/+$/,'');
+  const gmgnOpenApi=String(gmgnOpenApiBase).replace(/\/+$/,'');
+  const gmgnReadApiKey=String(gmgnApiKey||'').trim();
 
-  async function getJson(url){
+  async function getJson(url,{headers={}}={}){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||7000));
     try{
-      const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 early-memecoin-research'},signal:controller.signal});
+      const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 early-memecoin-research',...headers},signal:controller.signal});
       if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN')+' '+url);
       return await res.json();
     }finally{clearTimeout(timer);}
@@ -476,11 +480,28 @@ export function createMemecoinEarlyRadarProvider({
     },{force});
   }
   async function gmgnTrendingUltraSolana({force=false}={}){
-    return cached('ultra:gmgn:solana:trending:1m:default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
-      const body=await getJson(gmgn+'/defi/quotation/v1/rank/sol/swaps/1m?orderby=default&direction=desc');
+    return cached('ultra:gmgn:openapi:solana:trending:1m:default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+      if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
+      const timestamp=Math.floor(Number(now())/1000);
+      const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
+      const qs=new URLSearchParams({
+        chain:'sol',
+        interval:'1m',
+        limit:'100',
+        order_by:'default',
+        direction:'desc',
+        timestamp:String(timestamp),
+        client_id:String(clientId)
+      });
+      const body=await getJson(gmgnOpenApi+'/v1/market/rank?'+qs.toString(),{
+        headers:{
+          'X-APIKEY':gmgnReadApiKey,
+          'Content-Type':'application/json'
+        }
+      });
       const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
-      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_CODE_'+String(body.code)+'_'+text(body?.msg,120));
-      if(!raw.length)throw new Error('GMGN_TREND_EMPTY');
+      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_OPENAPI_CODE_'+String(body.code)+'_'+text(body?.msg,120));
+      if(!raw.length)throw new Error('GMGN_OPENAPI_TREND_EMPTY');
       return raw.map((x,i)=>normalizeGmgnTrend(x,i+1)).filter(x=>x.tokenAddress);
     },{force});
   }
@@ -515,7 +536,7 @@ export function createMemecoinEarlyRadarProvider({
     const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
     const errors=[];
     let pools=[];
-    let trendSource='GMGN_TRENDS_PUBLIC_1M_DEFAULT';
+    let trendSource='GMGN_OPENAPI_TRENDS_1M_DEFAULT';
     let exactGmgn=true;
     try{
       pools=await gmgnTrendingUltraSolana({force});
