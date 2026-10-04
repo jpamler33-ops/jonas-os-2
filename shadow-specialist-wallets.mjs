@@ -854,7 +854,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   maxOpenOperational=30,
   requireTrending=false,
   catastrophicDrawdownPct=.90,
-  catastrophicMarketCapUsd=10_000
+  catastrophicMarketCapUsd=10_000,
+  maxResearchHoldSeconds=3600
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
@@ -863,7 +864,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
-    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    marketCapExit:0,catastrophicExit:0,maxHorizonExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION,
     entryFunnel:{
@@ -959,6 +960,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       (catastrophicMcap>0&&marketCapUsd!=null&&marketCapUsd<catastrophicMcap)
     )){
       reason='USER_99K_60S_CATASTROPHIC_FAILSAFE';
+    }else if(!protectedHold&&holdSeconds>=Math.max(600,finite(maxResearchHoldSeconds,3600))){
+      reason='USER_99K_60S_MAX_RESEARCH_HORIZON';
     }
     if(reason){
       const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
@@ -966,6 +969,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         results.closed++;
         if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
         if(reason==='USER_99K_60S_CATASTROPHIC_FAILSAFE')results.catastrophicExit++;
+        if(reason==='USER_99K_60S_MAX_RESEARCH_HORIZON')results.maxHorizonExit++;
       }
     }
   }
@@ -1046,7 +1050,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       entryStrategySignal:clone(signal),
       strategyVersion:USER_99K_60S_STRATEGY_VERSION,
       entryRule:requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
+      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE_AND_60M_RESEARCH_HORIZON',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
       status:'OPEN',
