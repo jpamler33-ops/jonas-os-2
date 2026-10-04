@@ -804,15 +804,24 @@ test('W6 trend gate rejects a fresh 99k coin that is not in the trend feed',()=>
   assert.equal(x.results.entryBlockers.NOT_IN_TREND_FEED,1);
 });
 
-test('W6 trend gate opens when trend-visible, <=60s old and >=99k market cap',()=>{
+test('W6 exact setup requires current New Pair visibility in addition to trend age and market cap',()=>{
   const now=13_100_000;
+  const wrongTab=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'TRENDONLY',symbol:'OLDTAB',priceUsd:1,marketCap:120000,pairCreatedAt:now-20_000,
+    signalTrending:true,signalNewPair:false,trendRank:3
+  }]},{now,requireTrending:true,requireNewPair:true});
+  assert.equal(wrongTab.results.opened,0);
+  assert.equal(wrongTab.results.entryBlockers.NOT_IN_NEW_PAIR_FEED,1);
+
   const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'TRENDHOT',symbol:'HOT',priceUsd:1,marketCap:120000,pairCreatedAt:now-20_000,
-    signalTrending:true,trendRank:4
-  }]},{now,requireTrending:true});
+    chainId:'solana',tokenAddress:'NEWPAIRHOT',symbol:'HOT',priceUsd:1,marketCap:120000,pairCreatedAt:now-20_000,
+    signalTrending:true,signalNewPair:true,trendRank:4,sourceSetup:'GMGN_TRENDING_NEW_PAIR_1M'
+  }]},{now,requireTrending:true,requireNewPair:true});
   assert.equal(x.results.opened,1);
   const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
   assert.equal(p.trendRankAtEntry,4);
   assert.equal(p.trendVisibleAtEntry,true);
+  assert.equal(p.newPairVisibleAtEntry,true);
+  assert.equal(p.sourceSetupAtEntry,'GMGN_TRENDING_NEW_PAIR_1M');
 });
 
