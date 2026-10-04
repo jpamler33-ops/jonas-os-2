@@ -60,7 +60,7 @@ test('cold archive deduplicates identical positions and appends verified revisio
   assert.equal(duplicate.archived,0);
   assert.equal(duplicate.skipped,1);
 
-  const revised=await archiveClosedShadowPositions(archive,[closedPosition('sp_same',{realizedNetPnlQuote:999})]);
+  const revised=await archiveClosedShadowPositions(archive,[closedPosition('sp_same',{researchAnnotation:{source:'POST_CLOSE_MARKOUT',window:'1h'}})]);
   assert.equal(revised.archived,1);
   assert.equal(revised.revised,1);
   assert.equal(revised.totalRecords,1);
@@ -71,6 +71,17 @@ test('cold archive deduplicates identical positions and appends verified revisio
   assert.equal(reopened.records,1);
   assert.equal(reopened.revisions,1);
   assert.equal(shadowPortfolioColdArchiveSummary(reopened).revisions,1);
+});
+
+test('cold archive rejects revisions that alter immutable realized trade economics',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-shadow-cold-economics-'));
+  const file=path.join(dir,'cold.jsonl.gz');
+  const archive=await openShadowPortfolioColdArchive(file);
+  await archiveClosedShadowPositions(archive,[closedPosition('sp_economics')]);
+  await assert.rejects(
+    ()=>archiveClosedShadowPositions(archive,[closedPosition('sp_economics',{realizedNetPnlQuote:999})]),
+    /SHADOW_COLD_ARCHIVE_IDENTITY_CONFLICT/
+  );
 });
 
 test('cold archive still fails closed when a reused position id changes immutable identity',async()=>{
