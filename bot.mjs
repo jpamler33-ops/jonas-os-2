@@ -5218,7 +5218,9 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     minHoldSeconds:Math.max(0,Math.min(1800,Number(process.env.TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180))),
     solPriceUsd,
     maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
-    requireTrending:true
+    requireTrending:true,
+    catastrophicDrawdownPct:Math.max(.50,Math.min(.99,Number(process.env.TCX_W6_CATASTROPHIC_DRAWDOWN_PCT||.90))),
+    catastrophicMarketCapUsd:Math.max(0,Number(process.env.TCX_W6_CATASTROPHIC_MCAP_USD||10_000))
   };
 }
 
