@@ -490,10 +490,11 @@ export function createMemecoinEarlyRadarProvider({
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
       const timestamp=Math.floor(Number(now())/1000);
       const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
+      const demoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
       const qs=new URLSearchParams({
         chain:'sol',
         interval:gmgnTrendWindow,
-        limit:'100',
+        limit:demoKey?'3':'100',
         timestamp:String(timestamp),
         client_id:String(clientId)
       });
