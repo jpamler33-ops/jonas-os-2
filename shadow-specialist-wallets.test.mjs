@@ -765,3 +765,24 @@ test('W6 ignores position-only tracking rows but can enter a remembered fresh ca
   assert.equal(p.entryAgeSeconds,45);
 });
 
+test('W6 trend gate rejects a fresh 99k coin that is not in the trend feed',()=>{
+  const now=13_000_000;
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'NOTREND',symbol:'NO',priceUsd:1,marketCap:120000,pairCreatedAt:now-20_000
+  }]},{now,requireTrending:true});
+  assert.equal(x.results.opened,0);
+  assert.equal(x.results.entryBlockers.NOT_IN_TREND_FEED,1);
+});
+
+test('W6 trend gate opens when trend-visible, <=60s old and >=99k market cap',()=>{
+  const now=13_100_000;
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'TRENDHOT',symbol:'HOT',priceUsd:1,marketCap:120000,pairCreatedAt:now-20_000,
+    signalTrending:true,trendRank:4
+  }]},{now,requireTrending:true});
+  assert.equal(x.results.opened,1);
+  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.trendRankAtEntry,4);
+  assert.equal(p.trendVisibleAtEntry,true);
+});
+
