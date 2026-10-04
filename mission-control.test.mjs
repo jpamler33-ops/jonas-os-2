@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V18_W6_SIZING_HOLD_LAB');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V19_RESEARCH_SPINE');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);
@@ -100,4 +100,12 @@ test('mission-control source exposes W6 three-minute loss protection and hold la
   assert.ok(source.includes("holdScenarioCloses"));
   assert.ok(source.includes("DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION"));
   assert.ok(source.includes("canExecuteLive:false"));
+});
+
+
+test('mission control source exposes layered research spine',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("buildBiggjResearchSpine"));
+  assert.ok(source.includes("health.biggjResearchSpine"));
+  assert.ok(source.includes("BIGGJ_RESEARCH_SPINE_VERSION"));
 });
