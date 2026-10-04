@@ -78,7 +78,7 @@ test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Dis
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("user99k60s:memecoinEarlySnapshot?.user99k60s"));
   assert.ok(source.includes("version:USER_99K_60S_STRATEGY_VERSION"));
-  assert.ok(source.includes("sizingScenariosSol:[5,10,20,40,80]"));
+  assert.ok(source.includes("sizingScenariosSol:[2,5,10,20,40,60,80]"));
   assert.ok(source.includes("WALLET_6_USER_99K_60S"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
@@ -96,7 +96,7 @@ test('mission-control exposes W6 descriptive exit learner without automatic poli
 test('mission-control source exposes W6 three-minute loss protection and hold lab',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180"));
-  assert.ok(source.includes("notionalScenariosSol:[5,10,20,40,80]"));
+  assert.ok(source.includes("notionalScenariosSol:[2,5,10,20,40,60,80]"));
   assert.ok(source.includes("holdScenarioCloses"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
