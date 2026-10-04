@@ -704,6 +704,7 @@ export function createMemecoinEarlyRadarProvider({
       errors:Object.freeze(errors),
       source:trendSource,
       exactGmgn,
+      trendInterval:gmgnTrendWindow,
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
       candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,
