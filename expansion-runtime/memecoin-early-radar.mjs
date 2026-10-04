@@ -347,7 +347,7 @@ function normalizeGmgnTrend(row={},rank=null){
     signalTrending:true,
     gmgnExactTrend:true,
     trendRank:rank==null?null:Number(rank),
-    trendSource:'GMGN_OPENAPI_TRENDS_1M_DEFAULT'
+    trendSource:'GMGN_OPENAPI_TRENDS'
   };
 }
 
@@ -419,6 +419,7 @@ export function createMemecoinEarlyRadarProvider({
   ultraGeckoCacheMs=5000,
   ultraDexCacheMs=5000,
   gmgnTrendCacheMs=5000,
+  gmgnTrendInterval='1h',
   networks=['solana','base','ethereum'],
   pairLookupLimit=10,
   now=()=>Date.now()
@@ -431,6 +432,11 @@ export function createMemecoinEarlyRadarProvider({
   const gmgn=String(gmgnBase).replace(/\/+$/,'');
   const gmgnOpenApi=String(gmgnOpenApiBase).replace(/\/+$/,'');
   const gmgnReadApiKey=String(gmgnApiKey||'').trim();
+  const allowedGmgnTrendIntervals=new Set(['1m','5m','1h','6h','24h']);
+  const gmgnTrendWindow=allowedGmgnTrendIntervals.has(String(gmgnTrendInterval||'').trim())
+    ?String(gmgnTrendInterval).trim()
+    :'1h';
+  const gmgnTrendWindowLabel=gmgnTrendWindow.toUpperCase();
 
   async function getJson(url,{headers={}}={}){
     const controller=new AbortController();
@@ -480,13 +486,13 @@ export function createMemecoinEarlyRadarProvider({
     },{force});
   }
   async function gmgnTrendingUltraSolana({force=false}={}){
-    return cached('ultra:gmgn:openapi:solana:trending:1m:default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+    return cached('ultra:gmgn:openapi:solana:trending:'+gmgnTrendWindow+':default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
       const timestamp=Math.floor(Number(now())/1000);
       const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
       const qs=new URLSearchParams({
         chain:'sol',
-        interval:'1m',
+        interval:gmgnTrendWindow,
         limit:'100',
         order_by:'default',
         direction:'desc',
@@ -503,12 +509,12 @@ export function createMemecoinEarlyRadarProvider({
       const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
       if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_OPENAPI_CODE_'+String(body.code)+'_'+text(body?.msg,120));
       if(!raw.length)throw new Error('GMGN_OPENAPI_TREND_EMPTY');
-      return raw.map((x,i)=>normalizeGmgnTrend(x,i+1)).filter(x=>x.tokenAddress);
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
     },{force});
   }
   async function gmgnPublicTrendingUltraSolana({force=false}={}){
-    return cached('ultra:gmgn:public:solana:trending:1m:default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
-      const url=gmgn+'/defi/quotation/v1/rank/sol/swaps/1m?orderby=default&direction=desc';
+    return cached('ultra:gmgn:public:solana:trending:'+gmgnTrendWindow+':default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+      const url=gmgn+'/defi/quotation/v1/rank/sol/swaps/'+encodeURIComponent(gmgnTrendWindow)+'?orderby=default&direction=desc';
       const body=await getJson(url,{
         headers:{
           accept:'application/json, text/plain, */*',
@@ -521,7 +527,7 @@ export function createMemecoinEarlyRadarProvider({
       const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
       if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_PUBLIC_CODE_'+String(body.code)+'_'+text(body?.msg,120));
       if(!raw.length)throw new Error('GMGN_PUBLIC_TREND_EMPTY');
-      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_PUBLIC_TRENDS_1M_DEFAULT'})).filter(x=>x.tokenAddress);
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
     },{force});
   }
 
@@ -556,13 +562,13 @@ export function createMemecoinEarlyRadarProvider({
     const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
     const errors=[];
     let pools=[];
-    let trendSource='GMGN_OPENAPI_TRENDS_1M_DEFAULT';
+    let trendSource='GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
     let exactGmgn=true;
     try{
       pools=await gmgnTrendingUltraSolana({force});
     }catch(err){
       errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
-      trendSource='GMGN_PUBLIC_TRENDS_1M_DEFAULT';
+      trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
       try{
         pools=await gmgnPublicTrendingUltraSolana({force});
       }catch(publicErr){
