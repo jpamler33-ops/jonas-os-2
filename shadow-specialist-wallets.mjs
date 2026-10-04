@@ -714,7 +714,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   feeBps=30,
   maxAgeSeconds=60,
   minMarketCapUsd=99_000,
-  minExitMarketCapUsd=99_000,
+  minExitMarketCapUsd=null,
   targetPnlSol=10,
   entryNotionalSol=null,
   notionalScenariosSol=[10,20,40,80],
@@ -770,7 +770,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     results.marked++;
 
     let reason=null;
-    if(marketCapUsd!=null&&marketCapUsd<Math.max(1,Number(minExitMarketCapUsd)||99_000)){
+    const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
+    if(marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
     }else if(
       configuredNotionalSol>0&&
@@ -827,11 +828,12 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
         targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
         profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
-        minExitMarketCapUsd:Math.max(1,Number(minExitMarketCapUsd)||99_000),
+        minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
+        marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
         entryStrategySignal:clone(signal),
         strategyVersion:USER_99K_60S_STRATEGY_VERSION,
         entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-        exitRule:'TARGET_PNL_SOL_IF_NOTIONAL_KNOWN_OR_MARKET_CAP_BELOW_FLOOR',
+        exitRule:'TARGET_PNL_SOL_IF_NOTIONAL_KNOWN_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
         targetTracking:configuredNotionalSol>0?'ACTIVE_EXACT_NOTIONAL':'SCENARIO_MATRIX_10_20_40_80_SOL',
         source:'BIGGJ_MEMECOIN_EARLY_RADAR',
         status:'OPEN',
