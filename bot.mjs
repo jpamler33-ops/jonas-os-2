@@ -5312,6 +5312,35 @@ async function refreshW6UltraEarly(reason='periodic'){
       update.results.scenarioTargetHits
     )await persistSpecialistWallets('w6-ultra-early:'+reason);
     const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
+    const activeTrades=(Array.isArray(wallet?.active)?wallet.active:[]).slice(0,5).map(p=>{
+      const now=Date.now();
+      const holdSeconds=Math.max(0,(now-Number(p?.openedAt||now))/1000);
+      const protectionRemainingSeconds=Math.max(0,(Number(p?.lossExitProtectedUntil||0)-now)/1000);
+      const sizePnl=(Array.isArray(p?.holdLab)?p.holdLab:[])
+        .filter(x=>String(x?.policyId||'')==='RUNNER')
+        .map(x=>({entryNotionalSol:x?.entryNotionalSol,estimatedNetPnlSol:x?.estimatedNetPnlSol,capitalEfficiency:x?.capitalEfficiency,status:x?.status}))
+        .slice(0,7);
+      return {
+        symbol:p?.symbol||'MEME',
+        tokenAddress:p?.tokenAddress||'',
+        openedAt:p?.openedAt||null,
+        holdSeconds:Number(holdSeconds.toFixed(1)),
+        entryAgeSeconds:p?.entryAgeSeconds??null,
+        firstObservedAgeSeconds:p?.firstObservedAgeSeconds??p?.launchTracker?.firstObservedAgeSeconds??null,
+        first99kObservedAgeSeconds:p?.first99kObservedAgeSeconds??p?.launchTracker?.first99kObservedAgeSeconds??null,
+        entryMarketCapUsd:p?.entryMarketCapUsd??null,
+        lastMarketCapUsd:p?.lastMarketCapUsd??null,
+        peakMarketCapUsd:p?.peakMarketCapUsd??null,
+        troughMarketCapUsd:p?.troughMarketCapUsd??null,
+        entryPrice:p?.entryPrice??null,
+        lastPrice:p?.lastPrice??null,
+        unrealizedReturnPct:p?.unrealizedReturnPct??null,
+        unrealizedNetPnlQuote:p?.unrealizedNetPnlQuote??null,
+        protectionRemainingSeconds:Number(protectionRemainingSeconds.toFixed(1)),
+        holdLabSummary:p?.holdLabSummary||null,
+        sizePnl
+      };
+    });
     w6UltraEarlyLastRefreshAt=Date.now();
     w6UltraEarlyLastError=(ultra?.errors||[]).length?(ultra.errors||[]).join(' | '):null;
     w6UltraEarlySnapshot={
@@ -5362,6 +5391,7 @@ async function refreshW6UltraEarly(reason='periodic'){
       opened:update.results.opened||0,
       active:wallet?.openPositions||0,
       closedTrades:wallet?.closedTrades||0,
+      activeTrades,
       execution:'SHADOW_ONLY',
       canExecuteLive:false
     }));
