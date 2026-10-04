@@ -336,6 +336,7 @@ function normalizeGmgnTrend(row={},rank=null){
     sellsH1:Math.max(0,Math.floor(finite(row?.sells_1h??row?.sells)??0)),
     priceChangeM5:finite(row?.price_change_percent5m),
     priceChangeH1:finite(row?.price_change_percent1h),
+    priceChangeSelectedPct:finite(row?.price_change_percent),
     marketCap:finite(row?.market_cap),
     fdv:finite(row?.fdv),
     pairCreatedAt:gmgnAgeAt,
@@ -348,7 +349,7 @@ function normalizeGmgnTrend(row={},rank=null){
     xLinked:xLinked(links),
     websiteLinked:websiteLinked(links),
     signalTrending:true,
-    signalNewPair:true,
+    signalNewPair:false,
     gmgnExactTrend:true,
     trendRank:rank==null?null:Number(rank),
     trendSource:'GMGN_OPENAPI_TRENDS'
@@ -376,6 +377,7 @@ function mergeCandidate(base={},extra={}){
     sellsH1:pick(extra.sellsH1,base.sellsH1),
     priceChangeM5:pick(extra.priceChangeM5,base.priceChangeM5),
     priceChangeH1:pick(extra.priceChangeH1,base.priceChangeH1),
+    priceChangeSelectedPct:pick(extra.priceChangeSelectedPct,base.priceChangeSelectedPct),
     marketCap:pick(extra.marketCap,base.marketCap),
     fdv:pick(extra.fdv,base.fdv),
     pairCreatedAt:pick(extra.pairCreatedAt,base.pairCreatedAt),
@@ -424,7 +426,7 @@ export function createMemecoinEarlyRadarProvider({
   ultraDexCacheMs=5000,
   gmgnTrendCacheMs=5000,
   gmgnTrendInterval='1m',
-  gmgnTrendOrderBy='creation_timestamp',
+  gmgnTrendOrderBy='default',
   networks=['solana','base','ethereum'],
   pairLookupLimit=10,
   now=()=>Date.now()
@@ -442,7 +444,7 @@ export function createMemecoinEarlyRadarProvider({
     ?String(gmgnTrendInterval).trim()
     :'1h';
   const gmgnTrendWindowLabel=gmgnTrendWindow.toUpperCase();
-  const gmgnTrendSort=String(gmgnTrendOrderBy||'creation_timestamp').trim()||'creation_timestamp';
+  const gmgnTrendSort=String(gmgnTrendOrderBy||'default').trim()||'default';
 
   async function getJson(url,{headers={}}={}){
     const controller=new AbortController();
@@ -538,15 +540,15 @@ export function createMemecoinEarlyRadarProvider({
     },{force});
   }
 
-  async function freeNewPairCompositeSolana({force=false}={}){
+  async function freeTrendingCompositeSolana({force=false}={}){
     const settled=await Promise.allSettled([
-      geckoNewPairsUltraSolana({force}),
+      geckoTrendingPoolsUltraSolana({force}),
       dexTopBoostsUltraSolana({force})
     ]);
     const sourceErrors=[];
     const sources=[];
-    if(settled[0].status==='fulfilled')sources.push(['GECKOTERMINAL_NEW_PAIRS',settled[0].value]);
-    else sourceErrors.push('gecko:solana:new-pairs:'+(settled[0].reason instanceof Error?settled[0].reason.message:String(settled[0].reason)));
+    if(settled[0].status==='fulfilled')sources.push(['GECKOTERMINAL_TRENDING',settled[0].value]);
+    else sourceErrors.push('gecko:solana:trending:'+(settled[0].reason instanceof Error?settled[0].reason.message:String(settled[0].reason)));
     if(settled[1].status==='fulfilled')sources.push(['DEXSCREENER_TOP_BOOSTS',settled[1].value]);
     else sourceErrors.push('dex:solana:top-boosts:'+(settled[1].reason instanceof Error?settled[1].reason.message:String(settled[1].reason)));
 
@@ -556,15 +558,14 @@ export function createMemecoinEarlyRadarProvider({
         const key=tokenKey('solana',row?.tokenAddress);
         if(!key)continue;
         const prior=merged.get(key);
-        const isNewPairSource=sourceName==='GECKOTERMINAL_NEW_PAIRS'||row?.signalNewPair===true;
         if(!prior){
           merged.set(key,{
             ...row,
             signalTrending:true,
-            signalNewPair:isNewPairSource,
+            signalNewPair:false,
             gmgnExactTrend:false,
             freeTrendSources:[sourceName],
-            trendSource:'FREE_NEW_PAIR_COMPOSITE_GECKO_DEXSCREENER'
+            trendSource:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER'
           });
           continue;
         }
@@ -574,18 +575,15 @@ export function createMemecoinEarlyRadarProvider({
           ...mergeCandidate(prior,row),
           pairCreatedAt:priorCreated!=null&&rowCreated!=null?Math.min(priorCreated,rowCreated):(priorCreated??rowCreated),
           signalTrending:true,
-          signalNewPair:prior?.signalNewPair===true||isNewPairSource,
+          signalNewPair:false,
           gmgnExactTrend:false,
           freeTrendSources:[...priorSources],
           trendRank:Math.min(finite(prior?.trendRank)??Infinity,finite(row?.trendRank)??Infinity),
-          trendSource:'FREE_NEW_PAIR_COMPOSITE_GECKO_DEXSCREENER'
+          trendSource:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER'
         });
       }
     }
     const rows=[...merged.values()].sort((a,b)=>{
-      if(Boolean(a?.signalNewPair)!==Boolean(b?.signalNewPair))return a?.signalNewPair?-1:1;
-      const ageA=finite(a?.pairCreatedAt)??0,ageB=finite(b?.pairCreatedAt)??0;
-      if(ageB!==ageA)return ageB-ageA;
       const sourceDelta=(b?.freeTrendSources?.length||0)-(a?.freeTrendSources?.length||0);
       if(sourceDelta)return sourceDelta;
       return (finite(a?.trendRank)??999)-(finite(b?.trendRank)??999);
@@ -627,12 +625,12 @@ export function createMemecoinEarlyRadarProvider({
         const reason=text(body?.reason||body?.message||body?.msg||body?.error||'NO_REASON',180).replace(/\s+/g,'_');
         throw new Error('GMGN_OPENAPI_TREND_EMPTY_SHAPE_'+text(shape||'NONE',120)+'_REASON_'+reason);
       }
-      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_NEW_PAIR_'+gmgnTrendWindowLabel+'_CREATION_DESC'})).filter(x=>x.tokenAddress);
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
     },{force});
   }
   async function gmgnPublicTrendingUltraSolana({force=false}={}){
     return cached('ultra:gmgn:public:solana:trending:'+gmgnTrendWindow+':default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
-      const url=gmgn+'/defi/quotation/v1/rank/sol/swaps/'+encodeURIComponent(gmgnTrendWindow)+'?orderby=open_timestamp&direction=desc';
+      const url=gmgn+'/defi/quotation/v1/rank/sol/swaps/'+encodeURIComponent(gmgnTrendWindow)+'?orderby='+encodeURIComponent(gmgnTrendSort)+'&direction=desc';
       const body=await getJson(url,{
         headers:{
           accept:'application/json, text/plain, */*',
@@ -645,7 +643,7 @@ export function createMemecoinEarlyRadarProvider({
       const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
       if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_PUBLIC_CODE_'+String(body.code)+'_'+text(body?.msg,120));
       if(!raw.length)throw new Error('GMGN_PUBLIC_TREND_EMPTY');
-      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_PUBLIC_NEW_PAIR_'+gmgnTrendWindowLabel+'_OPEN_DESC'})).filter(x=>x.tokenAddress);
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
     },{force});
   }
 
@@ -682,7 +680,7 @@ export function createMemecoinEarlyRadarProvider({
     let pools=[];
     const demoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
     const hasPersonalGmgnKey=Boolean(gmgnReadApiKey)&&!demoKey;
-    let trendSource=hasPersonalGmgnKey?'GMGN_NEW_PAIR_'+gmgnTrendWindowLabel+'_CREATION_DESC':'GMGN_PUBLIC_NEW_PAIR_'+gmgnTrendWindowLabel+'_OPEN_DESC';
+    let trendSource=hasPersonalGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
     let exactGmgn=false;
     if(hasPersonalGmgnKey){
       try{
@@ -697,7 +695,7 @@ export function createMemecoinEarlyRadarProvider({
     // trend composite. If it is unavailable we still fail over to independent
     // GeckoTerminal + DexScreener trend sources.
     if(!pools.length){
-      trendSource='GMGN_PUBLIC_NEW_PAIR_'+gmgnTrendWindowLabel+'_OPEN_DESC';
+      trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
       try{
         pools=await gmgnPublicTrendingUltraSolana({force});
         exactGmgn=true;
@@ -706,9 +704,9 @@ export function createMemecoinEarlyRadarProvider({
       }
     }
     if(!pools.length){
-      trendSource='FREE_NEW_PAIR_COMPOSITE_GECKO_DEXSCREENER';
+      trendSource='FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER';
       exactGmgn=false;
-      const free=await freeNewPairCompositeSolana({force});
+      const free=await freeTrendingCompositeSolana({force});
       pools=free.rows;
       errors.push(...free.errors);
     }
@@ -766,12 +764,12 @@ export function createMemecoinEarlyRadarProvider({
         firstSeenAt:firstSeen.get(key),
         signalNewPool:false,
         signalTrending:true,
-        signalNewPair:pool?.signalNewPair===true||pool?.gmgnExactTrend===true,
+        signalNewPair:false,
         gmgnExactTrend:pool?.gmgnExactTrend===true,
         trendSource:text(pool?.trendSource||trendSource,80),
         trendRank:finite(pool?.trendRank),
         ultraEarly:true,
-        sourceSetup:'GMGN_TRENDING_NEW_PAIR_1M',
+        sourceSetup:'GMGN_TRENDS_1M',
         w6TrackingOnly:false,
         ultraSource:dexRow?(text(pool?.trendSource||trendSource,80)+'_PLUS_DEXSCREENER_BATCH'):text(pool?.trendSource||trendSource,80)
       };
@@ -841,7 +839,7 @@ export function createMemecoinEarlyRadarProvider({
       exactGmgn,
       trendInterval:gmgnTrendWindow,
       trendOrderBy:gmgnTrendSort,
-      setup:'GMGN_TRENDING_NEW_PAIR_1M',
+      setup:'GMGN_TRENDS_1M',
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
       candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,
