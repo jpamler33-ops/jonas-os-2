@@ -4,7 +4,7 @@ import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobil
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
 import { createBiggjPublicNewsProvider, BIGGJ_PUBLIC_NEWS_PROVIDER_VERSION } from './biggj-public-news-provider.mjs';
 import { createBiggjPublicTraderWatchProvider, BIGGJ_PUBLIC_TRADER_WATCH_VERSION } from './biggj-public-trader-watch.mjs';
-import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, scoreEarlyMemecoin, MEMECOIN_EARLY_RADAR_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
+import { createMemecoinEarlyRadarProvider, applyExternalMemecoinAttention, scoreEarlyMemecoin, MEMECOIN_EARLY_RADAR_VERSION, W6_ULTRA_EARLY_FEED_VERSION } from './expansion-runtime/memecoin-early-radar.mjs';
 import { createMemecoinSecurityProvider, MEMECOIN_SECURITY_PROVIDER_VERSION } from './expansion-runtime/memecoin-security-provider.mjs';
 import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, observeMemecoinSecurityOutcomes, dueMemecoinSecurityOutcomeFollowups, recordMemecoinSecurityOutcomeFollowupAttempt, memecoinSecurityOutcomeSummary, MEMECOIN_SECURITY_OUTCOME_TRACKER_VERSION } from './expansion-runtime/memecoin-security-outcome-tracker.mjs';
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
@@ -714,11 +714,14 @@ const marketDataProvider=createMarketDataProvider({
 });
 const dexScreenerProvider=createDexScreenerPublicProvider({fetchImpl:globalThis.fetch});
 const memecoinEarlyRefreshMs=Math.max(15_000,Math.min(120_000,Number(process.env.TCX_MEMECOIN_EARLY_REFRESH_MS||15_000)));
+const w6UltraEarlyRefreshMs=Math.max(5_000,Math.min(30_000,Number(process.env.TCX_W6_ULTRA_EARLY_REFRESH_MS||7_000)));
 const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   fetchImpl:globalThis.fetch,
   timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_MEMECOIN_EARLY_TIMEOUT_MS||7000))),
   dexCacheMs:Math.max(10_000,Math.min(60_000,Number(process.env.TCX_MEMECOIN_DEX_CACHE_MS||15_000))),
   geckoCacheMs:Math.max(45_000,Math.min(180_000,Number(process.env.TCX_MEMECOIN_GECKO_CACHE_MS||60_000))),
+  ultraGeckoCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_GECKO_CACHE_MS||5_000))),
+  ultraDexCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_DEX_CACHE_MS||5_000))),
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
 });
@@ -5174,6 +5177,9 @@ let memecoinEarlyLastRefreshAt=null;
 let memecoinSocialSnapshot=null;
 let memecoinSocialLastError=null;
 let memecoinSecurityLastError=null;
+let w6UltraEarlySnapshot=null;
+let w6UltraEarlyLastError=null;
+let w6UltraEarlyLastRefreshAt=null;
 let w6SolPriceCache={value:null,at:0,error:null};
 async function currentW6SolPriceUsd({force=false}={}){
   const now=Date.now();
@@ -5188,6 +5194,110 @@ async function currentW6SolPriceUsd({force=false}={}){
     w6SolPriceCache={...w6SolPriceCache,error:err instanceof Error?err.message:String(err)};
     if(Number(w6SolPriceCache.value)>0&&now-Number(w6SolPriceCache.at||0)<5*60_000)return Number(w6SolPriceCache.value);
     return null;
+  }
+}
+
+function w6StrategyRuntimeOptions(solPriceUsd){
+  return {
+    now:Date.now(),
+    marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
+    maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
+    minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
+    minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
+      ?Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD)
+      :null,
+    targetPnlSol:Math.max(.01,Number(process.env.TCX_W6_USER_99K_60S_TARGET_PNL_SOL||10)),
+    entryNotionalSol:Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL||0)>0
+      ?Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL)
+      :null,
+    notionalScenariosSol:[2,5,10,20,40,60,80],
+    minHoldSeconds:Math.max(0,Math.min(1800,Number(process.env.TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180))),
+    solPriceUsd,
+    maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30)))
+  };
+}
+
+async function refreshW6UltraEarly(reason='periodic'){
+  const started=Date.now();
+  const force=reason==='startup'||reason==='manual';
+  try{
+    const open=(specialistWalletState?.wallets?.[WALLET_6_USER_99K_60S]?.positions||[]);
+    const ultra=await memecoinEarlyProvider.fetchUltraEarlySolana({
+      limit:30,
+      maxAgeSeconds:Math.max(90,Math.min(300,Number(process.env.TCX_W6_ULTRA_DISCOVERY_MAX_AGE_SECONDS||180))),
+      trackTokenAddresses:open.map(x=>String(x?.tokenAddress||'')).filter(Boolean),
+      force
+    });
+    const solPriceUsd=await currentW6SolPriceUsd();
+    const update=applyUser99k60sStrategySnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
+    specialistWalletState=update.state;
+    if(
+      update.results.opened||update.results.closed||update.results.holdScenarioCloses||
+      update.results.scenarioTargetHits
+    )await persistSpecialistWallets('w6-ultra-early:'+reason);
+    const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
+    w6UltraEarlyLastRefreshAt=Date.now();
+    w6UltraEarlyLastError=(ultra?.errors||[]).length?(ultra.errors||[]).join(' | '):null;
+    w6UltraEarlySnapshot={
+      ...ultra,
+      appliedAt:w6UltraEarlyLastRefreshAt,
+      results:update.results,
+      wallet,
+      solPriceUsd
+    };
+    if(memecoinEarlySnapshot){
+      memecoinEarlySnapshot={...memecoinEarlySnapshot,user99k60s:{
+        ...(memecoinEarlySnapshot?.user99k60s||{}),
+        version:USER_99K_60S_STRATEGY_VERSION,
+        ultraFeed:{
+          version:W6_ULTRA_EARLY_FEED_VERSION,
+          capturedAt:ultra.capturedAt,
+          source:ultra.source,
+          sourceReady:ultra.sourceReady,
+          discoveryRows:ultra.discoveryRows||0,
+          trackingRows:ultra.trackingRows||0,
+          pollMs:w6UltraEarlyRefreshMs,
+          errors:ultra.errors||[]
+        },
+        results:update.results,
+        wallet,
+        solPriceUsd,
+        execution:'SHADOW_ONLY',
+        canExecute:false,
+        canExecuteLive:false
+      }};
+    }
+    console.log('[BIGGJ_W6_ULTRA_EARLY]',JSON.stringify({
+      reason,
+      version:W6_ULTRA_EARLY_FEED_VERSION,
+      source:ultra.source,
+      sourceReady:ultra.sourceReady,
+      discoveryRows:ultra.discoveryRows||0,
+      trackingRows:ultra.trackingRows||0,
+      pollMs:w6UltraEarlyRefreshMs,
+      funnel:update.results.entryFunnel||{},
+      blockers:update.results.entryBlockers||{},
+      opened:update.results.opened||0,
+      active:wallet?.openPositions||0,
+      closedTrades:wallet?.closedTrades||0,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    }));
+    recordOperation(observability,{name:'w6_ultra_early',ok:true,latencyMs:Date.now()-started,error:w6UltraEarlyLastError});
+    return {ok:true,snapshot:w6UltraEarlySnapshot,update};
+  }catch(err){
+    w6UltraEarlyLastError=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'w6_ultra_early',message:w6UltraEarlyLastError});
+    recordOperation(observability,{name:'w6_ultra_early',ok:false,latencyMs:Date.now()-started,error:w6UltraEarlyLastError});
+    console.error('[BIGGJ_W6_ULTRA_EARLY_ERROR]',reason,w6UltraEarlyLastError);
+    return {ok:false,error:w6UltraEarlyLastError};
+  }
+}
+async function w6UltraEarlyWatcher(){
+  while(running){
+    await sleep(w6UltraEarlyRefreshMs);
+    if(!running)break;
+    await refreshW6UltraEarly('periodic');
   }
 }
 
@@ -5542,27 +5652,11 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     });
     specialistWalletState=walletUpdate.state;
     const w6SolPriceUsd=await currentW6SolPriceUsd();
-    const user99k60sUpdate=applyUser99k60sStrategySnapshot(specialistWalletState,walletInput,{
-      now:Date.now(),
-      marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
-      maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
-      minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
-      minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
-        ?Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD)
-        :null,
-      targetPnlSol:Math.max(.01,Number(process.env.TCX_W6_USER_99K_60S_TARGET_PNL_SOL||10)),
-      entryNotionalSol:Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL||0)>0
-        ?Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL)
-        :null,
-      notionalScenariosSol:[2,5,10,20,40,60,80],
-      minHoldSeconds:Math.max(0,Math.min(1800,Number(process.env.TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180))),
-      solPriceUsd:w6SolPriceUsd,
-      maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30)))
-    });
+    const user99k60sUpdate=applyUser99k60sStrategySnapshot(specialistWalletState,walletInput,w6StrategyRuntimeOptions(w6SolPriceUsd));
     specialistWalletState=user99k60sUpdate.state;
     if(
       walletUpdate.results.opened||walletUpdate.results.closed||
-      user99k60sUpdate.results.opened||user99k60sUpdate.results.closed||user99k60sUpdate.results.holdScenarioCloses
+      user99k60sUpdate.results.opened||user99k60sUpdate.results.closed||user99k60sUpdate.results.holdScenarioCloses||user99k60sUpdate.results.scenarioTargetHits
     )await persistSpecialistWallets('memecoin-early:'+reason);
     const postTradeLearningModel=buildMemecoinTradeLearningModel(specialistWalletState,{asOf:Date.now()});
     const postTradeLearningSummary=memecoinTradeLearningSummary(postTradeLearningModel);
@@ -5576,7 +5670,17 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       solPriceUsd:w6SolPriceUsd,
       minHoldSeconds:180,
       holdPolicies:['5M','10M','RUNNER_60M'],
-      results:user99k60sUpdate.results,
+      results:w6UltraEarlySnapshot?.results||user99k60sUpdate.results,
+      ultraFeed:w6UltraEarlySnapshot?{
+        version:W6_ULTRA_EARLY_FEED_VERSION,
+        capturedAt:w6UltraEarlySnapshot.capturedAt,
+        source:w6UltraEarlySnapshot.source,
+        sourceReady:w6UltraEarlySnapshot.sourceReady,
+        discoveryRows:w6UltraEarlySnapshot.discoveryRows||0,
+        trackingRows:w6UltraEarlySnapshot.trackingRows||0,
+        pollMs:w6UltraEarlyRefreshMs,
+        errors:w6UltraEarlySnapshot.errors||[]
+      }:null,
       wallet:user99k60sWallet,
       exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:Date.now()}),
       execution:'SHADOW_ONLY',
@@ -13095,6 +13199,7 @@ await syncIndicatorEvolution('startup');
 await refreshBiggjWorldModelRuntime('STARTUP');
 await refreshPublicExperienceIntel('startup');
 await refreshMemecoinEarlyRadar('startup');
+await refreshW6UltraEarly('startup');
 await refreshParallelStrategyWorldsRuntime('STARTUP');
 await refreshAutonomousResearchFactory('STARTUP');
 await refreshAutonomousOperator('STARTUP');
@@ -13249,4 +13354,4 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
 }));
 
 await tg('deleteWebhook',{ drop_pending_updates:false });
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),memecoinEarlyWatcher(),biggjWorldModelWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),memecoinEarlyWatcher(),w6UltraEarlyWatcher(),biggjWorldModelWatcher()]);
