@@ -411,11 +411,15 @@ export function createMemecoinEarlyRadarProvider({
       return (Array.isArray(body?.data)?body.data:[]).map(x=>normalizeGeckoPool(x,included,network)).filter(x=>x.tokenAddress);
     },{force});
   }
-  async function geckoNewPoolsUltraSolana({force=false}={}){
-    return cached('ultra:gecko:solana',Math.max(1000,Number(ultraGeckoCacheMs)||5000),async()=>{
-      const body=await getJson(gecko+'/networks/solana/new_pools?include=base_token%2Cquote_token&page=1');
+  async function geckoTrendingPoolsUltraSolana({force=false}={}){
+    return cached('ultra:gecko:solana:trending',Math.max(1000,Number(ultraGeckoCacheMs)||5000),async()=>{
+      const body=await getJson(gecko+'/networks/solana/trending_pools?include=base_token%2Cquote_token&page=1');
       const included=new Map((Array.isArray(body?.included)?body.included:[]).map(x=>[x?.id,x]));
-      return (Array.isArray(body?.data)?body.data:[]).map(x=>normalizeGeckoPool(x,included,'solana')).filter(x=>x.tokenAddress);
+      return (Array.isArray(body?.data)?body.data:[]).map((x,i)=>({
+        ...normalizeGeckoPool(x,included,'solana'),
+        signalTrending:true,
+        trendRank:i+1
+      })).filter(x=>x.tokenAddress);
     },{force});
   }
   async function dexBatchTokens(chain,addresses,{force=false}={}){
@@ -450,9 +454,9 @@ export function createMemecoinEarlyRadarProvider({
     const errors=[];
     let pools=[];
     try{
-      pools=await geckoNewPoolsUltraSolana({force});
+      pools=await geckoTrendingPoolsUltraSolana({force});
     }catch(err){
-      errors.push('gecko:solana:'+(err instanceof Error?err.message:String(err)));
+      errors.push('gecko:solana:trending:'+(err instanceof Error?err.message:String(err)));
     }
     const fresh=pools.filter(row=>{
       const created=finite(row?.pairCreatedAt);
@@ -506,10 +510,12 @@ export function createMemecoinEarlyRadarProvider({
         pairAddress:pool.pairAddress||merged.pairAddress,
         pairCreatedAt:created,
         firstSeenAt:firstSeen.get(key),
-        signalNewPool:true,
+        signalNewPool:false,
+        signalTrending:true,
+        trendRank:finite(pool?.trendRank),
         ultraEarly:true,
         w6TrackingOnly:false,
-        ultraSource:dexRow?'GECKOTERMINAL_NEW_POOL_PLUS_DEXSCREENER_BATCH':'GECKOTERMINAL_NEW_POOL_ONLY'
+        ultraSource:dexRow?'GECKOTERMINAL_TRENDING_PLUS_DEXSCREENER_BATCH':'GECKOTERMINAL_TRENDING_ONLY'
       };
     });
     const freshKeys=new Set(freshRows.map(x=>tokenKey('solana',x.tokenAddress)));
@@ -526,11 +532,12 @@ export function createMemecoinEarlyRadarProvider({
         pairAddress:String(candidate?.pairAddress||merged?.pairAddress||''),
         pairCreatedAt:finite(candidate?.pairCreatedAt)??finite(dexRow?.pairCreatedAt),
         firstSeenAt:finite(candidate?.firstSeenAt)??firstSeen.get(key),
-        signalNewPool:true,
+        signalNewPool:false,
+        signalTrending:true,
         ultraEarly:true,
         candidateTracking:true,
         w6TrackingOnly:false,
-        ultraSource:'W6_CANDIDATE_MEMORY_PLUS_DEXSCREENER_BATCH'
+        ultraSource:'W6_TREND_CANDIDATE_MEMORY_PLUS_DEXSCREENER_BATCH'
       };
     }).filter(Boolean);
     const candidateKeys=new Set(candidateTrackingRows.map(x=>tokenKey('solana',x.tokenAddress)));
@@ -566,7 +573,7 @@ export function createMemecoinEarlyRadarProvider({
       capturedAt,
       rows:Object.freeze(selected),
       errors:Object.freeze(errors),
-      source:'GECKOTERMINAL_SOLANA_NEW_POOLS_PLUS_DEXSCREENER_BATCH',
+      source:'GECKOTERMINAL_SOLANA_TRENDING_PLUS_DEXSCREENER_BATCH',
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
       candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,
