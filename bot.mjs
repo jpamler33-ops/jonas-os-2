@@ -5273,7 +5273,7 @@ function enrichW6UltraCandidateRows(snapshot){
     let first99kObservedAgeSeconds=Number.isFinite(Number(priorTracker?.first99kObservedAgeSeconds))
       ?Number(priorTracker.first99kObservedAgeSeconds)
       :null;
-    if(first99kObservedAt==null&&greenPercentKnown&&greenPercent>threshold&&ageSeconds!=null){
+    if(first99kObservedAt==null&&greenPercentKnown&&greenPercent>=threshold&&ageSeconds!=null){
       first99kObservedAt=capturedAt;
       first99kObservedAgeSeconds=ageSeconds;
       if(ageSeconds<=60)w6UltraLaunchStats.first99kObservedWithin60++;
@@ -5295,7 +5295,7 @@ function enrichW6UltraCandidateRows(snapshot){
       first99kObservedAt,
       first99kObservedAgeSeconds,
       observed99kWithin60:first99kObservedAt!=null&&first99kObservedAgeSeconds!=null&&first99kObservedAgeSeconds<=60,
-      observationSemantics:'FIRST_OBSERVED_GMGN_GREEN_PERCENT_GT_99K_NOT_EXACT_CROSSING_TIME'
+      observationSemantics:'FIRST_OBSERVED_GMGN_GREEN_PERCENT_GTE_99K_NOT_EXACT_CROSSING_TIME'
     };
     const enriched={...row,w6LaunchTracker:tracker};
     if(ageSeconds!=null&&ageSeconds<=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)))){
