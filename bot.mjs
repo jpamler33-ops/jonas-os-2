@@ -723,7 +723,7 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   ultraGeckoCacheMs:Math.max(10_000,Math.min(60_000,Number(process.env.TCX_W6_ULTRA_GECKO_CACHE_MS||30_000))),
   ultraDexCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_DEX_CACHE_MS||5_000))),
   gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1m').trim(),
-  gmgnTrendOrderBy:String(process.env.TCX_W6_GMGN_TREND_ORDER_BY||'creation_timestamp').trim(),
+  gmgnTrendOrderBy:String(process.env.TCX_W6_GMGN_TREND_ORDER_BY||'default').trim(),
   gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'gmgn_solbscbaseethmonadtron').trim(),
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
@@ -5208,6 +5208,8 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
     maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
     minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
+    minGreenChangePct:Math.max(0,Number(process.env.TCX_W6_USER_99K_60S_MIN_GREEN_CHANGE_PCT||99_000)),
+    requireExactGmgnGreen:true,
     minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
       ?Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD)
       :null,
@@ -5220,7 +5222,7 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     solPriceUsd,
     maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
     requireTrending:true,
-    requireNewPair:true,
+    requireNewPair:false,
     catastrophicDrawdownPct:Math.max(.50,Math.min(.99,Number(process.env.TCX_W6_CATASTROPHIC_DRAWDOWN_PCT||.90))),
     catastrophicMarketCapUsd:Math.max(0,Number(process.env.TCX_W6_CATASTROPHIC_MCAP_USD||10_000))
   };
@@ -5235,7 +5237,7 @@ function currentW6UltraCandidates(now=Date.now()){
     const created=Number(row?.pairCreatedAt);
     const age=Number.isFinite(created)?Math.max(0,(Number(now)-created)/1000):Infinity;
     if(age>maxKeepSeconds){
-      if(row?.first99kObservedAt==null)w6UltraLaunchStats.expiredWithout99k++;
+      if(row?.w6LaunchTracker?.first99kObservedAt==null)w6UltraLaunchStats.expiredWithout99k++;
       w6UltraCandidateBook.delete(key);
     }
   }
@@ -5243,28 +5245,35 @@ function currentW6UltraCandidates(now=Date.now()){
 }
 function enrichW6UltraCandidateRows(snapshot){
   const capturedAt=Number(snapshot?.capturedAt||Date.now());
-  const threshold=Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000));
+  const threshold=Math.max(0,Number(process.env.TCX_W6_USER_99K_60S_MIN_GREEN_CHANGE_PCT||99_000));
   const rows=(Array.isArray(snapshot?.rows)?snapshot.rows:[]).map(row=>{
     if(row?.w6TrackingOnly===true)return row;
     const created=Number(row?.pairCreatedAt);
     const ageSeconds=Number.isFinite(created)?Math.max(0,(capturedAt-created)/1000):null;
     const key=w6UltraCandidateKey(row);
     const prior=w6UltraCandidateBook.get(key);
-    const firstObservedAt=Number(prior?.firstObservedAt)||capturedAt;
-    const firstObservedAgeSeconds=Number.isFinite(Number(prior?.firstObservedAgeSeconds))
-      ?Number(prior.firstObservedAgeSeconds)
+    const priorTracker=prior?.w6LaunchTracker||{};
+    const firstObservedAt=Number(priorTracker?.firstObservedAt)||capturedAt;
+    const firstObservedAgeSeconds=Number.isFinite(Number(priorTracker?.firstObservedAgeSeconds))
+      ?Number(priorTracker.firstObservedAgeSeconds)
       :ageSeconds;
     const marketCap=Number(row?.marketCap);
     const marketCapKnown=Number.isFinite(marketCap);
-    const priorMax=Number(prior?.maxObservedMarketCapUsd);
+    const priorMaxMarketCap=Number(priorTracker?.maxObservedMarketCapUsd);
     const maxObservedMarketCapUsd=marketCapKnown
-      ?Math.max(Number.isFinite(priorMax)?priorMax:-Infinity,marketCap)
-      :(Number.isFinite(priorMax)?priorMax:null);
-    let first99kObservedAt=Number(prior?.first99kObservedAt)||null;
-    let first99kObservedAgeSeconds=Number.isFinite(Number(prior?.first99kObservedAgeSeconds))
-      ?Number(prior.first99kObservedAgeSeconds)
+      ?Math.max(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:-Infinity,marketCap)
+      :(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:null);
+    const greenPercent=Number(row?.priceChangeSelectedPct);
+    const greenPercentKnown=Number.isFinite(greenPercent);
+    const priorMaxGreen=Number(priorTracker?.maxObservedGreenPercent);
+    const maxObservedGreenPercent=greenPercentKnown
+      ?Math.max(Number.isFinite(priorMaxGreen)?priorMaxGreen:-Infinity,greenPercent)
+      :(Number.isFinite(priorMaxGreen)?priorMaxGreen:null);
+    let first99kObservedAt=Number(priorTracker?.first99kObservedAt)||null;
+    let first99kObservedAgeSeconds=Number.isFinite(Number(priorTracker?.first99kObservedAgeSeconds))
+      ?Number(priorTracker.first99kObservedAgeSeconds)
       :null;
-    if(first99kObservedAt==null&&marketCapKnown&&marketCap>=threshold&&ageSeconds!=null){
+    if(first99kObservedAt==null&&greenPercentKnown&&greenPercent>threshold&&ageSeconds!=null){
       first99kObservedAt=capturedAt;
       first99kObservedAgeSeconds=ageSeconds;
       if(ageSeconds<=60)w6UltraLaunchStats.first99kObservedWithin60++;
@@ -5280,10 +5289,13 @@ function enrichW6UltraCandidateRows(snapshot){
       lastObservedAgeSeconds:ageSeconds,
       lastObservedMarketCapUsd:marketCapKnown?marketCap:null,
       maxObservedMarketCapUsd:Number.isFinite(maxObservedMarketCapUsd)?maxObservedMarketCapUsd:null,
+      lastObservedGreenPercent:greenPercentKnown?greenPercent:null,
+      maxObservedGreenPercent:Number.isFinite(maxObservedGreenPercent)?maxObservedGreenPercent:null,
+      greenPercentThreshold:threshold,
       first99kObservedAt,
       first99kObservedAgeSeconds,
       observed99kWithin60:first99kObservedAt!=null&&first99kObservedAgeSeconds!=null&&first99kObservedAgeSeconds<=60,
-      observationSemantics:'FIRST_OBSERVED_NOT_EXACT_CROSSING_TIME'
+      observationSemantics:'FIRST_OBSERVED_GMGN_GREEN_PERCENT_GT_99K_NOT_EXACT_CROSSING_TIME'
     };
     const enriched={...row,w6LaunchTracker:tracker};
     if(ageSeconds!=null&&ageSeconds<=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)))){
@@ -5337,6 +5349,8 @@ async function refreshW6UltraEarly(reason='periodic'){
         entryAgeSeconds:p?.entryAgeSeconds??null,
         firstObservedAgeSeconds:p?.firstObservedAgeSeconds??p?.launchTracker?.firstObservedAgeSeconds??null,
         first99kObservedAgeSeconds:p?.first99kObservedAgeSeconds??p?.launchTracker?.first99kObservedAgeSeconds??null,
+        entryGreenPercent:p?.entryGreenPercent??null,
+        entryThresholdMode:p?.entryThresholdMode??null,
         entryMarketCapUsd:p?.entryMarketCapUsd??null,
         lastMarketCapUsd:p?.lastMarketCapUsd??null,
         peakMarketCapUsd:p?.peakMarketCapUsd??null,
@@ -5391,7 +5405,7 @@ async function refreshW6UltraEarly(reason='periodic'){
       exactGmgn:ultra.exactGmgn===true,
       trendInterval:ultra.trendInterval||null,
       trendOrderBy:ultra.trendOrderBy||null,
-      setup:ultra.setup||'GMGN_TRENDING_NEW_PAIR_1M',
+      setup:ultra.setup||'GMGN_TRENDS_1M',
       sourceReady:ultra.sourceReady,
       sourceErrors:ultra.errors||[],
       discoveryRows:ultra.discoveryRows||0,
