@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MEMECOIN_EARLY_RADAR_VERSION,
+  W6_ULTRA_EARLY_FEED_VERSION,
   scoreEarlyMemecoin,
   applyExternalMemecoinAttention,
   createMemecoinEarlyRadarProvider
@@ -104,3 +105,53 @@ test('provider merges keyless new pools with DexScreener launch-attention signal
   assert.equal(out.execution,'SHADOW_ONLY');
   assert.equal(out.canExecuteLive,false);
 });
+
+test('W6 ultra-early feed keeps fresh Solana launch age while enriching market cap in one Dex batch',async()=>{
+  const now=2_100_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const calls=[];
+  const fetchImpl=async url=>{
+    calls.push(url);
+    const u=new URL(url);
+    if(u.hostname==='api.geckoterminal.com'&&u.pathname==='/api/v2/networks/solana/new_pools')return json({
+      data:[{
+        id:'solana_PAIRFAST',
+        attributes:{
+          address:'PAIRFAST',name:'FAST / SOL',base_token_price_usd:'0.001',
+          reserve_in_usd:'45000',pool_created_at:new Date(now-22_000).toISOString(),
+          volume_usd:{m5:'5000',h1:'5000'},transactions:{m5:{buys:20,sells:4},h1:{buys:20,sells:4}},
+          price_change_percentage:{m5:'12',h1:'12'},market_cap_usd:null,fdv_usd:'120000'
+        },
+        relationships:{base_token:{data:{id:'solana_FASTMINT'}},quote_token:{data:{id:'solana_SOL'}},dex:{data:{id:'raydium'}}}
+      }],
+      included:[
+        {id:'solana_FASTMINT',attributes:{address:'FASTMINT',symbol:'FAST',name:'Fast Meme'}},
+        {id:'solana_SOL',attributes:{address:'So111',symbol:'SOL',name:'Solana'}}
+      ]
+    });
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'OTHERPAIR',dexId:'raydium',
+      baseToken:{address:'FASTMINT',symbol:'FAST',name:'Fast Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.0011',liquidity:{usd:50000},volume:{m5:6000,h1:6000,h24:6000},
+      txns:{m5:{buys:25,sells:5},h1:{buys:25,sells:5}},priceChange:{m5:15,h1:15},
+      marketCap:125000,fdv:130000,pairCreatedAt:now-500_000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(out.version,W6_ULTRA_EARLY_FEED_VERSION);
+  assert.equal(out.sourceReady,true);
+  assert.equal(out.rows.length,1);
+  assert.equal(out.rows[0].tokenAddress,'FASTMINT');
+  assert.equal(out.rows[0].marketCap,125000);
+  assert.equal(out.rows[0].pairCreatedAt,now-22_000);
+  assert.equal(out.rows[0].ageSeconds,22);
+  assert.equal(out.rows[0].ultraEarly,true);
+  assert.equal(out.rows[0].canExecuteLive,undefined);
+  assert.equal(out.canExecuteLive,false);
+  assert.equal(calls.filter(x=>x.includes('/tokens/v1/solana/')).length,1);
+});
+
