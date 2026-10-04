@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V17_W6_EXIT_LEARNER');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V18_W6_SIZING_HOLD_LAB');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);
@@ -78,7 +78,7 @@ test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Dis
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("user99k60s:memecoinEarlySnapshot?.user99k60s"));
   assert.ok(source.includes("version:USER_99K_60S_STRATEGY_VERSION"));
-  assert.ok(source.includes("sizingScenariosSol:[10,20,40,80]"));
+  assert.ok(source.includes("sizingScenariosSol:[5,10,20,40,80]"));
   assert.ok(source.includes("WALLET_6_USER_99K_60S"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
@@ -90,4 +90,13 @@ test('mission-control exposes W6 descriptive exit learner without automatic poli
   assert.ok(source.includes("recordUser99k60sExitObservation"));
   assert.ok(source.includes("USER_PROFIT_ENOUGH"));
   assert.ok(source.includes("USER_MCAP_TOO_SMALL"));
+});
+
+
+test('mission-control source exposes W6 three-minute loss protection and hold lab',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180"));
+  assert.ok(source.includes("notionalScenariosSol:[5,10,20,40,80]"));
+  assert.ok(source.includes("holdScenarioCloses"));
+  assert.ok(source.includes("canExecuteLive:false"));
 });
