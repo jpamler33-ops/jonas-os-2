@@ -723,7 +723,7 @@ function user99k60sHoldLabScenarios(values=[2,5,10,20,40,60,80],{
   const policies=[
     {id:'HOLD_5M',reviewAtSeconds:300,maxHoldSeconds:300},
     {id:'HOLD_10M',reviewAtSeconds:600,maxHoldSeconds:600},
-    {id:'RUNNER',reviewAtSeconds:600,maxHoldSeconds:1800}
+    {id:'RUNNER',reviewAtSeconds:600,maxHoldSeconds:3600}
   ];
   const out=[];
   for(const notionalSol of user99k60sSolScenarios(values)){
@@ -802,7 +802,7 @@ function updateUser99k60sHoldLab(existing,{
     if(s.policyId==='HOLD_5M')shouldClose=hold>=300;
     else if(s.policyId==='HOLD_10M')shouldClose=hold>=600;
     else if(s.policyId==='RUNNER'){
-      if(hold>=1800)shouldClose=true;
+      if(hold>=3600)shouldClose=true;
       else if(hold>=600&&!runnerGood)shouldClose=true;
     }
     if(!shouldClose)return {...s,...impactState,protectedByMinHold:false,goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview};
@@ -814,7 +814,7 @@ function updateUser99k60sHoldLab(existing,{
       closeReturnPct:ret,
       ...impactState,
       goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview,
-      closeReason:s.policyId==='RUNNER'?(hold>=1800?'RUNNER_MAX_30M':'RUNNER_NO_LONGER_GOOD'):'TIME_WINDOW_REVIEW',
+      closeReason:s.policyId==='RUNNER'?(hold>=3600?'RUNNER_MAX_60M':'RUNNER_NO_LONGER_GOOD'):'TIME_WINDOW_REVIEW',
       protectedByMinHold:false
     };
   });
@@ -822,27 +822,39 @@ function updateUser99k60sHoldLab(existing,{
 function user99k60sHoldLabSummary(scenarios=[]){
   const rows=Array.isArray(scenarios)?scenarios:[];
   const closed=rows.filter(x=>x?.status==='CLOSED');
-  const best=closed.slice().sort((a,b)=>{
+  const efficiencyRows=closed.filter(x=>finite(x?.capitalEfficiency)!=null);
+  const best=efficiencyRows.slice().sort((a,b)=>{
     const ae=finite(a?.capitalEfficiency,-Infinity),be=finite(b?.capitalEfficiency,-Infinity);
     if(be!==ae)return be-ae;
     return finite(a?.entryNotionalSol,Infinity)-finite(b?.entryNotionalSol,Infinity);
   })[0]||null;
+  const bestAbsolute=closed.filter(x=>finite(x?.estimatedNetPnlSol)!=null).slice().sort((a,b)=>
+    finite(b?.estimatedNetPnlSol,-Infinity)-finite(a?.estimatedNetPnlSol,-Infinity)
+  )[0]||null;
+  const referenceHits=closed.filter(x=>finite(x?.estimatedNetPnlSol)!=null&&finite(x.estimatedNetPnlSol)>=10)
+    .sort((a,b)=>finite(a?.entryNotionalSol,Infinity)-finite(b?.entryNotionalSol,Infinity));
   const eff=finite(best?.capitalEfficiency);
+  const compact=(x)=>x?{
+    id:x.id,
+    policyId:x.policyId,
+    entryNotionalSol:x.entryNotionalSol,
+    estimatedNetPnlSol:x.estimatedNetPnlSol,
+    estimatedNetPnlSolBeforeImpact:x.estimatedNetPnlSolBeforeImpact,
+    capitalEfficiency:x.capitalEfficiency,
+    entryImpactPct:x.entryImpactPct,
+    exitImpactPct:x.exitImpactPct,
+    closeHoldSeconds:x.closeHoldSeconds,
+    closeReason:x.closeReason
+  }:null;
   return {
     scenarios:rows.length,
     open:rows.length-closed.length,
     closed:closed.length,
-    best:best?{
-      id:best.id,
-      policyId:best.policyId,
-      entryNotionalSol:best.entryNotionalSol,
-      estimatedNetPnlSol:best.estimatedNetPnlSol,
-      capitalEfficiency:best.capitalEfficiency,
-      closeHoldSeconds:best.closeHoldSeconds,
-      closeReason:best.closeReason,
-      estimatedSolNeededFor10SolReference:eff>0?10/eff:null
-    }:null,
-    semantics:'BEST_PRICE_PERFORMANCE_IS_HIGHEST_FEE_ADJUSTED_RETURN_PER_SOL_THEN_LOWEST_CAPITAL'
+    best:best?{...compact(best),estimatedSolNeededFor10SolReference:eff>0?10/eff:null}:null,
+    bestAbsolutePnl:compact(bestAbsolute),
+    minimumScenarioFor10SolReference:compact(referenceHits[0]||null),
+    priceImpactCoverage:closed.length?efficiencyRows.length/closed.length:0,
+    semantics:'BEST_PRICE_PERFORMANCE_IS_HIGHEST_LIQUIDITY_IMPACT_ADJUSTED_RETURN_PER_SOL;_ABSOLUTE_PNL_REPORTED_SEPARATELY'
   };
 }
 
