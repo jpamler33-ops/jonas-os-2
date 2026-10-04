@@ -230,6 +230,20 @@ function memeContrarianOverview(wallet,radar){
 function user99StrategyCard(wallet,user99){
  const p=(wallet?.active||[])[0]||null,sc=p?.profitTargetScenarios||[],xl=user99?.exitLearning||{},f=user99?.results?.entryFunnel||{},uf=user99?.ultraFeed||{},ls=uf?.launchStats||{},blockers=user99?.results?.entryBlockers||{},hs=p?.holdLabSummary||{},best=hs?.best||null,bestAbs=hs?.bestAbsolutePnl||null;
  const scenarios=sc.length?sc.map(x=>'<div class="contrarianMetric"><span>'+E(x.entryNotionalSol)+' SOL</span><b class="'+(x.targetHit?'good':'')+'">'+(x.targetHit?'REF ✓':((N(x.targetPriceReturnApprox)*100).toFixed(1)+'%'))+'</b></div>').join(''):'<div class="contrarianMetric"><span>SIZING</span><b>2/5/10/20/40/60/80 SOL</b></div>';
+ const activeSizeRows=p?(p?.holdLab||[]).filter(x=>String(x?.policyId||'')==='RUNNER').slice(0,7).map(x=>{const v=NUM(x?.estimatedNetPnlSol);return '<span class="'+(Number.isFinite(v)?(v>=0?'good':'bad'):'')+'">'+E(x?.entryNotionalSol)+' SOL '+(Number.isFinite(v)?((v>=0?'+':'')+v.toFixed(2)+' SOL'):'—')+'</span>'}).join(' · '):'';
+ const activeHold=p?Math.max(0,(Date.now()-N(p?.openedAt))/1000):0,protect=p?Math.max(0,(N(p?.lossExitProtectedUntil)-Date.now())/1000):0;
+ const activeBox=p?'<div class="contrarianRules"><div class="ml">AKTIVER W6 TRADE · '+E(p?.symbol||'MEME')+'</div><div class="contrarianGrid">'+
+ '<div class="contrarianMetric"><span>ENTRY ALTER</span><b>'+((Number.isFinite(NUM(p?.entryAgeSeconds)))?N(p.entryAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
+ '<div class="contrarianMetric"><span>ERSTMALS GESEHEN</span><b>'+((Number.isFinite(NUM(p?.firstObservedAgeSeconds)))?N(p.firstObservedAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
+ '<div class="contrarianMetric"><span>≥99K BEOBACHTET</span><b>'+((Number.isFinite(NUM(p?.first99kObservedAgeSeconds)))?N(p.first99kObservedAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
+ '<div class="contrarianMetric"><span>HOLD</span><b>'+activeHold.toFixed(0)+'s</b></div>'+
+ '<div class="contrarianMetric"><span>ENTRY MC</span><b>'+MONEY(p?.entryMarketCapUsd)+'</b></div>'+
+ '<div class="contrarianMetric"><span>AKTUELL MC</span><b>'+MONEY(p?.lastMarketCapUsd)+'</b></div>'+
+ '<div class="contrarianMetric"><span>RETURN</span><b class="'+(N(p?.unrealizedReturnPct)>=0?'good':'bad')+'">'+MPCT(p?.unrealizedReturnPct)+'</b></div>'+
+ '<div class="contrarianMetric"><span>SHADOW PNL</span><b class="'+(N(p?.unrealizedNetPnlQuote)>=0?'good':'bad')+'">'+MONEY(p?.unrealizedNetPnlQuote)+'</b></div></div>'+
+ '<div class="ms">'+(protect>0?('Loss-Schutz noch '+protect.toFixed(0)+'s'):'Loss-Schutz abgelaufen')+' · Peak MC '+MONEY(p?.peakMarketCapUsd)+' · Trough MC '+MONEY(p?.troughMarketCapUsd)+'</div>'+
+ (activeSizeRows?'<div class="ms">Sizing jetzt: '+activeSizeRows+'</div>':'')+
+ '<div class="ms">Token '+E(String(p?.tokenAddress||'').slice(0,8))+'…'+E(String(p?.tokenAddress||'').slice(-6))+' · SHADOW_ONLY</div></div>':'<div class="contrarianRules"><div class="ml">AKTIVER W6 TRADE</div><div class="ms">Aktuell keine offene W6-Position.</div></div>';
  const bestBox=best?'<div class="contrarianGrid"><div class="contrarianMetric"><span>BEST EFFIZIENZ</span><b class="good">'+E(best.entryNotionalSol)+' SOL · '+E(best.policyId||'—')+'</b></div><div class="contrarianMetric"><span>EFFIZIENZ</span><b>'+MPCT(best.capitalEfficiency)+'</b></div><div class="contrarianMetric"><span>BEST ABS. PNL</span><b>'+(bestAbs?(E(bestAbs.entryNotionalSol)+' SOL · '+N(bestAbs.estimatedNetPnlSol).toFixed(2)+' SOL'):'—')+'</b></div><div class="contrarianMetric"><span>~SOL FÜR +10</span><b>'+(Number.isFinite(NUM(best.estimatedSolNeededFor10SolReference))?N(best.estimatedSolNeededFor10SolReference).toFixed(1):'—')+'</b></div></div>':'<div class="ms">Noch keine Hold-Szenarien abgeschlossen.</div>';
  const blockerText=Object.entries(blockers).filter(([,v])=>N(v)>0).sort((a,b)=>N(b[1])-N(a[1])).slice(0,4).map(([k,v])=>E(k.replaceAll('_',' '))+' '+N(v)).join(' · ')||'keine Blocker im letzten Scan';
  const funnel='<div class="contrarianRules"><div class="ml">ENTRY FUNNEL · LETZTER SCAN</div><div class="contrarianGrid">'+
