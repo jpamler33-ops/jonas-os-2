@@ -505,6 +505,34 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.minHoldSeconds,180);
   assert.equal(p.holdLab.length,21);
   assert.equal(p.canExecuteLive,false);
+  assert.equal(x.results.entryFunnel.rowsSeen,1);
+  assert.equal(x.results.entryFunnel.ageWithinLimit,1);
+  assert.equal(x.results.entryFunnel.marketCapQualifiedAfterAge,1);
+  assert.equal(x.results.entryFunnel.dataCompleteAfterThreshold,1);
+  assert.equal(x.results.entryFunnel.eligible,1);
+  assert.equal(x.results.entryFunnel.opened,1);
+  assert.equal(x.results.entryFunnel.capitalVariantsStarted,7);
+  assert.equal(x.results.entryFunnel.holdVariantsStarted,21);
+});
+
+test('W6 entry funnel exposes exactly where candidates fail before entry',()=>{
+  const now=11_500_000;
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[
+    {chainId:'solana',tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-70_000},
+    {chainId:'solana',tokenAddress:'SMALL',symbol:'SMALL',priceUsd:1,marketCap:80_000,pairCreatedAt:now-20_000},
+    {chainId:'solana',tokenAddress:'NOPRICE',symbol:'NOPRICE',marketCap:120_000,pairCreatedAt:now-20_000},
+    {chainId:'solana',tokenAddress:'GOOD2',symbol:'GOOD2',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000}
+  ]},{now});
+  assert.equal(x.results.entryFunnel.rowsSeen,4);
+  assert.equal(x.results.entryFunnel.ageWithinLimit,3);
+  assert.equal(x.results.entryFunnel.marketCapQualifiedAfterAge,2);
+  assert.equal(x.results.entryFunnel.dataCompleteAfterThreshold,1);
+  assert.equal(x.results.entryFunnel.eligible,1);
+  assert.equal(x.results.entryFunnel.opened,1);
+  assert.equal(x.results.entryBlockers.OLDER_THAN_MAX_AGE,1);
+  assert.equal(x.results.entryBlockers.MARKET_CAP_BELOW_THRESHOLD,1);
+  assert.equal(x.results.entryBlockers.PRICE_UNKNOWN,1);
+  assert.equal(x.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
 });
 
 test('user 99k/60s V1 can apply a market-cap exit after the three-minute protection when an explicit floor is configured',()=>{
