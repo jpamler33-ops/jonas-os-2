@@ -31,6 +31,7 @@ function run(input){
   let governor=initialGovernor||null;
   let initialized=false,refreshed=false,evaluated=false,governorCreated=false,governorEvaluated=false;
   let generationAdvanced=false,previousGenerationId=null,nextGenerationId=null;
+  let reviewEvidenceFrozen=false;
 
   // COMPLETE_NO_PROMOTION is a terminal scientific result, not a reason to
   // leave the research loop permanently stalled. Start the next SHADOW_ONLY
@@ -70,6 +71,13 @@ function run(input){
     }
   }
 
+  const frozenReviewCandidateIds=()=>new Set(
+    (governor?.participants||[])
+      .filter(p=>['PROMOTION_REVIEW_REQUIRED','PROMOTION_CANDIDATE'].includes(String(p?.status)))
+      .map(p=>String(p?.candidateId||''))
+      .filter(Boolean)
+  );
+
   if(!generationAdvanced&&(
     !competition||
     competition.status==='WAITING_FOR_SEED_HISTORY'||
@@ -84,35 +92,52 @@ function run(input){
     });
     initialized=true;
   }else if(!generationAdvanced){
-    const before=competition.candidates?.length||0;
-    const next=refreshShadowCompetitionHypotheses(competition,{
-      historyRows:history,
-      incumbentConfig,
-      asOf:now,
-      maxGeneratedHypotheses
-    });
-    const after=next.candidates?.length||0;
-    refreshed=after!==before||next.hypothesisGenerator?.version!==competition.hypothesisGenerator?.version;
-    competition=next;
+    const frozenIds=frozenReviewCandidateIds();
+    const fullReviewFreeze=
+      governor?.status==='COMPLETE_PROMOTION_REVIEW_REQUIRED'&&
+      frozenIds.size>0;
+    if(fullReviewFreeze){
+      reviewEvidenceFrozen=true;
+    }else{
+      const before=competition.candidates?.length||0;
+      const next=refreshShadowCompetitionHypotheses(competition,{
+        historyRows:history,
+        incumbentConfig,
+        asOf:now,
+        maxGeneratedHypotheses
+      });
+      const after=next.candidates?.length||0;
+      refreshed=after!==before||next.hypothesisGenerator?.version!==competition.hypothesisGenerator?.version;
+      competition=next;
+    }
   }
 
   const previousProgressAt=Number(competition?.evaluatedHistoryThroughAt??initialCompetition?.evaluatedHistoryThroughAt??0);
   const historyProgressAt=forecastHistoryProgressAt(history);
+  const frozenIds=frozenReviewCandidateIds();
+  const allCandidatesFrozen=
+    (competition?.candidates?.length||0)>0&&
+    competition.candidates.every(c=>frozenIds.has(String(c?.artifact?.candidateId)));
+  reviewEvidenceFrozen=reviewEvidenceFrozen||frozenIds.size>0;
   if(
     !generationAdvanced&&
     competition?.status==='ACTIVE'&&
+    !allCandidatesFrozen&&
     forecastHistoryHasAdvanced(history,previousProgressAt)
   ){
     competition=evaluateShadowCompetition(competition,{
       historyRows:history,
       incumbentConfig,
       asOf:now,
-      minimumTrainCases
+      minimumTrainCases,
+      frozenCandidateIds:[...frozenIds]
     });
     evaluated=true;
   }
 
-  competition={...competition,evaluatedHistoryRows:history.length,evaluatedHistoryThroughAt:historyProgressAt};
+  if(!allCandidatesFrozen){
+    competition={...competition,evaluatedHistoryRows:history.length,evaluatedHistoryThroughAt:historyProgressAt};
+  }
 
   if(!governor&&competition?.status==='ACTIVE'){
     governor=createExperimentGovernor({
@@ -141,7 +166,9 @@ function run(input){
       governorEvaluated,
       generationAdvanced,
       previousGenerationId,
-      nextGenerationId
+      nextGenerationId,
+      reviewEvidenceFrozen,
+      frozenReviewCandidates:frozenReviewCandidateIds().size
     },
     historyRows:history.length
   };
