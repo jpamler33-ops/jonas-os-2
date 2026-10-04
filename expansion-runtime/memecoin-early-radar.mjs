@@ -496,7 +496,8 @@ export function createMemecoinEarlyRadarProvider({
       const body=await getJson(gmgnOpenApi+'/v1/market/rank?'+qs.toString(),{
         headers:{
           'X-APIKEY':gmgnReadApiKey,
-          'Content-Type':'application/json'
+          'Content-Type':'application/json',
+          'user-agent':'gmgn-cli/1.6.6'
         }
       });
       const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
