@@ -118,7 +118,7 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
       assert.equal(u.searchParams.get('interval'),'1h');
       assert.equal(u.searchParams.get('order_by'),null);
       assert.equal(u.searchParams.get('direction'),null);
-      assert.equal(opts?.headers?.['X-APIKEY'],'gmgn_solbscbaseethmonadtron');
+      assert.equal(opts?.headers?.['X-APIKEY'],'personal-test-key');
       assert.equal(opts?.headers?.['user-agent'],'gmgn-cli/1.6.6');
       return json({
       code:0,msg:'success',data:{rank:[{
