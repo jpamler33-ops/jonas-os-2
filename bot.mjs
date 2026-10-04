@@ -5549,6 +5549,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       sizingScenariosSol:[10,20,40,80],
       results:user99k60sUpdate.results,
       wallet:user99k60sWallet,
+      exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:Date.now()}),
       execution:'SHADOW_ONLY',
       canExecute:false,
       canExecuteLive:false
@@ -12389,6 +12390,7 @@ function missionControlData(){
       sizingScenariosSol:[10,20,40,80],
       results:{matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0},
       wallet:specialistWalletSummary(specialistWalletState,{asOf:now}).wallets?.[WALLET_6_USER_99K_60S]||null,
+      exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:now}),
       execution:'SHADOW_ONLY',
       canExecute:false,
       canExecuteLive:false
