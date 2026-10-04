@@ -501,7 +501,7 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.entryMarketCapUsd,120_000);
   assert.equal(p.entryRule,'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
   assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
-  assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[5,10,20,40,80]);
+  assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[2,5,10,20,40,60,80]);
   assert.equal(p.minHoldSeconds,180);
   assert.equal(p.holdLab.length,15);
   assert.equal(p.canExecuteLive,false);
@@ -636,26 +636,26 @@ test('W6 loss-style market-cap exit is protected during the first three minutes'
   assert.equal(later.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
 });
 
-test('W6 hold lab compares 5m 10m and runner policies across five SOL sizes',()=>{
+test('W6 hold lab compares 5m 10m and runner policies across seven SOL sizes',()=>{
   const now=19_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1,marketCap:120_000,pairCreatedAt:now-15_000
-  }]},{now,minHoldSeconds:180}).state;
+    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,pairCreatedAt:now-15_000
+  }]},{now,minHoldSeconds:180,solPriceUsd:150}).state;
 
   const at5=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1.10,marketCap:145_000,pairCreatedAt:now-315_000
-  }]},{now:now+300_000,minHoldSeconds:180});
+    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1.10,marketCap:145_000,liquidityUsd:110_000,pairCreatedAt:now-315_000
+  }]},{now:now+300_000,minHoldSeconds:180,solPriceUsd:150});
   let p=at5.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_5M'&&x.status==='CLOSED').length,5);
-  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='OPEN').length,5);
-  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,5);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_5M'&&x.status==='CLOSED').length,7);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='OPEN').length,7);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,7);
 
   const at10=applyUser99k60sStrategySnapshot(at5.state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1.20,marketCap:165_000,pairCreatedAt:now-615_000
-  }]},{now:now+600_000,minHoldSeconds:180});
+    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1.20,marketCap:165_000,liquidityUsd:120_000,pairCreatedAt:now-615_000
+  }]},{now:now+600_000,minHoldSeconds:180,solPriceUsd:150});
   p=at10.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='CLOSED').length,5);
-  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,5);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='CLOSED').length,7);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,7);
   assert.equal(p.holdLabSummary.closed,10);
   assert.equal(p.holdLabSummary.best.policyId,'HOLD_10M');
   assert.ok(p.holdLabSummary.best.estimatedSolNeededFor10SolReference>0);
@@ -665,13 +665,13 @@ test('W6 hold lab compares 5m 10m and runner policies across five SOL sizes',()=
 test('W6 runner can stay open beyond ten minutes while the coin remains healthy',()=>{
   const now=20_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'RUNNERGOOD',symbol:'RUNNERGOOD',priceUsd:1,marketCap:120_000,pairCreatedAt:now-10_000
+    chainId:'solana',tokenAddress:'RUNNERGOOD',symbol:'RUNNERGOOD',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,pairCreatedAt:now-10_000
   }]},{now,minHoldSeconds:180}).state;
   const at12=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'RUNNERGOOD',symbol:'RUNNERGOOD',priceUsd:1.25,marketCap:180_000,pairCreatedAt:now-730_000
-  }]},{now:now+720_000,minHoldSeconds:180});
+    chainId:'solana',tokenAddress:'RUNNERGOOD',symbol:'RUNNERGOOD',priceUsd:1.25,marketCap:180_000,liquidityUsd:130_000,pairCreatedAt:now-730_000
+  }]},{now:now+720_000,minHoldSeconds:180,solPriceUsd:150});
   const p=at12.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,5);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,7);
 });
 
 
@@ -697,24 +697,64 @@ test('W6 does not auto-exit a temporary loss during the first 3 minutes',()=>{
 test('W6 sizing and hold lab resolves 5m, 10m and runner scenarios independently',()=>{
   const now=19_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'LAB',symbol:'LAB',priceUsd:1,marketCap:120_000,pairCreatedAt:now-15_000
-  }]},{now,notionalScenariosSol:[5,10,20,40,80],minHoldSeconds:180}).state;
+    chainId:'solana',tokenAddress:'LAB',symbol:'LAB',priceUsd:1,marketCap:120_000,liquidityUsd:90_000,pairCreatedAt:now-15_000
+  }]},{now,notionalScenariosSol:[2,5,10,20,40,60,80],minHoldSeconds:180,solPriceUsd:150}).state;
 
   let x=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'LAB',symbol:'LAB',priceUsd:1.15,marketCap:150_000,pairCreatedAt:now-315_000
-  }]},{now:now+300_000,notionalScenariosSol:[5,10,20,40,80],minHoldSeconds:180});
+    chainId:'solana',tokenAddress:'LAB',symbol:'LAB',priceUsd:1.15,marketCap:150_000,liquidityUsd:100_000,pairCreatedAt:now-315_000
+  }]},{now:now+300_000,notionalScenariosSol:[2,5,10,20,40,60,80],minHoldSeconds:180,solPriceUsd:150});
   let p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.holdLab.filter(s=>s.policyId==='HOLD_5M'&&s.status==='CLOSED').length,5);
-  assert.equal(p.holdLab.filter(s=>s.policyId==='HOLD_10M'&&s.status==='OPEN').length,5);
-  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,5);
+  assert.equal(p.holdLab.filter(s=>s.policyId==='HOLD_5M'&&s.status==='CLOSED').length,7);
+  assert.equal(p.holdLab.filter(s=>s.policyId==='HOLD_10M'&&s.status==='OPEN').length,7);
+  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,7);
 
   x=applyUser99k60sStrategySnapshot(x.state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'LAB',symbol:'LAB',priceUsd:1.25,marketCap:170_000,pairCreatedAt:now-615_000
-  }]},{now:now+600_000,notionalScenariosSol:[5,10,20,40,80],minHoldSeconds:180});
+    chainId:'solana',tokenAddress:'LAB',symbol:'LAB',priceUsd:1.25,marketCap:170_000,liquidityUsd:120_000,pairCreatedAt:now-615_000
+  }]},{now:now+600_000,notionalScenariosSol:[2,5,10,20,40,60,80],minHoldSeconds:180,solPriceUsd:150});
   p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.holdLab.filter(s=>s.policyId==='HOLD_10M'&&s.status==='CLOSED').length,5);
-  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,5);
+  assert.equal(p.holdLab.filter(s=>s.policyId==='HOLD_10M'&&s.status==='CLOSED').length,7);
+  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,7);
   assert.ok(p.holdLabSummary.best);
   assert.ok(p.holdLabSummary.best.estimatedSolNeededFor10SolReference>0);
   assert.equal(p.canExecuteLive,false);
+});
+
+
+test('W6 price-performance penalizes oversized SOL entries in thin liquidity',()=>{
+  const now=21_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'IMPACT',symbol:'IMPACT',priceUsd:1,marketCap:120_000,liquidityUsd:60_000,pairCreatedAt:now-15_000
+  }]},{now,solPriceUsd:150,minHoldSeconds:180}).state;
+  const x=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'IMPACT',symbol:'IMPACT',priceUsd:1.30,marketCap:180_000,liquidityUsd:70_000,pairCreatedAt:now-315_000
+  }]},{now:now+300_000,solPriceUsd:150,minHoldSeconds:180});
+  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  const s2=p.holdLab.find(s=>s.id==='HOLD_5M_2SOL');
+  const s80=p.holdLab.find(s=>s.id==='HOLD_5M_80SOL');
+  assert.equal(s2.status,'CLOSED');
+  assert.equal(s80.status,'CLOSED');
+  assert.ok(s2.capitalEfficiency>s80.capitalEfficiency);
+  assert.ok(s80.entryImpactPct>s2.entryImpactPct);
+  assert.equal(p.holdLabSummary.best.entryNotionalSol,2);
+  assert.ok(p.holdLabSummary.bestAbsolutePnl);
+  assert.ok(p.holdLabSummary.priceImpactCoverage>0);
+});
+
+test('W6 runner can remain open after 30 minutes and only hard-caps at 60 minutes when still good',()=>{
+  const now=22_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'LONGRUN',symbol:'LONGRUN',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,pairCreatedAt:now-10_000
+  }]},{now,solPriceUsd:150,minHoldSeconds:180}).state;
+  let x=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'LONGRUN',symbol:'LONGRUN',priceUsd:1.40,marketCap:190_000,liquidityUsd:130_000,pairCreatedAt:now-1_810_000
+  }]},{now:now+1_800_000,solPriceUsd:150,minHoldSeconds:180});
+  let p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,7);
+
+  x=applyUser99k60sStrategySnapshot(x.state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'LONGRUN',symbol:'LONGRUN',priceUsd:1.50,marketCap:210_000,liquidityUsd:140_000,pairCreatedAt:now-3_610_000
+  }]},{now:now+3_600_000,solPriceUsd:150,minHoldSeconds:180});
+  p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='CLOSED').length,7);
+  assert.ok(p.holdLab.filter(s=>s.policyId==='RUNNER').every(s=>s.closeReason==='RUNNER_MAX_60M'));
 });
