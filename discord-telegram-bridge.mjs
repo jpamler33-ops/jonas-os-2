@@ -527,12 +527,16 @@ export function buildDiscordTerminalPayload(snapshot={}){
 }
 export function buildDiscordSystemPayload(snapshot={}){
   const h=snapshot?.health||{},r=h?.operationalReadiness||{},oms=h?.shadowOms||{},fabric=h?.marketDataFabric||{},tg=h?.telegramPolling||{},rb=h?.biggjRulebook?.runtime||{};
+  const world=h?.biggjWorldModel||{},memeGate=h?.memecoinRadar?.signalController||{},gateCounts=memeGate?.counts||{};
   const rulebookState=String(rb?.state||'UNKNOWN').toUpperCase();
-  const rows=[['Runtime',yesNo(r?.ready)],['Rulebook',rulebookState==='PASS'?'● OK':rulebookState==='CAUTION'?'◐ CAUTION':'● '+rulebookState],['Audit Ledger',yesNo(h?.institutionalKernel?.ledgerHealthy)],['Market Fabric',yesNo(fabric?.healthy)],['Shadow OMS',yesNo(oms?.healthy)],['Telegram',tg?.lastPollError?'● ERROR':'● OK'],['Discord','● OK']];
+  const worldMode=String(world?.refreshMode||'UNKNOWN').toUpperCase();
+  const worldState=worldMode==='FULL'?'● FULL':worldMode==='COMPACT'?'◐ COMPACT':worldMode==='DEFERRED'?'○ DEFERRED':'· '+worldMode;
+  const rows=[['Runtime',yesNo(r?.ready)],['World Model',worldState],['Rulebook',rulebookState==='PASS'?'● OK':rulebookState==='CAUTION'?'◐ CAUTION':'● '+rulebookState],['Audit Ledger',yesNo(h?.institutionalKernel?.ledgerHealthy)],['Market Fabric',yesNo(fabric?.healthy)],['Shadow OMS',yesNo(oms?.healthy)],['Telegram',tg?.lastPollError?'● ERROR':'● OK'],['Discord','● OK']];
   return {embeds:[{title:'TCX // SYSTEM STATUS',description:rows.map(([k,v])=>'\`'+k.padEnd(14)+'\` '+v).join('\n'),fields:[
     {name:'OMS',value:'Active '+String(oms?.active??0)+' · Filled '+String(oms?.filled??0),inline:true},
     {name:'Market Events',value:String(fabric?.events??'—'),inline:true},
-    {name:'Safety',value:'ABSTAIN / SHADOW_ONLY',inline:true}
+    {name:'Meme Entry Gate',value:'BUY '+String(gateCounts?.BUY??0)+' · READY '+String(gateCounts?.READY??0)+' · WATCH '+String(gateCounts?.WATCH??0)+' · BLOCKED '+String(gateCounts?.BLOCKED??0),inline:false},
+    {name:'Safety',value:'W4 öffnet nur bei BUY · ABSTAIN / SHADOW_ONLY',inline:false}
   ],footer:{text:MARKERS.system},timestamp:new Date().toISOString()}],components:commandCenterComponents(),allowedMentions:{parse:[]}};
 }
 
@@ -562,6 +566,7 @@ export function buildDiscordPerformancePayload(snapshot={}){
 
 export function buildDiscordMemecoinResearchPayload(snapshot={}){
   const h=snapshot?.health||{},radar=h?.memecoinRadar||{},learning=radar?.learning?.wallet4||{},contra=learning?.contrarian||{},g=contra?.global||{};
+  const world=h?.biggjWorldModel||{},signalController=radar?.signalController||{},signalCounts=signalController?.counts||{};
   const wallet=h?.specialistWallets?.wallets?.W4_MEME_SCOUT||{};
   const active=Array.isArray(wallet?.active)?wallet.active:[];
   const openContrarian=active.filter(x=>String(x?.entryResearchLane||'').toUpperCase()==='CONTRARIAN_PROBE');
@@ -589,16 +594,28 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
     ' · '+money(p?.unrealizedNetPnlQuote)+' · '+percent(p?.unrealizedReturnPct)
   );
   const state=hasData?'DATA LIVE':openContrarian.length?'PROBES RUNNING':'WARTE AUF ERSTE PROBE';
+  const signalRank={BUY:0,READY:1,WATCH:2,BLOCKED:3};
+  const signalRows=radarRows.slice().sort((a,b)=>(signalRank[String(a?.memeSignal?.action||'BLOCKED').toUpperCase()]??9)-(signalRank[String(b?.memeSignal?.action||'BLOCKED').toUpperCase()]??9)).slice(0,7).map(row=>{
+    const sig=row?.memeSignal||{},action=String(sig?.action||'WATCH').toUpperCase();
+    const label=sig?.label||({BUY:'🟢 KAUFEN',READY:'⏳ READY',WATCH:'👀 WATCH',BLOCKED:'⛔ BLOCKIERT'}[action]||action);
+    const readiness=Math.round(Number(sig?.entryReadinessScore||0)*100);
+    const why=(sig?.blockers?.length?sig.blockers:sig?.missing?.length?sig.missing:sig?.reasons||[]).slice(0,2).join(' · ')||'kein Detail';
+    return '• **'+String(row?.symbol||row?.name||'MEME')+'** · '+label+' · '+readiness+'/100 · '+why;
+  });
+  const worldMode=String(world?.refreshMode||'UNKNOWN').toUpperCase();
   return {embeds:[{
     title:'BIGGJ // MEMECOIN RESEARCH',
     description:[
       '**'+state+'**',
+      'World Model: **'+worldMode+'** · Meme Gate: **BUY '+String(signalCounts?.BUY??0)+' · READY '+String(signalCounts?.READY??0)+' · WATCH '+String(signalCounts?.WATCH??0)+' · BLOCKED '+String(signalCounts?.BLOCKED??0)+'**',
+      '**W4 Entry-Regel: Nur 🟢 KAUFEN darf einen neuen Papertrade öffnen.**',
       'Wallet 4: **'+money(wallet?.netPnlQuote)+' PnL** · '+money(wallet?.cumulativeMarginUsedQuote)+' kumulierter Einsatz · '+String(wallet?.openPositions??0)+' offen',
-      'Radar: **BLOCK '+actions.BLOCK+'** · THROTTLE '+actions.THROTTLE+' · BOOST '+actions.BOOST+' · NEUTRAL '+actions.NEUTRAL,
+      'Learner: BLOCK '+actions.BLOCK+' · THROTTLE '+actions.THROTTLE+' · BOOST '+actions.BOOST+' · NEUTRAL '+actions.NEUTRAL,
       '',
       '**CONTRARIAN** · 1 Soft-Regel absichtlich brechen · 5% Shadow-Size · Hard Guards bleiben aktiv'
     ].join('\n'),
     fields:[
+      {name:'Entry Gate · aktuelle Kandidaten',value:(signalRows.join('\n')||'Keine Radar-Kandidaten vorhanden.').slice(0,1024),inline:false},
       {name:'Probes',value:'Offen **'+openContrarian.length+'** · abgeschlossen **'+String(contra?.samples??0)+'** · Normal-Learner **'+String(learning?.samples??0)+'**',inline:false},
       {name:'Outcome',value:'WR **'+pctMaybe(g?.rawWinRate)+'** · Ø **'+pctMaybe(g?.rawMeanReturn)+'** · Median **'+pctMaybe(g?.medianReturn)+'** · Severe **'+pctMaybe(g?.severeLossRate)+'** · Moonshot **'+pctMaybe(g?.moonshotRate)+'**',inline:false},
       {name:'Aktive Contrarian-Probes',value:(openRows.join('\n')||'Noch keine aktive Probe.').slice(0,1024),inline:false},
