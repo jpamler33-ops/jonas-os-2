@@ -113,7 +113,10 @@ export function deriveShadowWorkerReplayPlan({
   baseAutoRssMb=620,
   autoExternalMb=64,
   hardExternalMb=160,
-  maxAdaptiveAutoHeapMb=350,
+  // The serving process now settles around 350-355 MB after guarded GC in production.
+  // Keep the strict 370 MB hard gate, but allow the minimum replay window to use
+  // a few extra MB of soft headroom instead of starving shadow research forever.
+  maxAdaptiveAutoHeapMb=360,
   maxAdaptiveAutoRssMb=720,
   maxAdaptiveHardHeapMb=370,
   hardRssMb=900
