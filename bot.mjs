@@ -642,7 +642,7 @@ const markets = requestedSymbols.map(symbol => ({
   label: MARKET_META[symbol]?.[1] || symbol.replace('USDT','')
 }));
 
-const researchMemoryGovernor=createMemoryGovernor({cooldownMs:45_000,minReclaimedMb:4});
+const researchMemoryGovernor=createMemoryGovernor({cooldownMs:30_000,minReclaimedMb:4});
 function maybeCollectResearchGarbage(reason,{triggerHeapMb=320,cooldownBypassOverageMb=null}={}){
   const result=researchMemoryGovernor.maybeCollect({
     reason,
@@ -720,7 +720,7 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   timeoutMs:Math.max(2500,Math.min(10_000,Number(process.env.TCX_MEMECOIN_EARLY_TIMEOUT_MS||7000))),
   dexCacheMs:Math.max(10_000,Math.min(60_000,Number(process.env.TCX_MEMECOIN_DEX_CACHE_MS||15_000))),
   geckoCacheMs:Math.max(45_000,Math.min(180_000,Number(process.env.TCX_MEMECOIN_GECKO_CACHE_MS||60_000))),
-  ultraGeckoCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_GECKO_CACHE_MS||5_000))),
+  ultraGeckoCacheMs:Math.max(10_000,Math.min(60_000,Number(process.env.TCX_W6_ULTRA_GECKO_CACHE_MS||30_000))),
   ultraDexCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_DEX_CACHE_MS||5_000))),
   gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1h').trim(),
   gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'gmgn_solbscbaseethmonadtron').trim(),
