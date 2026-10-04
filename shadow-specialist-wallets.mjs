@@ -644,14 +644,17 @@ export function evaluateUser99k60sEntry(row,{
   now=Date.now(),
   maxAgeSeconds=60,
   minMarketCapUsd=99_000,
-  requireTrending=false
+  requireTrending=false,
+  requireNewPair=false
 }={}){
   const ageSeconds=user99k60sAgeSeconds(row,now);
   const marketCapUsd=finite(row?.marketCap);
   const priceUsd=finite(row?.priceUsd);
   const blockers=[];
   const trendVisible=row?.signalTrending===true||row?.w6TrendVisible===true;
+  const newPairVisible=row?.signalNewPair===true&&trendVisible;
   if(requireTrending&&!trendVisible)blockers.push('NOT_IN_TREND_FEED');
+  if(requireNewPair&&!newPairVisible)blockers.push('NOT_IN_NEW_PAIR_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
   else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||60))blockers.push('OLDER_THAN_MAX_AGE');
   if(marketCapUsd==null)blockers.push('MARKET_CAP_UNKNOWN');
@@ -662,10 +665,13 @@ export function evaluateUser99k60sEntry(row,{
     version:USER_99K_60S_STRATEGY_VERSION,
     match,
     action:match?'BUY_SHADOW':'IGNORE',
-    rule:requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY',
+    rule:requireNewPair
+      ?'GMGN_TRENDING_NEW_PAIR_1M_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'
+      :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'),
     ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),
     marketCapUsd,
     trendVisible,
+    newPairVisible,
     trendRank:finite(row?.trendRank),
     thresholdUsd:Math.max(1,Number(minMarketCapUsd)||99_000),
     maxAgeSeconds:Math.max(1,Number(maxAgeSeconds)||60),
@@ -853,6 +859,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   solPriceUsd=null,
   maxOpenOperational=30,
   requireTrending=false,
+  requireNewPair=false,
   catastrophicDrawdownPct=.90,
   catastrophicMarketCapUsd=10_000
 }={}){
@@ -971,7 +978,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   }
 
   for(const row of entryRows){
-    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,requireTrending});
+    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,requireTrending,requireNewPair});
     const ageKnown=signal.ageSeconds!=null;
     const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
     const marketCapKnown=signal.marketCapUsd!=null;
@@ -1029,6 +1036,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       launchTracker:row?.w6LaunchTracker?clone(row.w6LaunchTracker):null,
       trendRankAtEntry:finite(row?.trendRank),
       trendVisibleAtEntry:row?.signalTrending===true||row?.w6TrendVisible===true,
+      newPairVisibleAtEntry:row?.signalNewPair===true&&(row?.signalTrending===true||row?.w6TrendVisible===true),
+      sourceSetupAtEntry:text(row?.sourceSetup||row?.setup||'GMGN_TRENDING_NEW_PAIR_1M',80),
       firstObservedAgeSeconds:finite(row?.w6LaunchTracker?.firstObservedAgeSeconds),
       first99kObservedAgeSeconds:finite(row?.w6LaunchTracker?.first99kObservedAgeSeconds),
       troughMarketCapUsd:marketCapUsd,
@@ -1045,7 +1054,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
       entryStrategySignal:clone(signal),
       strategyVersion:USER_99K_60S_STRATEGY_VERSION,
-      entryRule:requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      entryRule:requireNewPair
+        ?'GMGN_TRENDING_NEW_PAIR_1M_AGE_LTE_60S_MCAP_GTE_99K_IMMEDIATE'
+        :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'),
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
