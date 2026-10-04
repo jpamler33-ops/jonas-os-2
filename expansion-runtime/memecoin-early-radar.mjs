@@ -514,7 +514,8 @@ export function createMemecoinEarlyRadarProvider({
         [];
       if(!raw.length){
         const shape=payload&&typeof payload==='object'&&!Array.isArray(payload)?Object.keys(payload).slice(0,12).join(','):(Array.isArray(payload)?'ARRAY_0':typeof payload);
-        throw new Error('GMGN_OPENAPI_TREND_EMPTY_SHAPE_'+text(shape||'NONE',160));
+        const reason=text(body?.reason||body?.message||body?.msg||body?.error||'NO_REASON',180).replace(/\s+/g,'_');
+        throw new Error('GMGN_OPENAPI_TREND_EMPTY_SHAPE_'+text(shape||'NONE',120)+'_REASON_'+reason);
       }
       return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
     },{force});
