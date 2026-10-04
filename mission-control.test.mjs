@@ -96,7 +96,7 @@ test('mission-control exposes W6 descriptive exit learner without automatic poli
 test('mission-control source exposes W6 three-minute loss protection and hold lab',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180"));
-  assert.ok(source.includes("notionalScenariosSol:[2,5,10,20,40,60,80]"));
+  assert.ok(source.includes("notionalScenariosSol:[0.5,1,2,3,5,10,20,40,60,80]"));
   assert.ok(source.includes("holdScenarioCloses"));
   assert.ok(source.includes("DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION"));
   assert.ok(source.includes("canExecuteLive:false"));
