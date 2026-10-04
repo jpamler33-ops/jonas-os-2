@@ -84,6 +84,14 @@ test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Dis
 });
 
 
+test('W6 runtime follows the user market-cap rule, not the optional green-percent experiment',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000))"));
+  assert.ok(source.includes('minGreenChangePct:null'));
+  assert.ok(source.includes('requireExactGmgnGreen:false'));
+  assert.ok(source.includes('FIRST_OBSERVED_MARKET_CAP_USD_GTE_99K_NOT_EXACT_CROSSING_TIME'));
+});
+
 test('mission-control exposes W6 descriptive exit learner without automatic policy mutation',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
   assert.ok(source.includes("exitLearning:user99k60sExitLearningSummary"));
