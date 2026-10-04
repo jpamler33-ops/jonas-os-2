@@ -226,3 +226,23 @@ test('BIGGJ V12 keeps rulebook available on demand but out of the permanent user
 test('BIGGJ trade cards expose primary lane and virtual size explicitly',()=>{
   for(const required of ['tradeLaneLabel','virtualTradeSize','VIRTUAL SIZE','Abgeschlossene PRIMARY Shadow-Trades']) assert.ok(source.includes(required),required);
 });
+
+
+test('Discord shows the central memecoin BUY gate and world-model operating mode',()=>{
+  for(const required of [
+    'Meme Entry Gate',
+    'World Model',
+    'W4 Entry-Regel: Nur 🟢 KAUFEN',
+    'Entry Gate · aktuelle Kandidaten',
+    'signalController',
+    'memeSignal',
+    'refreshMode',
+    'BUY ',
+    'READY ',
+    'WATCH ',
+    'BLOCKED '
+  ]) assert.ok(source.includes(required),required);
+  assert.ok(source.includes("W4 öffnet nur bei BUY"));
+  assert.ok(source.includes("🟢 KAUFEN"));
+  assert.ok(source.includes("⛔ BLOCKIERT"));
+});
