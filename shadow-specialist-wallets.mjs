@@ -849,7 +849,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   minHoldSeconds=180,
   solPriceUsd=null,
   maxOpenOperational=30,
-  requireTrending=false
+  requireTrending=false,
+  catastrophicDrawdownPct=.90,
+  catastrophicMarketCapUsd=10_000
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
@@ -858,7 +860,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
-    marketCapExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION,
     entryFunnel:{
@@ -945,14 +947,22 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     let reason=null;
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
     const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
+    const catastrophicLoss=Math.max(.50,Math.min(.99,finite(catastrophicDrawdownPct,.90)));
+    const catastrophicMcap=Math.max(0,finite(catastrophicMarketCapUsd,10_000));
     if(!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
+    }else if(!protectedHold&&(
+      (ret!=null&&ret<=-catastrophicLoss)||
+      (catastrophicMcap>0&&marketCapUsd!=null&&marketCapUsd<catastrophicMcap)
+    )){
+      reason='USER_99K_60S_CATASTROPHIC_FAILSAFE';
     }
     if(reason){
       const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
       if(closed){
         results.closed++;
         if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
+        if(reason==='USER_99K_60S_CATASTROPHIC_FAILSAFE')results.catastrophicExit++;
       }
     }
   }
@@ -1033,7 +1043,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       entryStrategySignal:clone(signal),
       strategyVersion:USER_99K_60S_STRATEGY_VERSION,
       entryRule:requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
+      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
       status:'OPEN',
