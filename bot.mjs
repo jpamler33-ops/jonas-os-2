@@ -5704,6 +5704,8 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         marketCapExit:user99k60sUpdate.results.marketCapExit||0,
         scenarioTargetHits:user99k60sUpdate.results.scenarioTargetHits||0,
         holdScenarioCloses:user99k60sUpdate.results.holdScenarioCloses||0,
+        entryFunnel:user99k60sUpdate.results.entryFunnel||{},
+        entryBlockers:user99k60sUpdate.results.entryBlockers||{},
         active:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.openPositions||0,
         closedTrades:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.closedTrades||0,
         winRate:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.winRate??null,
