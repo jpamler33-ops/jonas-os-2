@@ -121,14 +121,26 @@ test('adaptive replay admits the observed production boundary by shrinking below
   assert.equal(plan.allowed,true);
   assert.equal(plan.replayMode,'COMPACT');
   assert.ok(plan.historyRows<=422);
-  assert.equal(plan.limits.autoHeapMb,350);
+  assert.equal(plan.limits.autoHeapMb,354);
   assert.ok(plan.limits.autoRssMb>=704);
+  assert.equal(plan.limits.hardHeapMb,370);
+});
+
+test('adaptive replay admits the observed 353 MB production post-GC floor with the minimum replay window',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:353,rssMb:679,externalMb:4,
+    configuredHistoryRows:1200,effectiveHistoryRows:500,minHistoryRows:400
+  });
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.replayMode,'COMPACT');
+  assert.equal(plan.historyRows,400);
+  assert.equal(plan.limits.autoHeapMb,357);
   assert.equal(plan.limits.hardHeapMb,370);
 });
 
 test('adaptive replay still defers when compact soft headroom is fully exhausted',()=>{
   const plan=deriveShadowWorkerReplayPlan({
-    mode:'AUTO',heapUsedMb:350,rssMb:704,externalMb:4,
+    mode:'AUTO',heapUsedMb:360,rssMb:704,externalMb:4,
     configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:400
   });
   assert.equal(plan.allowed,false);
