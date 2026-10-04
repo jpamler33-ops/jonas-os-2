@@ -704,6 +704,37 @@ test('only matured raw horizon coverage outcomes feed the bootstrap calibrator',
   assert.equal(recordCoverageProbeCalibration(r,{position:{...position,coverageEvidenceTier:'CALIBRATED'},closeReason:'HORIZON_EXIT',resolvedPrice:101}).reason,'NOT_RAW_BOOTSTRAP_EVIDENCE');
 });
 
+test('world-model journal projection is compact, bounded and evaluation-complete',async()=>{
+  const r=await runtime();
+  r.journal.entries=[
+    {
+      id:'BTC:1',symbol:'BTCUSDT',horizonId:'1h',asOf:1,status:'RESOLVED',gate:'PASS',
+      probabilities:{up:.6,down:.2,flat:.2},operationalConfidence:.7,
+      resolution:{topCorrect:true,brier:.2,logLoss:.3,absoluteReturnError:.01,intervalMiss:false},
+      features:{huge:'x'.repeat(20_000)},models:Array.from({length:20},(_,i)=>({modelId:'M'+i,blob:'y'.repeat(1000)}))
+    },
+    {
+      id:'BTC:2',symbol:'BTCUSDT',horizonId:'1h',asOf:2,status:'PENDING',gate:'CAUTION',
+      probabilities:{up:.4,down:.3,flat:.3},operationalConfidence:.5,
+      resolution:null,features:{huge:'z'.repeat(20_000)},models:[{blob:'q'.repeat(5000)}]
+    },
+    {
+      id:'ETH:1',symbol:'ETHUSDT',horizonId:'1h',asOf:3,status:'RESOLVED',gate:'PASS',
+      probabilities:{up:.5,down:.25,flat:.25},operationalConfidence:.6,
+      resolution:{topCorrect:false,brier:.7,logLoss:1.2,absoluteReturnError:.02,intervalMiss:true},
+      features:{huge:'w'.repeat(20_000)},models:[{blob:'r'.repeat(5000)}]
+    }
+  ];
+  const rows=r.journal.worldModelEntries({symbols:['BTCUSDT'],maxPerSymbol:30});
+  assert.equal(rows.length,2);
+  assert.deepEqual(rows.map(x=>x.id),['BTC:1','BTC:2']);
+  assert.equal('features' in rows[0],false);
+  assert.equal('models' in rows[0],false);
+  assert.equal(rows[0].resolution.brier,.2);
+  assert.deepEqual(rows[0].probabilities,{up:.6,down:.2,flat:.2});
+  assert.ok(Buffer.byteLength(JSON.stringify(rows))<5_000);
+});
+
 test('online forecast memories accept explicit bounded row caps',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-forecast-caps-'));
   const r=await openInstitutionalForecastRuntime(path.join(dir,'runtime.json'),{

@@ -274,6 +274,10 @@ import {
   BIGGJ_WORLD_MODEL_RUNTIME_VERSION
 } from './biggj-world-model-runtime.mjs';
 import {
+  deriveWorldModelRefreshPlan,
+  BIGGJ_WORLD_MODEL_MEMORY_POLICY_VERSION
+} from './biggj-world-model-memory-policy.mjs';
+import {
   buildBiggjAutopilotSupervisor,
   biggjAutopilotSupervisorSummary,
   BIGGJ_AUTOPILOT_SUPERVISOR_VERSION
@@ -677,6 +681,10 @@ let biggjWorldModelRuntimeState=buildBiggjWorldModelRuntime({asOf:Date.now()});
 let biggjWorldModelRuntimeHealthy=true;
 let biggjWorldModelRuntimeLastError=null;
 let biggjWorldModelRuntimeLastRefreshAt=null;
+let biggjWorldModelRuntimeLastMode='UNINITIALIZED';
+let biggjWorldModelRuntimeDeferredCount=0;
+let biggjWorldModelRuntimeLastMemory=null;
+let biggjWorldModelRuntimeRetryTimer=null;
 const researchAlertContextCache = new Map();
 const researchCoverageDiagnostics = new Map();
 const observability = createObservability({sampleLimit:500});
@@ -4879,15 +4887,48 @@ function biggjWorldAssetClass(symbol){
  return 'ALT';
 }
 
+function scheduleBiggjWorldModelRetry(baseDelayMs=30_000){
+ if(biggjWorldModelRuntimeRetryTimer||!running)return;
+ const multiplier=Math.min(8,2**Math.min(3,Math.max(0,biggjWorldModelRuntimeDeferredCount-1)));
+ const delay=Math.max(5_000,Math.min(biggjWorldModelRefreshMs,Math.floor(baseDelayMs*multiplier)));
+ biggjWorldModelRuntimeRetryTimer=setTimeout(()=>{
+  biggjWorldModelRuntimeRetryTimer=null;
+  if(!running)return;
+  void refreshBiggjWorldModelRuntime('MEMORY_RETRY');
+ },delay);
+ biggjWorldModelRuntimeRetryTimer.unref?.();
+}
+
 async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
  const started=Date.now();
  maybeCollectResearchGarbage('WORLD_MODEL_PRECHECK',{triggerHeapMb:Math.max(280,servingGuardHeapMb-10)});
  const pressure=servingMemoryPressure();
- if(pressure.pressured){
+ const plan=deriveWorldModelRefreshPlan(pressure,{
+  maxSymbols:biggjWorldModelMaxSymbols,
+  fullKlineRows:130,
+  compactMaxSymbols:Math.max(5,Math.min(6,biggjWorldModelMaxSymbols)),
+  compactKlineRows:96,
+  fullFetchConcurrency:4,
+  compactFetchConcurrency:2,
+  fullJournalRowsPerSymbol:1000,
+  compactJournalRowsPerSymbol:250,
+  heapGraceMb:Math.max(48,Number(process.env.TCX_BIGGJ_WORLD_MODEL_HEAP_GRACE_MB||96)),
+  retryMs:Math.max(10_000,Number(process.env.TCX_BIGGJ_WORLD_MODEL_MEMORY_RETRY_MS||30_000))
+ });
+ biggjWorldModelRuntimeLastMemory=plan.memory;
+ biggjWorldModelRuntimeLastMode=plan.mode;
+ if(plan.mode==='DEFERRED'){
+  biggjWorldModelRuntimeDeferredCount++;
+  scheduleBiggjWorldModelRetry(plan.retryMs);
+  recordOperation(observability,{name:'biggj_world_model_deferred',ok:true,latencyMs:Date.now()-started,error:null});
   console.warn('[BIGGJ_WORLD_MODEL_DEFERRED]',JSON.stringify({
-   reason:'MEMORY_PRESSURE',
+   reason:plan.reason,
    refreshReason:reason,
-   memory:pressure,
+   policy:BIGGJ_WORLD_MODEL_MEMORY_POLICY_VERSION,
+   mode:plan.mode,
+   deferredCount:biggjWorldModelRuntimeDeferredCount,
+   retryMs:plan.retryMs,
+   memory:plan.memory,
    execution:'SHADOW_ONLY',
    canExecuteLive:false
   }));
@@ -4895,11 +4936,16 @@ async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
  }
  try{
   const now=Date.now();
-  const symbols=requestedSymbols.slice(0,biggjWorldModelMaxSymbols);
-  const fetched=await Promise.allSettled(symbols.map(async symbol=>({
-   symbol,
-   rows:(await fetchKlines(symbol,'5m',130)).rows
-  })));
+  const symbols=requestedSymbols.slice(0,Math.min(biggjWorldModelMaxSymbols,plan.symbolLimit));
+  const fetched=[];
+  for(let i=0;i<symbols.length;i+=plan.fetchConcurrency){
+   const batch=symbols.slice(i,i+plan.fetchConcurrency);
+   const settled=await Promise.allSettled(batch.map(async symbol=>({
+    symbol,
+    rows:(await fetchKlines(symbol,'5m',plan.klineRows)).rows
+   })));
+   fetched.push(...settled);
+  }
   const seriesBySymbol={};
   for(const item of fetched){
    if(item.status!=='fulfilled')continue;
@@ -4909,7 +4955,10 @@ async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
   }
   const radarRows=symbols.map(symbol=>({symbol,...(radarCache.get(symbol)||{})}));
   const assetClassBySymbol=Object.fromEntries(symbols.map(symbol=>[symbol,biggjWorldAssetClass(symbol)]));
-  const journalEntries=forecastRuntime?.journal?.all?.()??forecastRuntime?.journal?.entries??[];
+  const journalEntries=forecastRuntime?.journal?.worldModelEntries?.({
+   symbols,
+   maxPerSymbol:plan.journalRowsPerSymbol
+  })??[];
   biggjWorldModelRuntimeState=buildBiggjWorldModelRuntime({
    seriesBySymbol,
    radarRows,
@@ -4922,11 +4971,21 @@ async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
   biggjWorldModelRuntimeHealthy=true;
   biggjWorldModelRuntimeLastError=null;
   biggjWorldModelRuntimeLastRefreshAt=now;
+  biggjWorldModelRuntimeLastMode=plan.mode;
+  biggjWorldModelRuntimeDeferredCount=0;
+  if(biggjWorldModelRuntimeRetryTimer){
+   clearTimeout(biggjWorldModelRuntimeRetryTimer);
+   biggjWorldModelRuntimeRetryTimer=null;
+  }
   const summary=biggjWorldModelRuntimeSummary(biggjWorldModelRuntimeState);
   recordOperation(observability,{name:'biggj_world_model_refresh',ok:true,latencyMs:Date.now()-started,error:null});
   console.log('[BIGGJ_WORLD_MODEL]',JSON.stringify({
    reason,
    version:summary.version,
+   mode:plan.mode,
+   memoryPolicy:BIGGJ_WORLD_MODEL_MEMORY_POLICY_VERSION,
+   symbolsRequested:symbols.length,
+   forecastRows:journalEntries.length,
    markets:summary.marketCount,
    states:summary.stateCount,
    associationEdges:summary.associationEdges,
@@ -4941,6 +5000,7 @@ async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
   const msg=err instanceof Error?err.message:String(err);
   biggjWorldModelRuntimeHealthy=false;
   biggjWorldModelRuntimeLastError=msg;
+  biggjWorldModelRuntimeLastMode='ERROR';
   recordError(observability,{scope:'biggj_world_model',message:msg});
   recordOperation(observability,{name:'biggj_world_model_refresh',ok:false,latencyMs:Date.now()-started,error:msg});
   console.error('[BIGGJ_WORLD_MODEL_ERROR]',JSON.stringify({
@@ -11985,6 +12045,10 @@ function missionControlData(){
     healthy:biggjWorldModelRuntimeHealthy,
     lastError:biggjWorldModelRuntimeLastError,
     lastRefreshAt:biggjWorldModelRuntimeLastRefreshAt,
+    refreshMode:biggjWorldModelRuntimeLastMode,
+    deferredCount:biggjWorldModelRuntimeDeferredCount,
+    lastMemory:biggjWorldModelRuntimeLastMemory,
+    memoryPolicyVersion:BIGGJ_WORLD_MODEL_MEMORY_POLICY_VERSION,
     refreshMs:biggjWorldModelRefreshMs
   },
   autonomousResearchFactory:{

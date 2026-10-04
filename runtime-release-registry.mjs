@@ -120,6 +120,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'biggj-market-science-director.mjs',
   'biggj-market-science-os.mjs',
   'biggj-world-model-runtime.mjs',
+  'biggj-world-model-memory-policy.mjs',
   'biggj-research-validation-harness.mjs',
   'biggj-research-protocol-compiler.mjs',
   'biggj-research-review-queue.mjs',

@@ -176,6 +176,47 @@ export class ForecastLearningJournal {
                 }
             }));
     }
+    worldModelEntries(opts = {}) {
+        const wanted = new Set((Array.isArray(opts.symbols) ? opts.symbols : []).map(s => String(s ?? '').toUpperCase()).filter(Boolean));
+        const maxPerSymbol = Math.max(30, Math.min(2000, Math.floor(Number(opts.maxPerSymbol) || 1000)));
+        const buckets = new Map();
+        for (let i = this.entries.length - 1; i >= 0; i--) {
+            const e = this.entries[i];
+            const symbol = String(e?.symbol ?? '').toUpperCase();
+            if (!symbol || (wanted.size && !wanted.has(symbol)))
+                continue;
+            const bucket = buckets.get(symbol) ?? [];
+            if (bucket.length >= maxPerSymbol)
+                continue;
+            bucket.push({
+                id: e?.id ?? null,
+                symbol,
+                horizonId: e?.horizonId ?? null,
+                asOf: e?.asOf ?? null,
+                status: e?.status ?? null,
+                gate: e?.gate ?? null,
+                probabilities: e?.probabilities ? {
+                    up: e.probabilities.up,
+                    down: e.probabilities.down,
+                    flat: e.probabilities.flat
+                } : null,
+                operationalConfidence: e?.operationalConfidence ?? null,
+                resolution: e?.resolution ? {
+                    topCorrect: e.resolution.topCorrect,
+                    brier: e.resolution.brier,
+                    logLoss: e.resolution.logLoss,
+                    absoluteReturnError: e.resolution.absoluteReturnError,
+                    intervalMiss: e.resolution.intervalMiss
+                } : null
+            });
+            buckets.set(symbol, bucket);
+        }
+        const out = [];
+        for (const bucket of buckets.values())
+            out.push(...bucket.reverse());
+        out.sort((a, b) => Number(a.asOf ?? 0) - Number(b.asOf ?? 0));
+        return out;
+    }
     all() { return this.entries.map(e => structuredClone(e)); }
     pending() { return this.entries.filter(e => e.status === 'PENDING').map(e => structuredClone(e)); }
     report() { return evaluateForecastJournal(this.entries); }
