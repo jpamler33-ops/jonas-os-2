@@ -853,7 +853,24 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     matched:0,opened:0,closed:0,marked:0,
     marketCapExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
-    strategyVersion:USER_99K_60S_STRATEGY_VERSION
+    strategyVersion:USER_99K_60S_STRATEGY_VERSION,
+    entryFunnel:{
+      rowsSeen:rows.length,
+      ageKnown:0,
+      ageWithinLimit:0,
+      marketCapKnown:0,
+      marketCapQualifiedAfterAge:0,
+      priceKnown:0,
+      dataCompleteAfterThreshold:0,
+      eligible:0,
+      duplicateBlocked:0,
+      capacityBlocked:0,
+      sourceNotReadyBlocked:0,
+      opened:0,
+      capitalVariantsStarted:0,
+      holdVariantsStarted:0
+    },
+    entryBlockers:{}
   };
 
   for(let i=wallet.positions.length-1;i>=0;i--){
@@ -933,62 +950,89 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     }
   }
 
-  if(snapshot?.sourceReady===true){
-    for(const row of rows){
-      if(wallet.positions.length>=Math.max(1,Number(maxOpenOperational)||30))break;
-      const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd});
-      if(!signal.match)continue;
-      results.matched++;
-      const key=user99k60sPositionKey(row);
-      if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key))continue;
-      const px=finite(row?.priceUsd);
-      if(!(px>0))continue;
-      const marketCapUsd=finite(row?.marketCap);
-      const margin=Math.max(1,Number(marginQuote)||100);
-      const rowNotionalSol=finite(row?.userStrategy?.entryNotionalSol);
-      const configuredNotionalSol=rowNotionalSol>0?rowNotionalSol:finite(entryNotionalSol);
-      const position={
-        walletId:WALLET_6_USER_99K_60S,
-        positionKey:key,
-        chainId:String(row?.chainId||''),
-        tokenAddress:String(row?.tokenAddress||''),
-        symbol:text(row?.symbol||row?.name||'MEME',80),
-        name:text(row?.name||'',120),
-        side:'LONG',leverage:1,
-        marginQuote:margin,exposureQuote:margin,
-        initialMarginQuote:margin,initialExposureQuote:margin,
-        entryPrice:px,lastPrice:px,
-        openedAt:Number(now),lastMarkedAt:Number(now),
-        sourcePairCreatedAt:finite(row?.pairCreatedAt),
-        sourceFirstSeenAt:finite(row?.firstSeenAt),
-        entryAgeSeconds:signal.ageSeconds,
-        observedTimeTo99kSeconds:signal.observedTimeTo99kSeconds,
-        entryMarketCapUsd:marketCapUsd,
-        lastMarketCapUsd:marketCapUsd,
-        peakMarketCapUsd:marketCapUsd,
-        troughMarketCapUsd:marketCapUsd,
-        entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
-        targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
-        profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
-        solPriceUsdAtEntry:finite(solPriceUsd),
-        entryLiquidityUsd:finite(row?.liquidityUsd),
-        holdLab:user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd}),
-        holdLabSummary:user99k60sHoldLabSummary(user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd})),
-        minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
-        lossExitProtectedUntil:Number(now)+Math.max(0,finite(minHoldSeconds,180))*1000,
-        minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
-        marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
-        entryStrategySignal:clone(signal),
-        strategyVersion:USER_99K_60S_STRATEGY_VERSION,
-        entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-        exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
-        targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
-        source:'BIGGJ_MEMECOIN_EARLY_RADAR',
-        status:'OPEN',
-        execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
-        epistemic:'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
-      };
-      if(openPosition(wallet,position))results.opened++;
+  for(const row of rows){
+    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd});
+    const ageKnown=signal.ageSeconds!=null;
+    const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
+    const marketCapKnown=signal.marketCapUsd!=null;
+    const marketCapQualified=marketCapKnown&&signal.marketCapUsd>=signal.thresholdUsd;
+    const priceKnown=finite(row?.priceUsd)>0;
+    if(ageKnown)results.entryFunnel.ageKnown++;
+    if(ageWithin)results.entryFunnel.ageWithinLimit++;
+    if(marketCapKnown)results.entryFunnel.marketCapKnown++;
+    if(ageWithin&&marketCapQualified)results.entryFunnel.marketCapQualifiedAfterAge++;
+    if(priceKnown)results.entryFunnel.priceKnown++;
+    if(ageWithin&&marketCapQualified&&priceKnown)results.entryFunnel.dataCompleteAfterThreshold++;
+    for(const blocker of signal.blockers||[])results.entryBlockers[blocker]=(results.entryBlockers[blocker]||0)+1;
+    if(!signal.match)continue;
+    results.entryFunnel.eligible++;
+    if(snapshot?.sourceReady!==true){
+      results.entryFunnel.sourceNotReadyBlocked++;
+      continue;
+    }
+    results.matched++;
+    const key=user99k60sPositionKey(row);
+    if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key)){
+      results.entryFunnel.duplicateBlocked++;
+      continue;
+    }
+    if(wallet.positions.length>=Math.max(1,Number(maxOpenOperational)||30)){
+      results.entryFunnel.capacityBlocked++;
+      continue;
+    }
+    const px=finite(row?.priceUsd);
+    if(!(px>0))continue;
+    const marketCapUsd=finite(row?.marketCap);
+    const margin=Math.max(1,Number(marginQuote)||100);
+    const rowNotionalSol=finite(row?.userStrategy?.entryNotionalSol);
+    const configuredNotionalSol=rowNotionalSol>0?rowNotionalSol:finite(entryNotionalSol);
+    const holdLab=user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd});
+    const position={
+      walletId:WALLET_6_USER_99K_60S,
+      positionKey:key,
+      chainId:String(row?.chainId||''),
+      tokenAddress:String(row?.tokenAddress||''),
+      symbol:text(row?.symbol||row?.name||'MEME',80),
+      name:text(row?.name||'',120),
+      side:'LONG',leverage:1,
+      marginQuote:margin,exposureQuote:margin,
+      initialMarginQuote:margin,initialExposureQuote:margin,
+      entryPrice:px,lastPrice:px,
+      openedAt:Number(now),lastMarkedAt:Number(now),
+      sourcePairCreatedAt:finite(row?.pairCreatedAt),
+      sourceFirstSeenAt:finite(row?.firstSeenAt),
+      entryAgeSeconds:signal.ageSeconds,
+      observedTimeTo99kSeconds:signal.observedTimeTo99kSeconds,
+      entryMarketCapUsd:marketCapUsd,
+      lastMarketCapUsd:marketCapUsd,
+      peakMarketCapUsd:marketCapUsd,
+      troughMarketCapUsd:marketCapUsd,
+      entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
+      targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
+      profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
+      solPriceUsdAtEntry:finite(solPriceUsd),
+      entryLiquidityUsd:finite(row?.liquidityUsd),
+      holdLab,
+      holdLabSummary:user99k60sHoldLabSummary(holdLab),
+      minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
+      lossExitProtectedUntil:Number(now)+Math.max(0,finite(minHoldSeconds,180))*1000,
+      minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
+      marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
+      entryStrategySignal:clone(signal),
+      strategyVersion:USER_99K_60S_STRATEGY_VERSION,
+      entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
+      targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
+      source:'BIGGJ_MEMECOIN_EARLY_RADAR',
+      status:'OPEN',
+      execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
+      epistemic:'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
+    };
+    if(openPosition(wallet,position)){
+      results.opened++;
+      results.entryFunnel.opened++;
+      results.entryFunnel.capitalVariantsStarted+=position.profitTargetScenarios.length;
+      results.entryFunnel.holdVariantsStarted+=position.holdLab.length;
     }
   }
 
