@@ -621,7 +621,7 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
       {name:'W6 · 99K IN 60S · USER V1',value:[
         'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
         'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
-        'Sizing getrennt: **10 / 20 / 40 / 80 SOL** · Ziel **+10 SOL** abhängig vom Einsatz.',
+        'Sizing getrennt: **10 / 20 / 40 / 80 SOL** · **+10 SOL nur Vergleichsmarke**, kein Auto-Exit.',
         user99Active[0]?.profitTargetScenarios?.length
           ?user99Active[0].profitTargetScenarios.map(s=>'`'+String(s.entryNotionalSol)+' SOL` '+(s.targetHit?'✅ Ziel erreicht':'→ ca. '+(Number(s.targetPriceReturnApprox||0)*100).toFixed(1)+'% Preisbewegung nötig')).join(' · ')
           :'Noch kein aktiver W6-Trade.'
