@@ -722,7 +722,8 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   geckoCacheMs:Math.max(45_000,Math.min(180_000,Number(process.env.TCX_MEMECOIN_GECKO_CACHE_MS||60_000))),
   ultraGeckoCacheMs:Math.max(10_000,Math.min(60_000,Number(process.env.TCX_W6_ULTRA_GECKO_CACHE_MS||30_000))),
   ultraDexCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_DEX_CACHE_MS||5_000))),
-  gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1h').trim(),
+  gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1m').trim(),
+  gmgnTrendOrderBy:String(process.env.TCX_W6_GMGN_TREND_ORDER_BY||'creation_timestamp').trim(),
   gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'gmgn_solbscbaseethmonadtron').trim(),
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
@@ -5219,6 +5220,7 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     solPriceUsd,
     maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
     requireTrending:true,
+    requireNewPair:true,
     catastrophicDrawdownPct:Math.max(.50,Math.min(.99,Number(process.env.TCX_W6_CATASTROPHIC_DRAWDOWN_PCT||.90))),
     catastrophicMarketCapUsd:Math.max(0,Number(process.env.TCX_W6_CATASTROPHIC_MCAP_USD||10_000))
   };
@@ -5388,6 +5390,8 @@ async function refreshW6UltraEarly(reason='periodic'){
       source:ultra.source,
       exactGmgn:ultra.exactGmgn===true,
       trendInterval:ultra.trendInterval||null,
+      trendOrderBy:ultra.trendOrderBy||null,
+      setup:ultra.setup||'GMGN_TRENDING_NEW_PAIR_1M',
       sourceReady:ultra.sourceReady,
       sourceErrors:ultra.errors||[],
       discoveryRows:ultra.discoveryRows||0,
