@@ -501,18 +501,20 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.entryMarketCapUsd,120_000);
   assert.equal(p.entryRule,'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
   assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
-  assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[10,20,40,80]);
+  assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[5,10,20,40,80]);
+  assert.equal(p.minHoldSeconds,180);
+  assert.equal(p.holdLab.length,15);
   assert.equal(p.canExecuteLive,false);
 });
 
-test('user 99k/60s V1 can apply a market-cap exit only when an explicit floor is configured',()=>{
+test('user 99k/60s V1 can apply a market-cap exit after the three-minute protection when an explicit floor is configured',()=>{
   const now=12_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
   }]},{now,minExitMarketCapUsd:99_000}).state;
   const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-50_000
-  }]},{now:now+30_000,minExitMarketCapUsd:99_000});
+    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-210_000
+  }]},{now:now+190_000,minExitMarketCapUsd:99_000});
   assert.equal(next.results.closed,1);
   assert.equal(next.results.marketCapExit,1);
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,0);
@@ -612,4 +614,62 @@ test('W6 exit learner remains descriptive until at least 20 marked exits',()=>{
   assert.equal(s.minimumSamplesBeforeRuleProposal,20);
   assert.equal(s.automaticPolicyMutation,false);
   assert.equal(s.canExecuteLive,false);
+});
+
+
+test('W6 loss-style market-cap exit is protected during the first three minutes',()=>{
+  const now=18_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000
+  }]},{now,minExitMarketCapUsd:99_000,minHoldSeconds:180}).state;
+
+  const early=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',priceUsd:.92,marketCap:90_000,pairCreatedAt:now-100_000
+  }]},{now:now+120_000,minExitMarketCapUsd:99_000,minHoldSeconds:180});
+  assert.equal(early.results.closed,0);
+  assert.equal(early.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
+
+  const later=applyUser99k60sStrategySnapshot(early.state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',priceUsd:.90,marketCap:88_000,pairCreatedAt:now-210_000
+  }]},{now:now+190_000,minExitMarketCapUsd:99_000,minHoldSeconds:180});
+  assert.equal(later.results.closed,1);
+  assert.equal(later.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
+});
+
+test('W6 hold lab compares 5m 10m and runner policies across five SOL sizes',()=>{
+  const now=19_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1,marketCap:120_000,pairCreatedAt:now-15_000
+  }]},{now,minHoldSeconds:180}).state;
+
+  const at5=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1.10,marketCap:145_000,pairCreatedAt:now-315_000
+  }]},{now:now+300_000,minHoldSeconds:180});
+  let p=at5.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_5M'&&x.status==='CLOSED').length,5);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='OPEN').length,5);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,5);
+
+  const at10=applyUser99k60sStrategySnapshot(at5.state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'HOLDGRID',symbol:'HOLDGRID',priceUsd:1.20,marketCap:165_000,pairCreatedAt:now-615_000
+  }]},{now:now+600_000,minHoldSeconds:180});
+  p=at10.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.holdLab.filter(x=>x.policyId==='HOLD_10M'&&x.status==='CLOSED').length,5);
+  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,5);
+  assert.equal(p.holdLabSummary.closed,10);
+  assert.equal(p.holdLabSummary.best.policyId,'HOLD_10M');
+  assert.ok(p.holdLabSummary.best.estimatedSolNeededFor10SolReference>0);
+  assert.equal(p.canExecuteLive,false);
+});
+
+test('W6 runner can stay open beyond ten minutes while the coin remains healthy',()=>{
+  const now=20_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUNNERGOOD',symbol:'RUNNERGOOD',priceUsd:1,marketCap:120_000,pairCreatedAt:now-10_000
+  }]},{now,minHoldSeconds:180}).state;
+  const at12=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'RUNNERGOOD',symbol:'RUNNERGOOD',priceUsd:1.25,marketCap:180_000,pairCreatedAt:now-730_000
+  }]},{now:now+720_000,minHoldSeconds:180});
+  const p=at12.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.holdLab.filter(x=>x.policyId==='RUNNER'&&x.status==='OPEN').length,5);
 });
