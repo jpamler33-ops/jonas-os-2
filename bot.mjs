@@ -5218,7 +5218,7 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     entryNotionalSol:Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL||0)>0
       ?Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL)
       :null,
-    notionalScenariosSol:[2,5,10,20,40,60,80],
+    notionalScenariosSol:[0.5,1,2,3,5,10,20,40,60,80],
     minHoldSeconds:Math.max(0,Math.min(1800,Number(process.env.TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180))),
     solPriceUsd,
     maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
