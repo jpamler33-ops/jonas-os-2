@@ -13439,5 +13439,17 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
   canExecute:false
 }));
 
-await tg('deleteWebhook',{ drop_pending_updates:false });
+try{
+  await tg('deleteWebhook',{ drop_pending_updates:false });
+}catch(err){
+  const message=err instanceof Error?err.message:String(err);
+  recordError(observability,{scope:'telegram.startup.deleteWebhook',message});
+  console.error('[TCX_TELEGRAM_STARTUP_DEGRADED]',JSON.stringify({
+    operation:'deleteWebhook',
+    error:message,
+    action:'CONTINUE_STARTUP_AND_LET_POLL_RETRY',
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  }));
+}
 await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),memecoinEarlyWatcher(),w6UltraEarlyWatcher(),biggjWorldModelWatcher()]);
