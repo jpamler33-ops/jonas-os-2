@@ -494,8 +494,6 @@ export function createMemecoinEarlyRadarProvider({
         chain:'sol',
         interval:gmgnTrendWindow,
         limit:'100',
-        order_by:'default',
-        direction:'desc',
         timestamp:String(timestamp),
         client_id:String(clientId)
       });
