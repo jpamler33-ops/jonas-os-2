@@ -400,7 +400,6 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
-  const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     opened:0,closed:0,marked:0,eligible:0,
@@ -849,6 +848,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
+  const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
