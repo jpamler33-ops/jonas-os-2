@@ -771,6 +771,7 @@ export function createMemecoinEarlyRadarProvider({
         trendSource:text(pool?.trendSource||trendSource,80),
         trendRank:finite(pool?.trendRank),
         ultraEarly:true,
+        sourceSetup:'GMGN_TRENDING_NEW_PAIR_1M',
         w6TrackingOnly:false,
         ultraSource:dexRow?(text(pool?.trendSource||trendSource,80)+'_PLUS_DEXSCREENER_BATCH'):text(pool?.trendSource||trendSource,80)
       };
@@ -791,6 +792,7 @@ export function createMemecoinEarlyRadarProvider({
         firstSeenAt:finite(candidate?.firstSeenAt)??firstSeen.get(key),
         signalNewPool:false,
         signalTrending:false,
+        signalNewPair:false,
         wasTrending:true,
         gmgnExactTrend:candidate?.gmgnExactTrend===true,
         trendSource:text(candidate?.trendSource||'W6_TREND_MEMORY',80),
@@ -811,6 +813,8 @@ export function createMemecoinEarlyRadarProvider({
         ...dexRow,
         firstSeenAt:firstSeen.get(key),
         ultraEarly:false,
+        signalTrending:false,
+        signalNewPair:false,
         candidateTracking:false,
         w6TrackingOnly:true,
         ultraSource:'DEXSCREENER_BATCH_POSITION_TRACKING'
