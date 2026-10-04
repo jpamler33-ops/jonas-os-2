@@ -622,11 +622,14 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
       {name:'W6 · 99K IN 60S · USER V1',value:[
         'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
         'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
-        'Sizing getrennt: **10 / 20 / 40 / 80 SOL** · **+10 SOL nur Vergleichsmarke**, kein Auto-Exit.',
+        'Sizing parallel: **5 / 10 / 20 / 40 / 80 SOL** auf demselben Entry.',
+        'Hold-Lab: **3 Min Verlustschutz** · danach **5m / 10m / Runner** bis max. 30m vergleichen.',
         'Exit-Lernen: **'+String(user99Exit?.samples??0)+'/20** markiert · Regelvorschlag **'+(user99Exit?.ruleProposalReady?'BEREIT ZUR PRÜFUNG':'GESPERRT')+'**.',
-        user99Active[0]?.profitTargetScenarios?.length
-          ?user99Active[0].profitTargetScenarios.map(s=>'`'+String(s.entryNotionalSol)+' SOL` '+(s.targetHit?'✅ Ziel erreicht':'→ ca. '+(Number(s.targetPriceReturnApprox||0)*100).toFixed(1)+'% Preisbewegung nötig')).join(' · ')
-          :'Noch kein aktiver W6-Trade.'
+        user99Active[0]?.holdLabSummary?.best
+          ?'Bestes Preis/Leistungs-Szenario: **'+String(user99Active[0].holdLabSummary.best.policyId||'—')+'** · Effizienz **'+percent(user99Active[0].holdLabSummary.best.capitalEfficiency)+'** · ~**'+(Number(user99Active[0].holdLabSummary.best.estimatedSolNeededFor10SolReference||0).toFixed(1))+' SOL** für +10 SOL Referenz'
+          :user99Active[0]?.profitTargetScenarios?.length
+            ?user99Active[0].profitTargetScenarios.map(s=>'`'+String(s.entryNotionalSol)+' SOL` '+(s.targetHit?'✅ Referenz erreicht':'→ '+(Number(s.targetPriceReturnApprox||0)*100).toFixed(1)+'% bis +10 SOL Ref.')).join(' · ')
+            :'Noch kein aktiver W6-Trade.'
       ].join('\n').slice(0,1024),inline:false},
       {name:'Probes',value:'Offen **'+openContrarian.length+'** · abgeschlossen **'+String(contra?.samples??0)+'** · Normal-Learner **'+String(learning?.samples??0)+'**',inline:false},
       {name:'Outcome',value:'WR **'+pctMaybe(g?.rawWinRate)+'** · Ø **'+pctMaybe(g?.rawMeanReturn)+'** · Median **'+pctMaybe(g?.medianReturn)+'** · Severe **'+pctMaybe(g?.severeLossRate)+'** · Moonshot **'+pctMaybe(g?.moonshotRate)+'**',inline:false},
