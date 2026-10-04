@@ -507,14 +507,14 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.canExecuteLive,false);
 });
 
-test('user 99k/60s V1 can apply a market-cap exit only when an explicit floor is configured',()=>{
+test('user 99k/60s V1 can apply a market-cap exit after the three-minute protection when an explicit floor is configured',()=>{
   const now=12_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
   }]},{now,minExitMarketCapUsd:99_000}).state;
   const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-50_000
-  }]},{now:now+30_000,minExitMarketCapUsd:99_000});
+    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-210_000
+  }]},{now:now+190_000,minExitMarketCapUsd:99_000});
   assert.equal(next.results.closed,1);
   assert.equal(next.results.marketCapExit,1);
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,0);
