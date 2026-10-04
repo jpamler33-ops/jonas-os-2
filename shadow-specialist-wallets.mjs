@@ -370,6 +370,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   feeBps=30,
   minScore=.58,
   minLiquidityUsd=10_000,
+  requireBuySignal=false,
   maxOpenOperational=30,
   horizonMs=12*60*60_000,
   stopReturn=-.25,
@@ -395,7 +396,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     opened:0,closed:0,marked:0,eligible:0,
-    learningBlocked:0,learningThrottled:0,learningBoosted:0,
+    learningBlocked:0,learningThrottled:0,learningBoosted:0,signalBlocked:0,
     tailRiskBlocked:0,tailRiskClosed:0,riskReduced:0,profitLocked:0,runnerTrailClosed:0,hardStopClosed:0,
     contrarianEligible:0,contrarianOpened:0,contrarianRejectedByHardGuard:0,
     sourceReady:snapshot?.sourceReady===true
@@ -476,6 +477,11 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     const securityGate=memeSecurityGate(row);
     const learningAction=String(row?.memeLearning?.action||'NEUTRAL').toUpperCase();
     const entryTailRisk=memeEntryTailRisk(row);
+    const entrySignalAction=String(row?.memeSignal?.action||'').toUpperCase();
+    if(requireBuySignal===true&&entrySignalAction!=='BUY'){
+      results.signalBlocked++;
+      continue;
+    }
 
     const hardSafe=
       px>0&&
@@ -588,6 +594,8 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
         holderFallbackUsed:row?.security?.coverage?.holderConcentrationIndependent===true||Boolean(row?.security?.independentHolderEvidence)
       },
       entryMemeLearning:clone(row?.memeLearning||null),
+      entryMemeSignal:clone(row?.memeSignal||null),
+      entrySignalAction:entrySignalAction||null,
       entryLearningSizeMultiplier:sizeMultiplier,
       entryRiskSizeMultiplier:riskSizeMultiplier,
       entrySizingPolicy:riskSizingEnabled===true?'LIQUIDITY_SCORE_RISK_SIZED':'LEGACY_FLAT_SHADOW_SIZE',
