@@ -181,13 +181,17 @@ export function deriveShadowWorkerReplayPlan({
         initialHistoryRows:initial
       };
     }
-    if(admission.reason==='HARD_MEMORY_PRESSURE'||admission.reason==='DISABLED'){
+    if(admission.reason==='DISABLED'){
       return {
         ...plan,
         replayMode:'DEFERRED',
         initialHistoryRows:initial
       };
     }
+    // HARD_MEMORY_PRESSURE at a larger replay window is not final: shrinking
+    // the replay window raises the adaptive headroom threshold and reduces the
+    // worker payload. Continue through compact candidates before deferring.
+    if(admission.reason==='HARD_MEMORY_PRESSURE') continue;
   }
   return {
     ...(last||first||evaluateShadowWorkerAdmission({mode,heapUsedMb,rssMb,externalMb})),
