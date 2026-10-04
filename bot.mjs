@@ -722,6 +722,7 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   geckoCacheMs:Math.max(45_000,Math.min(180_000,Number(process.env.TCX_MEMECOIN_GECKO_CACHE_MS||60_000))),
   ultraGeckoCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_GECKO_CACHE_MS||5_000))),
   ultraDexCacheMs:Math.max(3_000,Math.min(15_000,Number(process.env.TCX_W6_ULTRA_DEX_CACHE_MS||5_000))),
+  gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1h').trim(),
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
 });
@@ -5383,6 +5384,7 @@ async function refreshW6UltraEarly(reason='periodic'){
       version:W6_ULTRA_EARLY_FEED_VERSION,
       source:ultra.source,
       exactGmgn:ultra.exactGmgn===true,
+      trendInterval:ultra.trendInterval||null,
       sourceReady:ultra.sourceReady,
       sourceErrors:ultra.errors||[],
       discoveryRows:ultra.discoveryRows||0,
