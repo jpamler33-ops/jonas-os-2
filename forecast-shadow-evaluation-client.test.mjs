@@ -145,7 +145,7 @@ test('adaptive replay still defers when compact soft headroom is fully exhausted
   });
   assert.equal(plan.allowed,false);
   assert.equal(plan.replayMode,'DEFERRED');
-  assert.equal(plan.reason,'ADAPTIVE_MEMORY_PRESSURE');
+  assert.equal(plan.reason,'HARD_MEMORY_PRESSURE');
 });
 
 test('autolearn admission blocks external-memory pressure even when heap and rss look safe',()=>{
