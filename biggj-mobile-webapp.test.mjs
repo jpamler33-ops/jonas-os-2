@@ -325,7 +325,8 @@ test('research spine is visible in the discovery view',()=>{
 
 test('W6 webapp shows expanded sizing and 60m runner lab',()=>{
   const h=renderBiggjMobileApp({health:{specialistWallets:{wallets:{W6_USER_99K_60S:{openPositions:0,closedTrades:0,active:[]}}},memecoinRadar:{user99k60s:{exitLearning:{samples:0}}}}});
-  assert.match(h,/2\/5\/10\/20\/40\/60\/80 SOL/);
+  assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
+  assert.match(h,/REALISTISCH MAX/);
   assert.match(h,/Runner bis max\. 60m/);
   assert.match(h,/Liquiditäts-Price-Impact/);
   assert.match(h,/ENTRY FUNNEL/);
