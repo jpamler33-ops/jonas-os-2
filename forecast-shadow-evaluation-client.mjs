@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 
 export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1';
 
-export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2';
+export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V3';
 
 export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V2';
 
@@ -99,6 +99,104 @@ export function evaluateShadowWorkerAdmission({
     return {allowed:false,mode:effectiveMode,reason:'ADAPTIVE_MEMORY_PRESSURE',memory,limits};
   }
   return {allowed:true,mode:effectiveMode,reason:'MEMORY_HEADROOM_AVAILABLE',memory,limits};
+}
+
+export function deriveShadowWorkerReplayPlan({
+  mode='AUTO',
+  heapUsedMb=0,
+  rssMb=0,
+  externalMb=0,
+  configuredHistoryRows=1200,
+  effectiveHistoryRows=1200,
+  minHistoryRows=500,
+  baseAutoHeapMb=260,
+  baseAutoRssMb=620,
+  autoExternalMb=64,
+  hardExternalMb=160,
+  maxAdaptiveAutoHeapMb=345,
+  maxAdaptiveAutoRssMb=720,
+  maxAdaptiveHardHeapMb=370,
+  hardRssMb=900
+}={}){
+  const configured=Math.max(1,Math.floor(Number(configuredHistoryRows)||1200));
+  const minimum=Math.max(40,Math.min(configured,Math.floor(Number(minHistoryRows)||500)));
+  const initial=Math.max(minimum,Math.min(configured,Math.floor(Number(effectiveHistoryRows)||configured)));
+  const candidates=[initial];
+  if(String(mode||'AUTO').trim().toUpperCase()==='AUTO'){
+    for(const ratio of [.80,.65,.50]){
+      candidates.push(Math.max(minimum,Math.floor(initial*ratio)));
+    }
+    candidates.push(minimum);
+  }
+
+  const seen=new Set();
+  let first=null;
+  let last=null;
+  for(const rows of candidates){
+    if(seen.has(rows)) continue;
+    seen.add(rows);
+    const replayWindowRatio=Math.max(.25,Math.min(1,rows/configured));
+    const adaptiveAutoHeapMb=Math.min(
+      Math.max(1,Number(maxAdaptiveAutoHeapMb)||345),
+      Math.max(1,Number(baseAutoHeapMb)||260)+Math.round((1-replayWindowRatio)*145)
+    );
+    const adaptiveAutoRssMb=Math.min(
+      Math.max(1,Number(maxAdaptiveAutoRssMb)||720),
+      Math.max(1,Number(baseAutoRssMb)||620)+Math.round((1-replayWindowRatio)*140)
+    );
+    const adaptiveHardHeapMb=Math.min(
+      Math.max(1,Number(maxAdaptiveHardHeapMb)||370),
+      Math.max(300,adaptiveAutoHeapMb+25)
+    );
+    const admission=evaluateShadowWorkerAdmission({
+      mode,
+      heapUsedMb,
+      rssMb,
+      externalMb,
+      autoHeapMb:adaptiveAutoHeapMb,
+      autoRssMb:adaptiveAutoRssMb,
+      autoExternalMb,
+      hardHeapMb:adaptiveHardHeapMb,
+      hardRssMb,
+      hardExternalMb
+    });
+    const plan={
+      ...admission,
+      historyRows:rows,
+      configuredHistoryRows:configured,
+      replayWindowRatio,
+      compacted:rows<initial,
+      limits:{
+        ...admission.limits,
+        effectiveHistoryRows:rows,
+        configuredHistoryRows:configured
+      }
+    };
+    if(!first) first=plan;
+    last=plan;
+    if(admission.allowed){
+      return {
+        ...plan,
+        replayMode:rows<initial?'COMPACT':'FULL',
+        initialHistoryRows:initial
+      };
+    }
+    if(admission.reason==='HARD_MEMORY_PRESSURE'||admission.reason==='DISABLED'){
+      return {
+        ...plan,
+        replayMode:'DEFERRED',
+        initialHistoryRows:initial
+      };
+    }
+  }
+  return {
+    ...(last||first||evaluateShadowWorkerAdmission({mode,heapUsedMb,rssMb,externalMb})),
+    replayMode:'DEFERRED',
+    initialHistoryRows:initial,
+    historyRows:last?.historyRows??initial,
+    configuredHistoryRows:configured,
+    compacted:(last?.historyRows??initial)<initial
+  };
 }
 
 export function forecastHistoryProgressAt(historyRows){

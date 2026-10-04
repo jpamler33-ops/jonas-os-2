@@ -7,6 +7,7 @@ import {
   FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,
   AUTOLEARN_MEMORY_ADMISSION_VERSION,
   evaluateShadowWorkerAdmission,
+  deriveShadowWorkerReplayPlan,
   evaluateAutoLearnMemoryAdmission,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced
@@ -68,9 +69,60 @@ test('adaptive shadow worker admission requires real serving headroom',()=>{
   assert.equal(forcedExternalFailsHard.limits.hardExternalMb,160);
 
   assert.equal(evaluateShadowWorkerAdmission({mode:'OFF',heapUsedMb:100,rssMb:200}).allowed,false);
-  assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V2');
+  assert.equal(FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION,'TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V3');
 });
 
+
+test('adaptive replay compacts history instead of deferring under mild heap-only pressure',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',
+    heapUsedMb:344,
+    rssMb:670,
+    externalMb:4,
+    configuredHistoryRows:1200,
+    effectiveHistoryRows:650,
+    minHistoryRows:500,
+    baseAutoHeapMb:260,
+    baseAutoRssMb:620,
+    autoExternalMb:64,
+    hardExternalMb:160
+  });
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.replayMode,'COMPACT');
+  assert.equal(plan.historyRows,500);
+  assert.equal(plan.initialHistoryRows,650);
+  assert.equal(plan.limits.autoHeapMb,345);
+  assert.equal(plan.limits.hardHeapMb,370);
+});
+
+test('adaptive replay never bypasses genuine hard rss or external pressure',()=>{
+  const rss=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:320,rssMb:900,externalMb:4,
+    configuredHistoryRows:1200,effectiveHistoryRows:650
+  });
+  assert.equal(rss.allowed,false);
+  assert.equal(rss.replayMode,'DEFERRED');
+  assert.equal(rss.reason,'HARD_MEMORY_PRESSURE');
+
+  const external=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:320,rssMb:650,externalMb:160,
+    configuredHistoryRows:1200,effectiveHistoryRows:650
+  });
+  assert.equal(external.allowed,false);
+  assert.equal(external.replayMode,'DEFERRED');
+  assert.equal(external.reason,'HARD_MEMORY_PRESSURE');
+});
+
+test('adaptive replay still defers when even the minimum replay cannot create headroom',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:349,rssMb:670,externalMb:4,
+    configuredHistoryRows:1200,effectiveHistoryRows:650,minHistoryRows:500
+  });
+  assert.equal(plan.allowed,false);
+  assert.equal(plan.replayMode,'DEFERRED');
+  assert.equal(plan.historyRows,500);
+  assert.equal(plan.reason,'ADAPTIVE_MEMORY_PRESSURE');
+});
 
 test('autolearn admission blocks external-memory pressure even when heap and rss look safe',()=>{
   const r=evaluateAutoLearnMemoryAdmission({
