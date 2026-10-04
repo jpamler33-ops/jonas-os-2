@@ -928,7 +928,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
-    matched:0,opened:0,closed:0,marked:0,
+    matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
     marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION,
@@ -1105,7 +1105,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       trendRankAtEntry:finite(row?.trendRank),
       trendVisibleAtEntry:row?.signalTrending===true||row?.w6TrendVisible===true,
       newPairVisibleAtEntry:row?.signalNewPair===true&&(row?.signalTrending===true||row?.w6TrendVisible===true),
-      sourceSetupAtEntry:text(row?.sourceSetup||row?.setup||'GMGN_TRENDS_1M',80),
+      trendSourceAtEntry:text(row?.trendSource||row?.ultraSource||'',120)||null,
+      exactGmgnTrendAtEntry:row?.gmgnExactTrend===true,
+      trendFidelityAtEntry:row?.gmgnExactTrend===true?'EXACT_GMGN_TRENDS':'FREE_TRENDS_PROXY',
+      sourceSetupAtEntry:text(row?.sourceSetup||row?.setup||(row?.gmgnExactTrend===true?'GMGN_TRENDS_1M':'TRENDS_PROXY_RESEARCH'),80),
       firstObservedAgeSeconds:finite(row?.w6LaunchTracker?.firstObservedAgeSeconds),
       first99kObservedAgeSeconds:finite(row?.w6LaunchTracker?.first99kObservedAgeSeconds),
       troughMarketCapUsd:marketCapUsd,
@@ -1136,6 +1139,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     };
     if(openPosition(wallet,position)){
       results.opened++;
+      if(row?.gmgnExactTrend===true)results.openedExactGmgn++;
+      else results.openedTrendProxy++;
       results.entryFunnel.opened++;
       results.entryFunnel.capitalVariantsStarted+=position.profitTargetScenarios.length;
       results.entryFunnel.holdVariantsStarted+=position.holdLab.length;

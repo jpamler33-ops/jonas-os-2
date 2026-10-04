@@ -802,6 +802,24 @@ test('specialist wallet summary strips bidi controls from persisted token labels
   assert.equal(p.name,'Spoof');
 });
 
+test('W6 runtime market-cap mode can use a labelled free trend proxy without confusing it with exact GMGN',()=>{
+  const now=12_950_000;
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'PROXY99K',symbol:'P99',priceUsd:.001,marketCap:120000,pairCreatedAt:now-25_000,
+    signalTrending:true,gmgnExactTrend:false,trendRank:2,trendSource:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER',sourceSetup:'TRENDS_PROXY_RESEARCH'
+  }]},{now,requireTrending:true,minMarketCapUsd:99_000,minGreenChangePct:null,requireExactGmgnGreen:false});
+  assert.equal(x.results.opened,1);
+  assert.equal(x.results.openedExactGmgn,0);
+  assert.equal(x.results.openedTrendProxy,1);
+  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.entryThresholdMode,'MARKET_CAP_USD');
+  assert.equal(p.entryMarketCapUsd,120000);
+  assert.equal(p.trendFidelityAtEntry,'FREE_TRENDS_PROXY');
+  assert.equal(p.exactGmgnTrendAtEntry,false);
+  assert.equal(p.trendSourceAtEntry,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
+  assert.equal(p.sourceSetupAtEntry,'TRENDS_PROXY_RESEARCH');
+});
+
 test('W6 trend gate rejects a fresh 99k coin that is not in the trend feed',()=>{
   const now=13_000_000;
   const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{

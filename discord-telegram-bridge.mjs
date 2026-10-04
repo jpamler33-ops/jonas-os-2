@@ -570,7 +570,8 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
   const wallet=h?.specialistWallets?.wallets?.W4_MEME_SCOUT||{};
   const user99=h?.specialistWallets?.wallets?.W6_USER_99K_60S||{};
   const user99Exit=radar?.user99k60s?.exitLearning||{};
-  const user99Funnel=radar?.user99k60s?.results?.entryFunnel||{};
+  const user99Results=radar?.user99k60s?.results||{};
+  const user99Funnel=user99Results?.entryFunnel||{};
   const user99Ultra=radar?.user99k60s?.ultraFeed||{};
   const user99LaunchStats=user99Ultra?.launchStats||{};
   const user99Blockers=radar?.user99k60s?.results?.entryBlockers||{};
@@ -627,7 +628,7 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
       {name:'W6 · 99K IN 60S · USER V1',value:[
         'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
         'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
-        'Funnel: **'+String(user99Funnel?.rowsSeen??0)+' gesehen → '+String(user99Funnel?.ageWithinLimit??0)+' ≤60s → '+String(user99Funnel?.marketCapQualifiedAfterAge??0)+' ≥99k → '+String(user99Funnel?.dataCompleteAfterThreshold??0)+' Daten OK → '+String(user99Funnel?.eligible??0)+' Match → '+String(user99Funnel?.opened??0)+' opened**',
+        'Funnel: **'+String(user99Funnel?.rowsSeen??0)+' gesehen → '+String(user99Funnel?.ageWithinLimit??0)+' ≤60s → '+String(user99Funnel?.marketCapQualifiedAfterAge??0)+' ≥99k → '+String(user99Funnel?.dataCompleteAfterThreshold??0)+' Daten OK → '+String(user99Funnel?.eligible??0)+' Match → '+String(user99Funnel?.opened??0)+' opened** · Exact GMGN '+String(user99Results?.openedExactGmgn??0)+' / Proxy '+String(user99Results?.openedTrendProxy??0),
         'Ultra: **~'+(Number(user99Ultra?.pollMs||0)/1000).toFixed(1)+'s** · Hot **'+String(user99Ultra?.candidateBookSize??0)+'** · ≤60s entdeckt **'+String(user99LaunchStats?.discoveredWithin60??0)+'** · ≥99k≤60s **'+String(user99LaunchStats?.first99kObservedWithin60??0)+'** · ≥99k erst >60s **'+String(user99LaunchStats?.first99kObservedAfter60??0)+'**',
         'Blocker: '+user99BlockerText+' · Varianten gestartet: **'+String(user99Funnel?.capitalVariantsStarted??0)+' Size / '+String(user99Funnel?.holdVariantsStarted??0)+' Hold**',
         'Sizing parallel: **0.5 / 1 / 2 / 3 / 5 / 10 / 20 / 40 / 60 / 80 SOL** auf demselben Entry · Liquiditäts-Impact wird heuristisch berücksichtigt.',
