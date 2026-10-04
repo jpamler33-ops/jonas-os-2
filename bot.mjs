@@ -12,6 +12,7 @@ import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TE
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
 import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
+import { applyMemecoinEntrySignals, MEMECOIN_SIGNAL_CONTROLLER_VERSION } from './memecoin-signal-controller.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
 import { buildNewsResearchSnapshots, filterPreviouslyObservedNewsSnapshots, NEWS_RESEARCH_ADAPTER_VERSION } from './news-research-adapter.mjs';
 import { cleanupOrphanedPersistenceArtifacts, inspectPersistenceStorage, inspectStoragePressure, classifyStorageWriteAdmission, classifyBoundedResearchDataPlaneWrite } from './storage-maintenance.mjs';
@@ -4511,10 +4512,15 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
         ...(row?.security?.warningFlags||[]),
         ...(row?.security?.unknownReasonCodes||[])
       ].slice(0,3).join(' · ')||'keine kritische Security-Evidenz im aktuellen Check';
+      const signal=row?.memeSignal||null;
+      const signalText=signal?.label||'👀 WATCH';
+      const signalScore=Math.round(Number(signal?.entryReadinessScore||0)*100);
+      const signalWhy=(signal?.blockers?.length?signal.blockers:signal?.missing?.length?signal.missing:signal?.reasons||[]).slice(0,3).join(' · ')||'noch keine Freigabe';
       return [
         (i+1)+'. **'+name+'** · '+String(row?.chainId||'').toUpperCase()+' · '+(stageLabel[row?.score?.stage]||row?.score?.stage||'WATCH')+' · Priority '+score+'/100',
         '   '+age+' · Preis '+compactUsd(row?.priceUsd)+' · Liq '+compactUsd(row?.liquidityUsd)+' · MC '+compactUsd(row?.marketCap??row?.fdv),
         '   5m: Vol '+compactUsd(row?.volumeM5)+' · Buy/Sell '+buys+'/'+sells+' · '+signedPercent(row?.priceChangeM5),
+        '   Entscheidung: '+signalText+' · Readiness '+signalScore+'/100 · '+signalWhy,
         '   Attention: '+signals,
         '   Radar: '+risks,
         '   Security: '+securityIcon+' '+securityGate+' · '+securityFlags
@@ -5220,15 +5226,34 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       (Number(b?.score?.researchPriorityScore||0)+Number(b?.memeLearning?.rankingAdjustment||0))-
       (Number(a?.score?.researchPriorityScore||0)+Number(a?.memeLearning?.rankingAdjustment||0))
     );
-    secured={...secured,rows:learnedSecuredRows,tradeLearning:memecoinTradeLearningSummary(preTradeLearningModel)};
-    const secureByKey=new Map(learnedSecuredRows.map(row=>[memecoinRowKey(row),row]));
+    const signaledSecured=applyMemecoinEntrySignals({...secured,rows:learnedSecuredRows},{
+      minReadyResearchScore:Math.max(.40,Math.min(.95,Number(process.env.TCX_MEME_SIGNAL_READY_SCORE||.60))),
+      minBuyResearchScore:Math.max(.45,Math.min(.98,Number(process.env.TCX_MEME_SIGNAL_BUY_SCORE||.68))),
+      minLiquidityUsd:Math.max(3_000,Number(process.env.TCX_MEME_SIGNAL_MIN_LIQUIDITY_USD||25_000)),
+      minTradesM5:Math.max(3,Number(process.env.TCX_MEME_SIGNAL_MIN_TRADES_M5||10)),
+      minBuyShare:Math.max(.50,Math.min(.90,Number(process.env.TCX_MEME_SIGNAL_MIN_BUY_SHARE||.56))),
+      minTurnover:Math.max(.02,Math.min(5,Number(process.env.TCX_MEME_SIGNAL_MIN_TURNOVER||.12))),
+      minMomentumPct:Number(process.env.TCX_MEME_SIGNAL_MIN_MOMENTUM_PCT||2),
+      maxMomentumPct:Math.max(10,Number(process.env.TCX_MEME_SIGNAL_MAX_MOMENTUM_PCT||65)),
+      minTriggerPillars:Math.max(2,Math.min(4,Number(process.env.TCX_MEME_SIGNAL_MIN_PILLARS||3))),
+      minEntryReadiness:Math.max(.50,Math.min(.95,Number(process.env.TCX_MEME_SIGNAL_MIN_READINESS||.72)))
+    });
+    const signaledSecuredRows=signaledSecured.rows||[];
+    secured={...signaledSecured,tradeLearning:memecoinTradeLearningSummary(preTradeLearningModel)};
+    const secureByKey=new Map(signaledSecuredRows.map(row=>[memecoinRowKey(row),row]));
     snapshot={...snapshot,
       rows:(snapshot.rows||[]).map(row=>{
         const learned=secureByKey.get(memecoinRowKey(row));
-        return {...row,security:learned?.security||row?.security||null,memeLearning:learned?.memeLearning||null};
+        return {
+          ...row,
+          security:learned?.security||row?.security||null,
+          memeLearning:learned?.memeLearning||null,
+          memeSignal:learned?.memeSignal||null
+        };
       }),
       securityProvider:secured.securityProvider,
       tradeLearning:secured.tradeLearning,
+      signalController:secured.signalController,
       socialAttention:snapshot.socialAttention||{
         version:MEMECOIN_SOCIAL_ATTENTION_VERSION,
         configured:memecoinSocialSnapshot?.configured===true,
@@ -5242,14 +5267,14 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     const evidenceNow=Date.now();
     const evidenceObserved=observeMemecoinEvidence(
       memecoinEvidenceFactoryState,
-      learnedSecuredRows,
+      signaledSecuredRows,
       {
         now:evidenceNow,
         maxCases:Math.max(500,Math.min(5000,Number(process.env.TCX_MEME_EVIDENCE_MAX_CASES||4000)))
       }
     );
     memecoinEvidenceFactoryState=evidenceObserved.state;
-    const currentEvidenceKeys=new Set(learnedSecuredRows.map(memecoinRowKey));
+    const currentEvidenceKeys=new Set(signaledSecuredRows.map(memecoinRowKey));
     const dueEvidenceFollowups=dueMemecoinEvidenceFollowups(memecoinEvidenceFactoryState,{
       asOf:evidenceNow,
       max:Math.max(0,Math.min(10,Number(process.env.TCX_MEME_EVIDENCE_FOLLOWUPS_PER_CYCLE||5))),
@@ -5365,12 +5390,13 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
     });
 
-    const walletInput={...snapshot,rows:learnedSecuredRows};
+    const walletInput={...snapshot,rows:signaledSecuredRows};
     const walletUpdate=applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
       now:Date.now(),
       marginQuote:Math.max(1,Number(process.env.TCX_W4_MEME_MARGIN_QUOTE||100)),
       minScore:Math.max(0,Math.min(1,Number(process.env.TCX_W4_MEME_MIN_SCORE||.58))),
       minLiquidityUsd:Math.max(1000,Number(process.env.TCX_W4_MEME_MIN_LIQUIDITY_USD||10_000)),
+      requireBuySignal:true,
       maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W4_MEME_MAX_OPEN||30))),
       horizonMs:Math.max(30*60_000,Number(process.env.TCX_W4_MEME_HORIZON_MS||12*60*60_000)),
       stopReturn:Math.max(-.30,Math.min(-.08,Number(process.env.TCX_W4_MEME_STOP_RETURN||-.25))),
@@ -5484,6 +5510,13 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         policyMutationAllowed:false,
         canExecuteLive:false
       },
+      signalController:{
+        version:MEMECOIN_SIGNAL_CONTROLLER_VERSION,
+        ...(snapshot.signalController||{}),
+        enforcedForWallet4:true,
+        signalBlockedThisCycle:walletUpdate.results.signalBlocked||0,
+        canExecuteLive:false
+      },
       learning:{
         version:MEMECOIN_TRADE_LEARNER_VERSION,
         ...postTradeLearningSummary,
@@ -5496,6 +5529,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         eligible:walletUpdate.results.eligible,
         learningBlocked:walletUpdate.results.learningBlocked||0,
         learningBoosted:walletUpdate.results.learningBoosted||0,
+        signalBlocked:walletUpdate.results.signalBlocked||0,
         active:walletSummary.wallets?.[WALLET_4_MEME_SCOUT]?.openPositions||0,
         netPnlQuote:walletSummary.wallets?.[WALLET_4_MEME_SCOUT]?.netPnlQuote||0
       },
@@ -12133,7 +12167,8 @@ function missionControlData(){
       directSocialAttention:x?.directSocialAttention||null,
       security:x?.security||null,
       score:x?.score||null,
-      memeLearning:x?.memeLearning||null
+      memeLearning:x?.memeLearning||null,
+      memeSignal:x?.memeSignal||null
     })),
     boostedFallbackRows:(memecoinExperienceSnapshot?.rows||[]).slice(0,6).map(x=>({
       chainId:x?.chainId||null,
