@@ -5,6 +5,8 @@ export const SPECIALIST_SHADOW_WALLETS_VERSION='BIGGJ_SPECIALIST_SHADOW_WALLETS_
 export const WALLET_3_TRADER_COPY='W3_TRADER_COPY';
 export const WALLET_4_MEME_SCOUT='W4_MEME_SCOUT';
 export const WALLET_5_MEME_COPY='W5_MEME_COPY';
+export const WALLET_6_USER_99K_60S='W6_USER_99K_60S';
+export const USER_99K_60S_STRATEGY_VERSION='BIGGJ_USER_99K_60S_STRATEGY_V1';
 
 const EPS=1e-12;
 const DEFAULT_MEME_SYMBOLS=new Set([
@@ -75,6 +77,11 @@ export function createSpecialistWalletState(){
         label:'Memecoin Copy',
         defaultMarginQuote:150,
         objective:'COPY_PUBLIC_SUCCESSFUL_TRADER_MEMECOIN_POSITIONS'
+      }),
+      [WALLET_6_USER_99K_60S]:walletTemplate(WALLET_6_USER_99K_60S,{
+        label:'99k in 60s — User Strategy V1',
+        defaultMarginQuote:100,
+        objective:'SHADOW_TEST_USER_DISCOVERED_99K_MARKET_CAP_WITHIN_60_SECONDS'
       })
     },
     execution:'SHADOW_ONLY',
@@ -85,7 +92,7 @@ export function createSpecialistWalletState(){
 
 function mutableState(input){
   const base=input&&input.version===SPECIALIST_SHADOW_WALLETS_VERSION?clone(input):clone(createSpecialistWalletState());
-  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY]){
+  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY,WALLET_6_USER_99K_60S]){
     base.wallets[id]??=clone(createSpecialistWalletState().wallets[id]);
     base.wallets[id].positions=Array.isArray(base.wallets[id].positions)?base.wallets[id].positions:[];
     base.wallets[id].closed=Array.isArray(base.wallets[id].closed)?base.wallets[id].closed:[];
@@ -621,6 +628,173 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   return {state:freeze(state),results:freeze(results)};
 }
 
+function user99k60sPositionKey(row){
+  return WALLET_6_USER_99K_60S+':'+String(row?.chainId||'')+':'+String(row?.tokenAddress||'');
+}
+function user99k60sAgeSeconds(row,now){
+  const created=finite(row?.pairCreatedAt);
+  if(created==null)return null;
+  return Math.max(0,(Number(now)-created)/1000);
+}
+
+export function evaluateUser99k60sEntry(row,{
+  now=Date.now(),
+  maxAgeSeconds=60,
+  minMarketCapUsd=99_000
+}={}){
+  const ageSeconds=user99k60sAgeSeconds(row,now);
+  const marketCapUsd=finite(row?.marketCap);
+  const priceUsd=finite(row?.priceUsd);
+  const blockers=[];
+  if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
+  else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||60))blockers.push('OLDER_THAN_MAX_AGE');
+  if(marketCapUsd==null)blockers.push('MARKET_CAP_UNKNOWN');
+  else if(marketCapUsd<Math.max(1,Number(minMarketCapUsd)||99_000))blockers.push('MARKET_CAP_BELOW_THRESHOLD');
+  if(!(priceUsd>0))blockers.push('PRICE_UNKNOWN');
+  const match=blockers.length===0;
+  return freeze({
+    version:USER_99K_60S_STRATEGY_VERSION,
+    match,
+    action:match?'BUY_SHADOW':'IGNORE',
+    rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY',
+    ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),
+    marketCapUsd,
+    thresholdUsd:Math.max(1,Number(minMarketCapUsd)||99_000),
+    maxAgeSeconds:Math.max(1,Number(maxAgeSeconds)||60),
+    observedTimeTo99kSeconds:match&&ageSeconds!=null?Number(ageSeconds.toFixed(3)):null,
+    blockers,
+    epistemic:'OBSERVED_SNAPSHOT_THRESHOLD_TIME_NOT_EXACT_HISTORICAL_CROSSING_TIME',
+    execution:'SHADOW_ONLY',
+    canExecute:false,
+    canExecuteLive:false
+  });
+}
+
+export function applyUser99k60sStrategySnapshot(input,snapshot,{
+  now=Date.now(),
+  marginQuote=100,
+  feeBps=30,
+  maxAgeSeconds=60,
+  minMarketCapUsd=99_000,
+  minExitMarketCapUsd=99_000,
+  targetPnlSol=10,
+  entryNotionalSol=null,
+  maxOpenOperational=30
+}={}){
+  const state=mutableState(input);
+  const wallet=state.wallets[WALLET_6_USER_99K_60S];
+  const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
+  const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
+  const results={
+    matched:0,opened:0,closed:0,marked:0,
+    marketCapExit:0,targetPnlExit:0,
+    sourceReady:snapshot?.sourceReady===true,
+    strategyVersion:USER_99K_60S_STRATEGY_VERSION
+  };
+
+  for(let i=wallet.positions.length-1;i>=0;i--){
+    const p=wallet.positions[i];
+    const row=byKey.get(String(p.chainId||'')+':'+String(p.tokenAddress||''));
+    if(!row||!(finite(row?.priceUsd)>0))continue;
+    const baseMarked=markPosition(p,row.priceUsd,now,feeBps);
+    const marketCapUsd=finite(row?.marketCap);
+    const peakMarketCapUsd=Math.max(
+      finite(p?.peakMarketCapUsd,marketCapUsd??-Infinity),
+      marketCapUsd??-Infinity
+    );
+    const troughMarketCapUsd=Math.min(
+      finite(p?.troughMarketCapUsd,marketCapUsd??Infinity),
+      marketCapUsd??Infinity
+    );
+    const configuredNotionalSol=finite(p?.entryNotionalSol,finite(entryNotionalSol));
+    const pnlSolEstimate=configuredNotionalSol>0&&finite(baseMarked?.unrealizedReturnPct)!=null
+      ?configuredNotionalSol*finite(baseMarked.unrealizedReturnPct,0)
+      :null;
+    const marked={
+      ...baseMarked,
+      lastMarketCapUsd:marketCapUsd,
+      peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
+      troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
+      estimatedPnlSol:pnlSolEstimate
+    };
+    wallet.positions[i]=marked;
+    results.marked++;
+
+    let reason=null;
+    if(marketCapUsd!=null&&marketCapUsd<Math.max(1,Number(minExitMarketCapUsd)||99_000)){
+      reason='USER_99K_60S_MCAP_TOO_SMALL';
+    }else if(
+      configuredNotionalSol>0&&
+      finite(targetPnlSol)>0&&
+      pnlSolEstimate!=null&&
+      pnlSolEstimate>=finite(targetPnlSol)
+    ){
+      reason='USER_99K_60S_TARGET_PNL_SOL';
+    }
+    if(reason){
+      const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
+      if(closed){
+        results.closed++;
+        if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
+        if(reason==='USER_99K_60S_TARGET_PNL_SOL')results.targetPnlExit++;
+      }
+    }
+  }
+
+  if(snapshot?.sourceReady===true){
+    for(const row of rows){
+      if(wallet.positions.length>=Math.max(1,Number(maxOpenOperational)||30))break;
+      const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd});
+      if(!signal.match)continue;
+      results.matched++;
+      const key=user99k60sPositionKey(row);
+      if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key))continue;
+      const px=finite(row?.priceUsd);
+      if(!(px>0))continue;
+      const marketCapUsd=finite(row?.marketCap);
+      const margin=Math.max(1,Number(marginQuote)||100);
+      const configuredNotionalSol=finite(entryNotionalSol);
+      const position={
+        walletId:WALLET_6_USER_99K_60S,
+        positionKey:key,
+        chainId:String(row?.chainId||''),
+        tokenAddress:String(row?.tokenAddress||''),
+        symbol:text(row?.symbol||row?.name||'MEME',80),
+        name:text(row?.name||'',120),
+        side:'LONG',leverage:1,
+        marginQuote:margin,exposureQuote:margin,
+        initialMarginQuote:margin,initialExposureQuote:margin,
+        entryPrice:px,lastPrice:px,
+        openedAt:Number(now),lastMarkedAt:Number(now),
+        sourcePairCreatedAt:finite(row?.pairCreatedAt),
+        sourceFirstSeenAt:finite(row?.firstSeenAt),
+        entryAgeSeconds:signal.ageSeconds,
+        observedTimeTo99kSeconds:signal.observedTimeTo99kSeconds,
+        entryMarketCapUsd:marketCapUsd,
+        lastMarketCapUsd:marketCapUsd,
+        peakMarketCapUsd:marketCapUsd,
+        troughMarketCapUsd:marketCapUsd,
+        entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
+        targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
+        minExitMarketCapUsd:Math.max(1,Number(minExitMarketCapUsd)||99_000),
+        entryStrategySignal:clone(signal),
+        strategyVersion:USER_99K_60S_STRATEGY_VERSION,
+        entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+        exitRule:'TARGET_PNL_SOL_IF_NOTIONAL_KNOWN_OR_MARKET_CAP_BELOW_FLOOR',
+        targetTracking:configuredNotionalSol>0?'ACTIVE':'WAITING_FOR_ENTRY_NOTIONAL_SOL',
+        source:'BIGGJ_MEMECOIN_EARLY_RADAR',
+        status:'OPEN',
+        execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
+        epistemic:'USER_DISCOVERED_RULE_FROZEN_V1_SHADOW_TEST_NO_OPTIMIZATION'
+      };
+      if(openPosition(wallet,position))results.opened++;
+    }
+  }
+
+  state.updatedAt=Number(now);
+  return {state:freeze(state),results:freeze(results)};
+}
+
 function walletStats(wallet){
   const open=wallet.positions||[],closed=wallet.closed||[];
   const closedRealized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
@@ -649,7 +823,7 @@ function walletStats(wallet){
 export function specialistWalletSummary(state,{asOf=Date.now()}={}){
   const s=mutableState(state);
   const wallets={};
-  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY])wallets[id]=walletStats(s.wallets[id]);
+  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY,WALLET_6_USER_99K_60S])wallets[id]=walletStats(s.wallets[id]);
   const core={version:SPECIALIST_SHADOW_WALLETS_VERSION,asOf:Number(asOf),wallets,
     execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,automaticRealOrders:false};
   return freeze({...core,fingerprint:sha256(core)});
