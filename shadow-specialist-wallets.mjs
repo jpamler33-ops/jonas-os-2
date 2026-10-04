@@ -639,16 +639,24 @@ function user99k60sAgeSeconds(row,now){
   if(created==null)return null;
   return Math.max(0,(Number(now)-created)/1000);
 }
+function user99k60sGreenPercent(row){
+  return finite(row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct);
+}
 
 export function evaluateUser99k60sEntry(row,{
   now=Date.now(),
   maxAgeSeconds=60,
   minMarketCapUsd=99_000,
+  minGreenChangePct=null,
+  requireExactGmgnGreen=false,
   requireTrending=false,
   requireNewPair=false
 }={}){
   const ageSeconds=user99k60sAgeSeconds(row,now);
   const marketCapUsd=finite(row?.marketCap);
+  const greenPercent=user99k60sGreenPercent(row);
+  const greenThreshold=finite(minGreenChangePct);
+  const greenMode=greenThreshold!=null&&greenThreshold>=0;
   const priceUsd=finite(row?.priceUsd);
   const blockers=[];
   const trendVisible=row?.signalTrending===true||row?.w6TrendVisible===true;
@@ -657,27 +665,46 @@ export function evaluateUser99k60sEntry(row,{
   if(requireNewPair&&!newPairVisible)blockers.push('NOT_IN_NEW_PAIR_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
   else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||60))blockers.push('OLDER_THAN_MAX_AGE');
-  if(marketCapUsd==null)blockers.push('MARKET_CAP_UNKNOWN');
-  else if(marketCapUsd<Math.max(1,Number(minMarketCapUsd)||99_000))blockers.push('MARKET_CAP_BELOW_THRESHOLD');
+  if(greenMode){
+    if(requireExactGmgnGreen&&row?.gmgnExactTrend!==true)blockers.push('GMGN_EXACT_TREND_REQUIRED');
+    if(greenPercent==null)blockers.push('GMGN_GREEN_PERCENT_UNKNOWN');
+    else if(!(greenPercent>greenThreshold))blockers.push('GMGN_GREEN_PERCENT_NOT_ABOVE_THRESHOLD');
+  }else{
+    if(marketCapUsd==null)blockers.push('MARKET_CAP_UNKNOWN');
+    else if(marketCapUsd<Math.max(1,Number(minMarketCapUsd)||99_000))blockers.push('MARKET_CAP_BELOW_THRESHOLD');
+  }
   if(!(priceUsd>0))blockers.push('PRICE_UNKNOWN');
   const match=blockers.length===0;
+  const thresholdQualified=greenMode
+    ?greenPercent!=null&&greenPercent>greenThreshold
+    :marketCapUsd!=null&&marketCapUsd>=Math.max(1,Number(minMarketCapUsd)||99_000);
   return freeze({
     version:USER_99K_60S_STRATEGY_VERSION,
     match,
     action:match?'BUY_SHADOW':'IGNORE',
-    rule:requireNewPair
-      ?'GMGN_TRENDING_NEW_PAIR_1M_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'
-      :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'),
+    rule:greenMode
+      ?(requireTrending?'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GT_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_GREEN_PERCENT_GT_99K_THEN_IMMEDIATE_ENTRY')
+      :(requireNewPair
+        ?'GMGN_TRENDING_NEW_PAIR_1M_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'
+        :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY')),
     ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),
     marketCapUsd,
+    greenPercent,
     trendVisible,
     newPairVisible,
+    exactGmgnTrend:row?.gmgnExactTrend===true,
     trendRank:finite(row?.trendRank),
-    thresholdUsd:Math.max(1,Number(minMarketCapUsd)||99_000),
+    thresholdMode:greenMode?'GMGN_GREEN_PERCENT':'MARKET_CAP_USD',
+    thresholdQualified,
+    thresholdUsd:greenMode?null:Math.max(1,Number(minMarketCapUsd)||99_000),
+    thresholdPct:greenMode?greenThreshold:null,
     maxAgeSeconds:Math.max(1,Number(maxAgeSeconds)||60),
+    observedTimeToGreen99kSeconds:greenMode&&match&&ageSeconds!=null?Number(ageSeconds.toFixed(3)):null,
     observedTimeTo99kSeconds:match&&ageSeconds!=null?Number(ageSeconds.toFixed(3)):null,
     blockers,
-    epistemic:'OBSERVED_SNAPSHOT_THRESHOLD_TIME_NOT_EXACT_HISTORICAL_CROSSING_TIME',
+    epistemic:greenMode
+      ?'OBSERVED_GMGN_DISPLAYED_PERCENT_THRESHOLD_TIME_NOT_EXACT_HISTORICAL_CROSSING_TIME'
+      :'OBSERVED_SNAPSHOT_THRESHOLD_TIME_NOT_EXACT_HISTORICAL_CROSSING_TIME',
     execution:'SHADOW_ONLY',
     canExecute:false,
     canExecuteLive:false
@@ -851,6 +878,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   feeBps=30,
   maxAgeSeconds=60,
   minMarketCapUsd=99_000,
+  minGreenChangePct=null,
+  requireExactGmgnGreen=false,
   minExitMarketCapUsd=null,
   targetPnlSol=10,
   entryNotionalSol=null,
@@ -879,6 +908,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       ageWithinLimit:0,
       marketCapKnown:0,
       marketCapQualifiedAfterAge:0,
+      greenPercentKnown:0,
+      greenPercentQualifiedAfterAge:0,
       priceKnown:0,
       dataCompleteAfterThreshold:0,
       eligible:0,
@@ -978,18 +1009,22 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   }
 
   for(const row of entryRows){
-    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,requireTrending,requireNewPair});
+    const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,minGreenChangePct,requireExactGmgnGreen,requireTrending,requireNewPair});
     const ageKnown=signal.ageSeconds!=null;
     const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
     const marketCapKnown=signal.marketCapUsd!=null;
-    const marketCapQualified=marketCapKnown&&signal.marketCapUsd>=signal.thresholdUsd;
+    const marketCapQualified=marketCapKnown&&signal.thresholdUsd!=null&&signal.marketCapUsd>=signal.thresholdUsd;
+    const greenPercentKnown=signal.greenPercent!=null;
+    const greenPercentQualified=greenPercentKnown&&signal.thresholdPct!=null&&signal.greenPercent>signal.thresholdPct;
     const priceKnown=finite(row?.priceUsd)>0;
     if(ageKnown)results.entryFunnel.ageKnown++;
     if(ageWithin)results.entryFunnel.ageWithinLimit++;
     if(marketCapKnown)results.entryFunnel.marketCapKnown++;
     if(ageWithin&&marketCapQualified)results.entryFunnel.marketCapQualifiedAfterAge++;
+    if(greenPercentKnown)results.entryFunnel.greenPercentKnown++;
+    if(ageWithin&&greenPercentQualified)results.entryFunnel.greenPercentQualifiedAfterAge++;
     if(priceKnown)results.entryFunnel.priceKnown++;
-    if(ageWithin&&marketCapQualified&&priceKnown)results.entryFunnel.dataCompleteAfterThreshold++;
+    if(ageWithin&&signal.thresholdQualified===true&&priceKnown)results.entryFunnel.dataCompleteAfterThreshold++;
     for(const blocker of signal.blockers||[])results.entryBlockers[blocker]=(results.entryBlockers[blocker]||0)+1;
     if(!signal.match)continue;
     results.entryFunnel.eligible++;
@@ -1030,6 +1065,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       sourceFirstSeenAt:finite(row?.firstSeenAt),
       entryAgeSeconds:signal.ageSeconds,
       observedTimeTo99kSeconds:signal.observedTimeTo99kSeconds,
+      observedTimeToGreen99kSeconds:signal.observedTimeToGreen99kSeconds,
+      entryGreenPercent:signal.greenPercent,
+      entryThresholdMode:signal.thresholdMode,
       entryMarketCapUsd:marketCapUsd,
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:marketCapUsd,
@@ -1037,7 +1075,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       trendRankAtEntry:finite(row?.trendRank),
       trendVisibleAtEntry:row?.signalTrending===true||row?.w6TrendVisible===true,
       newPairVisibleAtEntry:row?.signalNewPair===true&&(row?.signalTrending===true||row?.w6TrendVisible===true),
-      sourceSetupAtEntry:text(row?.sourceSetup||row?.setup||'GMGN_TRENDING_NEW_PAIR_1M',80),
+      sourceSetupAtEntry:text(row?.sourceSetup||row?.setup||'GMGN_TRENDS_1M',80),
       firstObservedAgeSeconds:finite(row?.w6LaunchTracker?.firstObservedAgeSeconds),
       first99kObservedAgeSeconds:finite(row?.w6LaunchTracker?.first99kObservedAgeSeconds),
       troughMarketCapUsd:marketCapUsd,
@@ -1054,9 +1092,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
       entryStrategySignal:clone(signal),
       strategyVersion:USER_99K_60S_STRATEGY_VERSION,
-      entryRule:requireNewPair
-        ?'GMGN_TRENDING_NEW_PAIR_1M_AGE_LTE_60S_MCAP_GTE_99K_IMMEDIATE'
-        :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'),
+      entryRule:signal.rule,
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
