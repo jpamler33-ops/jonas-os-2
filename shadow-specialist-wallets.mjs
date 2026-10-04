@@ -647,7 +647,7 @@ export function evaluateUser99k60sEntry(row,{
   const marketCapUsd=finite(row?.marketCap);
   const priceUsd=finite(row?.priceUsd);
   const blockers=[];
-  const trendVisible=row?.signalTrending===true||row?.candidateTracking===true||row?.w6TrendVisible===true;
+  const trendVisible=row?.signalTrending===true||row?.w6TrendVisible===true;
   if(requireTrending&&!trendVisible)blockers.push('NOT_IN_TREND_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
   else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||60))blockers.push('OLDER_THAN_MAX_AGE');
@@ -1015,7 +1015,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       peakMarketCapUsd:marketCapUsd,
       launchTracker:row?.w6LaunchTracker?clone(row.w6LaunchTracker):null,
       trendRankAtEntry:finite(row?.trendRank),
-      trendVisibleAtEntry:row?.signalTrending===true||row?.candidateTracking===true,
+      trendVisibleAtEntry:row?.signalTrending===true||row?.w6TrendVisible===true,
       firstObservedAgeSeconds:finite(row?.w6LaunchTracker?.firstObservedAgeSeconds),
       first99kObservedAgeSeconds:finite(row?.w6LaunchTracker?.first99kObservedAgeSeconds),
       troughMarketCapUsd:marketCapUsd,
