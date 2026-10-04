@@ -485,6 +485,87 @@ export function createMemecoinEarlyRadarProvider({
       })).filter(x=>x.tokenAddress);
     },{force});
   }
+
+  async function dexTopBoostsUltraSolana({force=false}={}){
+    return cached('ultra:dex:solana:top-boosts',Math.max(3000,Number(ultraDexCacheMs)||5000),async()=>{
+      const body=await getJson(dex+'/token-boosts/top/v1');
+      const boosts=(Array.isArray(body)?body:[])
+        .filter(x=>String(x?.chainId||'').toLowerCase()==='solana'&&String(x?.tokenAddress||'').trim())
+        .slice(0,30);
+      if(!boosts.length)return [];
+      const dexRows=await dexBatchTokens('solana',boosts.map(x=>String(x.tokenAddress)),{force});
+      const byToken=new Map();
+      for(const row of dexRows){
+        const key=tokenKey('solana',row?.tokenAddress);
+        if(!key)continue;
+        const prior=byToken.get(key);
+        if(!prior||(finite(row?.liquidityUsd)??-1)>(finite(prior?.liquidityUsd)??-1))byToken.set(key,row);
+      }
+      return boosts.map((boost,i)=>{
+        const row=byToken.get(tokenKey('solana',boost?.tokenAddress));
+        if(!row)return null;
+        return {
+          ...row,
+          signalTrending:true,
+          signalBoost:true,
+          trendRank:i+1,
+          trendSource:'DEXSCREENER_TOP_BOOSTS',
+          freeTrendSources:['DEXSCREENER_TOP_BOOSTS'],
+          boostAmount:finite(boost?.amount),
+          boostTotalAmount:finite(boost?.totalAmount)
+        };
+      }).filter(Boolean);
+    },{force});
+  }
+
+  async function freeTrendingCompositeSolana({force=false}={}){
+    const settled=await Promise.allSettled([
+      geckoTrendingPoolsUltraSolana({force}),
+      dexTopBoostsUltraSolana({force})
+    ]);
+    const sourceErrors=[];
+    const sources=[];
+    if(settled[0].status==='fulfilled')sources.push(['GECKOTERMINAL_TRENDING',settled[0].value]);
+    else sourceErrors.push('gecko:solana:trending:'+(settled[0].reason instanceof Error?settled[0].reason.message:String(settled[0].reason)));
+    if(settled[1].status==='fulfilled')sources.push(['DEXSCREENER_TOP_BOOSTS',settled[1].value]);
+    else sourceErrors.push('dex:solana:top-boosts:'+(settled[1].reason instanceof Error?settled[1].reason.message:String(settled[1].reason)));
+
+    const merged=new Map();
+    for(const [sourceName,rows] of sources){
+      for(const row of Array.isArray(rows)?rows:[]){
+        const key=tokenKey('solana',row?.tokenAddress);
+        if(!key)continue;
+        const prior=merged.get(key);
+        if(!prior){
+          merged.set(key,{
+            ...row,
+            signalTrending:true,
+            gmgnExactTrend:false,
+            freeTrendSources:[sourceName],
+            trendSource:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER'
+          });
+          continue;
+        }
+        const priorSources=new Set([...(prior?.freeTrendSources||[]),sourceName]);
+        const priorCreated=finite(prior?.pairCreatedAt),rowCreated=finite(row?.pairCreatedAt);
+        merged.set(key,{
+          ...mergeCandidate(prior,row),
+          pairCreatedAt:priorCreated!=null&&rowCreated!=null?Math.min(priorCreated,rowCreated):(priorCreated??rowCreated),
+          signalTrending:true,
+          gmgnExactTrend:false,
+          freeTrendSources:[...priorSources],
+          trendRank:Math.min(finite(prior?.trendRank)??Infinity,finite(row?.trendRank)??Infinity),
+          trendSource:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER'
+        });
+      }
+    }
+    const rows=[...merged.values()].sort((a,b)=>{
+      const sourceDelta=(b?.freeTrendSources?.length||0)-(a?.freeTrendSources?.length||0);
+      if(sourceDelta)return sourceDelta;
+      return (finite(a?.trendRank)??999)-(finite(b?.trendRank)??999);
+    });
+    return {rows,errors:sourceErrors};
+  }
   async function gmgnTrendingUltraSolana({force=false}={}){
     return cached('ultra:gmgn:openapi:solana:trending:'+gmgnTrendWindow+':default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
@@ -571,25 +652,24 @@ export function createMemecoinEarlyRadarProvider({
     const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
     const errors=[];
     let pools=[];
-    let trendSource='GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
-    let exactGmgn=true;
-    try{
-      pools=await gmgnTrendingUltraSolana({force});
-    }catch(err){
-      errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
-      trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
+    const demoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
+    const hasPersonalGmgnKey=Boolean(gmgnReadApiKey)&&!demoKey;
+    let trendSource=hasPersonalGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER';
+    let exactGmgn=false;
+    if(hasPersonalGmgnKey){
       try{
-        pools=await gmgnPublicTrendingUltraSolana({force});
-      }catch(publicErr){
-        errors.push('gmgn:public:solana:trending:'+(publicErr instanceof Error?publicErr.message:String(publicErr)));
-        trendSource='GECKOTERMINAL_SOLANA_TRENDING_FALLBACK';
-        exactGmgn=false;
-        try{
-          pools=await geckoTrendingPoolsUltraSolana({force});
-        }catch(fallbackErr){
-          errors.push('gecko:solana:trending:'+(fallbackErr instanceof Error?fallbackErr.message:String(fallbackErr)));
-        }
+        pools=await gmgnTrendingUltraSolana({force});
+        exactGmgn=true;
+      }catch(err){
+        errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
       }
+    }
+    if(!pools.length){
+      trendSource='FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER';
+      exactGmgn=false;
+      const free=await freeTrendingCompositeSolana({force});
+      pools=free.rows;
+      errors.push(...free.errors);
     }
     const fresh=pools.filter(row=>{
       const created=finite(row?.pairCreatedAt);
@@ -650,7 +730,7 @@ export function createMemecoinEarlyRadarProvider({
         trendRank:finite(pool?.trendRank),
         ultraEarly:true,
         w6TrackingOnly:false,
-        ultraSource:dexRow?'GECKOTERMINAL_TRENDING_PLUS_DEXSCREENER_BATCH':'GECKOTERMINAL_TRENDING_ONLY'
+        ultraSource:dexRow?(text(pool?.trendSource||trendSource,80)+'_PLUS_DEXSCREENER_BATCH'):text(pool?.trendSource||trendSource,80)
       };
     });
     const freshKeys=new Set(freshRows.map(x=>tokenKey('solana',x.tokenAddress)));
