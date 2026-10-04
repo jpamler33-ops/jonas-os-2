@@ -622,8 +622,8 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
       {name:'W6 · 99K IN 60S · USER V1',value:[
         'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
         'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
-        'Sizing parallel: **5 / 10 / 20 / 40 / 80 SOL** auf demselben Entry.',
-        'Hold-Lab: **3 Min Verlustschutz** · danach **5m / 10m / Runner** bis max. 30m vergleichen.',
+        'Sizing parallel: **2 / 5 / 10 / 20 / 40 / 60 / 80 SOL** auf demselben Entry · Liquiditäts-Impact wird heuristisch berücksichtigt.',
+        'Hold-Lab: **3 Min Verlustschutz** · danach **5m / 10m / Runner** bis max. 60m vergleichen.',
         'Exit-Lernen: **'+String(user99Exit?.samples??0)+'/20** markiert · Regelvorschlag **'+(user99Exit?.ruleProposalReady?'BEREIT ZUR PRÜFUNG':'GESPERRT')+'**.',
         user99Active[0]?.holdLabSummary?.best
           ?'Bestes Preis/Leistungs-Szenario: **'+String(user99Active[0].holdLabSummary.best.policyId||'—')+'** · Effizienz **'+percent(user99Active[0].holdLabSummary.best.capitalEfficiency)+'** · ~**'+(Number(user99Active[0].holdLabSummary.best.estimatedSolNeededFor10SolReference||0).toFixed(1))+' SOL** für +10 SOL Referenz'
