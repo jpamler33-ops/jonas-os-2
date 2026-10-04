@@ -73,6 +73,17 @@ test('cold archive deduplicates identical positions and appends verified revisio
   assert.equal(shadowPortfolioColdArchiveSummary(reopened).revisions,1);
 });
 
+test('cold archive still fails closed when a reused position id changes immutable identity',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-shadow-cold-identity-'));
+  const file=path.join(dir,'cold.jsonl.gz');
+  const archive=await openShadowPortfolioColdArchive(file);
+  await archiveClosedShadowPositions(archive,[closedPosition('sp_identity')]);
+  await assert.rejects(
+    ()=>archiveClosedShadowPositions(archive,[closedPosition('sp_identity',{symbol:'ETHUSDT'})]),
+    /SHADOW_COLD_ARCHIVE_IDENTITY_CONFLICT/
+  );
+});
+
 test('open position is never admitted into closed cold archive',async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'tcx-shadow-cold-open-'));
   const file=path.join(dir,'cold.jsonl.gz');
