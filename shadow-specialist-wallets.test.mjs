@@ -4,10 +4,14 @@ import {
   createSpecialistWalletState,
   applyPublicTraderCopySnapshot,
   applyMemecoinScoutSnapshot,
+  evaluateUser99k60sEntry,
+  applyUser99k60sStrategySnapshot,
   specialistWalletSummary,
   WALLET_3_TRADER_COPY,
   WALLET_4_MEME_SCOUT,
-  WALLET_5_MEME_COPY
+  WALLET_5_MEME_COPY,
+  WALLET_6_USER_99K_60S,
+  USER_99K_60S_STRATEGY_VERSION
 } from './shadow-specialist-wallets.mjs';
 
 test('wallet 3 copies all visible public trader positions with unlimited virtual capital model',()=>{
@@ -448,4 +452,114 @@ test('wallet 4 enforced signal gate opens only explicit BUY candidates',()=>{
   assert.equal(p.entrySignalAction,'BUY');
   assert.equal(p.entryMemeSignal.label,'🟢 KAUFEN');
   assert.equal(p.canExecuteLive,false);
+});
+
+
+test('user 99k/60s V1 matches only coins already above 99k within 60 seconds',()=>{
+  const now=10_000_000;
+  const good=evaluateUser99k60sEntry({
+    priceUsd:.001,marketCap:105_000,pairCreatedAt:now-42_000
+  },{now});
+  assert.equal(good.version,USER_99K_60S_STRATEGY_VERSION);
+  assert.equal(good.match,true);
+  assert.equal(good.action,'BUY_SHADOW');
+  assert.equal(good.observedTimeTo99kSeconds,42);
+  assert.equal(good.canExecuteLive,false);
+
+  const old=evaluateUser99k60sEntry({
+    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-61_000
+  },{now});
+  assert.equal(old.match,false);
+  assert.ok(old.blockers.includes('OLDER_THAN_MAX_AGE'));
+
+  const small=evaluateUser99k60sEntry({
+    priceUsd:.001,marketCap:98_999,pairCreatedAt:now-10_000
+  },{now});
+  assert.equal(small.match,false);
+  assert.ok(small.blockers.includes('MARKET_CAP_BELOW_THRESHOLD'));
+});
+
+test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate',()=>{
+  const now=11_000_000;
+  const snap={sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'FAST99',symbol:'FAST99',name:'Fast 99',
+    priceUsd:.001,marketCap:120_000,pairCreatedAt:now-25_000,
+    score:{stage:'RISK_ONLY',researchPriorityScore:.1,riskFlags:['LIQUIDITY_THIN']},
+    security:{evidenceGate:'UNKNOWN',criticalRiskFlags:[],warningFlags:['SOURCE_UNAVAILABLE']},
+    memeSignal:{action:'BLOCKED'}
+  }]};
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),snap,{now,marginQuote:100});
+  assert.equal(x.results.matched,1);
+  assert.equal(x.results.opened,1);
+  assert.equal(x.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
+  assert.equal(x.state.wallets[WALLET_4_MEME_SCOUT].positions.length,0);
+  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.entryAgeSeconds,25);
+  assert.equal(p.observedTimeTo99kSeconds,25);
+  assert.equal(p.entryMarketCapUsd,120_000);
+  assert.equal(p.entryRule,'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
+  assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
+  assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[10,20,40,80]);
+  assert.equal(p.canExecuteLive,false);
+});
+
+test('user 99k/60s V1 can apply a market-cap exit only when an explicit floor is configured',()=>{
+  const now=12_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+  }]},{now,minExitMarketCapUsd:99_000}).state;
+  const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-50_000
+  }]},{now:now+30_000,minExitMarketCapUsd:99_000});
+  assert.equal(next.results.closed,1);
+  assert.equal(next.results.marketCapExit,1);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,0);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
+});
+
+test('user 99k/60s V1 observes a +10 SOL reference without auto-closing the position',()=>{
+  const now=13_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:1,marketCap:150_000,pairCreatedAt:now-15_000
+  }]},{now,entryNotionalSol:80,targetPnlSol:10}).state;
+  const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:1.14,marketCap:171_000,pairCreatedAt:now-45_000
+  }]},{now:now+30_000,entryNotionalSol:80,targetPnlSol:10});
+  assert.equal(next.results.closed,0);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
+  const p=next.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.ok(p.estimatedNetPnlSolBeforeSlippage>=10);
+  assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
+  assert.equal(p.profitTargetScenarios.find(x=>x.entryNotionalSol===80).targetHit,true);
+});
+
+test('user 99k/60s V1 tracks separate 10/20/40/80 SOL profit-target scenarios when actual stake varies',()=>{
+  const now=14_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'SIZEGRID',symbol:'SIZEGRID',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000
+  }]},{now,targetPnlSol:10}).state;
+  const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'SIZEGRID',symbol:'SIZEGRID',priceUsd:1.14,marketCap:150_000,pairCreatedAt:now-50_000
+  }]},{now:now+30_000,targetPnlSol:10});
+  const p=next.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  const s80=p.profitTargetScenarios.find(x=>x.entryNotionalSol===80);
+  const s40=p.profitTargetScenarios.find(x=>x.entryNotionalSol===40);
+  assert.equal(s80.targetHit,true);
+  assert.equal(s40.targetHit,false);
+  assert.ok(s80.targetPriceReturnApprox>.125);
+  assert.equal(next.results.scenarioTargetHits,1);
+});
+
+
+test('user 99k/60s V1 does not invent a market-cap exit threshold',()=>{
+  const now=15_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'NOFLOOR',symbol:'NOFLOOR',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+  }]},{now}).state;
+  const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'NOFLOOR',symbol:'NOFLOOR',priceUsd:.7,marketCap:70_000,pairCreatedAt:now-50_000
+  }]},{now:now+30_000});
+  assert.equal(next.results.marketCapExit,0);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions[0].marketCapExitTracking,'WAITING_FOR_OBSERVED_USER_EXIT_RULE');
 });

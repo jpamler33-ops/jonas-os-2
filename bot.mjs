@@ -10,7 +10,7 @@ import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, obs
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
 import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TEMPLE_VERSION } from './expansion-runtime/biggj-temporal-temple.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
-import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY } from './shadow-specialist-wallets.mjs';
+import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
 import { applyMemecoinEntrySignals, MEMECOIN_SIGNAL_CONTROLLER_VERSION } from './memecoin-signal-controller.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -4536,7 +4536,7 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       ];
     });
     const wallets=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets||{};
-    const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{};
+    const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{},w6=wallets[WALLET_6_USER_99K_60S]||{};
     const outcome=memecoinSecurityOutcomeSummary(memecoinSecurityOutcomeState,{
       asOf:Date.now(),
       minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
@@ -4554,6 +4554,11 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'WALLET 5 · MEME COPY',
       'Open '+Number(w5.openPositions||0)+' · Closed '+Number(w5.closedTrades||0)+' · Shadow PnL '+compactUsd(w5.netPnlQuote),
       'Kopiert öffentlich sichtbare Memecoin-Positionen qualifizierter OKX Lead-Trader.','',
+      'WALLET 6 · 99K IN 60S · USER STRATEGY V1',
+      'Open '+Number(w6.openPositions||0)+' · Closed '+Number(w6.closedTrades||0)+' · Winrate '+(w6.winRate==null?'—':Math.round(Number(w6.winRate)*100)+'%'),
+      'Regel: Alter ≤60s + Market Cap ≥99k => sofortiger Shadow-Entry.',
+      'Exit: diskretionär/positionsgrößenabhängig; +10 SOL ist nur ein Beispiel für „Gewinn reicht“. Dein „MC zu klein“-Exit wird beobachtet, aber nicht erfunden automatisiert.',
+      'Sizing-Lab: 10 / 20 / 40 / 80 SOL getrennt; +10 SOL wird nur als Vergleichsmarke mitgerechnet, NICHT als Auto-Exit.','',
       'ATTENTION-QUELLEN',
       '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
       '• öffentliche News-Erwähnungen + X-verknüpfte Projektprofile.',
@@ -5477,10 +5482,41 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       contrarianMaxSoftViolations:1
     });
     specialistWalletState=walletUpdate.state;
-    if(walletUpdate.results.opened||walletUpdate.results.closed)await persistSpecialistWallets('memecoin-early:'+reason);
+    const user99k60sUpdate=applyUser99k60sStrategySnapshot(specialistWalletState,walletInput,{
+      now:Date.now(),
+      marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
+      maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
+      minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
+      minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
+        ?Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD)
+        :null,
+      targetPnlSol:Math.max(.01,Number(process.env.TCX_W6_USER_99K_60S_TARGET_PNL_SOL||10)),
+      entryNotionalSol:Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL||0)>0
+        ?Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL)
+        :null,
+      notionalScenariosSol:[10,20,40,80],
+      maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30)))
+    });
+    specialistWalletState=user99k60sUpdate.state;
+    if(
+      walletUpdate.results.opened||walletUpdate.results.closed||
+      user99k60sUpdate.results.opened||user99k60sUpdate.results.closed
+    )await persistSpecialistWallets('memecoin-early:'+reason);
     const postTradeLearningModel=buildMemecoinTradeLearningModel(specialistWalletState,{asOf:Date.now()});
     const postTradeLearningSummary=memecoinTradeLearningSummary(postTradeLearningModel);
-    snapshot={...snapshot,tradeLearning:postTradeLearningSummary};
+    const user99k60sWallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
+    snapshot={...snapshot,tradeLearning:postTradeLearningSummary,user99k60s:{
+      version:USER_99K_60S_STRATEGY_VERSION,
+      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
+      targetPnlSol:10,
+      sizingScenariosSol:[10,20,40,80],
+      results:user99k60sUpdate.results,
+      wallet:user99k60sWallet,
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false
+    }};
 
     memecoinEarlySnapshot=snapshot;
     memecoinEarlyLastRefreshAt=Date.now();
@@ -5593,6 +5629,22 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         signalBlocked:walletUpdate.results.signalBlocked||0,
         active:walletSummary.wallets?.[WALLET_4_MEME_SCOUT]?.openPositions||0,
         netPnlQuote:walletSummary.wallets?.[WALLET_4_MEME_SCOUT]?.netPnlQuote||0
+      },
+      user99k60s:{
+        version:USER_99K_60S_STRATEGY_VERSION,
+        matched:user99k60sUpdate.results.matched||0,
+        opened:user99k60sUpdate.results.opened||0,
+        closed:user99k60sUpdate.results.closed||0,
+        marketCapExit:user99k60sUpdate.results.marketCapExit||0,
+        scenarioTargetHits:user99k60sUpdate.results.scenarioTargetHits||0,
+        active:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.openPositions||0,
+        closedTrades:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.closedTrades||0,
+        winRate:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.winRate??null,
+        netPnlQuote:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.netPnlQuote||0,
+        rule:'AGE<=60S + MC>=99K => IMMEDIATE SHADOW ENTRY',
+        targetPnlSol:10,
+        sizingScenariosSol:[10,20,40,80],
+        canExecuteLive:false
       },
       execution:'SHADOW_ONLY',
       canExecuteLive:false
@@ -12283,6 +12335,18 @@ function missionControlData(){
       canExecute:false,
       canExecuteLive:false,
       enforcedForWallet4:true
+    },
+    user99k60s:memecoinEarlySnapshot?.user99k60s||{
+      version:USER_99K_60S_STRATEGY_VERSION,
+      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
+      targetPnlSol:10,
+      sizingScenariosSol:[10,20,40,80],
+      results:{matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0},
+      wallet:specialistWalletSummary(specialistWalletState,{asOf:now}).wallets?.[WALLET_6_USER_99K_60S]||null,
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false
     },
     learning:memecoinEarlySnapshot?.tradeLearning||memecoinTradeLearningSummary(buildMemecoinTradeLearningModel(specialistWalletState,{asOf:now})),
     temporalTemple:memecoinEarlySnapshot?.temporalTemple||biggjTemporalTempleSummary(buildBiggjTemporalTemple(memecoinEvidenceFactoryState,{

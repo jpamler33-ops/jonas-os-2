@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V15_SIGNAL_GATE');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V16_USER_99K_60S');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);
@@ -70,5 +70,15 @@ test('mission-control snapshot source exposes canonical memecoin signal controll
   assert.ok(source.includes("version:MEMECOIN_SIGNAL_CONTROLLER_VERSION"));
   assert.ok(source.includes("entryAuthority:'BUY_REQUIRED_WHEN_ENFORCED'"));
   assert.ok(source.includes("enforcedForWallet4:true"));
+  assert.ok(source.includes("canExecuteLive:false"));
+});
+
+
+test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Discord and webapp',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("user99k60s:memecoinEarlySnapshot?.user99k60s"));
+  assert.ok(source.includes("version:USER_99K_60S_STRATEGY_VERSION"));
+  assert.ok(source.includes("sizingScenariosSol:[10,20,40,80]"));
+  assert.ok(source.includes("WALLET_6_USER_99K_60S"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
