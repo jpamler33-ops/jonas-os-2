@@ -126,6 +126,18 @@ test('adaptive replay admits the observed production boundary by shrinking below
   assert.equal(plan.limits.hardHeapMb,370);
 });
 
+test('adaptive replay retries a smaller window after initial hard-heap rejection',()=>{
+  const plan=deriveShadowWorkerReplayPlan({
+    mode:'AUTO',heapUsedMb:353,rssMb:679,externalMb:4,
+    configuredHistoryRows:650,effectiveHistoryRows:500,minHistoryRows:400,
+    baseAutoHeapMb:260,baseAutoRssMb:620
+  });
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.replayMode,'COMPACT');
+  assert.equal(plan.historyRows,400);
+  assert.ok(plan.limits.hardHeapMb>=353);
+});
+
 test('adaptive replay still defers when compact soft headroom is fully exhausted',()=>{
   const plan=deriveShadowWorkerReplayPlan({
     mode:'AUTO',heapUsedMb:350,rssMb:704,externalMb:4,
