@@ -670,7 +670,7 @@ export function evaluateUser99k60sEntry(row,{
   });
 }
 
-function user99k60sSolScenarios(values=[10,20,40,80]){
+function user99k60sSolScenarios(values=[5,10,20,40,80]){
   return [...new Set((Array.isArray(values)?values:[])
     .map(x=>finite(x))
     .filter(x=>x>0&&x<=10_000))]
@@ -708,6 +708,111 @@ function updateUser99k60sTargetScenarios(existing,returnPct,now,feeBps){
   });
 }
 
+function user99k60sHoldLabScenarios(values=[5,10,20,40,80]){
+  const policies=[
+    {id:'HOLD_5M',reviewAtSeconds:300,maxHoldSeconds:300},
+    {id:'HOLD_10M',reviewAtSeconds:600,maxHoldSeconds:600},
+    {id:'RUNNER',reviewAtSeconds:600,maxHoldSeconds:1800}
+  ];
+  const out=[];
+  for(const notionalSol of user99k60sSolScenarios(values)){
+    for(const policy of policies){
+      out.push({
+        id:policy.id+'_'+notionalSol+'SOL',
+        policyId:policy.id,
+        entryNotionalSol:notionalSol,
+        reviewAtSeconds:policy.reviewAtSeconds,
+        maxHoldSeconds:policy.maxHoldSeconds,
+        status:'OPEN',
+        closeAt:null,
+        closeReturnPct:null,
+        estimatedNetPnlSol:null,
+        capitalEfficiency:null,
+        goodRunnerAtLastReview:null,
+        semantics:'PARALLEL_SHADOW_SCENARIO_NO_LIVE_EXECUTION'
+      });
+    }
+  }
+  return out;
+}
+function updateUser99k60sHoldLab(existing,{
+  returnPct,
+  holdSeconds,
+  marketCapUsd,
+  entryMarketCapUsd,
+  peakMarketCapUsd,
+  now,
+  feeBps=30,
+  minHoldSeconds=180
+}={}){
+  const ret=finite(returnPct);
+  const cap=finite(marketCapUsd);
+  const entryCap=finite(entryMarketCapUsd);
+  const peakCap=finite(peakMarketCapUsd);
+  const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+  const hold=Math.max(0,finite(holdSeconds,0));
+  return (Array.isArray(existing)?existing:[]).map(s=>{
+    if(s?.status==='CLOSED')return s;
+    const notionalSol=Math.max(0,finite(s?.entryNotionalSol,0));
+    const netRet=ret==null?null:ret-roundTripFeeRate;
+    const estimatedNetPnlSol=netRet==null||!(notionalSol>0)?null:notionalSol*netRet;
+    const capitalEfficiency=netRet;
+    if(hold<Math.max(0,finite(minHoldSeconds,180))){
+      return {...s,estimatedNetPnlSol,capitalEfficiency,protectedByMinHold:true};
+    }
+
+    const drawdownFromPeak=cap!=null&&peakCap>0?cap/peakCap-1:null;
+    const aboveEntry=cap!=null&&entryCap>0?cap>=entryCap:false;
+    const runnerGood=(ret!=null&&ret>0)||(aboveEntry&&drawdownFromPeak!=null&&drawdownFromPeak>-0.20);
+    let shouldClose=false;
+    if(s.policyId==='HOLD_5M')shouldClose=hold>=300;
+    else if(s.policyId==='HOLD_10M')shouldClose=hold>=600;
+    else if(s.policyId==='RUNNER'){
+      if(hold>=1800)shouldClose=true;
+      else if(hold>=600&&!runnerGood)shouldClose=true;
+    }
+    if(!shouldClose)return {...s,estimatedNetPnlSol,capitalEfficiency,protectedByMinHold:false,goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview};
+    return {
+      ...s,
+      status:'CLOSED',
+      closeAt:Number(now),
+      closeHoldSeconds:hold,
+      closeReturnPct:ret,
+      estimatedNetPnlSol,
+      capitalEfficiency,
+      goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview,
+      closeReason:s.policyId==='RUNNER'?(hold>=1800?'RUNNER_MAX_30M':'RUNNER_NO_LONGER_GOOD'):'TIME_WINDOW_REVIEW',
+      protectedByMinHold:false
+    };
+  });
+}
+function user99k60sHoldLabSummary(scenarios=[]){
+  const rows=Array.isArray(scenarios)?scenarios:[];
+  const closed=rows.filter(x=>x?.status==='CLOSED');
+  const best=closed.slice().sort((a,b)=>{
+    const ae=finite(a?.capitalEfficiency,-Infinity),be=finite(b?.capitalEfficiency,-Infinity);
+    if(be!==ae)return be-ae;
+    return finite(a?.entryNotionalSol,Infinity)-finite(b?.entryNotionalSol,Infinity);
+  })[0]||null;
+  const eff=finite(best?.capitalEfficiency);
+  return {
+    scenarios:rows.length,
+    open:rows.length-closed.length,
+    closed:closed.length,
+    best:best?{
+      id:best.id,
+      policyId:best.policyId,
+      entryNotionalSol:best.entryNotionalSol,
+      estimatedNetPnlSol:best.estimatedNetPnlSol,
+      capitalEfficiency:best.capitalEfficiency,
+      closeHoldSeconds:best.closeHoldSeconds,
+      closeReason:best.closeReason,
+      estimatedSolNeededFor10SolReference:eff>0?10/eff:null
+    }:null,
+    semantics:'BEST_PRICE_PERFORMANCE_IS_HIGHEST_FEE_ADJUSTED_RETURN_PER_SOL_THEN_LOWEST_CAPITAL'
+  };
+}
+
 export function applyUser99k60sStrategySnapshot(input,snapshot,{
   now=Date.now(),
   marginQuote=100,
@@ -717,7 +822,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   minExitMarketCapUsd=null,
   targetPnlSol=10,
   entryNotionalSol=null,
-  notionalScenariosSol=[10,20,40,80],
+  notionalScenariosSol=[5,10,20,40,80],
+  minHoldSeconds=180,
   maxOpenOperational=30
 }={}){
   const state=mutableState(input);
@@ -726,7 +832,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,closed:0,marked:0,
-    marketCapExit:0,scenarioTargetHits:0,
+    marketCapExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION
   };
@@ -758,20 +864,43 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     );
     const afterHits=profitTargetScenarios.filter(x=>x?.targetHit===true).length;
     results.scenarioTargetHits+=Math.max(0,afterHits-beforeHits);
+    const holdSeconds=Math.max(0,(Number(now)-Number(p?.openedAt||now))/1000);
+    const priorHoldLab=p?.holdLab||user99k60sHoldLabScenarios(notionalScenariosSol);
+    const priorHoldClosed=priorHoldLab.filter(x=>x?.status==='CLOSED').length;
+    const holdLab=updateUser99k60sHoldLab(
+      priorHoldLab,
+      {
+        returnPct:ret,
+        holdSeconds,
+        marketCapUsd,
+        entryMarketCapUsd:p?.entryMarketCapUsd,
+        peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
+        now,
+        feeBps,
+        minHoldSeconds
+      }
+    );
+    results.holdScenarioCloses+=Math.max(0,holdLab.filter(x=>x?.status==='CLOSED').length-priorHoldClosed);
     const marked={
       ...baseMarked,
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
       troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
       estimatedNetPnlSolBeforeSlippage:pnlSolEstimate,
-      profitTargetScenarios
+      profitTargetScenarios,
+      holdSeconds,
+      minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
+      lossExitProtectedUntil:Number(p?.openedAt||now)+Math.max(0,finite(minHoldSeconds,180))*1000,
+      holdLab,
+      holdLabSummary:user99k60sHoldLabSummary(holdLab)
     };
     wallet.positions[i]=marked;
     results.marked++;
 
     let reason=null;
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
-    if(marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
+    const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
+    if(!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
     }
     if(reason){
@@ -820,12 +949,16 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
         targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
         profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
+        holdLab:user99k60sHoldLabScenarios(notionalScenariosSol),
+        holdLabSummary:user99k60sHoldLabSummary(user99k60sHoldLabScenarios(notionalScenariosSol)),
+        minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
+        lossExitProtectedUntil:Number(now)+Math.max(0,finite(minHoldSeconds,180))*1000,
         minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
         marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
         entryStrategySignal:clone(signal),
         strategyVersion:USER_99K_60S_STRATEGY_VERSION,
         entryRule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
-        exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
+        exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
         targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
         source:'BIGGJ_MEMECOIN_EARLY_RADAR',
         status:'OPEN',
