@@ -197,9 +197,9 @@ export function deriveShadowWorkerReplayPlan({
     // maxAdaptiveHardHeapMb. Only genuine absolute hard pressure must stop
     // immediately.
     const absoluteHardPressure=
-      memory.heapUsedMb>=Math.max(1,Number(maxAdaptiveHardHeapMb)||370)||
-      memory.rssMb>=Math.max(1,Number(hardRssMb)||900)||
-      memory.externalMb>=Math.max(1,Number(hardExternalMb)||160);
+      Number(heapUsedMb)>=Math.max(1,Number(maxAdaptiveHardHeapMb)||370)||
+      Number(rssMb)>=Math.max(1,Number(hardRssMb)||900)||
+      Number(externalMb)>=Math.max(1,Number(hardExternalMb)||160);
     if(admission.reason==='HARD_MEMORY_PRESSURE'&&absoluteHardPressure){
       return {
         ...plan,
