@@ -1,4 +1,5 @@
 export const MEMECOIN_EARLY_RADAR_VERSION='BIGGJ_MEMECOIN_EARLY_RADAR_V1';
+export const W6_ULTRA_EARLY_FEED_VERSION='BIGGJ_W6_ULTRA_EARLY_FEED_V1';
 
 function finite(v){
   if(v==null||v==='')return null;
@@ -362,6 +363,8 @@ export function createMemecoinEarlyRadarProvider({
   timeoutMs=7000,
   dexCacheMs=15000,
   geckoCacheMs=60000,
+  ultraGeckoCacheMs=5000,
+  ultraDexCacheMs=5000,
   networks=['solana','base','ethereum'],
   pairLookupLimit=10,
   now=()=>Date.now()
@@ -408,6 +411,23 @@ export function createMemecoinEarlyRadarProvider({
       return (Array.isArray(body?.data)?body.data:[]).map(x=>normalizeGeckoPool(x,included,network)).filter(x=>x.tokenAddress);
     },{force});
   }
+  async function geckoNewPoolsUltraSolana({force=false}={}){
+    return cached('ultra:gecko:solana',Math.max(1000,Number(ultraGeckoCacheMs)||5000),async()=>{
+      const body=await getJson(gecko+'/networks/solana/new_pools?include=base_token%2Cquote_token&page=1');
+      const included=new Map((Array.isArray(body?.included)?body.included:[]).map(x=>[x?.id,x]));
+      return (Array.isArray(body?.data)?body.data:[]).map(x=>normalizeGeckoPool(x,included,'solana')).filter(x=>x.tokenAddress);
+    },{force});
+  }
+  async function dexBatchTokens(chain,addresses,{force=false}={}){
+    const xs=[...new Set((Array.isArray(addresses)?addresses:[]).map(x=>String(x||'').trim()).filter(Boolean))].slice(0,30);
+    if(!xs.length)return [];
+    const key='ultra:dex:'+normChain(chain)+':'+xs.join(',');
+    return cached(key,Math.max(1000,Number(ultraDexCacheMs)||5000),async()=>{
+      const body=await getJson(dex+'/tokens/v1/'+encodeURIComponent(normChain(chain))+'/'+xs.map(encodeURIComponent).join(','));
+      const raw=Array.isArray(body)?body:(Array.isArray(body?.pairs)?body.pairs:[]);
+      return raw.map(normalizeDexPair).filter(x=>x.tokenAddress);
+    },{force});
+  }
 
   async function fetchTokenSnapshot(chainId,tokenAddress,{force=false}={}){
     const capturedAt=Number(now());
@@ -422,6 +442,82 @@ export function createMemecoinEarlyRadarProvider({
     if(!firstSeen.has(key))firstSeen.set(key,capturedAt);
     const row={...best,firstSeenAt:firstSeen.get(key),signalProfile:false,signalBoost:false,signalTakeover:false,signalAd:false};
     return Object.freeze({...row,score:scoreEarlyMemecoin(row,{now:capturedAt})});
+  }
+
+  async function fetchUltraEarlySolana({limit=30,maxAgeSeconds=180,force=false}={}){
+    const capturedAt=Number(now());
+    const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
+    const errors=[];
+    let pools=[];
+    try{
+      pools=await geckoNewPoolsUltraSolana({force});
+    }catch(err){
+      errors.push('gecko:solana:'+(err instanceof Error?err.message:String(err)));
+    }
+    const fresh=pools.filter(row=>{
+      const created=finite(row?.pairCreatedAt);
+      if(created==null)return false;
+      const age=Math.max(0,(capturedAt-created)/1000);
+      return age<=maxAge;
+    }).sort((a,b)=>(finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0)).slice(0,30);
+
+    let dexRows=[];
+    try{
+      dexRows=await dexBatchTokens('solana',fresh.map(x=>x.tokenAddress),{force});
+    }catch(err){
+      errors.push('dex:batch:'+(err instanceof Error?err.message:String(err)));
+    }
+    const byToken=new Map();
+    for(const row of dexRows){
+      const key=tokenKey('solana',row?.tokenAddress);
+      if(!key)continue;
+      const prior=byToken.get(key);
+      if(!prior){
+        byToken.set(key,row);
+        continue;
+      }
+      const priorLiq=finite(prior?.liquidityUsd)??-1,rowLiq=finite(row?.liquidityUsd)??-1;
+      if(rowLiq>priorLiq)byToken.set(key,row);
+    }
+
+    const rows=fresh.map(pool=>{
+      const key=tokenKey('solana',pool.tokenAddress);
+      const dexRow=byToken.get(key)||null;
+      const merged=dexRow?mergeCandidate(pool,dexRow):pool;
+      const created=finite(pool?.pairCreatedAt);
+      const normalized={
+        ...merged,
+        chainId:'solana',
+        tokenAddress:pool.tokenAddress,
+        pairAddress:pool.pairAddress||merged.pairAddress,
+        pairCreatedAt:created,
+        firstSeenAt:firstSeen.get(key)??capturedAt,
+        signalNewPool:true,
+        ultraEarly:true,
+        ultraSource:dexRow?'GECKOTERMINAL_NEW_POOL_PLUS_DEXSCREENER_BATCH':'GECKOTERMINAL_NEW_POOL_ONLY'
+      };
+      if(!firstSeen.has(key))firstSeen.set(key,capturedAt);
+      normalized.firstSeenAt=firstSeen.get(key);
+      return normalized;
+    }).filter(row=>!obviousNonMeme(row)).map(row=>{
+      const created=finite(row?.pairCreatedAt);
+      const ageSeconds=created==null?null:Math.max(0,(capturedAt-created)/1000);
+      return Object.freeze({...row,ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),score:scoreEarlyMemecoin(row,{now:capturedAt})});
+    }).sort((a,b)=>(finite(a?.ageSeconds)??Infinity)-(finite(b?.ageSeconds)??Infinity)).slice(0,Math.max(1,Math.min(30,Number(limit)||30)));
+
+    return Object.freeze({
+      version:W6_ULTRA_EARLY_FEED_VERSION,
+      capturedAt,
+      rows:Object.freeze(rows),
+      errors:Object.freeze(errors),
+      source:'GECKOTERMINAL_SOLANA_NEW_POOLS_PLUS_DEXSCREENER_BATCH',
+      sourceReady:errors.length===0||rows.length>0,
+      pollTargetSeconds:Number((Math.max(1000,Number(ultraGeckoCacheMs)||5000)/1000).toFixed(1)),
+      maxAgeSeconds:maxAge,
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false
+    });
   }
 
   async function fetchEarlyRadar({limit=12,force=false}={}){
@@ -535,5 +631,5 @@ export function createMemecoinEarlyRadarProvider({
     });
   }
 
-  return Object.freeze({version:MEMECOIN_EARLY_RADAR_VERSION,fetchEarlyRadar,fetchTokenSnapshot});
+  return Object.freeze({version:MEMECOIN_EARLY_RADAR_VERSION,fetchEarlyRadar,fetchUltraEarlySolana,fetchTokenSnapshot});
 }
