@@ -4536,7 +4536,7 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       ];
     });
     const wallets=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets||{};
-    const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{};
+    const w4=wallets[WALLET_4_MEME_SCOUT]||{},w5=wallets[WALLET_5_MEME_COPY]||{},w6=wallets[WALLET_6_USER_99K_60S]||{};
     const outcome=memecoinSecurityOutcomeSummary(memecoinSecurityOutcomeState,{
       asOf:Date.now(),
       minComparisonSample:Math.max(10,Number(process.env.TCX_MEME_SECURITY_MIN_COMPARISON_SAMPLE||30))
@@ -4554,6 +4554,11 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'WALLET 5 · MEME COPY',
       'Open '+Number(w5.openPositions||0)+' · Closed '+Number(w5.closedTrades||0)+' · Shadow PnL '+compactUsd(w5.netPnlQuote),
       'Kopiert öffentlich sichtbare Memecoin-Positionen qualifizierter OKX Lead-Trader.','',
+      'WALLET 6 · 99K IN 60S · USER STRATEGY V1',
+      'Open '+Number(w6.openPositions||0)+' · Closed '+Number(w6.closedTrades||0)+' · Winrate '+(w6.winRate==null?'—':Math.round(Number(w6.winRate)*100)+'%'),
+      'Regel: Alter ≤60s + Market Cap ≥99k => sofortiger Shadow-Entry.',
+      'Exit: Market Cap fällt unter 99k oder +10 SOL Ziel bei bekannter Entry-Größe.',
+      'Sizing-Lab: 10 / 20 / 40 / 80 SOL getrennt; 80 SOL braucht ca. +12,5% brutto für +10 SOL vor Kosten.','',
       'ATTENTION-QUELLEN',
       '• neue DEX-Pools · neue Token-Profile · Boosts · Community-Takeovers · DEX Ads',
       '• öffentliche News-Erwähnungen + X-verknüpfte Projektprofile.',
