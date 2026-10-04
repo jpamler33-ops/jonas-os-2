@@ -504,9 +504,18 @@ export function createMemecoinEarlyRadarProvider({
           'user-agent':'gmgn-cli/1.6.6'
         }
       });
-      const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
-      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_OPENAPI_CODE_'+String(body.code)+'_'+text(body?.msg,120));
-      if(!raw.length)throw new Error('GMGN_OPENAPI_TREND_EMPTY');
+      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_OPENAPI_CODE_'+String(body.code)+'_'+text(body?.message||body?.msg||body?.error,120));
+      const payload=body?.data??body;
+      const raw=
+        Array.isArray(payload?.rank)?payload.rank:
+        Array.isArray(payload?.list)?payload.list:
+        Array.isArray(payload?.tokens)?payload.tokens:
+        Array.isArray(payload)?payload:
+        [];
+      if(!raw.length){
+        const shape=payload&&typeof payload==='object'&&!Array.isArray(payload)?Object.keys(payload).slice(0,12).join(','):(Array.isArray(payload)?'ARRAY_0':typeof payload);
+        throw new Error('GMGN_OPENAPI_TREND_EMPTY_SHAPE_'+text(shape||'NONE',160));
+      }
       return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
     },{force});
   }
