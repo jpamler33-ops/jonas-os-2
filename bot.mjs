@@ -270,6 +270,11 @@ import {
   BIGGJ_MARKET_SCIENCE_OS_VERSION
 } from './biggj-market-science-os.mjs';
 import {
+  buildBiggjResearchSpine,
+  biggjResearchSpineSummary,
+  BIGGJ_RESEARCH_SPINE_VERSION
+} from './biggj-research-spine.mjs';
+import {
   buildBiggjWorldModelRuntime,
   biggjWorldModelRuntimeSummary,
   BIGGJ_WORLD_MODEL_RUNTIME_VERSION
@@ -12194,6 +12199,12 @@ function missionControlData(){
     lastError:biggjDiscoveryLedgerLastError,
     file:biggjDiscoveryLedgerFile
   },
+  strategyLeagueSummary:{
+    ...strategyLeagueSummary(strategyLeagueLedger,{asOf:now}),
+    enabled:strategyLeagueEnabled,
+    healthy:strategyLeagueHealthy,
+    lastError:strategyLeagueLastError
+  },
   indicatorEvolution:{
     ...indicatorEvolutionSummary(indicatorEvolutionState),
     version:INDICATOR_EVOLUTION_ENGINE_VERSION,
@@ -12511,6 +12522,16 @@ function missionControlData(){
  health.biggjMarketScienceOs={
    ...biggjMarketScienceOsSummary(marketScienceOs),
    version:BIGGJ_MARKET_SCIENCE_OS_VERSION
+ };
+ const researchSpine=buildBiggjResearchSpine({
+   health,
+   portfolio:portfolioView,
+   discovery,
+   asOf:now
+ });
+ health.biggjResearchSpine={
+   ...biggjResearchSpineSummary(researchSpine),
+   version:BIGGJ_RESEARCH_SPINE_VERSION
  };
  health.experienceNeeds=deriveBiggjExperienceNeeds({health});
  return missionControlSnapshot({health,portfolio:portfolioView,discovery,storage:{persistentStorageMounted}});
