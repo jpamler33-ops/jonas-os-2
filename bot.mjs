@@ -208,6 +208,7 @@ import {
 import {
   runForecastShadowEvaluationWorker,
   evaluateShadowWorkerAdmission,
+  deriveShadowWorkerReplayPlan,
   evaluateAutoLearnMemoryAdmission,
   forecastHistoryProgressAt,
   forecastHistoryHasAdvanced,
@@ -11049,61 +11050,71 @@ async function shadowCompetitionWatcher(){
     try{
       if(shadowCompetitionEnabled&&shadowCompetitionServingWorkerEnabled&&forecastRuntime.healthy){
         const researchAcceleration=currentResearchAccelerator(Date.now());
-        const effectiveShadowCompetitionHistoryRows=Math.max(
+        const acceleratedHistoryRows=Math.max(
           500,
           Math.min(shadowCompetitionHistoryRows,researchAcceleration.resource.shadowReplayHistoryRows)
         );
-        const replayWindowRatio=Math.max(.25,Math.min(1,effectiveShadowCompetitionHistoryRows/shadowCompetitionHistoryRows));
-        const adaptiveShadowAutoHeapMb=Math.min(
-          345,
-          shadowCompetitionAutoHeapMb+Math.round((1-replayWindowRatio)*145)
-        );
-        const adaptiveShadowAutoRssMb=Math.min(
-          720,
-          shadowCompetitionAutoRssMb+Math.round((1-replayWindowRatio)*140)
-        );
-        const adaptiveShadowHardHeapMb=Math.min(
-          370,
-          Math.max(300,adaptiveShadowAutoHeapMb+25)
-        );
-        const effectiveShadowWorkerHeapMb=
-          researchAcceleration.resource.mode==='MEMORY_PROTECT'
-            ?128
-            :researchAcceleration.resource.mode==='CAUTIOUS'
-              ?Math.min(144,shadowCompetitionWorkerHeapMb)
-              :shadowCompetitionWorkerHeapMb;
         maybeCollectResearchGarbage('SHADOW_REPLAY_PRECHECK',{
-          triggerHeapMb:Math.max(280,Math.min(adaptiveShadowAutoHeapMb,servingGuardHeapMb)-10)
+          triggerHeapMb:Math.max(280,Math.min(shadowCompetitionAutoHeapMb,servingGuardHeapMb)-10)
         });
         const memory=process.memoryUsage();
         const heapUsedMb=Math.round(memory.heapUsed/1024/1024);
         const rssMb=Math.round(memory.rss/1024/1024);
         const externalMb=Math.round(memory.external/1024/1024);
-        const admission=evaluateShadowWorkerAdmission({
+        let replayPlan=deriveShadowWorkerReplayPlan({
           mode:shadowCompetitionWorkerMode,
           heapUsedMb,
           rssMb,
           externalMb,
-          autoHeapMb:adaptiveShadowAutoHeapMb,
-          autoRssMb:adaptiveShadowAutoRssMb,
+          configuredHistoryRows:shadowCompetitionHistoryRows,
+          effectiveHistoryRows:acceleratedHistoryRows,
+          minHistoryRows:Math.max(500,shadowCompetitionMinSeedRows,shadowCompetitionMinTrainCases),
+          baseAutoHeapMb:shadowCompetitionAutoHeapMb,
+          baseAutoRssMb:shadowCompetitionAutoRssMb,
           autoExternalMb:shadowCompetitionAutoExternalMb,
-          hardHeapMb:adaptiveShadowHardHeapMb,
-          hardRssMb:900,
-          hardExternalMb:shadowCompetitionHardExternalMb
+          hardExternalMb:shadowCompetitionHardExternalMb,
+          hardRssMb:900
         });
-        shadowCompetitionWorkerLastDecision={...admission,at:Date.now()};
+        let effectiveShadowCompetitionHistoryRows=replayPlan.historyRows;
+        let adaptiveShadowAutoHeapMb=replayPlan.limits?.autoHeapMb||shadowCompetitionAutoHeapMb;
+        let adaptiveShadowAutoRssMb=replayPlan.limits?.autoRssMb||shadowCompetitionAutoRssMb;
+        let adaptiveShadowHardHeapMb=replayPlan.limits?.hardHeapMb||300;
+        let replayMode=replayPlan.replayMode||'DEFERRED';
+        let effectiveShadowWorkerHeapMb=
+          replayMode==='COMPACT'||researchAcceleration.resource.mode==='MEMORY_PROTECT'
+            ?128
+            :researchAcceleration.resource.mode==='CAUTIOUS'
+              ?Math.min(144,shadowCompetitionWorkerHeapMb)
+              :shadowCompetitionWorkerHeapMb;
+        const admission=replayPlan;
+        shadowCompetitionWorkerLastDecision={...admission,at:Date.now(),stage:'INITIAL_ADMISSION'};
         if(!admission.allowed){
           shadowCompetitionWorkerMemoryDeferrals++;
           console.warn('shadow competition deferred for memory headroom',JSON.stringify({
             mode:shadowCompetitionWorkerMode,
+            replayMode,
             reason:admission.reason,
             heapUsedMb,rssMb,externalMb,
-            historyRows:forecastRuntime.engine.historySize(),
+            engineHistoryRows:forecastRuntime.engine.historySize(),
+            effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
             limits:admission.limits
           }));
           recordOperation(observability,{name:'forecast_shadow_competition',ok:true,latencyMs:Date.now()-started,error:'DEFERRED_'+admission.reason});
           await sleep(shadowCompetitionEvalMs);
           continue;
+        }
+        if(replayMode==='COMPACT'){
+          console.info('[TCX_SHADOW_REPLAY_COMPACT]',JSON.stringify({
+            reason:'ADAPTIVE_MEMORY_HEADROOM',
+            heapUsedMb,rssMb,externalMb,
+            acceleratedHistoryRows,
+            effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
+            autoHeapMb:adaptiveShadowAutoHeapMb,
+            hardHeapMb:adaptiveShadowHardHeapMb,
+            workerHeapMb:effectiveShadowWorkerHeapMb,
+            execution:'SHADOW_ONLY',
+            canExecuteLive:false
+          }));
         }
         const preflightHistoryProgressAt=forecastRuntime.engine.historyProgressAt(
           Number.POSITIVE_INFINITY,
