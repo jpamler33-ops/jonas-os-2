@@ -825,3 +825,54 @@ test('W6 exact setup requires current New Pair visibility in addition to trend a
   assert.equal(p.sourceSetupAtEntry,'GMGN_TRENDING_NEW_PAIR_1M');
 });
 
+test('W6 Trends 1m uses the green GMGN percentage threshold, not market cap',()=>{
+  const now=13_200_000;
+  const base={
+    chainId:'solana',tokenAddress:'GREEN999K',symbol:'GREEN',priceUsd:.001,
+    marketCap:47_800,pairCreatedAt:now-50_000,
+    signalTrending:true,signalNewPair:false,gmgnExactTrend:true,trendRank:4,
+    priceChangeSelectedPct:999_000,sourceSetup:'GMGN_TRENDS_1M'
+  };
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{
+    sourceReady:true,rows:[base]
+  },{
+    now,requireTrending:true,requireNewPair:false,
+    minGreenChangePct:99_000,requireExactGmgnGreen:true
+  });
+  assert.equal(x.results.opened,1);
+  assert.equal(x.results.entryFunnel.greenPercentKnown,1);
+  assert.equal(x.results.entryFunnel.greenPercentQualifiedAfterAge,1);
+  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.entryMarketCapUsd,47_800);
+  assert.equal(p.entryGreenPercent,999_000);
+  assert.equal(p.entryThresholdMode,'GMGN_GREEN_PERCENT');
+  assert.equal(p.entryRule,'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY');
+  assert.equal(p.sourceSetupAtEntry,'GMGN_TRENDS_1M');
+
+  const exact99k=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{
+    sourceReady:true,rows:[{...base,tokenAddress:'GREEN99K',priceChangeSelectedPct:99_000}]
+  },{
+    now,requireTrending:true,requireNewPair:false,
+    minGreenChangePct:99_000,requireExactGmgnGreen:true
+  });
+  assert.equal(exact99k.results.opened,1);
+
+  const tooLow=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{
+    sourceReady:true,rows:[{...base,tokenAddress:'GREENLOW',marketCap:250_000,priceChangeSelectedPct:98_999}]
+  },{
+    now,requireTrending:true,requireNewPair:false,
+    minGreenChangePct:99_000,requireExactGmgnGreen:true
+  });
+  assert.equal(tooLow.results.opened,0);
+  assert.equal(tooLow.results.entryBlockers.GMGN_GREEN_PERCENT_BELOW_THRESHOLD,1);
+
+  const fallback=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{
+    sourceReady:true,rows:[{...base,tokenAddress:'NOTGMGN',gmgnExactTrend:false}]
+  },{
+    now,requireTrending:true,requireNewPair:false,
+    minGreenChangePct:99_000,requireExactGmgnGreen:true
+  });
+  assert.equal(fallback.results.opened,0);
+  assert.equal(fallback.results.entryBlockers.GMGN_EXACT_TREND_REQUIRED,1);
+});
+
