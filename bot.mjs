@@ -11166,7 +11166,7 @@ async function shadowCompetitionWatcher(){
             hardRssMb:900,
             hardExternalMb:shadowCompetitionHardExternalMb
           });
-          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs,stage:'PRE_SNAPSHOT'};
+          shadowCompetitionWorkerLastDecision={...freshAdmission,at:Date.now(),slotWaitMs,stage:'PRE_SNAPSHOT',replayMode,effectiveHistoryRows:effectiveShadowCompetitionHistoryRows};
           if(freshAdmission.allowed){
             history=forecastRuntime.engine.historySnapshot(
               Number.POSITIVE_INFINITY,
@@ -11207,7 +11207,7 @@ async function shadowCompetitionWatcher(){
                 releaseId,
                 minSeedRows:shadowCompetitionMinSeedRows,
                 minimumTrainCases:shadowCompetitionMinTrainCases,
-                maxGeneratedHypotheses:4,
+                maxGeneratedHypotheses:replayMode==='COMPACT'?2:4,
                 now:Date.now()
               },{
                 timeoutMs:shadowCompetitionWorkerTimeoutMs,
@@ -11254,6 +11254,8 @@ async function shadowCompetitionWatcher(){
           allowed:true,
           reason:'WORKER_COMPLETED',
           stage:'WORKER_COMPLETED',
+          replayMode,
+          effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
           historyProgressAt,
           slotWaitMs
         };
@@ -11319,6 +11321,7 @@ async function shadowCompetitionWatcher(){
           mainHeapBeforeMb:heapBefore,
           mainHeapAfterMb:Math.round(process.memoryUsage().heapUsed/1024/1024),
           mode:shadowCompetitionWorkerMode,
+          replayMode,
           historyProgressAt,
           configuredHistoryRows:shadowCompetitionHistoryRows,
           effectiveHistoryRows:effectiveShadowCompetitionHistoryRows,
