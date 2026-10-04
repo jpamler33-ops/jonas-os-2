@@ -743,3 +743,25 @@ test('W6 healthy runner may remain open after 30m and caps at 60m',()=>{
   assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='CLOSED').length,7);
   assert.ok(p.holdLab.filter(s=>s.policyId==='RUNNER').every(s=>s.closeReason==='RUNNER_MAX_60M'));
 });
+
+test('W6 ignores position-only tracking rows but can enter a remembered fresh candidate after it reaches 99k',()=>{
+  const now=12_500_000;
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[
+    {
+      chainId:'solana',tokenAddress:'OPENONLY',symbol:'OLDOPEN',priceUsd:1,marketCap:150000,
+      pairCreatedAt:now-30_000,w6TrackingOnly:true
+    },
+    {
+      chainId:'solana',tokenAddress:'REMEMBERED',symbol:'HOT',priceUsd:1,marketCap:120000,
+      pairCreatedAt:now-45_000,candidateTracking:true,w6TrackingOnly:false,
+      w6LaunchTracker:{firstObservedAgeSeconds:12,first99kObservedAgeSeconds:45,observed99kWithin60:true}
+    }
+  ]},{now});
+  assert.equal(x.results.entryFunnel.rowsSeen,1);
+  assert.equal(x.results.entryFunnel.eligible,1);
+  assert.equal(x.results.opened,1);
+  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.tokenAddress,'REMEMBERED');
+  assert.equal(p.entryAgeSeconds,45);
+});
+
