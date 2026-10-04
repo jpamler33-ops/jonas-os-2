@@ -5215,7 +5215,8 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     notionalScenariosSol:[2,5,10,20,40,60,80],
     minHoldSeconds:Math.max(0,Math.min(1800,Number(process.env.TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180))),
     solPriceUsd,
-    maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30)))
+    maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
+    requireTrending:true
   };
 }
 
@@ -5267,6 +5268,8 @@ function enrichW6UltraCandidateRows(snapshot){
     const tracker={
       firstObservedAt,
       firstObservedAgeSeconds,
+      firstTrendSeenAt:firstObservedAt,
+      firstTrendSeenAgeSeconds:firstObservedAgeSeconds,
       lastObservedAt:capturedAt,
       lastObservedAgeSeconds:ageSeconds,
       lastObservedMarketCapUsd:marketCapKnown?marketCap:null,
