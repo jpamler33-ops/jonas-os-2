@@ -18,7 +18,10 @@ function finite(v,fallback=null){
   const n=Number(v);return Number.isFinite(n)?n:fallback;
 }
 function text(v,max=160){
-  const s=String(v??'').replace(/\s+/g,' ').trim();
+  const s=String(v??'')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
   return s.length<=max?s:s.slice(0,max-1)+'…';
 }
 function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
@@ -1154,6 +1157,15 @@ export function user99k60sExitLearningSummary(input,{asOf=Date.now()}={}){
   });
 }
 
+function safePositionForOutput(position){
+  const x=clone(position);
+  if(x&&typeof x==='object'){
+    if('symbol' in x)x.symbol=text(x.symbol,80);
+    if('name' in x)x.name=text(x.name,120);
+  }
+  return x;
+}
+
 function walletStats(wallet){
   const open=wallet.positions||[],closed=wallet.closed||[];
   const closedRealized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
@@ -1172,8 +1184,8 @@ function walletStats(wallet){
     profitFactor:gl>EPS?gp/gl:null,
     cumulativeMarginUsedQuote:[...open,...closed].reduce((s,p)=>s+Math.max(0,finite(p?.initialMarginQuote,p?.marginQuote)||0),0),
     currentMarginAtRiskQuote:open.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
-    active:open.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(x=>clone(x)),
-    recentClosed:closed.slice(-20).reverse().map(x=>clone(x)),
+    active:open.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
+    recentClosed:closed.slice(-20).reverse().map(safePositionForOutput),
     objective:wallet.objective,primaryPerformanceExcluded:true,
     execution:'SHADOW_ONLY',canExecuteLive:false
   });
