@@ -168,7 +168,7 @@ test('W6 exact GMGN Trends 1m feed keeps launch age and displayed green percenta
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
 });
 
-test('W6 can push the green percent threshold into GMGN OpenAPI discovery',async()=>{
+test('W6 keeps GMGN discovery unfiltered and applies green threshold downstream',async()=>{
   const now=2_110_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const fetchImpl=async (url)=>{
@@ -176,7 +176,7 @@ test('W6 can push the green percent threshold into GMGN OpenAPI discovery',async
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
       assert.equal(u.searchParams.get('interval'),'1m');
       assert.equal(u.searchParams.get('order_by'),null);
-      assert.equal(u.searchParams.get('min_price_change_percent'),'99000');
+      assert.equal(u.searchParams.get('min_price_change_percent'),null);
       return json({code:0,data:{rank:[{
         address:'GREENMINT',symbol:'GREEN',name:'Green Meme',price:.001,market_cap:47800,
         price_change_percent:999000,open_timestamp:Math.floor((now-50_000)/1000)
