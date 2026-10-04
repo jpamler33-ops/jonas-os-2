@@ -744,7 +744,7 @@ test('W6 healthy runner may remain open after 30m and caps at 60m',()=>{
   assert.ok(p.holdLab.filter(s=>s.policyId==='RUNNER').every(s=>s.closeReason==='RUNNER_MAX_60M'));
 });
 
-test('W6 ignores position-only tracking rows but can enter a remembered fresh candidate after it reaches 99k',()=>{
+test('W6 tracking memory cannot trigger an entry after the coin leaves the current trend feed',()=>{
   const now=12_500_000;
   const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[
     {
@@ -753,16 +753,14 @@ test('W6 ignores position-only tracking rows but can enter a remembered fresh ca
     },
     {
       chainId:'solana',tokenAddress:'REMEMBERED',symbol:'HOT',priceUsd:1,marketCap:120000,
-      pairCreatedAt:now-45_000,candidateTracking:true,w6TrackingOnly:false,
+      pairCreatedAt:now-45_000,candidateTracking:true,w6TrackingOnly:false,signalTrending:false,
       w6LaunchTracker:{firstObservedAgeSeconds:12,first99kObservedAgeSeconds:45,observed99kWithin60:true}
     }
-  ]},{now});
+  ]},{now,requireTrending:true});
   assert.equal(x.results.entryFunnel.rowsSeen,1);
-  assert.equal(x.results.entryFunnel.eligible,1);
-  assert.equal(x.results.opened,1);
-  const p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.tokenAddress,'REMEMBERED');
-  assert.equal(p.entryAgeSeconds,45);
+  assert.equal(x.results.entryFunnel.eligible,0);
+  assert.equal(x.results.entryBlockers.NOT_IN_TREND_FEED,1);
+  assert.equal(x.results.opened,0);
 });
 
 test('W6 trend gate rejects a fresh 99k coin that is not in the trend feed',()=>{
