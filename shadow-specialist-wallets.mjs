@@ -1092,7 +1092,11 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
       entryStrategySignal:clone(signal),
       strategyVersion:USER_99K_60S_STRATEGY_VERSION,
-      entryRule:signal.rule,
+      entryRule:signal.thresholdMode==='GMGN_GREEN_PERCENT'
+        ?signal.rule
+        :(requireNewPair
+          ?'GMGN_TRENDING_NEW_PAIR_1M_AGE_LTE_60S_MCAP_GTE_99K_IMMEDIATE'
+          :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE')),
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
