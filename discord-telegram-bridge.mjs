@@ -568,6 +568,8 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
   const h=snapshot?.health||{},radar=h?.memecoinRadar||{},learning=radar?.learning?.wallet4||{},contra=learning?.contrarian||{},g=contra?.global||{};
   const world=h?.biggjWorldModel||{},signalController=radar?.signalController||{},signalCounts=signalController?.counts||{};
   const wallet=h?.specialistWallets?.wallets?.W4_MEME_SCOUT||{};
+  const user99=h?.specialistWallets?.wallets?.W6_USER_99K_60S||{};
+  const user99Active=Array.isArray(user99?.active)?user99.active:[];
   const active=Array.isArray(wallet?.active)?wallet.active:[];
   const openContrarian=active.filter(x=>String(x?.entryResearchLane||'').toUpperCase()==='CONTRARIAN_PROBE');
   const radarRows=Array.isArray(radar?.rows)?radar.rows:[];
@@ -616,6 +618,14 @@ export function buildDiscordMemecoinResearchPayload(snapshot={}){
     ].join('\n'),
     fields:[
       {name:'Entry Gate · aktuelle Kandidaten',value:(signalRows.join('\n')||'Keine Radar-Kandidaten vorhanden.').slice(0,1024),inline:false},
+      {name:'W6 · 99K IN 60S · USER V1',value:[
+        'Regel: **≤60s alt + ≥$99k MC → sofortiger Shadow-Entry**',
+        'Open **'+String(user99?.openPositions??0)+'** · Closed **'+String(user99?.closedTrades??0)+'** · WR **'+percent(user99?.winRate)+'**',
+        'Sizing getrennt: **10 / 20 / 40 / 80 SOL** · Ziel **+10 SOL** abhängig vom Einsatz.',
+        user99Active[0]?.profitTargetScenarios?.length
+          ?user99Active[0].profitTargetScenarios.map(s=>'`'+String(s.entryNotionalSol)+' SOL` '+(s.targetHit?'✅ Ziel erreicht':'→ ca. '+(Number(s.targetPriceReturnApprox||0)*100).toFixed(1)+'% Preisbewegung nötig')).join(' · ')
+          :'Noch kein aktiver W6-Trade.'
+      ].join('\n').slice(0,1024),inline:false},
       {name:'Probes',value:'Offen **'+openContrarian.length+'** · abgeschlossen **'+String(contra?.samples??0)+'** · Normal-Learner **'+String(learning?.samples??0)+'**',inline:false},
       {name:'Outcome',value:'WR **'+pctMaybe(g?.rawWinRate)+'** · Ø **'+pctMaybe(g?.rawMeanReturn)+'** · Median **'+pctMaybe(g?.medianReturn)+'** · Severe **'+pctMaybe(g?.severeLossRate)+'** · Moonshot **'+pctMaybe(g?.moonshotRate)+'**',inline:false},
       {name:'Aktive Contrarian-Probes',value:(openRows.join('\n')||'Noch keine aktive Probe.').slice(0,1024),inline:false},
