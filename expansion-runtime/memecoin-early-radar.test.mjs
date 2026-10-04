@@ -110,10 +110,15 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
   const now=2_100_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const calls=[];
-  const fetchImpl=async url=>{
-    calls.push(url);
+  const fetchImpl=async (url,opts={})=>{
+    calls.push({url,opts});
     const u=new URL(url);
-    if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1m')return json({
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
+      assert.equal(u.searchParams.get('chain'),'sol');
+      assert.equal(u.searchParams.get('interval'),'1m');
+      assert.equal(u.searchParams.get('order_by'),'default');
+      assert.equal(opts?.headers?.['X-APIKEY'],'gmgn_solbscbaseethmonadtron');
+      return json({
       code:0,msg:'success',data:{rank:[{
         chain:'sol',address:'FASTMINT',symbol:'FAST',name:'Fast Meme',
         price:0.001,liquidity:45000,volume:5000,market_cap:120000,
@@ -123,6 +128,7 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
         holder_count:77
       }]}
     });
+    }
     if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
       chainId:'solana',pairAddress:'OTHERPAIR',dexId:'raydium',
       baseToken:{address:'FASTMINT',symbol:'FAST',name:'Fast Meme'},quoteToken:{symbol:'SOL'},
@@ -146,13 +152,13 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
   assert.equal(out.rows[0].ultraEarly,true);
   assert.equal(out.rows[0].signalTrending,true);
   assert.equal(out.rows[0].gmgnExactTrend,true);
-  assert.equal(out.rows[0].trendSource,'GMGN_TRENDS_PUBLIC_1M_DEFAULT');
+  assert.equal(out.rows[0].trendSource,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
   assert.equal(out.rows[0].trendRank,1);
   assert.equal(out.exactGmgn,true);
-  assert.equal(out.source,'GMGN_TRENDS_PUBLIC_1M_DEFAULT');
+  assert.equal(out.source,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
-  assert.equal(calls.filter(x=>x.includes('/tokens/v1/solana/')).length,1);
+  assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
 });
 
 test('W6 candidate memory stays entry-eligible and preserves original launch age while Dex data refreshes',async()=>{
