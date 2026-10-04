@@ -7,7 +7,10 @@ function finite(v){
   return Number.isFinite(n)?n:null;
 }
 function text(v,max=500){
-  const s=String(v??'').replace(/\s+/g,' ').trim();
+  const s=String(v??'')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
   return s.length<=max?s:s.slice(0,max-1)+'…';
 }
 function clamp(v,a=0,b=1){return Math.max(a,Math.min(b,Number(v)||0));}
