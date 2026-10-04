@@ -498,7 +498,8 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.observedTimeTo99kSeconds,25);
   assert.equal(p.entryMarketCapUsd,120_000);
   assert.equal(p.entryRule,'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
-  assert.equal(p.targetTracking,'WAITING_FOR_ENTRY_NOTIONAL_SOL');
+  assert.equal(p.targetTracking,'SCENARIO_MATRIX_10_20_40_80_SOL');
+  assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[10,20,40,80]);
   assert.equal(p.canExecuteLive,false);
 });
 
@@ -520,11 +521,29 @@ test('user 99k/60s V1 can represent the 10 SOL profit exit when entry SOL notion
   const now=13_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:1,marketCap:150_000,pairCreatedAt:now-15_000
-  }]},{now,entryNotionalSol:10,targetPnlSol:10}).state;
+  }]},{now,entryNotionalSol:80,targetPnlSol:10}).state;
   const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:2,marketCap:300_000,pairCreatedAt:now-45_000
-  }]},{now:now+30_000,entryNotionalSol:10,targetPnlSol:10});
+    chainId:'solana',tokenAddress:'TEN',symbol:'TEN',priceUsd:1.14,marketCap:171_000,pairCreatedAt:now-45_000
+  }]},{now:now+30_000,entryNotionalSol:80,targetPnlSol:10});
   assert.equal(next.results.closed,1);
   assert.equal(next.results.targetPnlExit,1);
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_TARGET_PNL_SOL');
+  assert.ok(next.state.wallets[WALLET_6_USER_99K_60S].closed[0].estimatedNetPnlSolBeforeSlippage>=10);
+});
+
+test('user 99k/60s V1 tracks separate 10/20/40/80 SOL profit-target scenarios when actual stake varies',()=>{
+  const now=14_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'SIZEGRID',symbol:'SIZEGRID',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000
+  }]},{now,targetPnlSol:10}).state;
+  const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'SIZEGRID',symbol:'SIZEGRID',priceUsd:1.14,marketCap:150_000,pairCreatedAt:now-50_000
+  }]},{now:now+30_000,targetPnlSol:10});
+  const p=next.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  const s80=p.profitTargetScenarios.find(x=>x.entryNotionalSol===80);
+  const s40=p.profitTargetScenarios.find(x=>x.entryNotionalSol===40);
+  assert.equal(s80.targetHit,true);
+  assert.equal(s40.targetHit,false);
+  assert.ok(s80.targetPriceReturnApprox>.125);
+  assert.equal(next.results.scenarioTargetHits,1);
 });
