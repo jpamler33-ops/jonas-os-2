@@ -507,10 +507,10 @@ test('user 99k/60s V1 exits when market cap falls below the frozen 99k floor',()
   const now=12_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
-  }]},{now}).state;
+  }]},{now,minExitMarketCapUsd:99_000}).state;
   const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-50_000
-  }]},{now:now+30_000});
+  }]},{now:now+30_000,minExitMarketCapUsd:99_000});
   assert.equal(next.results.closed,1);
   assert.equal(next.results.marketCapExit,1);
   assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,0);
@@ -546,4 +546,18 @@ test('user 99k/60s V1 tracks separate 10/20/40/80 SOL profit-target scenarios wh
   assert.equal(s40.targetHit,false);
   assert.ok(s80.targetPriceReturnApprox>.125);
   assert.equal(next.results.scenarioTargetHits,1);
+});
+
+
+test('user 99k/60s V1 does not invent a market-cap exit threshold',()=>{
+  const now=15_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'NOFLOOR',symbol:'NOFLOOR',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+  }]},{now}).state;
+  const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'NOFLOOR',symbol:'NOFLOOR',priceUsd:.7,marketCap:70_000,pairCreatedAt:now-50_000
+  }]},{now:now+30_000});
+  assert.equal(next.results.marketCapExit,0);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
+  assert.equal(next.state.wallets[WALLET_6_USER_99K_60S].positions[0].marketCapExitTracking,'WAITING_FOR_OBSERVED_USER_EXIT_RULE');
 });
