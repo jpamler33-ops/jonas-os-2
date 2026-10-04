@@ -400,6 +400,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_4_MEME_SCOUT];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
+  const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     opened:0,closed:0,marked:0,eligible:0,
@@ -855,7 +856,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION,
     entryFunnel:{
-      rowsSeen:rows.length,
+      rowsSeen:entryRows.length,
       ageKnown:0,
       ageWithinLimit:0,
       marketCapKnown:0,
@@ -950,7 +951,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     }
   }
 
-  for(const row of rows){
+  for(const row of entryRows){
     const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd});
     const ageKnown=signal.ageSeconds!=null;
     const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
