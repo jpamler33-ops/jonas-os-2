@@ -881,9 +881,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         minHoldSeconds
       }
     );
-    results.holdScenarioCloses+=Math.max(0,holdLab.filter(x=>x?.status==='CLOSED').length-priorHoldClosed);
     const afterHoldClosed=holdLab.filter(x=>x?.status==='CLOSED').length;
-    results.holdScenarioCloses+=Math.max(0,afterHoldClosed-beforeHoldClosed);
+    results.holdScenarioCloses+=Math.max(0,afterHoldClosed-priorHoldClosed);
     const marked={
       ...baseMarked,
       lastMarketCapUsd:marketCapUsd,
