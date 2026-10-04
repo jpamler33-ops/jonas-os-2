@@ -5181,7 +5181,7 @@ let w6UltraEarlySnapshot=null;
 let w6UltraEarlyLastError=null;
 let w6UltraEarlyLastRefreshAt=null;
 const w6UltraCandidateBook=new Map();
-const w6UltraLaunchStats={discoveredWithin60:0,first99kObservedWithin60:0,expiredWithout99k:0};
+const w6UltraLaunchStats={discoveredWithin60:0,first99kObservedWithin60:0,first99kObservedAfter60:0,expiredWithout99k:0};
 let w6SolPriceCache={value:null,at:0,error:null};
 async function currentW6SolPriceUsd({force=false}={}){
   const now=Date.now();
@@ -5257,10 +5257,11 @@ function enrichW6UltraCandidateRows(snapshot){
     let first99kObservedAgeSeconds=Number.isFinite(Number(prior?.first99kObservedAgeSeconds))
       ?Number(prior.first99kObservedAgeSeconds)
       :null;
-    if(first99kObservedAt==null&&marketCapKnown&&marketCap>=threshold&&ageSeconds!=null&&ageSeconds<=60){
+    if(first99kObservedAt==null&&marketCapKnown&&marketCap>=threshold&&ageSeconds!=null){
       first99kObservedAt=capturedAt;
       first99kObservedAgeSeconds=ageSeconds;
-      w6UltraLaunchStats.first99kObservedWithin60++;
+      if(ageSeconds<=60)w6UltraLaunchStats.first99kObservedWithin60++;
+      else w6UltraLaunchStats.first99kObservedAfter60++;
     }
     if(!prior&&ageSeconds!=null&&ageSeconds<=60)w6UltraLaunchStats.discoveredWithin60++;
     const tracker={
