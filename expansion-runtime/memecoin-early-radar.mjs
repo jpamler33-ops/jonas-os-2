@@ -312,7 +312,7 @@ function normalizeGmgnTrend(row={},rank=null){
     row?.website?{type:'website',label:'website',url:text(row.website,500)}:null,
     row?.telegram?{type:'telegram',label:'telegram',url:text(row.telegram,500)}:null
   ].filter(Boolean);
-  const gmgnAgeAt=unixMs(row?.open_timestamp)??unixMs(row?.pool_creation_timestamp);
+  const gmgnAgeAt=unixMs(row?.open_timestamp)??unixMs(row?.creation_timestamp)??unixMs(row?.pool_creation_timestamp);
   return {
     chainId:'solana',
     tokenAddress:text(row?.address,200),
@@ -337,7 +337,7 @@ function normalizeGmgnTrend(row={},rank=null){
     fdv:finite(row?.fdv),
     pairCreatedAt:gmgnAgeAt,
     gmgnOpenTimestamp:unixMs(row?.open_timestamp),
-    gmgnPoolCreationTimestamp:unixMs(row?.pool_creation_timestamp),
+    gmgnPoolCreationTimestamp:unixMs(row?.creation_timestamp)??unixMs(row?.pool_creation_timestamp),
     holderCount:finite(row?.holder_count),
     smartBuy24h:finite(row?.smart_buy_24h),
     smartSell24h:finite(row?.smart_sell_24h),
@@ -505,6 +505,25 @@ export function createMemecoinEarlyRadarProvider({
       return raw.map((x,i)=>normalizeGmgnTrend(x,i+1)).filter(x=>x.tokenAddress);
     },{force});
   }
+  async function gmgnPublicTrendingUltraSolana({force=false}={}){
+    return cached('ultra:gmgn:public:solana:trending:1m:default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+      const url=gmgn+'/defi/quotation/v1/rank/sol/swaps/1m?orderby=default&direction=desc';
+      const body=await getJson(url,{
+        headers:{
+          accept:'application/json, text/plain, */*',
+          'accept-language':'en-US,en;q=0.9',
+          'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          referer:'https://gmgn.ai/trend',
+          origin:'https://gmgn.ai'
+        }
+      });
+      const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
+      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_PUBLIC_CODE_'+String(body.code)+'_'+text(body?.msg,120));
+      if(!raw.length)throw new Error('GMGN_PUBLIC_TREND_EMPTY');
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_PUBLIC_TRENDS_1M_DEFAULT'})).filter(x=>x.tokenAddress);
+    },{force});
+  }
+
   async function dexBatchTokens(chain,addresses,{force=false}={}){
     const xs=[...new Set((Array.isArray(addresses)?addresses:[]).map(x=>String(x||'').trim()).filter(Boolean))].slice(0,30);
     if(!xs.length)return [];
@@ -541,13 +560,19 @@ export function createMemecoinEarlyRadarProvider({
     try{
       pools=await gmgnTrendingUltraSolana({force});
     }catch(err){
-      errors.push('gmgn:solana:trending:'+(err instanceof Error?err.message:String(err)));
-      trendSource='GECKOTERMINAL_SOLANA_TRENDING_FALLBACK';
-      exactGmgn=false;
+      errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
+      trendSource='GMGN_PUBLIC_TRENDS_1M_DEFAULT';
       try{
-        pools=await geckoTrendingPoolsUltraSolana({force});
-      }catch(fallbackErr){
-        errors.push('gecko:solana:trending:'+(fallbackErr instanceof Error?fallbackErr.message:String(fallbackErr)));
+        pools=await gmgnPublicTrendingUltraSolana({force});
+      }catch(publicErr){
+        errors.push('gmgn:public:solana:trending:'+(publicErr instanceof Error?publicErr.message:String(publicErr)));
+        trendSource='GECKOTERMINAL_SOLANA_TRENDING_FALLBACK';
+        exactGmgn=false;
+        try{
+          pools=await geckoTrendingPoolsUltraSolana({force});
+        }catch(fallbackErr){
+          errors.push('gecko:solana:trending:'+(fallbackErr instanceof Error?fallbackErr.message:String(fallbackErr)));
+        }
       }
     }
     const fresh=pools.filter(row=>{
