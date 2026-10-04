@@ -668,7 +668,7 @@ export function evaluateUser99k60sEntry(row,{
   if(greenMode){
     if(requireExactGmgnGreen&&row?.gmgnExactTrend!==true)blockers.push('GMGN_EXACT_TREND_REQUIRED');
     if(greenPercent==null)blockers.push('GMGN_GREEN_PERCENT_UNKNOWN');
-    else if(!(greenPercent>greenThreshold))blockers.push('GMGN_GREEN_PERCENT_NOT_ABOVE_THRESHOLD');
+    else if(greenPercent<greenThreshold)blockers.push('GMGN_GREEN_PERCENT_BELOW_THRESHOLD');
   }else{
     if(marketCapUsd==null)blockers.push('MARKET_CAP_UNKNOWN');
     else if(marketCapUsd<Math.max(1,Number(minMarketCapUsd)||99_000))blockers.push('MARKET_CAP_BELOW_THRESHOLD');
@@ -676,14 +676,14 @@ export function evaluateUser99k60sEntry(row,{
   if(!(priceUsd>0))blockers.push('PRICE_UNKNOWN');
   const match=blockers.length===0;
   const thresholdQualified=greenMode
-    ?greenPercent!=null&&greenPercent>greenThreshold
+    ?greenPercent!=null&&greenPercent>=greenThreshold
     :marketCapUsd!=null&&marketCapUsd>=Math.max(1,Number(minMarketCapUsd)||99_000);
   return freeze({
     version:USER_99K_60S_STRATEGY_VERSION,
     match,
     action:match?'BUY_SHADOW':'IGNORE',
     rule:greenMode
-      ?(requireTrending?'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GT_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_GREEN_PERCENT_GT_99K_THEN_IMMEDIATE_ENTRY')
+      ?(requireTrending?'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY')
       :(requireNewPair
         ?'GMGN_TRENDING_NEW_PAIR_1M_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'
         :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY')),
@@ -1015,7 +1015,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const marketCapKnown=signal.marketCapUsd!=null;
     const marketCapQualified=marketCapKnown&&signal.thresholdUsd!=null&&signal.marketCapUsd>=signal.thresholdUsd;
     const greenPercentKnown=signal.greenPercent!=null;
-    const greenPercentQualified=greenPercentKnown&&signal.thresholdPct!=null&&signal.greenPercent>signal.thresholdPct;
+    const greenPercentQualified=greenPercentKnown&&signal.thresholdPct!=null&&signal.greenPercent>=signal.thresholdPct;
     const priceKnown=finite(row?.priceUsd)>0;
     if(ageKnown)results.entryFunnel.ageKnown++;
     if(ageWithin)results.entryFunnel.ageWithinLimit++;
