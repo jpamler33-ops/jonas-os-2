@@ -63,3 +63,12 @@ test('mission snapshot feeds only primary positions into primary Discord trade s
   assert.ok(source.includes("TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 25"));
   assert.ok(source.includes("TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 200"));
 });
+
+test('mission-control snapshot source exposes canonical memecoin signal controller for Discord and webapp',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("signalController:memecoinEarlySnapshot?.signalController"));
+  assert.ok(source.includes("version:MEMECOIN_SIGNAL_CONTROLLER_VERSION"));
+  assert.ok(source.includes("entryAuthority:'BUY_REQUIRED_WHEN_ENFORCED'"));
+  assert.ok(source.includes("enforcedForWallet4:true"));
+  assert.ok(source.includes("canExecuteLive:false"));
+});
