@@ -224,7 +224,7 @@ test('W6 free New Pair composite can use DexScreener as enrichment when GMGN is 
   const json=data=>({ok:true,status:200,json:async()=>data});
   const fetchImpl=async url=>{
     const u=new URL(url);
-    if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1h'){
+    if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1m'){
       return {ok:false,status:503,json:async()=>({})};
     }
     if(u.hostname==='api.geckoterminal.com'){
