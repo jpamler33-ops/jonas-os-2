@@ -13412,7 +13412,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     shadowWorker:{
       auto:{heapUsedMb:shadowCompetitionAutoHeapMb,rssMb:shadowCompetitionAutoRssMb,externalMb:shadowCompetitionAutoExternalMb},
       hard:{heapUsedMb:300,rssMb:900,externalMb:shadowCompetitionHardExternalMb},
-      adaptiveReducedReplayWindow:{maxAutoHeapMb:350,maxHardHeapMb:370,minHistoryRows:400,minWorkerHeapMb:128,compactHypotheses:2}
+      adaptiveReducedReplayWindow:{maxAutoHeapMb:360,maxHardHeapMb:370,minHistoryRows:400,minWorkerHeapMb:128,compactHypotheses:2}
     },
     forecastPersistence:{
       heapUsedMb:forecastPersistenceHeapHeadroomMb,
