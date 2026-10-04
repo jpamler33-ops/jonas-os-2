@@ -12274,6 +12274,16 @@ function missionControlData(){
       }),
       truthBoundary:'THIRD_PARTY_SECURITY_EVIDENCE_NOT_RUG_PROBABILITY'
     },
+    signalController:memecoinEarlySnapshot?.signalController||{
+      version:MEMECOIN_SIGNAL_CONTROLLER_VERSION,
+      counts:{BLOCKED:0,WATCH:0,READY:0,BUY:0},
+      buyCandidates:0,
+      entryAuthority:'BUY_REQUIRED_WHEN_ENFORCED',
+      execution:'SHADOW_ONLY',
+      canExecute:false,
+      canExecuteLive:false,
+      enforcedForWallet4:true
+    },
     learning:memecoinEarlySnapshot?.tradeLearning||memecoinTradeLearningSummary(buildMemecoinTradeLearningModel(specialistWalletState,{asOf:now})),
     temporalTemple:memecoinEarlySnapshot?.temporalTemple||biggjTemporalTempleSummary(buildBiggjTemporalTemple(memecoinEvidenceFactoryState,{
       asOf:now,
