@@ -9,7 +9,7 @@ test('market science mission control remains explicitly shadow only',()=>{
   assert.equal(MISSION_CONTROL_VERSION,'BIGGJ_MARKET_SCIENCE_CONTROL_V2');
   assert.equal(s.canExecuteLive,false);
   assert.equal(s.execution,'SHADOW_ONLY');
-  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V16_USER_99K_60S');
+  assert.equal(s.appVersion,'BIGGJ_USER_COMMAND_CENTER_V17_W6_EXIT_LEARNER');
   const html=renderMissionControlHtml(s);
   assert.match(html,/SHADOW_ONLY/);
   assert.match(html,/BIGGJ/);
@@ -81,4 +81,13 @@ test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Dis
   assert.ok(source.includes("sizingScenariosSol:[10,20,40,80]"));
   assert.ok(source.includes("WALLET_6_USER_99K_60S"));
   assert.ok(source.includes("canExecuteLive:false"));
+});
+
+
+test('mission-control exposes W6 descriptive exit learner without automatic policy mutation',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("exitLearning:user99k60sExitLearningSummary"));
+  assert.ok(source.includes("recordUser99k60sExitObservation"));
+  assert.ok(source.includes("USER_PROFIT_ENOUGH"));
+  assert.ok(source.includes("USER_MCAP_TOO_SMALL"));
 });
