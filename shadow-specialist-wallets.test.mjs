@@ -761,7 +761,7 @@ test('W6 healthy runner may remain open after 30m and caps at 60m',()=>{
     chainId:'solana',tokenAddress:'LONGRUN',symbol:'LONGRUN',priceUsd:1.40,marketCap:190_000,liquidityUsd:130_000,pairCreatedAt:now-1_810_000
   }]},{now:now+1_800_000,solPriceUsd:150,minHoldSeconds:180});
   let p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,7);
+  assert.equal(p.holdLab.filter(s=>s.policyId==='RUNNER'&&s.status==='OPEN').length,10);
 
   x=applyUser99k60sStrategySnapshot(x.state,{sourceReady:true,rows:[{
     chainId:'solana',tokenAddress:'LONGRUN',symbol:'LONGRUN',priceUsd:1.50,marketCap:210_000,liquidityUsd:140_000,pairCreatedAt:now-3_610_000
