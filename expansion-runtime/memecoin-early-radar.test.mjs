@@ -113,21 +113,15 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
   const fetchImpl=async url=>{
     calls.push(url);
     const u=new URL(url);
-    if(u.hostname==='api.geckoterminal.com'&&u.pathname==='/api/v2/networks/solana/trending_pools')return json({
-      data:[{
-        id:'solana_PAIRFAST',
-        attributes:{
-          address:'PAIRFAST',name:'FAST / SOL',base_token_price_usd:'0.001',
-          reserve_in_usd:'45000',pool_created_at:new Date(now-22_000).toISOString(),
-          volume_usd:{m5:'5000',h1:'5000'},transactions:{m5:{buys:20,sells:4},h1:{buys:20,sells:4}},
-          price_change_percentage:{m5:'12',h1:'12'},market_cap_usd:null,fdv_usd:'120000'
-        },
-        relationships:{base_token:{data:{id:'solana_FASTMINT'}},quote_token:{data:{id:'solana_SOL'}},dex:{data:{id:'raydium'}}}
-      }],
-      included:[
-        {id:'solana_FASTMINT',attributes:{address:'FASTMINT',symbol:'FAST',name:'Fast Meme'}},
-        {id:'solana_SOL',attributes:{address:'So111',symbol:'SOL',name:'Solana'}}
-      ]
+    if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1m')return json({
+      code:0,msg:'success',data:{rank:[{
+        chain:'sol',address:'FASTMINT',symbol:'FAST',name:'Fast Meme',
+        price:0.001,liquidity:45000,volume:5000,market_cap:120000,
+        buys:20,sells:4,price_change_percent5m:12,price_change_percent1h:12,
+        open_timestamp:Math.floor((now-22_000)/1000),
+        pool_creation_timestamp:Math.floor((now-28_000)/1000),
+        holder_count:77
+      }]}
     });
     if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
       chainId:'solana',pairAddress:'OTHERPAIR',dexId:'raydium',
@@ -151,7 +145,11 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
   assert.equal(out.rows[0].ageSeconds,22);
   assert.equal(out.rows[0].ultraEarly,true);
   assert.equal(out.rows[0].signalTrending,true);
+  assert.equal(out.rows[0].gmgnExactTrend,true);
+  assert.equal(out.rows[0].trendSource,'GMGN_TRENDS_PUBLIC_1M_DEFAULT');
   assert.equal(out.rows[0].trendRank,1);
+  assert.equal(out.exactGmgn,true);
+  assert.equal(out.source,'GMGN_TRENDS_PUBLIC_1M_DEFAULT');
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
   assert.equal(calls.filter(x=>x.includes('/tokens/v1/solana/')).length,1);
