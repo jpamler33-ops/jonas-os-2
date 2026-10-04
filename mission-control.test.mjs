@@ -101,3 +101,12 @@ test('mission-control source exposes W6 three-minute loss protection and hold la
   assert.ok(source.includes("DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
+
+
+test('mission-control wires the canonical BIGGJ layer backbone into health',()=>{
+  const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("buildBiggjLayerBackbone"));
+  assert.ok(source.includes("health.biggjLayerBackbone"));
+  assert.ok(source.includes("backboneVersion:BIGGJ_LAYER_BACKBONE_VERSION"));
+  assert.ok(source.includes("wiringCoverage:health.biggjLayerBackbone.architecture?.wiringCoverage"));
+});
