@@ -783,6 +783,18 @@ test('W6 tracking memory cannot trigger an entry after the coin leaves the curre
   assert.equal(x.results.opened,0);
 });
 
+test('specialist wallet summary strips bidi controls from persisted token labels',()=>{
+  const now=12_900_000;
+  const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'BIDITEST',symbol:'\u202eSA\u202e',name:'\u202eSpoof\u202e',
+    priceUsd:1,marketCap:120000,pairCreatedAt:now-20_000
+  }]},{now});
+  const summary=specialistWalletSummary(x.state,{asOf:now});
+  const p=summary.wallets[WALLET_6_USER_99K_60S].active[0];
+  assert.equal(p.symbol,'SA');
+  assert.equal(p.name,'Spoof');
+});
+
 test('W6 trend gate rejects a fresh 99k coin that is not in the trend feed',()=>{
   const now=13_000_000;
   const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
