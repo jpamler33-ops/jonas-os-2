@@ -106,7 +106,7 @@ test('provider merges keyless new pools with DexScreener launch-attention signal
   assert.equal(out.canExecuteLive,false);
 });
 
-test('W6 exact GMGN New Pair 1m feed keeps launch age while enriching market cap',async()=>{
+test('W6 exact GMGN Trends 1m feed keeps launch age and displayed green percentage while enriching market cap',async()=>{
   const now=2_100_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const calls=[];
@@ -116,7 +116,7 @@ test('W6 exact GMGN New Pair 1m feed keeps launch age while enriching market cap
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
       assert.equal(u.searchParams.get('chain'),'sol');
       assert.equal(u.searchParams.get('interval'),'1m');
-      assert.equal(u.searchParams.get('order_by'),'creation_timestamp');
+      assert.equal(u.searchParams.get('order_by'),'default');
       assert.equal(u.searchParams.get('direction'),'desc');
       assert.equal(opts?.headers?.['X-APIKEY'],'personal-test-key');
       assert.equal(opts?.headers?.['user-agent'],'gmgn-cli/1.6.6');
@@ -124,7 +124,7 @@ test('W6 exact GMGN New Pair 1m feed keeps launch age while enriching market cap
       code:0,msg:'success',data:{rank:[{
         chain:'sol',address:'FASTMINT',symbol:'FAST',name:'Fast Meme',
         price:0.001,liquidity:45000,volume:5000,market_cap:120000,
-        buys:20,sells:4,price_change_percent5m:12,price_change_percent1h:12,
+        buys:20,sells:4,price_change_percent:999000,price_change_percent5m:12,price_change_percent1h:12,
         open_timestamp:Math.floor((now-22_000)/1000),
         pool_creation_timestamp:Math.floor((now-28_000)/1000),
         holder_count:77
@@ -153,22 +153,23 @@ test('W6 exact GMGN New Pair 1m feed keeps launch age while enriching market cap
   assert.equal(out.rows[0].ageSeconds,22);
   assert.equal(out.rows[0].ultraEarly,true);
   assert.equal(out.rows[0].signalTrending,true);
-  assert.equal(out.rows[0].signalNewPair,true);
+  assert.equal(out.rows[0].signalNewPair,false);
   assert.equal(out.rows[0].gmgnExactTrend,true);
-  assert.equal(out.rows[0].trendSource,'GMGN_NEW_PAIR_1M_CREATION_DESC');
+  assert.equal(out.rows[0].trendSource,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
   assert.equal(out.rows[0].trendRank,1);
   assert.equal(out.exactGmgn,true);
   assert.equal(out.trendInterval,'1m');
-  assert.equal(out.trendOrderBy,'creation_timestamp');
-  assert.equal(out.setup,'GMGN_TRENDING_NEW_PAIR_1M');
-  assert.equal(out.source,'GMGN_NEW_PAIR_1M_CREATION_DESC');
+  assert.equal(out.trendOrderBy,'default');
+  assert.equal(out.setup,'GMGN_TRENDS_1M');
+  assert.equal(out.source,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
+  assert.equal(out.rows[0].priceChangeSelectedPct,999000);
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
 });
 
 
-test('W6 uses public GMGN New Pair 1m before free composite when no personal key is configured',async()=>{
+test('W6 uses public GMGN Trends 1m before free composite when no personal key is configured',async()=>{
   const now=2_125_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const calls=[];
@@ -176,13 +177,13 @@ test('W6 uses public GMGN New Pair 1m before free composite when no personal key
     calls.push({url,opts});
     const u=new URL(url);
     if(u.hostname==='gmgn.ai'&&u.pathname==='/defi/quotation/v1/rank/sol/swaps/1m'){
-      assert.equal(u.searchParams.get('orderby'),'open_timestamp');
+      assert.equal(u.searchParams.get('orderby'),'default');
       assert.equal(u.searchParams.get('direction'),'desc');
       assert.equal(opts?.headers?.referer,'https://gmgn.ai/trend');
       return json({code:0,msg:'success',data:{rank:[{
         address:'PUBMINT',symbol:'PUB',name:'Public Trend Meme',
         price:0.001,liquidity:42000,volume:7000,market_cap:118000,
-        buys:28,sells:6,price_change_percent5m:14,price_change_percent1h:14,
+        buys:28,sells:6,price_change_percent:120000,price_change_percent5m:14,price_change_percent1h:14,
         creation_timestamp:Math.floor((now-25_000)/1000),
         holder_count:91
       }]}});
@@ -206,20 +207,21 @@ test('W6 uses public GMGN New Pair 1m before free composite when no personal key
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
   assert.equal(out.sourceReady,true);
   assert.equal(out.exactGmgn,true);
-  assert.equal(out.source,'GMGN_PUBLIC_NEW_PAIR_1M_OPEN_DESC');
+  assert.equal(out.source,'GMGN_PUBLIC_TRENDS_1M_DEFAULT');
   assert.equal(out.trendInterval,'1m');
   assert.equal(out.rows.length,1);
   assert.equal(out.rows[0].tokenAddress,'PUBMINT');
   assert.equal(out.rows[0].gmgnExactTrend,true);
-  assert.equal(out.rows[0].signalNewPair,true);
-  assert.equal(out.rows[0].trendSource,'GMGN_PUBLIC_NEW_PAIR_1M_OPEN_DESC');
+  assert.equal(out.rows[0].signalNewPair,false);
+  assert.equal(out.rows[0].priceChangeSelectedPct,120000);
+  assert.equal(out.rows[0].trendSource,'GMGN_PUBLIC_TRENDS_1M_DEFAULT');
   assert.equal(out.rows[0].ageSeconds,25);
   assert.equal(out.rows[0].marketCap,124000);
   assert.equal(calls.some(x=>x.url.includes('api.geckoterminal.com')),false);
   assert.equal(calls.some(x=>x.url.includes('/token-boosts/top/v1')),false);
 });
 
-test('W6 free New Pair composite can use DexScreener as enrichment when GMGN is unavailable',async()=>{
+test('W6 free trends composite can use DexScreener as enrichment when GMGN is unavailable',async()=>{
   const now=2_150_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const fetchImpl=async url=>{
@@ -247,7 +249,7 @@ test('W6 free New Pair composite can use DexScreener as enrichment when GMGN is 
   });
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
   assert.equal(out.exactGmgn,false);
-  assert.equal(out.source,'FREE_NEW_PAIR_COMPOSITE_GECKO_DEXSCREENER');
+  assert.equal(out.source,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
   assert.ok(out.errors.some(x=>String(x).startsWith('gmgn:public:solana:trending:HTTP_503')));
   assert.equal(out.rows.length,1);
   assert.equal(out.rows[0].tokenAddress,'BOOSTMINT');
