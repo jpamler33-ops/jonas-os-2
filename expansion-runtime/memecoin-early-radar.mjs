@@ -678,11 +678,13 @@ export function createMemecoinEarlyRadarProvider({
     const maxAge=Math.max(60,Math.min(600,Number(maxAgeSeconds)||180));
     const errors=[];
     let pools=[];
-    const demoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
-    const hasPersonalGmgnKey=Boolean(gmgnReadApiKey)&&!demoKey;
-    let trendSource=hasPersonalGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
+    const hasAnyGmgnKey=Boolean(gmgnReadApiKey);
+    let trendSource=hasAnyGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
     let exactGmgn=false;
-    if(hasPersonalGmgnKey){
+    // Railway's public gmgn.ai Trends endpoint can return HTTP 403. Prefer
+    // openapi.gmgn.ai whenever any configured key is available, including the
+    // built-in read-only demo key, and only then try the public web endpoint.
+    if(hasAnyGmgnKey){
       try{
         pools=await gmgnTrendingUltraSolana({force});
         exactGmgn=true;
@@ -690,10 +692,10 @@ export function createMemecoinEarlyRadarProvider({
         errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
       }
     }
-    // Preserve the user's Trends-tab semantics even without a personal key.
-    // The public GMGN Trends surface is attempted before the broader free
-    // trend composite. If it is unavailable we still fail over to independent
-    // GeckoTerminal + DexScreener trend sources.
+    // Preserve the user's exact GMGN Trends semantics before any independent
+    // fallback. If OpenAPI is unavailable, try the public Trends endpoint; if
+    // both fail we may enrich/monitor from free sources, but exactGmgn stays
+    // false so the W6 green-% entry gate remains fail-closed.
     if(!pools.length){
       trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
       try{
