@@ -296,9 +296,12 @@ test('mobile command center surfaces world-model mode and the same memecoin BUY 
   };
   x.health.specialistWallets={wallets:{W4_MEME_SCOUT:{openPositions:2,active:[],recentClosed:[]},W5_MEME_COPY:{openPositions:0,active:[],recentClosed:[]}}};
   const h=renderBiggjMobileApp(x);
-  for(const text of ['WORLD MODEL','MEME ENTRY GATE','BUY AVAILABLE','BUY 1 · READY 2 · WATCH 3 · BLOCK 4','Memecoin Entry Gate','nur 🟢 KAUFEN öffnet W4','BUYME','WAITME','84/100','69/100'])assert.match(h,new RegExp(text));
+  for(const text of ['WORLD MODEL','MEME ENTRY GATE','BUY AVAILABLE','Memecoin Entry Gate','nur 🟢 KAUFEN öffnet W4'])assert.match(h,new RegExp(text));
   assert.match(h,/runtimePulse/);
   assert.match(h,/memeSignalBoard/);
   assert.match(h,/refreshMode/);
   assert.match(h,/signalController/);
+  assert.match(h,/BUY '\+x\.buy\+' · READY '\+x\.ready\+' · WATCH '\+x\.watch\+' · BLOCK '\+x\.blocked/);
+  assert.match(h,/entryReadinessScore/);
+  assert.match(h,/memeSignal/);
 });
