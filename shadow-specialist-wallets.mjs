@@ -670,7 +670,7 @@ export function evaluateUser99k60sEntry(row,{
   });
 }
 
-function user99k60sSolScenarios(values=[5,10,20,40,80]){
+function user99k60sSolScenarios(values=[2,5,10,20,40,60,80]){
   return [...new Set((Array.isArray(values)?values:[])
     .map(x=>finite(x))
     .filter(x=>x>0&&x<=10_000))]
@@ -708,7 +708,18 @@ function updateUser99k60sTargetScenarios(existing,returnPct,now,feeBps){
   });
 }
 
-function user99k60sHoldLabScenarios(values=[5,10,20,40,80]){
+function user99k60sImpactPct(notionalSol,solPriceUsd,liquidityUsd){
+  const n=finite(notionalSol),sol=finite(solPriceUsd),liq=finite(liquidityUsd);
+  if(!(n>0&&sol>0&&liq>0))return null;
+  const notionalUsd=n*sol;
+  const quoteReserveUsd=liq/2;
+  return Math.max(0,Math.min(.95,notionalUsd/(quoteReserveUsd+notionalUsd)));
+}
+function user99k60sHoldLabScenarios(values=[2,5,10,20,40,60,80],{
+  solPriceUsd=null,
+  liquidityUsd=null
+}={}){
+
   const policies=[
     {id:'HOLD_5M',reviewAtSeconds:300,maxHoldSeconds:300},
     {id:'HOLD_10M',reviewAtSeconds:600,maxHoldSeconds:600},
@@ -717,10 +728,15 @@ function user99k60sHoldLabScenarios(values=[5,10,20,40,80]){
   const out=[];
   for(const notionalSol of user99k60sSolScenarios(values)){
     for(const policy of policies){
+      const entryImpactPct=user99k60sImpactPct(notionalSol,solPriceUsd,liquidityUsd);
       out.push({
         id:policy.id+'_'+notionalSol+'SOL',
         policyId:policy.id,
         entryNotionalSol:notionalSol,
+        entryNotionalUsd:finite(solPriceUsd)>0?notionalSol*finite(solPriceUsd):null,
+        solPriceUsdAtEntry:finite(solPriceUsd),
+        entryLiquidityUsd:finite(liquidityUsd),
+        entryImpactPct,
         reviewAtSeconds:policy.reviewAtSeconds,
         maxHoldSeconds:policy.maxHoldSeconds,
         status:'OPEN',
@@ -743,7 +759,9 @@ function updateUser99k60sHoldLab(existing,{
   peakMarketCapUsd,
   now,
   feeBps=30,
-  minHoldSeconds=180
+  minHoldSeconds=180,
+  solPriceUsd=null,
+  liquidityUsd=null
 }={}){
   const ret=finite(returnPct);
   const cap=finite(marketCapUsd);
@@ -754,11 +772,27 @@ function updateUser99k60sHoldLab(existing,{
   return (Array.isArray(existing)?existing:[]).map(s=>{
     if(s?.status==='CLOSED')return s;
     const notionalSol=Math.max(0,finite(s?.entryNotionalSol,0));
-    const netRet=ret==null?null:ret-roundTripFeeRate;
-    const estimatedNetPnlSol=netRet==null||!(notionalSol>0)?null:notionalSol*netRet;
-    const capitalEfficiency=netRet;
+    const estimatedNetPnlSolBeforeImpact=ret==null||!(notionalSol>0)?null:notionalSol*(ret-roundTripFeeRate);
+    const entryImpactPct=finite(s?.entryImpactPct);
+    const exitImpactPct=user99k60sImpactPct(notionalSol,solPriceUsd,liquidityUsd);
+    const priceImpactKnown=entryImpactPct!=null&&exitImpactPct!=null;
+    const netRetAfterImpact=ret==null||!priceImpactKnown
+      ?null
+      :((1+ret)*(1-entryImpactPct)*(1-exitImpactPct)-1-roundTripFeeRate);
+    const estimatedNetPnlSol=netRetAfterImpact==null||!(notionalSol>0)?null:notionalSol*netRetAfterImpact;
+    const capitalEfficiency=netRetAfterImpact;
+    const impactState={
+      entryImpactPct,
+      exitImpactPct,
+      priceImpactKnown,
+      impactModel:'CONSTANT_PRODUCT_LIQUIDITY_USD_APPROXIMATION',
+      impactSemantics:'HEURISTIC_NOT_EXECUTION_QUOTE',
+      estimatedNetPnlSolBeforeImpact,
+      estimatedNetPnlSol,
+      capitalEfficiency
+    };
     if(hold<Math.max(0,finite(minHoldSeconds,180))){
-      return {...s,estimatedNetPnlSol,capitalEfficiency,protectedByMinHold:true};
+      return {...s,...impactState,protectedByMinHold:true};
     }
 
     const drawdownFromPeak=cap!=null&&peakCap>0?cap/peakCap-1:null;
@@ -771,15 +805,14 @@ function updateUser99k60sHoldLab(existing,{
       if(hold>=1800)shouldClose=true;
       else if(hold>=600&&!runnerGood)shouldClose=true;
     }
-    if(!shouldClose)return {...s,estimatedNetPnlSol,capitalEfficiency,protectedByMinHold:false,goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview};
+    if(!shouldClose)return {...s,...impactState,protectedByMinHold:false,goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview};
     return {
       ...s,
       status:'CLOSED',
       closeAt:Number(now),
       closeHoldSeconds:hold,
       closeReturnPct:ret,
-      estimatedNetPnlSol,
-      capitalEfficiency,
+      ...impactState,
       goodRunnerAtLastReview:s.policyId==='RUNNER'?runnerGood:s.goodRunnerAtLastReview,
       closeReason:s.policyId==='RUNNER'?(hold>=1800?'RUNNER_MAX_30M':'RUNNER_NO_LONGER_GOOD'):'TIME_WINDOW_REVIEW',
       protectedByMinHold:false
@@ -822,8 +855,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   minExitMarketCapUsd=null,
   targetPnlSol=10,
   entryNotionalSol=null,
-  notionalScenariosSol=[5,10,20,40,80],
+  notionalScenariosSol=[2,5,10,20,40,60,80],
   minHoldSeconds=180,
+  solPriceUsd=null,
   maxOpenOperational=30
 }={}){
   const state=mutableState(input);
@@ -865,7 +899,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const afterHits=profitTargetScenarios.filter(x=>x?.targetHit===true).length;
     results.scenarioTargetHits+=Math.max(0,afterHits-beforeHits);
     const holdSeconds=Math.max(0,(Number(now)-Number(p?.openedAt||now))/1000);
-    const priorHoldLab=p?.holdLab||user99k60sHoldLabScenarios(notionalScenariosSol);
+    const priorHoldLab=p?.holdLab||user99k60sHoldLabScenarios(notionalScenariosSol,{
+      solPriceUsd:finite(p?.solPriceUsdAtEntry,finite(solPriceUsd)),
+      liquidityUsd:finite(p?.entryLiquidityUsd,finite(row?.liquidityUsd))
+    });
     const priorHoldClosed=priorHoldLab.filter(x=>x?.status==='CLOSED').length;
     const beforeHoldClosed=(p?.holdLab||[]).filter(x=>x?.status==='CLOSED').length;
     const holdLab=updateUser99k60sHoldLab(
@@ -878,7 +915,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
         now,
         feeBps,
-        minHoldSeconds
+        minHoldSeconds,
+        solPriceUsd,
+        liquidityUsd:row?.liquidityUsd
       }
     );
     const afterHoldClosed=holdLab.filter(x=>x?.status==='CLOSED').length;
@@ -951,8 +990,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         entryNotionalSol:configuredNotionalSol>0?configuredNotionalSol:null,
         targetPnlSol:finite(targetPnlSol)>0?finite(targetPnlSol):10,
         profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
-        holdLab:user99k60sHoldLabScenarios(notionalScenariosSol),
-        holdLabSummary:user99k60sHoldLabSummary(user99k60sHoldLabScenarios(notionalScenariosSol)),
+        solPriceUsdAtEntry:finite(solPriceUsd),
+        entryLiquidityUsd:finite(row?.liquidityUsd),
+        holdLab:user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd}),
+        holdLabSummary:user99k60sHoldLabSummary(user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd})),
         minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
         lossExitProtectedUntil:Number(now)+Math.max(0,finite(minHoldSeconds,180))*1000,
         minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
