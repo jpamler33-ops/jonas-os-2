@@ -192,7 +192,7 @@ test('runtime throughput tuning uses lightweight pending rows and bounded adapti
   assert.match(bot,/adaptiveShadowHardHeapMb/);
   assert.match(bot,/effectiveShadowWorkerHeapMb/);
   assert.match(bot,/maxOldGenerationSizeMb:effectiveShadowWorkerHeapMb/);
-  assert.match(bot,/maxAutoHeapMb:350/);
+  assert.match(bot,/maxAutoHeapMb:360/);
   assert.match(bot,/maxHardHeapMb:370/);
   assert.match(bot,/minHistoryRows:400/);
   assert.match(bot,/minWorkerHeapMb:128/);
