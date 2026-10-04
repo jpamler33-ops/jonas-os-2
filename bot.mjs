@@ -4593,7 +4593,7 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'WALLET 6 · 99K IN 60S · USER STRATEGY V1',
       'Open '+Number(w6.openPositions||0)+' · Closed '+Number(w6.closedTrades||0)+' · Winrate '+(w6.winRate==null?'—':Math.round(Number(w6.winRate)*100)+'%'),
       'Regel: Alter ≤60s + Market Cap ≥99k => sofortiger Shadow-Entry.',
-      'Exit: diskretionär/positionsgrößenabhängig; +10 SOL ist nur ein Beispiel für „Gewinn reicht“. Dein „MC zu klein“-Exit wird beobachtet, aber nicht erfunden automatisiert.',
+      'Exit: diskretionär/positionsgrößenabhängig. Erste 3 Minuten: kein automatischer Verlust-/MC-Exit wegen normalem roten Wackler. Danach 5m / 10m / Runner-Lab.',
       'Sizing-Lab: 5 / 10 / 20 / 40 / 80 SOL parallel auf demselben Entry.',
       'Hold-Lab: erste 3 Min Verlustschutz; danach 5m / 10m / Runner bis max. 30m, solange der Runner noch gesund wirkt.',
       'Exit-Lernen: '+Number(w6ExitLearning.samples||0)+'/20 markierte Exits · Regelvorschlag '+(w6ExitLearning.ruleProposalReady?'BEREIT ZUR PRÜFUNG':'NOCH GESPERRT')+'.','',
@@ -5174,6 +5174,24 @@ let memecoinEarlyLastRefreshAt=null;
 let memecoinSocialSnapshot=null;
 let memecoinSocialLastError=null;
 let memecoinSecurityLastError=null;
+let w6SolPriceCache={value:null,at:0,error:null};
+async function currentW6SolPriceUsd({force=false}={}){
+  const now=Date.now();
+  if(!force&&Number(w6SolPriceCache.value)>0&&now-Number(w6SolPriceCache.at||0)<60_000)return Number(w6SolPriceCache.value);
+  try{
+    const market=await fetchMarketParts('SOLUSDT');
+    const px=Number(market?.ticker?.lastPrice);
+    if(!(px>0))throw new Error('SOLUSDT_PRICE_UNAVAILABLE');
+    w6SolPriceCache={value:px,at:now,error:null};
+    return px;
+  }catch(err){
+    const message=err instanceof Error?err.message:String(err);
+    w6SolPriceCache={...w6SolPriceCache,error:message};
+    if(Number(w6SolPriceCache.value)>0&&now-Number(w6SolPriceCache.at||0)<5*60_000)return Number(w6SolPriceCache.value);
+    return null;
+  }
+}
+
 let traderWatchExperienceSnapshot=null;
 let traderWatchExperienceLastError=null;
 let traderWatchExperienceLastRefreshAt=null;
@@ -5524,6 +5542,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       contrarianMaxSoftViolations:1
     });
     specialistWalletState=walletUpdate.state;
+    const w6SolPriceUsd=await currentW6SolPriceUsd();
     const user99k60sUpdate=applyUser99k60sStrategySnapshot(specialistWalletState,walletInput,{
       now:Date.now(),
       marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
@@ -5536,8 +5555,9 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       entryNotionalSol:Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL||0)>0
         ?Number(process.env.TCX_W6_USER_99K_60S_ENTRY_NOTIONAL_SOL)
         :null,
-      notionalScenariosSol:[5,10,20,40,80],
+      notionalScenariosSol:[2,5,10,20,40,60,80],
       minHoldSeconds:Math.max(0,Math.min(1800,Number(process.env.TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180))),
+      solPriceUsd:w6SolPriceUsd,
       maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30)))
     });
     specialistWalletState=user99k60sUpdate.state;
@@ -5553,7 +5573,10 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
       rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetPnlSol:10,
-      sizingScenariosSol:[5,10,20,40,80],
+      sizingScenariosSol:[2,5,10,20,40,60,80],
+      solPriceUsd:w6SolPriceUsd,
+      minHoldSeconds:180,
+      holdPolicies:['5M','10M','RUNNER_30M'],
       results:user99k60sUpdate.results,
       wallet:user99k60sWallet,
       exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:Date.now()}),
@@ -5688,7 +5711,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
         netPnlQuote:walletSummary.wallets?.[WALLET_6_USER_99K_60S]?.netPnlQuote||0,
         rule:'AGE<=60S + MC>=99K => IMMEDIATE SHADOW ENTRY',
         targetPnlSol:10,
-        sizingScenariosSol:[5,10,20,40,80],
+        sizingScenariosSol:[2,5,10,20,40,60,80],
         canExecuteLive:false
       },
       execution:'SHADOW_ONLY',
@@ -12401,7 +12424,7 @@ function missionControlData(){
       rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE',
       targetPnlSol:10,
-      sizingScenariosSol:[5,10,20,40,80],
+      sizingScenariosSol:[2,5,10,20,40,60,80],
       results:{matched:0,opened:0,closed:0,marketCapExit:0,scenarioTargetHits:0},
       wallet:specialistWalletSummary(specialistWalletState,{asOf:now}).wallets?.[WALLET_6_USER_99K_60S]||null,
       exitLearning:user99k60sExitLearningSummary(specialistWalletState,{asOf:now}),
