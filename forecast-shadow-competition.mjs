@@ -278,8 +278,10 @@ export function evaluateShadowCompetition(state,{
   incumbentConfig,
   asOf=Date.now(),
   minimumTrainCases=40,
-  promotionPolicy=DEFAULT_PROMOTION_POLICY
+  promotionPolicy=DEFAULT_PROMOTION_POLICY,
+  frozenCandidateIds=[]
 }={}){
+  const frozenIds=new Set((Array.isArray(frozenCandidateIds)?frozenCandidateIds:[]).map(x=>String(x)));
   if(state?.version!==FORECAST_SHADOW_COMPETITION_VERSION) throw new Error('shadow competition version invalid');
   const t=finite(asOf);
   if(t==null) throw new Error('asOf must be finite');
@@ -300,7 +302,11 @@ export function evaluateShadowCompetition(state,{
     return Object.freeze({
       ...clone(state),
       lastEvaluatedAt:t,
-      candidates:Object.freeze(state.candidates.map(c=>Object.freeze({...clone(c),status:'WAITING_FOR_OOS'}))),
+      candidates:Object.freeze(state.candidates.map(c=>
+        frozenIds.has(String(c?.artifact?.candidateId))
+          ?Object.freeze(clone(c))
+          :Object.freeze({...clone(c),status:'WAITING_FOR_OOS'})
+      )),
       competition:Object.freeze({
         oosRows:0,
         evaluatedCandidates:0,
@@ -312,6 +318,10 @@ export function evaluateShadowCompetition(state,{
 
   const evaluated=[];
   for(const c of state.candidates){
+    if(frozenIds.has(String(c?.artifact?.candidateId))){
+      evaluated.push(Object.freeze(clone(c)));
+      continue;
+    }
     try{
       const wf=evaluateForecastCandidateWalkForward({
         historyRows,
