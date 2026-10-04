@@ -141,7 +141,7 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
     throw new Error('unexpected '+url);
   };
   const p=createMemecoinEarlyRadarProvider({
-    fetchImpl,networks:['solana'],ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+    fetchImpl,networks:['solana'],gmgnApiKey:'personal-test-key',ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
   });
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
   assert.equal(out.version,W6_ULTRA_EARLY_FEED_VERSION);
@@ -162,6 +162,41 @@ test('W6 trend-first feed keeps fresh Solana launch age while enriching market c
   assert.equal(out.rows[0].canExecuteLive,undefined);
   assert.equal(out.canExecuteLive,false);
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
+});
+
+
+test('W6 free trends composite uses DexScreener boosts when exact GMGN is unavailable',async()=>{
+  const now=2_150_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='api.geckoterminal.com'){
+      return {ok:false,status:429,json:async()=>({})};
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname==='/token-boosts/top/v1')return json([{
+      chainId:'solana',tokenAddress:'BOOSTMINT',amount:50,totalAmount:200
+    }]);
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'BOOSTPAIR',dexId:'raydium',
+      baseToken:{address:'BOOSTMINT',symbol:'BST',name:'Boost Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.0012',liquidity:{usd:70000},volume:{m5:10000,h1:12000,h24:12000},
+      txns:{m5:{buys:35,sells:7},h1:{buys:35,sells:7}},priceChange:{m5:20,h1:20},
+      marketCap:130000,fdv:135000,pairCreatedAt:now-30_000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(out.exactGmgn,false);
+  assert.equal(out.source,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
+  assert.equal(out.rows.length,1);
+  assert.equal(out.rows[0].tokenAddress,'BOOSTMINT');
+  assert.equal(out.rows[0].signalTrending,true);
+  assert.equal(out.rows[0].gmgnExactTrend,false);
+  assert.ok(out.rows[0].freeTrendSources.includes('DEXSCREENER_TOP_BOOSTS'));
+  assert.equal(out.rows[0].ageSeconds,30);
 });
 
 test('W6 candidate memory stays entry-eligible and preserves original launch age while Dex data refreshes',async()=>{
