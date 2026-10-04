@@ -664,6 +664,26 @@ test('W6 loss-style market-cap exit is protected during the first three minutes'
   assert.equal(later.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
 });
 
+test('W6 catastrophic fail-safe is blocked for 3m then closes extreme collapse',()=>{
+  const now=18_500_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+  }]},{now,minHoldSeconds:180}).state;
+
+  const protectedDrop=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',priceUsd:.05,marketCap:6_500,pairCreatedAt:now-140_000
+  }]},{now:now+120_000,minHoldSeconds:180});
+  assert.equal(protectedDrop.results.closed,0);
+
+  const afterProtection=applyUser99k60sStrategySnapshot(protectedDrop.state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',priceUsd:.05,marketCap:6_500,pairCreatedAt:now-210_000
+  }]},{now:now+190_000,minHoldSeconds:180});
+  assert.equal(afterProtection.results.closed,1);
+  assert.equal(afterProtection.results.catastrophicExit,1);
+  assert.equal(afterProtection.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_CATASTROPHIC_FAILSAFE');
+  assert.equal(afterProtection.state.wallets[WALLET_6_USER_99K_60S].positions.length,0);
+});
+
 test('W6 hold lab compares 5m 10m and runner policies across seven SOL sizes',()=>{
   const now=19_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
