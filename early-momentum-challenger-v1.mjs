@@ -10,6 +10,8 @@ export const EARLY_MOMENTUM_CHALLENGER_POLICY=Object.freeze({
   epistemic:'EXTERNAL_SYNTHETIC_BENCHMARK_HYPOTHESIS_REQUIRES_POINT_IN_TIME_SHADOW_VALIDATION',
   purpose:'TEST_ENTRY_AGE_HOLD_TIME_AND_SIZE_VS_LIQUIDITY_WITHOUT_CHANGING_PRIMARY_POLICY',
   holdTargetsSeconds:Object.freeze([30,60,120,180,240,300,480]),
+  entryAgeTargetsSeconds:Object.freeze([60,120,180,300]),
+  entryAgeEvaluationHoldsSeconds:Object.freeze([180,300]),
   userSizeHypothesis:'4_SOL_PER_10K_USD_LIQUIDITY_IS_CHALLENGER_NOT_TRUTH'
 });
 
@@ -88,6 +90,54 @@ function scenarioId(holdTargetSeconds,sizeSol){
   return 'H'+String(holdTargetSeconds)+'S_'+String(sizeSol).replace('.','P')+'SOL';
 }
 
+function createEntryAgeArms(entryAgeSeconds,{
+  entryAgeTargetsSeconds=EARLY_MOMENTUM_CHALLENGER_POLICY.entryAgeTargetsSeconds,
+  evaluationHoldsSeconds=EARLY_MOMENTUM_CHALLENGER_POLICY.entryAgeEvaluationHoldsSeconds
+}={}){
+  const actualAge=Math.max(0,finite(entryAgeSeconds,0));
+  const holds=uniquePositive(Array.isArray(evaluationHoldsSeconds)?evaluationHoldsSeconds:[]);
+  const targets=uniquePositive(Array.isArray(entryAgeTargetsSeconds)?entryAgeTargetsSeconds:[])
+    .filter(x=>x>actualAge);
+  const arms=[];
+  for(const h of holds){
+    arms.push({
+      id:'ACTUAL_AGE_'+String(Math.round(actualAge))+'S_HOLD_'+String(h)+'S',
+      entryType:'ACTUAL',
+      targetAgeSeconds:actualAge,
+      evaluationHoldSeconds:h,
+      status:'ENTERED',
+      entryObservedAgeSeconds:actualAge,
+      sourceHoldAtEntrySeconds:0,
+      entryPriceIndex:1,
+      lastReturnFromArmEntryPct:0,
+      closeReturnPct:null,
+      netReturnAfterFeesPct:null,
+      closedAt:null,
+      observedCloseAgeSeconds:null
+    });
+  }
+  for(const targetAgeSeconds of targets){
+    for(const h of holds){
+      arms.push({
+        id:'DELAYED_AGE_'+String(targetAgeSeconds)+'S_HOLD_'+String(h)+'S',
+        entryType:'DELAYED_COUNTERFACTUAL',
+        targetAgeSeconds,
+        evaluationHoldSeconds:h,
+        status:'PENDING_ENTRY',
+        entryObservedAgeSeconds:null,
+        sourceHoldAtEntrySeconds:null,
+        entryPriceIndex:null,
+        lastReturnFromArmEntryPct:null,
+        closeReturnPct:null,
+        netReturnAfterFeesPct:null,
+        closedAt:null,
+        observedCloseAgeSeconds:null
+      });
+    }
+  }
+  return arms;
+}
+
 export function createEarlyMomentumChallengerLab({
   entryAgeSeconds=null,
   liquidityUsd=null,
@@ -131,6 +181,7 @@ export function createEarlyMomentumChallengerLab({
     solPriceUsdAtEntry:finite(solPriceUsd),
     feeBps:Math.max(0,finite(feeBps,30)),
     sizeGrid:grid,
+    entryAgeArms:createEntryAgeArms(entryAgeSeconds),
     scenarios,
     execution:'SHADOW_ONLY',
     canExecute:false,
@@ -216,6 +267,37 @@ export function updateEarlyMomentumChallengerLab(lab,{
   const feeRate=fee/10_000*2;
   const exitLiq=finite(currentLiquidityUsd);
   const sol=finite(solPriceUsd,finite(lab.solPriceUsdAtEntry));
+  const currentTokenAgeSeconds=finite(lab.entryAgeSeconds)!=null?Math.max(0,finite(lab.entryAgeSeconds,0)+hold):null;
+  const currentPriceIndex=ret!=null&&1+ret>0?1+ret:null;
+  let newEntryAgeCloses=0;
+  const entryAgeArms=(lab.entryAgeArms||createEntryAgeArms(lab.entryAgeSeconds)).map(arm=>{
+    if(arm?.status==='CLOSED')return arm;
+    let x={...arm};
+    if(x.status==='PENDING_ENTRY'&&currentTokenAgeSeconds!=null&&currentPriceIndex!=null&&currentTokenAgeSeconds>=finite(x.targetAgeSeconds,Infinity)){
+      x={
+        ...x,
+        status:'ENTERED',
+        entryObservedAgeSeconds:currentTokenAgeSeconds,
+        sourceHoldAtEntrySeconds:hold,
+        entryPriceIndex:currentPriceIndex,
+        lastReturnFromArmEntryPct:0
+      };
+    }
+    if(x.status!=='ENTERED'||currentPriceIndex==null||!(finite(x.entryPriceIndex)>0))return x;
+    const armHoldSeconds=Math.max(0,hold-Math.max(0,finite(x.sourceHoldAtEntrySeconds,0)));
+    const returnFromArmEntryPct=currentPriceIndex/finite(x.entryPriceIndex)-1;
+    const live={...x,lastReturnFromArmEntryPct:returnFromArmEntryPct,observedHoldFromArmEntrySeconds:armHoldSeconds};
+    if(armHoldSeconds<Math.max(0,finite(x.evaluationHoldSeconds,0)))return live;
+    newEntryAgeCloses++;
+    return {
+      ...live,
+      status:'CLOSED',
+      closeReturnPct:returnFromArmEntryPct,
+      netReturnAfterFeesPct:returnFromArmEntryPct-feeRate,
+      closedAt:Number(now),
+      observedCloseAgeSeconds:currentTokenAgeSeconds
+    };
+  });
   let newCloses=0;
   const scenarios=(lab.scenarios||[]).map(s=>{
     if(s?.status==='CLOSED')return s;
@@ -265,8 +347,10 @@ export function updateEarlyMomentumChallengerLab(lab,{
     lastObservedHoldSeconds:hold,
     lastObservedReturnPct:ret,
     lastObservedLiquidityUsd:exitLiq,
+    entryAgeArms,
     scenarios,
     newCloses,
+    newEntryAgeCloses,
     diagnostics
   });
 }
@@ -289,6 +373,19 @@ function compactScenario(x){
     exitImpactPct:x.exitImpactPct
   }):null;
 }
+function compactEntryAgeArm(x){
+  return x?freeze({
+    id:x.id,
+    entryType:x.entryType,
+    targetAgeSeconds:x.targetAgeSeconds,
+    entryObservedAgeSeconds:x.entryObservedAgeSeconds,
+    evaluationHoldSeconds:x.evaluationHoldSeconds,
+    observedHoldFromArmEntrySeconds:x.observedHoldFromArmEntrySeconds,
+    closeReturnPct:x.closeReturnPct,
+    netReturnAfterFeesPct:x.netReturnAfterFeesPct,
+    observedCloseAgeSeconds:x.observedCloseAgeSeconds
+  }):null;
+}
 
 export function summarizeEarlyMomentumChallengerLab(lab={}){
   const rows=Array.isArray(lab?.scenarios)?lab.scenarios:[];
@@ -297,6 +394,9 @@ export function summarizeEarlyMomentumChallengerLab(lab={}){
   const bestAbsolute=bestRow(closed,'netPnlSol');
   const userRows=closed.filter(x=>x?.sizeSource==='USER_4_SOL_PER_10K_HYPOTHESIS');
   const bestUser=bestRow(userRows,'netPnlSol');
+  const ageArms=Array.isArray(lab?.entryAgeArms)?lab.entryAgeArms:[];
+  const closedAgeArms=ageArms.filter(x=>x?.status==='CLOSED');
+  const bestEntryAgeArm=bestRow(closedAgeArms,'netReturnAfterFeesPct');
   const byHold={};
   for(const x of closed){
     const k=String(x.holdTargetSeconds);
@@ -311,6 +411,9 @@ export function summarizeEarlyMomentumChallengerLab(lab={}){
     bestCapitalEfficiency:compactScenario(bestEfficiency),
     bestAbsoluteNetPnl:compactScenario(bestAbsolute),
     bestUser4SolPer10kHypothesis:compactScenario(bestUser),
+    entryAgeArms:ageArms.length,
+    entryAgeArmsClosed:closedAgeArms.length,
+    bestEntryAgeArm:compactEntryAgeArm(bestEntryAgeArm),
     bestByHoldSeconds:byHold,
     diagnostics:lab?.diagnostics||null,
     entryAgeBucket:lab?.entryAgeBucket||'AGE_UNKNOWN',
