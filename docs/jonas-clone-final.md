@@ -1,0 +1,1 @@
+Final contract-stage status: ready for PR. Scheduler/runtime integration and runtime proof remain the next stage.
