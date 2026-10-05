@@ -1,6 +1,6 @@
 import { renderBiggjMobileApp, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 
-export const MISSION_CONTROL_VERSION='BIGGJ_MARKET_SCIENCE_CONTROL_V3';
+export const MISSION_CONTROL_VERSION='BIGGJ_MARKET_SCIENCE_CONTROL_V2';
 
 export function missionControlSnapshot({health,portfolio,researchTrades,discovery,storage}={}){
   const portfolioView=portfolio||{};
