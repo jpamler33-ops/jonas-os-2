@@ -255,6 +255,39 @@ test('W6 uses public GMGN Trends 1m before free composite when no personal key i
   assert.equal(calls.some(x=>x.url.includes('/token-boosts/top/v1')),false);
 });
 
+test('W6 can disable the unsupported public GMGN path and fall back without recording a 403',async()=>{
+  const now=2_140_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const calls=[];
+  const fetchImpl=async url=>{
+    calls.push(String(url));
+    const u=new URL(url);
+    if(u.hostname==='gmgn.ai') throw new Error('public GMGN must be skipped');
+    if(u.hostname==='api.geckoterminal.com') return json({data:[],included:[]});
+    if(u.hostname==='api.dexscreener.com'&&u.pathname==='/token-boosts/top/v1')return json([{
+      chainId:'solana',tokenAddress:'BOOSTONLY',amount:50,totalAmount:200
+    }]);
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'BOOSTPAIR',dexId:'raydium',
+      baseToken:{address:'BOOSTONLY',symbol:'BST',name:'Boost Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.0012',liquidity:{usd:70000},volume:{m5:10000,h1:12000,h24:12000},
+      txns:{m5:{buys:35,sells:7},h1:{buys:35,sells:7}},priceChange:{m5:20,h1:20},
+      marketCap:130000,fdv:135000,pairCreatedAt:now-30_000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],gmgnApiKey:'',gmgnPublicEnabled:false,
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(out.exactGmgn,false);
+  assert.equal(out.source,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
+  assert.equal(out.rows.length,1);
+  assert.equal(calls.some(x=>x.includes('gmgn.ai')),false);
+  assert.equal(out.errors.some(x=>String(x).startsWith('gmgn:public:')),false);
+});
+
 test('W6 free trends composite can use DexScreener as enrichment when GMGN is unavailable',async()=>{
   const now=2_150_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
@@ -328,4 +361,3 @@ test('W6 candidate memory preserves launch age but is no longer current New Pair
   assert.equal(out.rows[0].marketCap,125000);
   assert.equal(out.rows[0].ageSeconds,45);
 });
-
