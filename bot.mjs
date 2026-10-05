@@ -726,7 +726,8 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1m').trim(),
   gmgnTrendOrderBy:String(process.env.TCX_W6_GMGN_TREND_ORDER_BY||'default').trim(),
   gmgnTrendMinPriceChangePct:null,
-  gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'gmgn_solbscbaseethmonadtron').trim(),
+  gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'').trim(),
+  gmgnPublicEnabled:String(process.env.TCX_GMGN_PUBLIC_ENABLED||'0')==='1',
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
 });
