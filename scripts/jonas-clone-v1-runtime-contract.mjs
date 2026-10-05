@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {jonasCloneCandidateToShadowIntent} from '../jonas-clone-v1-integration.mjs';
+const bad=jonasCloneCandidateToShadowIntent({ageSeconds:90,marketCapUsd:120000,liquidityUsd:20000,trendFeed:true});
+assert.equal(bad.eligible,false);
+assert.equal(bad.canExecuteLive,false);
+const good=jonasCloneCandidateToShadowIntent({ageSeconds:30,marketCapUsd:120000,liquidityUsd:20000,trendFeed:true});
+assert.equal(good.eligible,true);
+assert.equal(good.sizeSol,8);
+assert.deepEqual(good.exitComparisonsSeconds,[180,240,300,600]);
+assert.equal(good.execution,'SHADOW_ONLY');
+console.log('JONAS_CLONE_RUNTIME_CONTRACT_PASS');
