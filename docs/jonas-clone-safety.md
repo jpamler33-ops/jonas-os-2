@@ -1,0 +1,1 @@
+Safety invariant: all JONAS_CLONE_V1 outputs are shadow research intents. The adapter explicitly overwrites hostile or accidental live flags to execution=SHADOW_ONLY, canExecute=false, canExecuteLive=false, automaticPrimaryMutation=false.
