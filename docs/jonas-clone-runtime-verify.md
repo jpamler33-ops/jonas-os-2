@@ -1,0 +1,1 @@
+Runtime verification evidence must include scheduler invocation, candidate counts, eligible counts, emitted W6 intents, persisted checkpoint counts and closed/comparison outcomes. A healthy deployment without those signals does not prove the clone is trading in shadow mode.
