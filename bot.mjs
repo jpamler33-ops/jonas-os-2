@@ -1,3 +1,4 @@
+import {applyJonasCloneSnapshot} from './jonas-clone-v1-integration.mjs';
 import http from 'node:http';
 import { createBiggjAgentAutolearnHook } from './biggj-agent-autolearn-hook.mjs';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
@@ -5452,11 +5453,11 @@ async function refreshW6UltraEarly(reason='periodic'){
     });
     const ultra=enrichW6UltraCandidateRows(ultraRaw);
     const solPriceUsd=await currentW6SolPriceUsd();
-    const update=applyUser99k60sStrategySnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
+    const update=applyJonasCloneSnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
     specialistWalletState=update.state;
     if(
       update.results.opened||update.results.closed||update.results.holdScenarioCloses||
-      update.results.scenarioTargetHits
+      update.results.scenarioTargetHits||update.results.cloneCheckpoints
     )await persistSpecialistWallets('w6-ultra-early:'+reason);
     const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
     const activeTrades=(Array.isArray(wallet?.active)?wallet.active:[]).slice(0,5).map(p=>{
@@ -5468,6 +5469,7 @@ async function refreshW6UltraEarly(reason='periodic'){
         .map(x=>({entryNotionalSol:x?.entryNotionalSol,estimatedNetPnlSol:x?.estimatedNetPnlSol,capitalEfficiency:x?.capitalEfficiency,status:x?.status}))
         .slice(0,7);
       return {
+        jonasClone:p?.jonasClone||null,
         symbol:p?.symbol||'MEME',
         tokenAddress:p?.tokenAddress||'',
         openedAt:p?.openedAt||null,
@@ -5540,6 +5542,8 @@ async function refreshW6UltraEarly(reason='periodic'){
       launchStats:ultra.launchStats||{},
       trackingRows:ultra.trackingRows||0,
       pollMs:w6UltraEarlyRefreshMs,
+      cloneStrategy:update.results.strategyVersion,
+      cloneCheckpoints:update.results.cloneCheckpoints||0,
       funnel:update.results.entryFunnel||{},
       blockers:update.results.entryBlockers||{},
       opened:update.results.opened||0,

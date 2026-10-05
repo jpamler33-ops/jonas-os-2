@@ -7,6 +7,9 @@ const GENESIS='0'.repeat(64);
 
 export const DEFAULT_RUNTIME_FILES=[
   'bot.mjs',
+  'jonas-clone-v1.mjs',
+  'jonas-clone-v1-integration.mjs',
+  'jonas-clone-v1-intent.mjs',
   'biggj-agent-autolearn-hook.mjs',
   'biggj-agent-coordinator.mjs',
   'biggj-agent-runtime.mjs',

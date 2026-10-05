@@ -1,3 +1,4 @@
+import {jonasCloneCandidateToShadowIntent} from './jonas-clone-v1-intent.mjs';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { sha256 } from './institutional-kernel.mjs';
 
@@ -920,7 +921,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   requireTrending=false,
   requireNewPair=false,
   catastrophicDrawdownPct=.90,
-  catastrophicMarketCapUsd=10_000
+  catastrophicMarketCapUsd=10_000,
+  clonePolicy=false
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
@@ -930,8 +932,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const results={
     matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
     marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    cloneCheckpoints:0,
     sourceReady:snapshot?.sourceReady===true,
-    strategyVersion:USER_99K_60S_STRATEGY_VERSION,
+    strategyVersion:clonePolicy?'JONAS_CLONE_V1':USER_99K_60S_STRATEGY_VERSION,
     entryFunnel:{
       rowsSeen:entryRows.length,
       ageKnown:0,
@@ -999,8 +1002,11 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       }
     );
     results.holdScenarioCloses+=Math.max(0,holdLab.filter(x=>x?.status==='CLOSED').length-priorHoldClosed);
+    const cloneTelemetry=snapshot?.sourceReady===true?observeJonasClone(p,row,now,feeBps):null;
+    if(cloneTelemetry)results.cloneCheckpoints+=cloneTelemetry.checkpoints.length-(p?.jonasClone?.checkpoints?.length||0);
     const marked={
       ...baseMarked,
+      ...(cloneTelemetry?{jonasClone:cloneTelemetry}:{}),
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
       troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
@@ -1040,6 +1046,11 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
 
   for(const row of entryRows){
     const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,minGreenChangePct,requireExactGmgnGreen,requireTrending,requireNewPair});
+    const intent=clonePolicy?jonasCloneCandidateToShadowIntent({
+      ageSeconds:row?.pairCreatedAt!=null&&Number(row.pairCreatedAt)<=now?(now-Number(row.pairCreatedAt))/1000:null,
+      marketCapUsd:row?.marketCap,liquidityUsd:row?.liquidityUsd,
+      trendFeed:row?.signalTrending===true||row?.w6TrendVisible===true
+    }):null;
     const ageKnown=signal.ageSeconds!=null;
     const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
     const marketCapKnown=signal.marketCapUsd!=null;
@@ -1057,6 +1068,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     if(ageWithin&&signal.thresholdQualified===true&&priceKnown)results.entryFunnel.dataCompleteAfterThreshold++;
     for(const blocker of signal.blockers||[])results.entryBlockers[blocker]=(results.entryBlockers[blocker]||0)+1;
     if(!signal.match)continue;
+    if(clonePolicy&&(!intent.eligible||!(intent.sizeSol>0)||!(finite(solPriceUsd)>0))){
+      results.entryBlockers.CLONE_DATA_OR_POLICY_UNQUALIFIED=(results.entryBlockers.CLONE_DATA_OR_POLICY_UNQUALIFIED||0)+1;
+      continue;
+    }
     results.entryFunnel.eligible++;
     if(snapshot?.sourceReady!==true){
       results.entryFunnel.sourceNotReadyBlocked++;
@@ -1075,8 +1090,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const px=finite(row?.priceUsd);
     if(!(px>0))continue;
     const marketCapUsd=finite(row?.marketCap);
-    const margin=Math.max(1,Number(marginQuote)||100);
-    const rowNotionalSol=finite(row?.userStrategy?.entryNotionalSol);
+    const margin=clonePolicy?intent.sizeSol*solPriceUsd:Math.max(1,Number(marginQuote)||100);
+    const rowNotionalSol=clonePolicy?intent.sizeSol:finite(row?.userStrategy?.entryNotionalSol);
     const configuredNotionalSol=rowNotionalSol>0?rowNotionalSol:finite(entryNotionalSol);
     const holdLab=user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd});
     const position={
@@ -1124,7 +1139,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
       marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
       entryStrategySignal:clone(signal),
-      strategyVersion:USER_99K_60S_STRATEGY_VERSION,
+      ...(clonePolicy?{jonasClone:{strategy:'JONAS_CLONE_V1',intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},strategy:'JONAS_CLONE_V1'}:{}),
+      strategyVersion:clonePolicy?'JONAS_CLONE_V1':USER_99K_60S_STRATEGY_VERSION,
       entryRule:signal.thresholdMode==='GMGN_GREEN_PERCENT'
         ?signal.rule
         :(requireNewPair
@@ -1303,4 +1319,30 @@ export async function saveSpecialistWalletState(filePath,state){
   await writeFile(tmp,JSON.stringify(next),'utf8');
   await rename(tmp,filePath);
   return freeze(next);
+}
+
+function observeJonasClone(p,row,now,feeBps){
+  if(!p?.jonasClone)return null;
+  const t=clone(p.jonasClone),ret=row.priceUsd/p.entryPrice-1;
+  t.mfeReturnPct=Math.max(t.mfeReturnPct,ret);
+  t.maeReturnPct=Math.min(t.maeReturnPct,ret);
+  const elapsed=(now-p.openedAt)/1000;
+  for(const second of t.intent.checkpointsSeconds){
+    if(elapsed<second||t.checkpoints.some(x=>x.targetSeconds===second))continue;
+    const liquidity=finite(row.liquidityUsd),size=p.entryNotionalSol;
+    const entryImpact=user99k60sImpactPct(size,p.solPriceUsdAtEntry,p.entryLiquidityUsd);
+    const exitImpact=user99k60sImpactPct(size,p.solPriceUsdAtEntry,liquidity);
+    const observable=liquidity>0&&entryImpact!=null&&exitImpact!=null;
+    const gross=size*ret,fees=size*Math.max(0,finite(feeBps,30))/10000*2;
+    t.checkpoints.push({targetSeconds:second,observedAt:now,holdSeconds:elapsed,
+      observationLagSeconds:elapsed-second,status:elapsed-second<=15?'OBSERVED':'LATE_OBSERVATION',
+      exitComparison:t.intent.exitComparisonsSeconds.includes(second),price:row.priceUsd,
+      exitLiquidityUsd:liquidity,liquidityDecayPct:liquidity!=null&&p.entryLiquidityUsd>0?1-liquidity/p.entryLiquidityUsd:null,
+      mfeReturnPct:t.mfeReturnPct,maeReturnPct:t.maeReturnPct,grossPnlSol:gross,feesSol:fees,
+      priceImpactBps:observable?(entryImpact+exitImpact)*10000:null,
+      modelledNetPnlSol:observable?gross-fees-size*(entryImpact+exitImpact):null,
+      realizability:observable?'MODELLED_CONSTANT_PRODUCT_NOT_EXECUTION_QUOTE':'UNVERIFIED_EXIT_LIQUIDITY',
+      execution:'SHADOW_ONLY',canExecuteLive:false});
+  }
+  return t;
 }

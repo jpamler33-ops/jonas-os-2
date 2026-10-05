@@ -23,7 +23,8 @@ export function jonasCloneSizeSol(liquidityUsd,{minSol=0,maxSol=80}={}){
 }
 
 export function jonasCloneEligible(row={}){
-  const age=Number(row.ageSeconds??row.tokenAgeSeconds);
+  const rawAge=row.ageSeconds??row.tokenAgeSeconds;
+  const age=rawAge==null?NaN:Number(rawAge);
   const mcap=Number(row.marketCapUsd??row.marketCap);
   const trend=row.trendFeed===true||row.fromTrendFeed===true||row.source==='TREND_FEED';
   return Number.isFinite(age)&&age>=0&&age<=60&&Number.isFinite(mcap)&&mcap>=99000&&trend;
