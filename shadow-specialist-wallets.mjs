@@ -1331,6 +1331,14 @@ function walletStats(wallet){
   });
 }
 
+export function shouldPersistUser99k60sUpdate(results={}){
+  return Boolean(
+    results?.opened||results?.closed||results?.holdScenarioCloses||
+    results?.scenarioTargetHits||results?.cloneCheckpoints||
+    results?.earlyMomentumScenarioCloses||results?.earlyMomentumEntryAgeCloses
+  );
+}
+
 export function specialistWalletSummary(state,{asOf=Date.now()}={}){
   const s=mutableState(state);
   const wallets={};
