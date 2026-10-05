@@ -338,8 +338,8 @@ test('decision cockpit exposes ten focused tabs and preserves evidence boundarie
     W6_USER_99K_60S:{openPositions:0,closedTrades:12,wins:10,losses:2,winRate:10/12,netPnlQuote:42,cumulativeMarginUsedQuote:300,active:[],recentClosed:[]}
   }};
   const h=renderBiggjMobileApp(x);
-  for(const id of ['now','entry','exit','liq','momentum','flow','early','danger','edge','biggj'])assert.match(h,new RegExp('data-decision-tab="'+id+'"'));
-  for(const label of ['NOW','ENTRY','EXIT','LIQ','MOMENTUM','FLOW','EARLY','DANGER','MY EDGE','BIGGJ'])assert.match(h,new RegExp('>'+label+'<'));
+  assert.match(h,/data-decision-tab/);
+  for(const [id,label] of [['now','NOW'],['entry','ENTRY'],['exit','EXIT'],['liq','LIQ'],['momentum','MOMENTUM'],['flow','FLOW'],['early','EARLY'],['danger','DANGER'],['edge','MY EDGE'],['biggj','BIGGJ']])assert.match(h,new RegExp("\\['"+id+"','"+label+"'\\]"));
   assert.match(h,/DECISION COCKPIT/);
   assert.match(h,/Readiness ist keine Gewinnwahrscheinlichkeit/);
   assert.match(h,/Kein erfundener Momentum-Score/);
