@@ -419,6 +419,7 @@ export function createMemecoinEarlyRadarProvider({
   gmgnBase='https://gmgn.ai',
   gmgnOpenApiBase='https://openapi.gmgn.ai',
   gmgnApiKey='gmgn_solbscbaseethmonadtron',
+  gmgnPublicEnabled=true,
   timeoutMs=7000,
   dexCacheMs=15000,
   geckoCacheMs=60000,
@@ -440,6 +441,7 @@ export function createMemecoinEarlyRadarProvider({
   const gmgn=String(gmgnBase).replace(/\/+$/,'');
   const gmgnOpenApi=String(gmgnOpenApiBase).replace(/\/+$/,'');
   const gmgnReadApiKey=String(gmgnApiKey||'').trim();
+  const gmgnPublicAllowed=gmgnPublicEnabled!==false;
   const allowedGmgnTrendIntervals=new Set(['1m','5m','1h','6h','24h']);
   const gmgnTrendWindow=allowedGmgnTrendIntervals.has(String(gmgnTrendInterval||'').trim())
     ?String(gmgnTrendInterval).trim()
@@ -710,7 +712,7 @@ export function createMemecoinEarlyRadarProvider({
     // fallback. If OpenAPI is unavailable, try the public Trends endpoint; if
     // both fail we may enrich/monitor from free sources, but exactGmgn stays
     // false so the W6 green-% entry gate remains fail-closed.
-    if(!pools.length){
+    if(!pools.length&&gmgnPublicAllowed){
       trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
       try{
         pools=await gmgnPublicTrendingUltraSolana({force});
