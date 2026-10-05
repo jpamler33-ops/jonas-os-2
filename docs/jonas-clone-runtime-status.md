@@ -1,0 +1,1 @@
+Runtime status must be reported as pending until scheduler integration is merged, deployed and observed. The presence of the policy module or passing unit tests is not evidence that the clone has opened any autonomous shadow trades.
