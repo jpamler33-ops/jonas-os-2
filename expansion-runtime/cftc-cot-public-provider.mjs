@@ -145,7 +145,14 @@ export function createCftcCotPublicProvider({
   async function fetchSnapshot(symbol,{force=false}={}){
     const s=String(symbol||'').toUpperCase();
     const contract=CFTC_COT_CONTRACTS[s];
-    if(!contract) return Object.freeze({ok:false,symbol:s,reason:'CFTC_CONTRACT_UNMAPPED',version:CFTC_COT_PUBLIC_PROVIDER_VERSION});
+    if(!contract) return Object.freeze({
+      ok:false,
+      applicable:false,
+      status:'NOT_APPLICABLE',
+      symbol:s,
+      reason:'CFTC_CONTRACT_NOT_APPLICABLE',
+      version:CFTC_COT_PUBLIC_PROVIDER_VERSION
+    });
     const t=Number(now());
     const hit=cache.get(s);
     if(!force&&hit&&t-hit.at<cacheTtlMs) return hit.value;
