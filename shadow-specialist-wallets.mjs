@@ -1,5 +1,6 @@
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { sha256 } from './institutional-kernel.mjs';
+import { createEarlyMomentumChallengerLab, updateEarlyMomentumChallengerLab, summarizeEarlyMomentumChallengerLab } from './early-momentum-challenger-v1.mjs';
 
 export const SPECIALIST_SHADOW_WALLETS_VERSION='BIGGJ_SPECIALIST_SHADOW_WALLETS_V1';
 export const WALLET_3_TRADER_COPY='W3_TRADER_COPY';
@@ -929,7 +930,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
-    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,earlyMomentumScenarioCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION,
     entryFunnel:{
@@ -999,6 +1000,31 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       }
     );
     results.holdScenarioCloses+=Math.max(0,holdLab.filter(x=>x?.status==='CLOSED').length-priorHoldClosed);
+    const priorEarlyMomentumLab=p?.earlyMomentumChallengerLab||createEarlyMomentumChallengerLab({
+      entryAgeSeconds:p?.entryAgeSeconds,
+      liquidityUsd:p?.entryLiquidityUsd,
+      solPriceUsd:p?.solPriceUsdAtEntry,
+      feeBps
+    });
+    const priorEarlyMomentumClosed=(priorEarlyMomentumLab?.scenarios||[]).filter(x=>x?.status==='CLOSED').length;
+    const earlyMomentumChallengerLab=updateEarlyMomentumChallengerLab(priorEarlyMomentumLab,{
+      now,
+      holdSeconds,
+      returnPct:ret,
+      currentLiquidityUsd:row?.liquidityUsd,
+      solPriceUsd,
+      feeBps,
+      securityGate:row?.security?.evidenceGate,
+      criticalRiskFlags:row?.security?.criticalRiskFlags,
+      buysM5:row?.buysM5,
+      sellsM5:row?.sellsM5,
+      priceChangeM5:row?.priceChangeM5
+    });
+    results.earlyMomentumScenarioCloses+=Math.max(
+      0,
+      (earlyMomentumChallengerLab?.scenarios||[]).filter(x=>x?.status==='CLOSED').length-priorEarlyMomentumClosed
+    );
+    const earlyMomentumChallengerSummary=summarizeEarlyMomentumChallengerLab(earlyMomentumChallengerLab);
     const marked={
       ...baseMarked,
       lastMarketCapUsd:marketCapUsd,
@@ -1010,7 +1036,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
       lossExitProtectedUntil:Number(p?.openedAt||now)+Math.max(0,finite(minHoldSeconds,180))*1000,
       holdLab,
-      holdLabSummary:user99k60sHoldLabSummary(holdLab)
+      holdLabSummary:user99k60sHoldLabSummary(holdLab),
+      earlyMomentumChallengerLab,
+      earlyMomentumChallengerSummary
     };
     wallet.positions[i]=marked;
     results.marked++;
@@ -1079,6 +1107,12 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const rowNotionalSol=finite(row?.userStrategy?.entryNotionalSol);
     const configuredNotionalSol=rowNotionalSol>0?rowNotionalSol:finite(entryNotionalSol);
     const holdLab=user99k60sHoldLabScenarios(notionalScenariosSol,{solPriceUsd,liquidityUsd:row?.liquidityUsd});
+    const earlyMomentumChallengerLab=createEarlyMomentumChallengerLab({
+      entryAgeSeconds:signal.ageSeconds,
+      liquidityUsd:row?.liquidityUsd,
+      solPriceUsd,
+      feeBps
+    });
     const position={
       walletId:WALLET_6_USER_99K_60S,
       positionKey:key,
@@ -1119,6 +1153,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       entryLiquidityUsd:finite(row?.liquidityUsd),
       holdLab,
       holdLabSummary:user99k60sHoldLabSummary(holdLab),
+      earlyMomentumChallengerLab,
+      earlyMomentumChallengerSummary:summarizeEarlyMomentumChallengerLab(earlyMomentumChallengerLab),
       minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
       lossExitProtectedUntil:Number(now)+Math.max(0,finite(minHoldSeconds,180))*1000,
       minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
