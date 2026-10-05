@@ -1,0 +1,3 @@
+# Runtime integration contract
+
+The production candidate scheduler must treat JONAS_CLONE_V1 as P0 research. Candidate evaluation calls the clone adapter first. Ineligible candidates fall through without side effects. Eligible candidates emit W6 shadow intents only. Runtime observations persist the clone telemetry contract at the defined checkpoints. Lower-priority research may run afterward but cannot change the V1 baseline. Any path that attempts live execution must remain denied.

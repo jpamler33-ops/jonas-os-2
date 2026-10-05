@@ -1,0 +1,1 @@
+V1 scope is baseline reproduction and measurement only. Optimization is performed by separate parallel variants after evidence exists. V1 parameters are not silently self-modified. The strategy remains a shadow research system.

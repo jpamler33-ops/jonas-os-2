@@ -1,0 +1,1 @@
+Paper PnL is not executable PnL. Clone evaluation must account for fees, price impact, slippage proxy and available exit liquidity. The liquidity-to-SOL relation remains a shadow research hypothesis, not a live sizing recommendation.

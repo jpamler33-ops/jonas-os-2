@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {JONAS_CLONE_V1_POLICY,jonasCloneSizeSol} from '../jonas-clone-v1.mjs';
+import {jonasCloneCandidateToShadowIntent} from '../jonas-clone-v1-integration.mjs';
+assert.equal(JONAS_CLONE_V1_POLICY.priority,'P0');
+assert.equal(JONAS_CLONE_V1_POLICY.canExecuteLive,false);
+assert.equal(jonasCloneSizeSol(20000),8);
+const i=jonasCloneCandidateToShadowIntent({ageSeconds:30,marketCapUsd:120000,liquidityUsd:20000,trendFeed:true});
+assert.equal(i.execution,'SHADOW_ONLY');
+assert.equal(i.canExecuteLive,false);
+console.log('JONAS_CLONE_V1_FINAL_SMOKE_PASS');

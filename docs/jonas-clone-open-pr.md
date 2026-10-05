@@ -1,0 +1,1 @@
+Branch has a real functional diff and is ready for PR CI. Autonomous runtime operation is still pending by design.

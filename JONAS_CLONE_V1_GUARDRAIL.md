@@ -1,0 +1,1 @@
+JONAS_CLONE_V1 is a measurement and shadow-simulation track. The liquidity sizing relation is an empirical hypothesis to evaluate under fees, price impact, slippage and exit-liquidity constraints. It must not be interpreted as a safe live position-size recommendation. Production acceptance requires observed shadow executions and runtime verification.

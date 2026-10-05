@@ -1,0 +1,1 @@
+Release verification after merge: Railway deployment SUCCESS, runtime health green, clone priority visible, at least one eligible candidate evaluated through the adapter when market data provides one, W6 shadow lifecycle persists, and no live execution capability exists. Absence of eligible market candidates is not fabricated as a successful trade.

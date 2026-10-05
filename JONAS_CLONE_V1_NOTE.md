@@ -1,0 +1,1 @@
+No claim of profitability or live reproducibility is made by this implementation. The purpose is to automate evidence collection and compare the strategy under more realistic execution assumptions.

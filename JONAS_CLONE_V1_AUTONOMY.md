@@ -1,0 +1,1 @@
+Autonomy means BIGGJ discovers an eligible candidate, emits the W6 clone shadow intent, observes it through the configured checkpoints, records comparison exits and persists the result without manual trade entry. This branch does not claim autonomy until production scheduler wiring and runtime evidence confirm that full chain.

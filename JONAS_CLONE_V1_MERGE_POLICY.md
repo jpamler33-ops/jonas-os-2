@@ -1,0 +1,1 @@
+Merge only after CI is green and review confirms no existing runtime safety invariant is weakened. Merge does not itself prove autonomous operation; Railway deployment and runtime evidence are separate required verification steps.

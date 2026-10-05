@@ -1,0 +1,3 @@
+# Clone telemetry
+
+Each eligible shadow candidate should retain candidate age, market cap, liquidity, research size in SOL, entry price, estimated price impact, fees, MFE, MAE, liquidity decay, exit liquidity, holding time, gross PnL, net PnL and exit reason. Observations are required at 60, 120, 180, 240, 300 and 600 seconds. Comparable hypothetical exits are required at 180, 240, 300 and 600 seconds without mutating the baseline position path.

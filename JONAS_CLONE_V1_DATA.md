@@ -1,0 +1,1 @@
+Manual observations and video-derived behavior inform the initial hypothesis, but only machine-captured shadow telemetry is used to claim autonomous performance. Outlier PnL is reported separately from median and execution-adjusted results so a single extreme paper trade cannot dominate conclusions.

@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {applyJonasClonePriority,jonasCloneCandidateToShadowIntent} from '../jonas-clone-v1-integration.mjs';
+const r=applyJonasClonePriority({execution:'LIVE',canExecuteLive:true});
+assert.equal(r.execution,'SHADOW_ONLY');
+assert.equal(r.canExecuteLive,false);
+const x=jonasCloneCandidateToShadowIntent({ageSeconds:30,marketCapUsd:130000,liquidityUsd:40000,trendFeed:true});
+assert.equal(x.eligible,true);
+assert.equal(x.sizeSol,16);
+assert.equal(x.walletId,'W6_USER_99K_60S');
+console.log('JONAS_CLONE_V1_INTEGRATION_SMOKE_PASS');

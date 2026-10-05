@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {JONAS_CLONE_V1_POLICY,jonasCloneSizeSol,jonasCloneResearchPlan} from '../jonas-clone-v1.mjs';
+assert.equal(JONAS_CLONE_V1_POLICY.priority,'P0');
+assert.equal(JONAS_CLONE_V1_POLICY.execution,'SHADOW_ONLY');
+assert.equal(JONAS_CLONE_V1_POLICY.canExecuteLive,false);
+assert.equal(jonasCloneSizeSol(20000),8);
+assert.equal(jonasCloneSizeSol(40000),16);
+const p=jonasCloneResearchPlan({ageSeconds:20,marketCapUsd:120000,liquidityUsd:20000,trendFeed:true});
+assert.equal(p.eligible,true);
+assert.deepEqual(p.exitComparisonsSeconds,[180,240,300,600]);
+assert.equal(p.canExecuteLive,false);
+console.log('JONAS_CLONE_V1_SMOKE_PASS');

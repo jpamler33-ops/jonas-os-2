@@ -1,0 +1,1 @@
+No merge solely because standalone clone tests pass. Existing institutional CI must pass, runtime wiring must be reviewed, and deployment verification must preserve SHADOW_ONLY / canExecuteLive=false.

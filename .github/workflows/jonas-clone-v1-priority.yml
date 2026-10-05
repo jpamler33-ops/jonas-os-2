@@ -1,0 +1,20 @@
+name: JONAS Clone V1 P0 Gate
+on:
+  pull_request:
+    paths:
+      - 'jonas-clone-v1.mjs'
+      - 'jonas-clone-v1-integration.mjs'
+      - 'test/jonas-clone-v1*.test.mjs'
+      - 'scripts/jonas-clone-v1*.mjs'
+      - '.github/workflows/jonas-clone-v1*.yml'
+jobs:
+  clone-p0-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test test/jonas-clone-v1.test.mjs test/jonas-clone-v1-integration.test.mjs test/jonas-clone-v1-priority.test.mjs
+      - run: node scripts/jonas-clone-v1-smoke.mjs
+      - run: node scripts/jonas-clone-v1-priority-smoke.mjs

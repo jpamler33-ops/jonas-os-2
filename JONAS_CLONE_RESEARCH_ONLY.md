@@ -1,0 +1,1 @@
+This strategy is research-only. Its purpose is to automate measurement of a manually observed pattern. No parameter in V1 constitutes a recommendation to deploy capital.

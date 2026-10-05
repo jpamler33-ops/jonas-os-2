@@ -1,0 +1,1 @@
+Contract stage complete. Stop adding speculative features. Open PR, let CI expose integration issues, then perform the smallest grounded scheduler/runtime wiring needed.

@@ -1,0 +1,1 @@
+Evidence hierarchy: runtime-captured execution-adjusted telemetry > runtime raw shadow marks > manual trade logs > video-derived behavioral inference. Strategy conclusions must state which evidence tier supports them.

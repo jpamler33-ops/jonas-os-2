@@ -1,0 +1,1 @@
+Exit research records comparable outcomes at 180, 240, 300 and 600 seconds while preserving the original baseline trajectory. Small adverse movement before 180 seconds is observed rather than treated as an automatic normal-loss exit. Liquidity disappearance remains separately observable and may invalidate realizability.

@@ -1,0 +1,1 @@
+Immediate next action: open PR, run repository CI, inspect failures, then integrate the adapter at the existing W6 scheduler call site. Do not declare autonomous shadow operation until runtime evidence exists.

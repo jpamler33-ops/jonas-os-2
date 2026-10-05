@@ -1,0 +1,1 @@
+The V1 baseline is frozen for comparison. Changes learned from later evidence become separately versioned variants rather than silently modifying V1. This preserves a stable control cohort for measuring whether BIGGJ improvements actually add value.

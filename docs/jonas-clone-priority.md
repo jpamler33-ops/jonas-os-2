@@ -1,0 +1,1 @@
+While this research track is active, autonomous clone evidence collection is the first trading-research objective. Existing lower-priority systems remain secondary and must not alter the frozen V1 baseline.

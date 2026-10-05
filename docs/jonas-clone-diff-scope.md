@@ -1,0 +1,1 @@
+The intended functional diff is isolated: new clone policy and adapter modules plus tests/docs. Existing production runtime files are deliberately not rewritten in this stage, reducing regression risk before scheduler integration is grounded.
