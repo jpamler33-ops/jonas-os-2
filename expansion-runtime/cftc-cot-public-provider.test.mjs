@@ -100,7 +100,9 @@ test('unsupported symbols fail closed without network request',async()=>{
   const p=createCftcCotPublicProvider({fetchImpl:async()=>{calls++;return response([]);},now:()=>NOW});
   const out=await p.fetchSnapshot('DOGEUSDT');
   assert.equal(out.ok,false);
-  assert.equal(out.reason,'CFTC_CONTRACT_UNMAPPED');
+  assert.equal(out.applicable,false);
+  assert.equal(out.status,'NOT_APPLICABLE');
+  assert.equal(out.reason,'CFTC_CONTRACT_NOT_APPLICABLE');
   assert.equal(calls,0);
 });
 
