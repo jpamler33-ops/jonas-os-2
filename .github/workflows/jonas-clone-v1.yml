@@ -1,0 +1,19 @@
+name: JONAS Clone V1 Gate
+on:
+  pull_request:
+    paths:
+      - 'jonas-clone-v1.mjs'
+      - 'test/jonas-clone-v1.test.mjs'
+      - 'scripts/jonas-clone-v1-smoke.mjs'
+      - 'JONAS_CLONE_V1_P0.md'
+      - '.github/workflows/jonas-clone-v1.yml'
+jobs:
+  shadow-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test test/jonas-clone-v1.test.mjs
+      - run: node scripts/jonas-clone-v1-smoke.mjs
