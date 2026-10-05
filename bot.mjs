@@ -8630,11 +8630,12 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       if(id==='derivatives') ok=ok&&value?.ok===true;
       else if(id==='external') ok=ok&&Boolean(value?.coinMetrics?.ok||value?.deribitOptions?.ok||value?.macro?.ok||value?.predictionMarket?.ok);
       else if(id==='public_context') ok=ok&&Boolean(value?.sentiment||value?.global||value?.defi||value?.stablecoins);
-      else if(id==='cftc_cot') ok=ok&&value?.ok===true;
+      else if(id==='cftc_cot') ok=ok&&(value?.ok===true||value?.applicable===false);
       else if(id==='official_primary') ok=ok&&value?.ok===true;
       else if(id==='issuer_etf') ok=ok&&value?.ok===true;
       else if(['dex_context','dex_promotion'].includes(id)) ok=ok&&Array.isArray(value?.rows)&&value.rows.length>0;
-      else if(['onchain','entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
+      else if(id==='onchain') ok=ok&&(value?.ok===true||value?.applicable===false);
+      else if(['entity_flow','wallet'].includes(id)) ok=ok&&value?.ok===true;
       const error=row.status==='REJECTED'
         ?row.error
         :(ok?null:(value?.reason||((value?.errors||[]).map(x=>x.error||x.reason||String(x)).join(' | ')||'PROVIDER_NO_USABLE_DATA')));
@@ -9208,7 +9209,8 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
 
   recordOperation(observability,{
     name:silent?'institutional_forecast_autolearn':'institutional_forecast',
-    ok:auditHealthyAfter&&issuance.gate!=='ABSTAIN',
+    // ABSTAIN is a valid fail-closed forecast outcome, not an operational failure.
+    ok:auditHealthyAfter,
     latencyMs:Date.now()-started,
     error:auditHealthyAfter?null:'forecast audit binding failed'
   });
