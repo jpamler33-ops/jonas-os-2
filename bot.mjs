@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createBiggjAgentAutolearnHook } from './biggj-agent-autolearn-hook.mjs';
 import { missionControlSnapshot, renderMissionControlHtml, MISSION_CONTROL_VERSION } from './mission-control.mjs';
 import { biggjWebManifest, biggjAppIconSvg, biggjServiceWorker, renderBiggjMobileApp, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 import { deriveBiggjExperienceNeeds } from './biggj-experience-center.mjs';
@@ -1580,6 +1581,60 @@ const marketFabricMaintenanceMs = Math.max(60000, Number(process.env.TCX_MARKET_
 let auditAppendQueue = Promise.resolve();
 let researchDataPlaneAppendQueue=Promise.resolve();
 let activeBackgroundResearchJob=null;
+const biggjAgentRuntimeEnabled=String(process.env.TCX_AGENT_RUNTIME_ENABLED||'1')!=='0';
+const biggjAgentAutolearnHook=createBiggjAgentAutolearnHook();
+let biggjAgentNextCycleAt=0;
+let biggjAgentLastError=null;
+
+function afterBiggjAgentAutolearn(silentResult,learnedChallenger=null){
+  if(!biggjAgentRuntimeEnabled||silentResult?.ok!==true)return;
+  const now=Date.now();
+  // Check cadence before constructing summaries or calling the hook. Repeated
+  // throttled hook snapshots otherwise retain their previous results recursively.
+  if(now<biggjAgentNextCycleAt)return;
+  try{
+    if(servingMemoryPressure().pressured)return;
+    biggjAgentNextCycleAt=now+60_000;
+    const result=biggjAgentAutolearnHook.afterAutolearn({
+      silentResult,
+      engines:{
+        shadowCompetition:shadowCompetitionState?shadowCompetitionSummary(shadowCompetitionState):null,
+        experimentGovernor:experimentGovernorState?experimentGovernorSummary(experimentGovernorState):null,
+        featureResearch:featureResearchState?featureResearchSummary(featureResearchState):null,
+        indicatorEvolution:indicatorEvolutionHealthy?indicatorEvolutionSummary(indicatorEvolutionState):null,
+        learnedChallenger,
+        parallelStrategyWorlds:parallelStrategyWorldsHealthy?parallelStrategyWorldsSummary(parallelStrategyWorldsState):null,
+        walletResearchManager:walletResearchManagerHealthy?shadowWalletResearchManagerSummary(walletResearchManagerState,shadowPortfolioLedger,{
+          asOf:now,targetArmTrades:walletResearchTargetArmTrades,maxEpochMs:walletResearchMaxEpochMs
+        }):null,
+        researchActivity:shadowResearchActivitySummary(shadowPortfolioLedger,{asOf:now}),
+        researchFactory:autonomousResearchFactoryHealthy?autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState):null
+      }
+    });
+    biggjAgentLastError=result?.status==='ERROR'?String(result.error||'AGENT_CYCLE_FAILED'):null;
+    if(biggjAgentLastError)recordError(observability,{scope:'biggj_agent_runtime',message:biggjAgentLastError});
+    recordOperation(observability,{
+      name:'biggj_agent_autolearn',ok:result?.status==='OK',
+      latencyMs:Date.now()-now,error:biggjAgentLastError
+    });
+  }catch(err){
+    biggjAgentLastError=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'biggj_agent_runtime',message:biggjAgentLastError});
+    console.error('[BIGGJ_AGENT_RUNTIME_ERROR]',biggjAgentLastError);
+  }
+}
+
+function biggjAgentRuntimeSnapshot(){
+  return {
+    ...biggjAgentAutolearnHook.snapshot(),
+    enabled:biggjAgentRuntimeEnabled,
+    healthy:biggjAgentLastError===null,
+    lastError:biggjAgentLastError,
+    nextEligibleAt:biggjAgentNextCycleAt||null,
+    canExecute:false
+  };
+}
+
 let forecastOutcomeMemoryBackoffUntil=0;
 const institutionalConfig = Object.freeze({
   execution:'SHADOW_ONLY',
@@ -9221,6 +9276,7 @@ async function showForecast(chatId,symbol,messageId=null,options={}){
       mandatoryDiscoveryOrderStatus:mandatoryDiscoveryRun?.status||null,
       horizons
     });
+    if(issuanceSource==='TCX_AUTOLEARN_V1')afterBiggjAgentAutolearn(silentResult,learnedChallengerRun?.lab||null);
     return silentResult;
   }
 
@@ -12412,6 +12468,7 @@ function missionControlData(){
   }),
   biggjSignalLab:{version:BIGGJ_SIGNAL_LAB_VERSION,proofVersion:BIGGJ_PROOF_FEED_VERSION,modes:['FULL','STRUCTURE','FLOW','LIQUIDITY','MACRO'],execution:'SHADOW_ONLY',action:'ABSTAIN',canExecuteLive:false},
   aiAdvisor:biggjOpenAiBridge.snapshot(now),
+  biggjAgentRuntime:biggjAgentRuntimeSnapshot(),
   claimAssumptionResearch:claimAssumptionResearchLastSummary||{
     state:'NOT_EVALUATED',
     observations:0,
@@ -13242,6 +13299,7 @@ const server = http.createServer(async (req,res) => {
         outcomeCheckMs:forecastOutcomeCheckMs
       },
       researchDataPlane:researchDataPlaneSummary(researchDataPlane),
+      biggjAgentRuntime:biggjAgentRuntimeSnapshot(),
       researchDataGovernance:{
         ...researchDataGovernanceSummary(researchDataGovernance,{now:Date.now()}),
         file:researchGovernanceFile,
@@ -13405,6 +13463,7 @@ console.log('[TCX_STARTUP_READY]',JSON.stringify({
     ...indicatorEvolutionSummary(indicatorEvolutionState)
   },
   modelCandidateRegistry:modelCandidateRegistrySummary(modelCandidateRegistry),
+  biggjAgentRuntime:biggjAgentRuntimeSnapshot(),
   autonomousResearchFactory:autonomousResearchTrainingFactorySummary(autonomousResearchFactoryState),
   autonomousOperator:biggjAutonomousOperatorSummary(autonomousOperatorState),
   auditLedger:{

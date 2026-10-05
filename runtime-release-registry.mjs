@@ -7,6 +7,11 @@ const GENESIS='0'.repeat(64);
 
 export const DEFAULT_RUNTIME_FILES=[
   'bot.mjs',
+  'biggj-agent-autolearn-hook.mjs',
+  'biggj-agent-coordinator.mjs',
+  'biggj-agent-runtime.mjs',
+  'biggj-agent-evidence-adapter.mjs',
+  'biggj-agent-bus.mjs',
   'biggj-openai-bridge.mjs',
   'state-store.mjs',
   'market-structure.mjs',
