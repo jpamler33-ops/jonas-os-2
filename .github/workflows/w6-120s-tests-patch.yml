@@ -1,0 +1,51 @@
+name: W6 120s tests one-shot patch
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[w6-120s-tests-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply bounded W6 120s test migration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('shadow-specialist-wallets.test.mjs')
+          s=p.read_text()
+          replacements={
+            "test('user 99k/60s V1 matches only coins already above 99k within 60 seconds'":"test('user 99k/120s V1 matches only coins already above 99k before 120 seconds'",
+            "pairCreatedAt:now-61_000":"pairCreatedAt:now-120_000",
+            "'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'":"'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'",
+            "tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-70_000":"tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-120_000",
+            "'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'":"'GMGN_TRENDS_1M_AND_AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'"
+          }
+          expected={
+            "test('user 99k/60s V1 matches only coins already above 99k within 60 seconds'":1,
+            "pairCreatedAt:now-61_000":1,
+            "'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'":1,
+            "tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-70_000":1,
+            "'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'":1
+          }
+          for old,count in expected.items():
+            actual=s.count(old)
+            assert actual==count, f'{old}: expected {count}, got {actual}'
+          for old,new in replacements.items():
+            s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          git diff --check
+          node --test shadow-specialist-wallets.test.mjs
+      - name: Commit migrated tests
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add shadow-specialist-wallets.test.mjs
+          git commit -m 'test(w6): align entry assertions with strict 120s window [w6-120s-tests-applied]'
+          git push origin HEAD:main
