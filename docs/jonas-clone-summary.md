@@ -1,0 +1,1 @@
+JONAS_CLONE_V1 is now represented as a P0 shadow research contract with W6 adapter and extensive safety/behavior tests. The branch intentionally distinguishes implemented policy from operational runtime wiring. Next step after CI review is wiring into the existing W6 scheduler and proving autonomous shadow observations in Railway.
