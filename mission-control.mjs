@@ -1,8 +1,8 @@
 import { renderBiggjMobileApp, BIGGJ_MOBILE_WEBAPP_VERSION } from './biggj-mobile-webapp.mjs';
 
-export const MISSION_CONTROL_VERSION='BIGGJ_MARKET_SCIENCE_CONTROL_V2';
+export const MISSION_CONTROL_VERSION='BIGGJ_MARKET_SCIENCE_CONTROL_V3';
 
-export function missionControlSnapshot({health,portfolio,discovery,storage}={}){
+export function missionControlSnapshot({health,portfolio,researchTrades,discovery,storage}={}){
   return {
     version:MISSION_CONTROL_VERSION,
     appVersion:BIGGJ_MOBILE_WEBAPP_VERSION,
@@ -10,6 +10,7 @@ export function missionControlSnapshot({health,portfolio,discovery,storage}={}){
     biggj:health?.biggjMarketScienceOs||null,
     health:health||{},
     portfolio:portfolio||{},
+    researchTrades:researchTrades||{},
     discovery:discovery||{},
     storage:storage||{},
     execution:'SHADOW_ONLY',
