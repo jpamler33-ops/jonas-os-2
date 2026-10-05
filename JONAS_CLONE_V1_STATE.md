@@ -1,0 +1,1 @@
+State: CONTRACT_READY_FOR_REVIEW. Runtime autonomous-trading status: NOT_YET_VERIFIED. Required next step is PR CI followed by production scheduler wiring and runtime verification. Safety state remains SHADOW_ONLY / canExecuteLive=false.
