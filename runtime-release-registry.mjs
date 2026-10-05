@@ -157,6 +157,9 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'research-feature-catalog.mjs',
   'research-source-contracts.mjs',
   'research-data-governance.mjs',
+
+  // Direct production dependencies imported by bot.mjs. Keep the release
+  // component identity closed over the serving entrypoint, not just feature subsets.
   'opportunity-allocator.mjs',
   'strategy-edge-decay.mjs',
   'evidence-promotion-gate.mjs',
@@ -207,6 +210,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'expansion-runtime/official-primary-research-provider.mjs',
   'expansion-runtime/issuer-etf-holdings-provider.mjs',
   'expansion-runtime/external-research-provider.mjs',
+
   'forecast-runtime/utils/math.js',
   'forecast-runtime/forecast/index.js',
   'forecast-runtime/forecast/forecast_bot_api.js',
@@ -230,6 +234,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'forecast-runtime/forecast/tcx_adapter.js',
   'forecast-runtime/forecast/intelligence.js',
   'forecast-runtime/forecast/intelligence_service.js',
+
   'science-runtime/empirical-support.mjs',
   'science-runtime/research-integrity.mjs',
   'science-runtime/concept-stability.mjs',
@@ -240,6 +245,7 @@ export const INSTITUTIONAL_STAGED_RUNTIME_FILES=[
   'science-runtime/transportability.mjs',
   'science-runtime/evidence-lineage-independence.mjs',
   'science-runtime/epistemic-integrity.mjs',
+
   'expansion-runtime/provenance.mjs',
   'expansion-runtime/institutional-expansion.mjs',
   'expansion-runtime/future-intelligence.mjs',
@@ -268,33 +274,197 @@ function cleanDeployment(d={}){
   return {gitCommit,gitBranch,service};
 }
 
-export async function buildRuntimeManifest({rootDir='.',files=DEFAULT_RUNTIME_FILES,config={},packageInfo={},deployment={},versions={}}={}){
+export async function buildRuntimeManifest({
+  rootDir='.',
+  files=DEFAULT_RUNTIME_FILES,
+  config={},
+  packageInfo={},
+  deployment={},
+  versions={}
+}={}){
   const componentHashes={};
-  for(const name of [...files].sort()) componentHashes[name]=sha256(await readFile(path.resolve(rootDir,name)));
+  for(const name of [...files].sort()){
+    const full=path.resolve(rootDir,name);
+    const content=await readFile(full);
+    componentHashes[name]=sha256(content);
+  }
+
   let resolvedPackage={...packageInfo};
   if(!resolvedPackage.name||!resolvedPackage.version){
     try{
       const parsed=JSON.parse(await readFile(path.resolve(rootDir,'package.json'),'utf8'));
-      resolvedPackage={name:resolvedPackage.name||parsed.name,version:resolvedPackage.version||parsed.version};
+      resolvedPackage={
+        name:resolvedPackage.name||parsed.name,
+        version:resolvedPackage.version||parsed.version
+      };
     }catch{}
   }
-  const core={schemaVersion:SCHEMA_VERSION,kind:'TCX_RUNTIME_RELEASE',package:{name:String(resolvedPackage.name||'tcx-telegram-railway'),version:String(resolvedPackage.version||'UNKNOWN')},runtime:{node:process.version,platform:process.platform,arch:process.arch},deployment:cleanDeployment(deployment),versions,configHash:sha256(config),componentHashes};
+
+  const core={
+    schemaVersion:SCHEMA_VERSION,
+    kind:'TCX_RUNTIME_RELEASE',
+    package:{
+      name:String(resolvedPackage.name||'tcx-telegram-railway'),
+      version:String(resolvedPackage.version||'UNKNOWN')
+    },
+    runtime:{
+      node:process.version,
+      platform:process.platform,
+      arch:process.arch
+    },
+    deployment:cleanDeployment(deployment),
+    versions,
+    configHash:sha256(config),
+    componentHashes
+  };
   return {...core,releaseId:sha256(core)};
 }
 
-function registryCore({seq,prevHash,registeredAt,manifest}){return {schemaVersion:SCHEMA_VERSION,seq,prevHash,registeredAt:Number(registeredAt),releaseId:String(manifest.releaseId),manifestHash:sha256(manifest),manifest};}
-export function hashReleaseRecord(record){const {recordHash,...without}=record;return sha256(without);}
-export function verifyReleaseRegistry(records){let prev=GENESIS,seq=1;for(const record of records){if(Number(record.seq)!==seq)return {ok:false,error:'SEQ_GAP',seq:record.seq,expected:seq};if(record.prevHash!==prev)return {ok:false,error:'PREV_HASH_MISMATCH',seq:record.seq};if(record.manifestHash!==sha256(record.manifest))return {ok:false,error:'MANIFEST_HASH_MISMATCH',seq:record.seq};if(record.releaseId!==record.manifest?.releaseId)return {ok:false,error:'RELEASE_ID_MISMATCH',seq:record.seq};if(record.recordHash!==hashReleaseRecord(record))return {ok:false,error:'RECORD_HASH_MISMATCH',seq:record.seq};prev=record.recordHash;seq++;}return {ok:true,count:records.length,lastSeq:seq-1,tailHash:prev};}
+function registryCore({seq,prevHash,registeredAt,manifest}){
+  return {
+    schemaVersion:SCHEMA_VERSION,
+    seq,
+    prevHash,
+    registeredAt:Number(registeredAt),
+    releaseId:String(manifest.releaseId),
+    manifestHash:sha256(manifest),
+    manifest
+  };
+}
+
+export function hashReleaseRecord(record){
+  const {recordHash,...without}=record;
+  return sha256(without);
+}
+
+export function verifyReleaseRegistry(records){
+  let prev=GENESIS,seq=1;
+  for(const record of records){
+    if(Number(record.seq)!==seq) return {ok:false,error:'SEQ_GAP',seq:record.seq,expected:seq};
+    if(record.prevHash!==prev) return {ok:false,error:'PREV_HASH_MISMATCH',seq:record.seq};
+    if(record.manifestHash!==sha256(record.manifest)) return {ok:false,error:'MANIFEST_HASH_MISMATCH',seq:record.seq};
+    if(record.releaseId!==record.manifest?.releaseId) return {ok:false,error:'RELEASE_ID_MISMATCH',seq:record.seq};
+    if(record.recordHash!==hashReleaseRecord(record)) return {ok:false,error:'RECORD_HASH_MISMATCH',seq:record.seq};
+    prev=record.recordHash;
+    seq++;
+  }
+  return {ok:true,count:records.length,lastSeq:seq-1,tailHash:prev};
+}
 
 export async function openReleaseRegistry(filePath){
-  await mkdir(path.dirname(filePath),{recursive:true});let records=[],recoveredFromTruncatedTail=false,backupPath=null;
-  try{const raw=await readFile(filePath,'utf8');const lines=raw.split(/\r?\n/);for(let i=0;i<lines.length;i++){const line=lines[i];if(!line.trim())continue;try{records.push(JSON.parse(line));}catch{const trailingOnly=lines.slice(i+1).every(x=>!x.trim());const prefix=verifyReleaseRegistry(records);if(!trailingOnly||!prefix.ok)throw new Error(`Invalid release-registry JSON at line ${i+1}`);const stamp=Date.now(),tempPath=filePath+'.repair-'+stamp;backupPath=filePath+'.truncated-tail-'+stamp;const repaired=records.length?records.map(canonicalJson).join('\n')+'\n':'';let tempHandle;try{await writeFile(tempPath,repaired,{encoding:'utf8',mode:0o600,flag:'wx'});tempHandle=await openFile(tempPath,'r+');await tempHandle.sync();await tempHandle.close();tempHandle=null;await rename(filePath,backupPath);try{await rename(tempPath,filePath);}catch(err){await rename(backupPath,filePath).catch(()=>{});throw err;}recoveredFromTruncatedTail=true;}catch(err){if(tempHandle)await tempHandle.close().catch(()=>{});await unlink(tempPath).catch(()=>{});throw new Error(`Could not preserve and repair truncated release-registry tail: ${err instanceof Error?err.message:String(err)}`);}break;}}}}catch(err){if(err?.code!=='ENOENT')return {filePath,healthy:false,verification:{ok:false,error:'REGISTRY_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},records:[],seq:0,tailHash:GENESIS};}
-  const verification=verifyReleaseRegistry(records);return {filePath,healthy:verification.ok,verification,records,seq:verification.ok?verification.lastSeq:0,tailHash:verification.ok?verification.tailHash:GENESIS,recoveredFromTruncatedTail,backupPath};
+  await mkdir(path.dirname(filePath),{recursive:true});
+  let records=[];
+  let recoveredFromTruncatedTail=false;
+  let backupPath=null;
+  try{
+    const raw=await readFile(filePath,'utf8');
+    const lines=raw.split(/\r?\n/);
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i];
+      if(!line.trim()) continue;
+      try{records.push(JSON.parse(line));}
+      catch{
+        const trailingOnly=lines.slice(i+1).every(x=>!x.trim());
+        const prefix=verifyReleaseRegistry(records);
+        if(!trailingOnly||!prefix.ok){
+          throw new Error(`Invalid release-registry JSON at line ${i+1}`);
+        }
+        const stamp=Date.now();
+        const tempPath=filePath+'.repair-'+stamp;
+        backupPath=filePath+'.truncated-tail-'+stamp;
+        const repaired=records.length?records.map(canonicalJson).join('\n')+'\n':'';
+        let tempHandle;
+        try{
+          await writeFile(tempPath,repaired,{encoding:'utf8',mode:0o600,flag:'wx'});
+          tempHandle=await openFile(tempPath,'r+');
+          await tempHandle.sync();
+          await tempHandle.close();
+          tempHandle=null;
+          await rename(filePath,backupPath);
+          try{await rename(tempPath,filePath);}
+          catch(err){
+            await rename(backupPath,filePath).catch(()=>{});
+            throw err;
+          }
+          recoveredFromTruncatedTail=true;
+        }catch(err){
+          if(tempHandle) await tempHandle.close().catch(()=>{});
+          await unlink(tempPath).catch(()=>{});
+          throw new Error(`Could not preserve and repair truncated release-registry tail: ${err instanceof Error?err.message:String(err)}`);
+        }
+        break;
+      }
+    }
+  }catch(err){
+    if(err?.code!=='ENOENT'){
+      return {
+        filePath,healthy:false,
+        verification:{ok:false,error:'REGISTRY_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
+        records:[],seq:0,tailHash:GENESIS
+      };
+    }
+  }
+  const verification=verifyReleaseRegistry(records);
+  return {
+    filePath,
+    healthy:verification.ok,
+    verification,
+    records,
+    seq:verification.ok?verification.lastSeq:0,
+    tailHash:verification.ok?verification.tailHash:GENESIS,
+    recoveredFromTruncatedTail,
+    backupPath
+  };
 }
 
 export async function registerRuntimeRelease(registry,manifest,{registeredAt=Date.now()}={}){
-  if(!registry?.healthy)throw new Error('Release Registry unhealthy: fail closed');const existing=registry.records.find(r=>r.releaseId===manifest.releaseId);if(existing)return {record:existing,duplicate:true};const core=registryCore({seq:registry.seq+1,prevHash:registry.tailHash,registeredAt,manifest});const record={...core,recordHash:sha256(core)};let fh;try{fh=await openFile(registry.filePath,'a',0o600);await fh.write(canonicalJson(record)+'\n',null,'utf8');await fh.sync();}catch(err){registry.healthy=false;registry.verification={ok:false,error:'REGISTRY_APPEND_FAILURE',detail:err instanceof Error?err.message:String(err)};throw err;}finally{if(fh)await fh.close();}registry.records.push(record);registry.seq=record.seq;registry.tailHash=record.recordHash;return {record,duplicate:false};
+  if(!registry?.healthy) throw new Error('Release Registry unhealthy: fail closed');
+  const existing=registry.records.find(r=>r.releaseId===manifest.releaseId);
+  if(existing) return {record:existing,duplicate:true};
+
+  const core=registryCore({
+    seq:registry.seq+1,
+    prevHash:registry.tailHash,
+    registeredAt,
+    manifest
+  });
+  const record={...core,recordHash:sha256(core)};
+
+  let fh;
+  try{
+    fh=await openFile(registry.filePath,'a',0o600);
+    await fh.write(canonicalJson(record)+'\n',null,'utf8');
+    await fh.sync();
+  }catch(err){
+    registry.healthy=false;
+    registry.verification={ok:false,error:'REGISTRY_APPEND_FAILURE',detail:err instanceof Error?err.message:String(err)};
+    throw err;
+  }finally{
+    if(fh) await fh.close();
+  }
+
+  registry.records.push(record);
+  registry.seq=record.seq;
+  registry.tailHash=record.recordHash;
+  return {record,duplicate:false};
 }
 
-export function releaseRegistrySummary(registry,currentManifest=null){const currentRecord=currentManifest?registry?.records?.find(r=>r.releaseId===currentManifest.releaseId)||null:null;return {healthy:registry?.healthy===true,seq:Number(registry?.seq||0),tailHash:String(registry?.tailHash||GENESIS),filePath:String(registry?.filePath||''),releases:Array.isArray(registry?.records)?registry.records.length:0,currentReleaseId:currentManifest?.releaseId||null,currentRegistered:Boolean(currentRecord),currentRegistrySeq:currentRecord?.seq??null,recoveredFromTruncatedTail:registry?.recoveredFromTruncatedTail===true,backupPath:registry?.backupPath??null};}
+export function releaseRegistrySummary(registry,currentManifest=null){
+  const currentRecord=currentManifest
+    ? registry?.records?.find(r=>r.releaseId===currentManifest.releaseId)||null
+    : null;
+  return {
+    healthy:registry?.healthy===true,
+    seq:Number(registry?.seq||0),
+    tailHash:String(registry?.tailHash||GENESIS),
+    filePath:String(registry?.filePath||''),
+    releases:Array.isArray(registry?.records)?registry.records.length:0,
+    currentReleaseId:currentManifest?.releaseId||null,
+    currentRegistered:Boolean(currentRecord),
+    currentRegistrySeq:currentRecord?.seq??null,
+    recoveredFromTruncatedTail:registry?.recoveredFromTruncatedTail===true,
+    backupPath:registry?.backupPath??null
+  };
+}
+
 export const RELEASE_REGISTRY_VERSION='RR_V1';
