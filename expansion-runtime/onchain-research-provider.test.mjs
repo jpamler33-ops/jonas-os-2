@@ -105,6 +105,8 @@ test('unmapped assets fail closed instead of inventing on-chain context',async()
   const p=createOnchainResearchProvider({fetchImpl:fetchMock,now:()=>2_000_000});
   const s=await p.fetchAssetSnapshot('DOGEUSDT',{cacheMs:0});
   assert.equal(s.ok,false);
-  assert.equal(s.reason,'CHAIN_RESEARCH_NOT_MAPPED');
+  assert.equal(s.applicable,false);
+  assert.equal(s.status,'NOT_APPLICABLE');
+  assert.equal(s.reason,'CHAIN_RESEARCH_NOT_APPLICABLE');
   assert.deepEqual(onchainSnapshotToExtraFeatures(s),[]);
 });
