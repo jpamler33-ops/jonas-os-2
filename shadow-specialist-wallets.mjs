@@ -84,9 +84,9 @@ export function createSpecialistWalletState(){
         objective:'COPY_PUBLIC_SUCCESSFUL_TRADER_MEMECOIN_POSITIONS'
       }),
       [WALLET_6_USER_99K_60S]:walletTemplate(WALLET_6_USER_99K_60S,{
-        label:'99k in 60s — User Strategy V1',
+        label:'99k in <2m — User Strategy V1',
         defaultMarginQuote:100,
-        objective:'SHADOW_TEST_USER_DISCOVERED_99K_MARKET_CAP_WITHIN_60_SECONDS'
+        objective:'SHADOW_TEST_USER_DISCOVERED_99K_MARKET_CAP_WITHIN_120_SECONDS'
       })
     },
     execution:'SHADOW_ONLY',
@@ -647,7 +647,7 @@ function user99k60sGreenPercent(row){
 
 export function evaluateUser99k60sEntry(row,{
   now=Date.now(),
-  maxAgeSeconds=60,
+  maxAgeSeconds=120,
   minMarketCapUsd=99_000,
   minGreenChangePct=null,
   requireExactGmgnGreen=false,
@@ -666,7 +666,7 @@ export function evaluateUser99k60sEntry(row,{
   if(requireTrending&&!trendVisible)blockers.push('NOT_IN_TREND_FEED');
   if(requireNewPair&&!newPairVisible)blockers.push('NOT_IN_NEW_PAIR_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
-  else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||60))blockers.push('OLDER_THAN_MAX_AGE');
+  else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');
   if(greenMode){
     if(requireExactGmgnGreen&&row?.gmgnExactTrend!==true)blockers.push('GMGN_EXACT_TREND_REQUIRED');
     if(greenPercent==null)blockers.push('GMGN_GREEN_PERCENT_UNKNOWN');
@@ -685,10 +685,10 @@ export function evaluateUser99k60sEntry(row,{
     match,
     action:match?'BUY_SHADOW':'IGNORE',
     rule:greenMode
-      ?(requireTrending?'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY')
+      ?(requireTrending?'GMGN_TRENDS_1M_AND_AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY')
       :(requireNewPair
-        ?'GMGN_TRENDING_NEW_PAIR_1M_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'
-        :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY')),
+        ?'GMGN_TRENDING_NEW_PAIR_1M_AND_AGE_LT_120S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY'
+        :(requireTrending?'TREND_VISIBLE_AND_AGE_LT_120S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY':'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_THEN_IMMEDIATE_ENTRY')),
     ageSeconds:ageSeconds==null?null:Number(ageSeconds.toFixed(3)),
     marketCapUsd,
     greenPercent,
@@ -700,7 +700,7 @@ export function evaluateUser99k60sEntry(row,{
     thresholdQualified,
     thresholdUsd:greenMode?null:Math.max(1,Number(minMarketCapUsd)||99_000),
     thresholdPct:greenMode?greenThreshold:null,
-    maxAgeSeconds:Math.max(1,Number(maxAgeSeconds)||60),
+    maxAgeSeconds:Math.max(1,Number(maxAgeSeconds)||120),
     observedTimeToGreen99kSeconds:greenMode&&match&&ageSeconds!=null?Number(ageSeconds.toFixed(3)):null,
     observedTimeTo99kSeconds:match&&ageSeconds!=null?Number(ageSeconds.toFixed(3)):null,
     blockers,
@@ -908,7 +908,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   now=Date.now(),
   marginQuote=100,
   feeBps=30,
-  maxAgeSeconds=60,
+  maxAgeSeconds=120,
   minMarketCapUsd=99_000,
   minGreenChangePct=null,
   requireExactGmgnGreen=false,
@@ -1182,8 +1182,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       entryRule:signal.thresholdMode==='GMGN_GREEN_PERCENT'
         ?signal.rule
         :(requireNewPair
-          ?'GMGN_TRENDING_NEW_PAIR_1M_AGE_LTE_60S_MCAP_GTE_99K_IMMEDIATE'
-          :(requireTrending?'TREND_VISIBLE_AND_AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE')),
+          ?'GMGN_TRENDING_NEW_PAIR_1M_AGE_LT_120S_MCAP_GTE_99K_IMMEDIATE'
+          :(requireTrending?'TREND_VISIBLE_AND_AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE')),
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
       targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',

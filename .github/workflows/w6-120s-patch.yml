@@ -1,0 +1,50 @@
+name: W6 120s one-shot patch
+on:
+  push:
+    branches: [biggj/w6-120s-entry]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[w6-120s-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: biggj/w6-120s-entry
+          fetch-depth: 0
+      - name: Apply bounded W6 age-window patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('shadow-specialist-wallets.mjs')
+          s=p.read_text()
+          replacements={
+            "label:'99k in 60s — User Strategy V1'":"label:'99k in <2m — User Strategy V1'",
+            "objective:'SHADOW_TEST_USER_DISCOVERED_99K_MARKET_CAP_WITHIN_60_SECONDS'":"objective:'SHADOW_TEST_USER_DISCOVERED_99K_MARKET_CAP_WITHIN_120_SECONDS'",
+            "maxAgeSeconds=60,":"maxAgeSeconds=120,",
+            "Number(maxAgeSeconds)||60":"Number(maxAgeSeconds)||120",
+            "AGE_LTE_60S":"AGE_LT_120S"
+          }
+          expected={
+            "label:'99k in 60s — User Strategy V1'":1,
+            "objective:'SHADOW_TEST_USER_DISCOVERED_99K_MARKET_CAP_WITHIN_60_SECONDS'":1,
+            "maxAgeSeconds=60,":2,
+            "Number(maxAgeSeconds)||60":2,
+          }
+          for old,count in expected.items():
+            actual=s.count(old)
+            assert actual==count, f'{old}: expected {count}, got {actual}'
+          for old,new in replacements.items():
+            s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- shadow-specialist-wallets.mjs
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add shadow-specialist-wallets.mjs
+          git commit -m 'fix(w6): use strict 120s entry window [w6-120s-applied]'
+          git push origin HEAD:biggj/w6-120s-entry
