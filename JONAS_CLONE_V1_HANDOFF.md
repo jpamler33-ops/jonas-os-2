@@ -1,0 +1,1 @@
+Next engineering action after PR gates: locate the existing W6 candidate scheduler call site, invoke the clone adapter there as P0, map eligible intents into the existing persistent W6 shadow lifecycle, extend marking persistence with the telemetry contract, then runtime-verify actual autonomous observations. Do not bypass institutional gates.
