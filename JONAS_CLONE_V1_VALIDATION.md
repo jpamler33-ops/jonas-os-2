@@ -1,0 +1,1 @@
+Validation reports both raw paper results and execution-adjusted results. Minimum cohort metrics: trade count, win rate, median net PnL, total net PnL, MFE, MAE, holding-time distribution, liquidity decay, exit-liquidity failures, and outcomes for 3/4/5/10-minute hypothetical exits. Manual trades are ground-truth comparison data, not training labels to force-match profits.
