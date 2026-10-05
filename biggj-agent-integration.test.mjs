@@ -245,3 +245,8 @@ test('bot invokes the adapter only for successful silent autolearn and exposes r
   assert.match(source,/if\(issuanceSource==='TCX_AUTOLEARN_V1'\)afterBiggjAgentAutolearn\(silentResult,learnedChallengerRun\?\.lab\|\|null\);\s*return silentResult;/);
   assert.equal((source.match(/biggjAgentRuntime:biggjAgentRuntimeSnapshot\(\)/g)||[]).length,3);
 });
+
+test('ABSTAIN remains a valid forecast outcome instead of poisoning AutoLearn SLO success',()=>{
+  assert.match(source,/name:silent\?'institutional_forecast_autolearn':'institutional_forecast',[\s\S]{0,220}ok:auditHealthyAfter,/);
+  assert.doesNotMatch(source,/ok:auditHealthyAfter&&issuance\.gate!=='ABSTAIN'/);
+});
