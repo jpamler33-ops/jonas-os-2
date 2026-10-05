@@ -17,6 +17,9 @@ function harness({enabled='1',hookFactory,overrides={}}={}){
   let now=Date.now();
   let pressured=false;
   let summaryCalls=0;
+  let timerSequence=0;
+  let peakTimers=0;
+  const timers=new Map();
   const errors=[];
   const operations=[];
   const summary=state=>{summaryCalls++;return state;};
@@ -25,6 +28,14 @@ function harness({enabled='1',hookFactory,overrides={}}={}){
     Error,
     process:{env:{TCX_AGENT_RUNTIME_ENABLED:enabled}},
     Date:{now:()=>now},
+    running:true,
+    setTimeout:(fn,delay)=>{
+      const timer={id:++timerSequence,unref(){}};
+      timers.set(timer,{fn,at:now+delay});
+      peakTimers=Math.max(peakTimers,timers.size);
+      return timer;
+    },
+    clearTimeout:timer=>timers.delete(timer),
     createBiggjAgentAutolearnHook:hookFactory||(()=>createBiggjAgentAutolearnHook({coordinator:createBiggjAgentCoordinator({minCycleMs:0})})),
     servingMemoryPressure:()=>({pressured}),
     shadowCompetitionState:input,shadowCompetitionSummary:summary,
@@ -40,8 +51,19 @@ function harness({enabled='1',hookFactory,overrides={}}={}){
     console:{error:()=>{}},
     ...overrides
   };
-  const api=vm.runInNewContext(adapter+'\n({run:afterBiggjAgentAutolearn,snapshot:biggjAgentRuntimeSnapshot,hook:biggjAgentAutolearnHook})',context);
-  return {api,input,errors,operations,advance:ms=>{now+=ms;},pressure:value=>{pressured=value;},summaryCalls:()=>summaryCalls};
+  const api=vm.runInNewContext(adapter+'\n({run:afterBiggjAgentAutolearn,snapshot:biggjAgentRuntimeSnapshot,hook:biggjAgentAutolearnHook,pending:()=>biggjAgentPendingRun,stop:()=>{running=false;clearBiggjAgentPendingRun();}})',context);
+  function advance(ms){
+    const target=now+ms;
+    for(;;){
+      const due=[...timers].filter(([,x])=>x.at<=target).sort((a,b)=>a[1].at-b[1].at)[0];
+      if(!due)break;
+      now=due[1].at;
+      timers.delete(due[0]);
+      due[1].fn();
+    }
+    now=target;
+  }
+  return {api,input,errors,operations,advance,pressure:value=>{pressured=value;},summaryCalls:()=>summaryCalls,timerCount:()=>timers.size,peakTimers:()=>peakTimers};
 }
 
 test('successful autolearn ingests existing evidence and coordinates six research roles without mutating inputs',()=>{
@@ -97,9 +119,93 @@ test('serving memory pressure defers only agents and permits retry on recovery',
   assert.equal(h.summaryCalls(),0);
   assert.equal(h.api.snapshot().invocations,0);
   assert.equal(h.api.snapshot().nextEligibleAt,null);
+  assert.equal(h.api.snapshot().pending,true);
+  assert.equal(h.timerCount(),1);
   h.pressure(false);
-  h.api.run({ok:true});
+  h.advance(7500);
   assert.equal(h.api.snapshot().invocations,1);
+  assert.equal(h.api.snapshot().coordinator.runtime.cycles,1);
+  assert.equal(h.api.snapshot().pending,false);
+  assert.equal(h.timerCount(),0);
+  h.advance(120_000);
+  assert.equal(h.api.snapshot().invocations,1);
+});
+
+test('1000 pressured calls retain only one pending observation and one retry timer',()=>{
+  const h=harness();
+  h.pressure(true);
+  for(let i=0;i<1000;i++)h.api.run({ok:true,symbol:'COIN'+i,issuance:{largeForecast:Array(100).fill('unused')}});
+  assert.equal(h.api.snapshot().invocations,0);
+  assert.equal(h.api.snapshot().pendingSymbol,'COIN999');
+  assert.equal(h.timerCount(),1);
+  assert.equal(h.peakTimers(),1);
+  assert.equal(h.api.pending().silentResult.issuance,undefined);
+  assert.equal(h.summaryCalls(),0);
+});
+
+test('newest successful autolearn replaces pending input before exactly one deferred cycle',()=>{
+  const h=harness();
+  let consumed=null;
+  const realRun=h.api.hook.afterAutolearn;
+  h.api.hook.afterAutolearn=input=>{consumed=input;return realRun(input);};
+  h.pressure(true);
+  h.api.run({ok:true,symbol:'BTCUSDT',dataQuality:.5});
+  h.api.run({ok:false,symbol:'IGNORED'});
+  h.api.run({ok:true,symbol:'ETHUSDT',dataQuality:.9});
+  h.pressure(false);
+  h.advance(7500);
+  assert.equal(consumed.silentResult.symbol,'ETHUSDT');
+  assert.equal(consumed.silentResult.dataQuality,.9);
+  assert.equal(h.api.snapshot().invocations,1);
+  assert.equal(h.api.snapshot().pending,false);
+});
+
+test('continued pressure backs off with bounded delay and never grows the timer queue',()=>{
+  const h=harness();
+  h.pressure(true);
+  h.api.run({ok:true,symbol:'BTCUSDT'});
+  h.advance(7500);
+  assert.equal(h.api.snapshot().retryAttempts,2);
+  h.advance(15_000);
+  assert.equal(h.api.snapshot().retryAttempts,3);
+  h.advance(300_000);
+  assert.equal(h.api.snapshot().retryAttempts,3);
+  assert.equal(h.timerCount(),1);
+  assert.equal(h.peakTimers(),1);
+  assert.equal(h.api.snapshot().invocations,0);
+  h.pressure(false);
+  h.advance(30_000);
+  assert.equal(h.api.snapshot().invocations,1);
+  assert.equal(h.timerCount(),0);
+});
+
+test('deferred cycle preserves PRIMARY inputs, SHADOW_ONLY and no live authority',()=>{
+  const h=harness();
+  const forecast=Object.freeze({ok:true,symbol:'BTCUSDT',issuance:Object.freeze({primaryPolicy:'UNCHANGED',canExecuteLive:false})});
+  const before=JSON.stringify(forecast);
+  h.pressure(true);
+  h.api.run(forecast);
+  h.pressure(false);
+  h.advance(7500);
+  const s=h.api.snapshot();
+  assert.equal(JSON.stringify(forecast),before);
+  assert.equal(s.execution,'SHADOW_ONLY');
+  assert.equal(s.canExecute,false);
+  assert.equal(s.canExecuteLive,false);
+  assert.equal(s.automaticPrimaryMutation,false);
+  assert.equal(s.coordinator.runtime.lastCycle.automaticPrimaryMutation,false);
+});
+
+test('shutdown clears the pending run and cancels its timer',()=>{
+  const h=harness();
+  h.pressure(true);
+  h.api.run({ok:true});
+  h.api.stop();
+  h.pressure(false);
+  h.advance(60_000);
+  assert.equal(h.api.snapshot().invocations,0);
+  assert.equal(h.api.snapshot().pending,false);
+  assert.equal(h.timerCount(),0);
 });
 
 test('summary errors are contained and exposed without changing the forecast result',()=>{

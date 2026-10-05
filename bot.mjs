@@ -1585,15 +1585,77 @@ const biggjAgentRuntimeEnabled=String(process.env.TCX_AGENT_RUNTIME_ENABLED||'1'
 const biggjAgentAutolearnHook=createBiggjAgentAutolearnHook();
 let biggjAgentNextCycleAt=0;
 let biggjAgentLastError=null;
+let biggjAgentPendingRun=null;
+let biggjAgentRetryTimer=null;
+let biggjAgentRetryAt=null;
+let biggjAgentRetryAttempts=0;
+
+function clearBiggjAgentPendingRun(){
+  if(biggjAgentRetryTimer!==null)clearTimeout(biggjAgentRetryTimer);
+  biggjAgentRetryTimer=null;
+  biggjAgentRetryAt=null;
+  biggjAgentPendingRun=null;
+  biggjAgentRetryAttempts=0;
+}
+
+function scheduleBiggjAgentRetry(delayMs){
+  if(biggjAgentRetryTimer!==null)return;
+  biggjAgentRetryAt=Date.now()+delayMs;
+  biggjAgentRetryTimer=setTimeout(()=>{
+    biggjAgentRetryTimer=null;
+    biggjAgentRetryAt=null;
+    tryBiggjAgentAutolearn();
+  },delayMs);
+  biggjAgentRetryTimer.unref?.();
+}
 
 function afterBiggjAgentAutolearn(silentResult,learnedChallenger=null){
-  if(!biggjAgentRuntimeEnabled||silentResult?.ok!==true)return;
+  if(!running||!biggjAgentRuntimeEnabled||silentResult?.ok!==true)return;
   const now=Date.now();
   // Check cadence before constructing summaries or calling the hook. Repeated
   // throttled hook snapshots otherwise retain their previous results recursively.
   if(now<biggjAgentNextCycleAt)return;
+  // Retain only the bounded observation consumed by the prepared hook, never
+  // the issuance, forecast, action results or the full mutable engine states.
   try{
-    if(servingMemoryPressure().pressured)return;
+    biggjAgentPendingRun={
+      queuedAt:now,
+      silentResult:{
+        ok:true,symbol:silentResult.symbol||null,
+        dataQuality:silentResult.dataQuality??null,
+        researchDependencyGate:silentResult.researchDependencyGate||null,
+        researchDependencyCoverage:silentResult.researchDependencyCoverage??null,
+        researchGovernanceIssueCount:silentResult.researchGovernanceIssueCount??null,
+        autoShadowTradePlaced:silentResult.autoShadowTradePlaced===true,
+        mandatoryDiscoveryPlaced:silentResult.mandatoryDiscoveryPlaced===true,
+        learnedChallengerPlaced:Number(silentResult.learnedChallengerPlaced||0),
+        strategyLeaguePlaced:Number(silentResult.strategyLeaguePlaced||0)
+      },
+      learnedChallenger:learnedChallenger?JSON.parse(JSON.stringify(learnedChallenger)):null
+    };
+    biggjAgentRetryAttempts=0;
+    tryBiggjAgentAutolearn();
+  }catch(err){
+    clearBiggjAgentPendingRun();
+    biggjAgentLastError=err instanceof Error?err.message:String(err);
+    recordError(observability,{scope:'biggj_agent_runtime',message:biggjAgentLastError});
+    console.error('[BIGGJ_AGENT_RUNTIME_ERROR]',biggjAgentLastError);
+  }
+}
+
+function tryBiggjAgentAutolearn(){
+  if(!running){clearBiggjAgentPendingRun();return;}
+  if(!biggjAgentPendingRun)return;
+  const now=Date.now();
+  try{
+    if(now<biggjAgentNextCycleAt){scheduleBiggjAgentRetry(biggjAgentNextCycleAt-now);return;}
+    if(servingMemoryPressure().pressured){
+      biggjAgentRetryAttempts=Math.min(3,biggjAgentRetryAttempts+1);
+      scheduleBiggjAgentRetry(Math.min(30_000,7500*2**(biggjAgentRetryAttempts-1)));
+      return;
+    }
+    const {silentResult,learnedChallenger}=biggjAgentPendingRun;
+    clearBiggjAgentPendingRun();
     biggjAgentNextCycleAt=now+60_000;
     const result=biggjAgentAutolearnHook.afterAutolearn({
       silentResult,
@@ -1618,6 +1680,7 @@ function afterBiggjAgentAutolearn(silentResult,learnedChallenger=null){
       latencyMs:Date.now()-now,error:biggjAgentLastError
     });
   }catch(err){
+    clearBiggjAgentPendingRun();
     biggjAgentLastError=err instanceof Error?err.message:String(err);
     recordError(observability,{scope:'biggj_agent_runtime',message:biggjAgentLastError});
     console.error('[BIGGJ_AGENT_RUNTIME_ERROR]',biggjAgentLastError);
@@ -1631,6 +1694,11 @@ function biggjAgentRuntimeSnapshot(){
     healthy:biggjAgentLastError===null,
     lastError:biggjAgentLastError,
     nextEligibleAt:biggjAgentNextCycleAt||null,
+    pending:biggjAgentPendingRun!==null,
+    pendingSymbol:biggjAgentPendingRun?.silentResult?.symbol||null,
+    pendingSince:biggjAgentPendingRun?.queuedAt||null,
+    retryAt:biggjAgentRetryAt,
+    retryAttempts:biggjAgentRetryAttempts,
     canExecute:false
   };
 }
@@ -13350,6 +13418,7 @@ async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   running = false;
+  clearBiggjAgentPendingRun();
   console.log('shutdown', signal);
   await persistState(`shutdown:${signal}`);
   await persistEpisodeMemory(`shutdown:${signal}`);
