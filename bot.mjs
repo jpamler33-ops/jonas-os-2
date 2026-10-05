@@ -12,7 +12,7 @@ import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, obs
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
 import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TEMPLE_VERSION } from './expansion-runtime/biggj-temporal-temple.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
-import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
+import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, shouldPersistUser99k60sUpdate, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
 import { applyMemecoinEntrySignals, MEMECOIN_SIGNAL_CONTROLLER_VERSION } from './memecoin-signal-controller.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -5455,10 +5455,7 @@ async function refreshW6UltraEarly(reason='periodic'){
     const solPriceUsd=await currentW6SolPriceUsd();
     const update=applyJonasCloneSnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
     specialistWalletState=update.state;
-    if(
-      update.results.opened||update.results.closed||update.results.holdScenarioCloses||
-      update.results.scenarioTargetHits||update.results.cloneCheckpoints
-    )await persistSpecialistWallets('w6-ultra-early:'+reason);
+    if(shouldPersistUser99k60sUpdate(update.results))await persistSpecialistWallets('w6-ultra-early:'+reason);
     const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
     const activeTrades=(Array.isArray(wallet?.active)?wallet.active:[]).slice(0,5).map(p=>{
       const now=Date.now();
@@ -5489,6 +5486,7 @@ async function refreshW6UltraEarly(reason='periodic'){
         unrealizedNetPnlQuote:p?.unrealizedNetPnlQuote??null,
         protectionRemainingSeconds:Number(protectionRemainingSeconds.toFixed(1)),
         holdLabSummary:p?.holdLabSummary||null,
+        earlyMomentumChallengerSummary:p?.earlyMomentumChallengerSummary||null,
         sizePnl
       };
     });
@@ -5544,6 +5542,8 @@ async function refreshW6UltraEarly(reason='periodic'){
       pollMs:w6UltraEarlyRefreshMs,
       cloneStrategy:update.results.strategyVersion,
       cloneCheckpoints:update.results.cloneCheckpoints||0,
+      earlyMomentumScenarioCloses:update.results.earlyMomentumScenarioCloses||0,
+      earlyMomentumEntryAgeCloses:update.results.earlyMomentumEntryAgeCloses||0,
       funnel:update.results.entryFunnel||{},
       blockers:update.results.entryBlockers||{},
       opened:update.results.opened||0,
