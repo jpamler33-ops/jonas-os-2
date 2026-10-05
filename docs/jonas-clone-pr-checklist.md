@@ -1,0 +1,1 @@
+PR checklist: inspect diff size; run clone tests; run institutional CI; verify no live flags; confirm W6 compatibility; do not merge if runtime wiring assumptions are unverified.
