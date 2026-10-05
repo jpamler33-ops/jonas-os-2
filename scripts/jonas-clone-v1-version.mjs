@@ -1,0 +1,2 @@
+import {JONAS_CLONE_V1_VERSION,JONAS_CLONE_PRIORITY} from '../jonas-clone-v1.mjs';
+console.log(`${JONAS_CLONE_V1_VERSION}:${JONAS_CLONE_PRIORITY}:SHADOW_ONLY`);
