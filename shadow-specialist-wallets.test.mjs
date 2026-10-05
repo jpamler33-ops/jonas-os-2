@@ -928,6 +928,7 @@ test('wallet 6 runs the early-momentum size and hold challenger without changing
     {sourceReady:true,rows:[{...baseRow,priceUsd:1.05,liquidityUsd:19_000}]},
     {now:now+40_000,solPriceUsd:150,requireTrending:true}
   );
+  assert.equal(x.results.earlyMomentumScenarioCloses,5);
   assert.equal(x.results.earlyMomentumEntryAgeCloses,0);
 
   x=applyUser99k60sStrategySnapshot(
@@ -936,8 +937,8 @@ test('wallet 6 runs the early-momentum size and hold challenger without changing
     {now:now+240_000,solPriceUsd:150,requireTrending:true}
   );
   p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
-  assert.equal(x.results.earlyMomentumScenarioCloses,25);
-  assert.ok(x.results.earlyMomentumEntryAgeCloses>=1);
+  assert.equal(x.results.earlyMomentumScenarioCloses,20);
+  assert.ok(x.results.earlyMomentumEntryAgeCloses>=2);
   assert.equal(p.earlyMomentumChallengerSummary.closed,25);
   assert.ok(p.earlyMomentumChallengerSummary.bestCapitalEfficiency);
   assert.ok(p.earlyMomentumChallengerSummary.bestUser4SolPer10kHypothesis);
