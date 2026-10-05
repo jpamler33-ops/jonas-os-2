@@ -1,0 +1,3 @@
+# PR summary
+
+Adds the P0 JONAS_CLONE_V1 shadow research contract and W6 adapter. It codifies the user's observed ultra-early candidate filter, liquidity-proportional research sizing hypothesis, observation and exit-comparison windows, execution-realism telemetry, immutable baseline validation, and explicit live-execution denial. Production scheduler wiring remains an acceptance requirement and must be verified before claiming autonomous operation.
