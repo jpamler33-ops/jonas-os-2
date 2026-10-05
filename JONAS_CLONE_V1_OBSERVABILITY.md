@@ -1,0 +1,1 @@
+Runtime observability must distinguish discovered candidates, eligible candidates, shadow intents emitted, positions observed, checkpoints recorded, comparison exits recorded, liquidity-invalidated exits and closed cohorts. A zero-trade period must be distinguishable from a broken scheduler.
