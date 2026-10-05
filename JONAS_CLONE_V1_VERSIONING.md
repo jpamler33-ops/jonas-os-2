@@ -1,0 +1,1 @@
+JONAS_CLONE_V1 remains the frozen control strategy. Evidence-backed modifications become V1 variants or V2. This prevents hindsight from rewriting the baseline and allows fair cohort comparisons.
