@@ -1,0 +1,1 @@
+Current branch status: P0 clone contract and adapter implemented; safety and research contracts covered by tests; autonomous production scheduler wiring remains pending and is explicitly required before calling the clone operational.
