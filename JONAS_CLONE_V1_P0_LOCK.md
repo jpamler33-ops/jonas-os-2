@@ -1,0 +1,1 @@
+JONAS_CLONE_V1 is the highest-priority trading research path until autonomous shadow data is sufficient for validation. Lower-priority experiments may continue only without starving or mutating this baseline.
