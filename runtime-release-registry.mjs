@@ -85,6 +85,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'biggj-public-news-provider.mjs',
   'biggj-public-trader-watch.mjs',
   'shadow-specialist-wallets.mjs',
+  'early-momentum-challenger-v1.mjs',
   'expansion-runtime/memecoin-early-radar.mjs',
   'expansion-runtime/memecoin-early-radar-legacy.mjs',
   'expansion-runtime/memecoin-security-provider.mjs',
