@@ -1,0 +1,1 @@
+Test boundaries: eligibility at 60 seconds and 99k market cap, trend-feed requirement, reference sizing points, extreme sizing cap, P0 priority override, W6 mapping, 3/4/5/10-minute comparison contract, telemetry keys, immutable baseline, and live-execution denial. Existing repository institutional tests remain mandatory.
