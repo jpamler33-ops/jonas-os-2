@@ -107,3 +107,40 @@ test('summary compares capital efficiency, absolute pnl and user sizing hypothes
   assert.equal(summary.execution,'SHADOW_ONLY');
   assert.equal(summary.automaticPrimaryMutation,false);
 });
+
+
+test('entry-age arms capture delayed entries point-in-time and compare fixed hold windows',()=>{
+  let lab=createEarlyMomentumChallengerLab({
+    entryAgeSeconds:30,
+    liquidityUsd:20_000,
+    solPriceUsd:150,
+    feeBps:30
+  });
+  lab=updateEarlyMomentumChallengerLab(lab,{
+    now:4_000_000,
+    holdSeconds:40,
+    returnPct:.05,
+    currentLiquidityUsd:19_000,
+    solPriceUsd:150,
+    securityGate:'PASS'
+  });
+  const delayed60=lab.entryAgeArms.find(x=>x.targetAgeSeconds===60&&x.evaluationHoldSeconds===180);
+  assert.equal(delayed60.status,'ENTERED');
+  assert.equal(delayed60.entryObservedAgeSeconds,70);
+
+  lab=updateEarlyMomentumChallengerLab(lab,{
+    now:4_180_000,
+    holdSeconds:220,
+    returnPct:.20,
+    currentLiquidityUsd:17_000,
+    solPriceUsd:150,
+    securityGate:'PASS'
+  });
+  const closed60=lab.entryAgeArms.find(x=>x.targetAgeSeconds===60&&x.evaluationHoldSeconds===180);
+  assert.equal(closed60.status,'CLOSED');
+  assert.ok(closed60.closeReturnPct>0);
+  assert.ok(closed60.netReturnAfterFeesPct<closed60.closeReturnPct);
+  const summary=summarizeEarlyMomentumChallengerLab(lab);
+  assert.ok(summary.entryAgeArmsClosed>=2);
+  assert.ok(summary.bestEntryAgeArm);
+});
