@@ -218,10 +218,12 @@ export function createOnchainResearchProvider({
         symbol:s,
         availableAt:t0,
         ok:false,
+        applicable:false,
+        status:'NOT_APPLICABLE',
         chain:null,
         metrics:null,
         source:null,
-        reason:'CHAIN_RESEARCH_NOT_MAPPED',
+        reason:'CHAIN_RESEARCH_NOT_APPLICABLE',
         restrictions:Object.freeze({researchOnly:true,mayExecute:false,mayMutateProductionForecast:false})
       });
       cache.set(s,{cachedAt:t0,value});
