@@ -1,9 +1,7 @@
 import { Worker } from 'node:worker_threads';
 
 export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1';
-
 export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V3';
-
 export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V2';
 
 export function evaluateAutoLearnMemoryAdmission({phase='ISSUE',heapUsedMb=0,rssMb=0,externalMb=0,issueHeapMb=320,issueRssMb=720,issueExternalMb=64,resumeHeapMb=300,resumeRssMb=620,resumeExternalMb=48}={}){
@@ -31,7 +29,7 @@ export function evaluateShadowWorkerAdmission({mode='AUTO',heapUsedMb=0,rssMb=0,
 
 export function deriveShadowWorkerReplayPlan({mode='AUTO',heapUsedMb=0,rssMb=0,externalMb=0,configuredHistoryRows=1200,effectiveHistoryRows=1200,minHistoryRows=500,baseAutoHeapMb=260,baseAutoRssMb=620,autoExternalMb=64,hardExternalMb=160,maxAdaptiveAutoHeapMb=360,maxAdaptiveAutoRssMb=720,maxAdaptiveHardHeapMb=370,hardRssMb=900}={}){
   const configured=Math.max(1,Math.floor(Number(configuredHistoryRows)||1200));
-  const minimum=Math.max(40,Math.min(configured,Math.floor(Number(minHistoryRows)||500));
+  const minimum=Math.max(40,Math.min(configured,Math.floor(Number(minHistoryRows)||500)));
   const initial=Math.max(minimum,Math.min(configured,Math.floor(Number(effectiveHistoryRows)||configured)));
   const candidates=[initial];
   if(String(mode||'AUTO').trim().toUpperCase()==='AUTO'){for(const ratio of [.80,.65,.50]) candidates.push(Math.max(minimum,Math.floor(initial*ratio)));candidates.push(minimum);}
