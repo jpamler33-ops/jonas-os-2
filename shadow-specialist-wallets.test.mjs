@@ -901,3 +901,37 @@ test('W6 Trends 1m uses the green GMGN percentage threshold, not market cap',()=
   assert.equal(fallback.results.entryBlockers.GMGN_EXACT_TREND_REQUIRED,1);
 });
 
+
+
+test('wallet 6 runs the early-momentum size and hold challenger without changing execution policy',()=>{
+  const now=5_000_000;
+  const baseRow={
+    chainId:'solana',tokenAddress:'EARLYLAB',symbol:'EARLYLAB',
+    priceUsd:1,liquidityUsd:20_000,marketCap:120_000,pairCreatedAt:now-30_000,
+    signalTrending:true,buysM5:20,sellsM5:8,priceChangeM5:35,
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[]}
+  };
+  let x=applyUser99k60sStrategySnapshot(
+    createSpecialistWalletState(),
+    {sourceReady:true,rows:[baseRow]},
+    {now,solPriceUsd:150,requireTrending:true}
+  );
+  assert.equal(x.results.opened,1);
+  let p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(p.earlyMomentumChallengerLab.execution,'SHADOW_ONLY');
+  assert.equal(p.earlyMomentumChallengerLab.canExecuteLive,false);
+  assert.equal(p.earlyMomentumChallengerLab.scenarios.length,35);
+  assert.equal(p.earlyMomentumChallengerSummary.automaticPrimaryMutation,false);
+
+  x=applyUser99k60sStrategySnapshot(
+    x.state,
+    {sourceReady:true,rows:[{...baseRow,priceUsd:1.2,liquidityUsd:18_000}]},
+    {now:now+240_000,solPriceUsd:150,requireTrending:true}
+  );
+  p=x.state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  assert.equal(x.results.earlyMomentumScenarioCloses,25);
+  assert.equal(p.earlyMomentumChallengerSummary.closed,25);
+  assert.ok(p.earlyMomentumChallengerSummary.bestCapitalEfficiency);
+  assert.ok(p.earlyMomentumChallengerSummary.bestUser4SolPer10kHypothesis);
+  assert.equal(p.canExecuteLive,false);
+});
