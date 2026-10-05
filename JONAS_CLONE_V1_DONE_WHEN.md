@@ -1,0 +1,3 @@
+# Done when
+
+The clone is not considered done until runtime verification proves: the production scheduler evaluates eligible candidates through the clone adapter; W6 opens autonomous shadow observations; checkpoint and exit-comparison telemetry persists; clone metrics can be inspected; safety remains SHADOW_ONLY and canExecuteLive=false; and Railway is healthy. Code contracts alone are not sufficient.
