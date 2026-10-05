@@ -13,7 +13,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Apply strict W6 120s boundary and migrate tests
+      - name: Migrate W6 tests to strict 120s contract
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -22,8 +22,10 @@ jobs:
           s=code.read_text()
           old="else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');"
           new="else if(ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');"
-          assert s.count(old)==1, f'production boundary expected once, got {s.count(old)}'
-          code.write_text(s.replace(old,new))
+          if old in s:
+              s=s.replace(old,new,1)
+              code.write_text(s)
+          assert new in code.read_text(), 'strict <120s production boundary missing'
 
           p=Path('shadow-specialist-wallets.test.mjs')
           s=p.read_text()
@@ -35,12 +37,16 @@ jobs:
             "'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'":"'GMGN_TRENDS_1M_AND_AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'"
           }
           for old,new in replacements.items():
-            assert s.count(old)==1, f'{old}: expected once, got {s.count(old)}'
-            s=s.replace(old,new)
+              if old in s:
+                  s=s.replace(old,new,1)
+              assert new in s, f'migrated expectation missing: {new}'
+
           anchor="  const old=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-120_000\n  },{now});"
-          near="  const nearBoundary=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-119_999\n  },{now});\n  assert.equal(nearBoundary.match,true);\n  assert.equal(nearBoundary.action,'BUY_SHADOW');\n\n"
-          assert s.count(anchor)==1, f'boundary anchor expected once, got {s.count(anchor)}'
-          s=s.replace(anchor,near+anchor)
+          marker="  const nearBoundary=evaluateUser99k60sEntry({"
+          if marker not in s:
+              near="  const nearBoundary=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-119_999\n  },{now});\n  assert.equal(nearBoundary.match,true);\n  assert.equal(nearBoundary.action,'BUY_SHADOW');\n\n"
+              assert anchor in s, 'boundary anchor missing'
+              s=s.replace(anchor,near+anchor,1)
           p.write_text(s)
           PY
           git diff --check
@@ -50,5 +56,9 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add shadow-specialist-wallets.mjs shadow-specialist-wallets.test.mjs
+          if git diff --cached --quiet; then
+            echo 'No migration changes required.'
+            exit 0
+          fi
           git commit -m 'fix(w6): strict <120s entry with migrated tests [w6-120s-tests-applied]'
           git push origin HEAD:main
