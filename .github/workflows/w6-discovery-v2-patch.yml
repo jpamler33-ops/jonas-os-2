@@ -1,0 +1,105 @@
+name: W6 Discovery V2 Patch
+on:
+  push:
+    branches: [w6-discovery-v2]
+    paths: ['.github/workflows/w6-discovery-v2-patch.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: w6-discovery-v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch free discovery composite and regression test
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('expansion-runtime/memecoin-early-radar.mjs')
+          s=p.read_text()
+          old="""  async function freeTrendingCompositeSolana({force=false}={}){
+    const settled=await Promise.allSettled([
+      geckoTrendingPoolsUltraSolana({force}),
+      dexTopBoostsUltraSolana({force})
+    ]);
+    const sourceErrors=[];
+    const sources=[];
+    if(settled[0].status==='fulfilled')sources.push(['GECKOTERMINAL_TRENDING',settled[0].value]);
+    else sourceErrors.push('gecko:solana:trending:'+(settled[0].reason instanceof Error?settled[0].reason.message:String(settled[0].reason)));
+    if(settled[1].status==='fulfilled')sources.push(['DEXSCREENER_TOP_BOOSTS',settled[1].value]);
+    else sourceErrors.push('dex:solana:top-boosts:'+(settled[1].reason instanceof Error?settled[1].reason.message:String(settled[1].reason)));
+"""
+          new="""  async function freeTrendingCompositeSolana({force=false}={}){
+    const settled=await Promise.allSettled([
+      geckoNewPairsUltraSolana({force}),
+      geckoTrendingPoolsUltraSolana({force}),
+      dexTopBoostsUltraSolana({force})
+    ]);
+    const sourceErrors=[];
+    const sources=[];
+    if(settled[0].status==='fulfilled')sources.push(['GECKOTERMINAL_NEW_PAIRS',settled[0].value]);
+    else sourceErrors.push('gecko:solana:new-pairs:'+(settled[0].reason instanceof Error?settled[0].reason.message:String(settled[0].reason)));
+    if(settled[1].status==='fulfilled')sources.push(['GECKOTERMINAL_TRENDING',settled[1].value]);
+    else sourceErrors.push('gecko:solana:trending:'+(settled[1].reason instanceof Error?settled[1].reason.message:String(settled[1].reason)));
+    if(settled[2].status==='fulfilled')sources.push(['DEXSCREENER_TOP_BOOSTS',settled[2].value]);
+    else sourceErrors.push('dex:solana:top-boosts:'+(settled[2].reason instanceof Error?settled[2].reason.message:String(settled[2].reason)));
+"""
+          if old not in s:
+            raise SystemExit('target composite block not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          t=Path('expansion-runtime/memecoin-early-radar.test.mjs')
+          x=t.read_text()
+          marker="test('W6 free trends composite can use DexScreener as enrichment when GMGN is unavailable',async()=>{"
+          if marker not in x:
+            raise SystemExit('test marker not found')
+          test="""test('W6 free composite discovers fresh GeckoTerminal new pairs before trend or boost signals',async()=>{
+  const now=2_145_000_000_000;
+  const json=data=>({ok:true,status:200,json:async()=>data});
+  const calls=[];
+  const fetchImpl=async url=>{
+    calls.push(String(url));
+    const u=new URL(url);
+    if(u.hostname==='api.geckoterminal.com'&&u.pathname==='/api/v2/networks/solana/new_pools')return json({
+      data:[{id:'solana_NEWPAIR',type:'pool',attributes:{address:'NEWPAIR',name:'Fresh Meme / SOL',pool_created_at:new Date(now-30_000).toISOString(),base_token_price_usd:'0.001',reserve_in_usd:'45000',volume_usd:{m5:'7000',h1:'7000',h24:'7000'},transactions:{m5:{buys:22,sells:5},h1:{buys:22,sells:5}},price_change_percentage:{m5:'18',h1:'18'},fdv_usd:'130000',market_cap_usd:'125000'},relationships:{base_token:{data:{id:'solana_FRESHMINT'}},quote_token:{data:{id:'solana_SOL'}}}}],
+      included:[{id:'solana_FRESHMINT',type:'token',attributes:{address:'FRESHMINT',symbol:'FRESH',name:'Fresh Meme'}},{id:'solana_SOL',type:'token',attributes:{address:'SOL',symbol:'SOL',name:'Solana'}}]
+    });
+    if(u.hostname==='api.geckoterminal.com'&&u.pathname==='/api/v2/networks/solana/trending_pools')return json({data:[],included:[]});
+    if(u.hostname==='api.dexscreener.com'&&u.pathname==='/token-boosts/top/v1')return json([]);
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'NEWPAIR',dexId:'raydium',baseToken:{address:'FRESHMINT',symbol:'FRESH',name:'Fresh Meme'},quoteToken:{symbol:'SOL'},priceUsd:'0.001',liquidity:{usd:45000},volume:{m5:7000,h1:7000,h24:7000},txns:{m5:{buys:22,sells:5},h1:{buys:22,sells:5}},priceChange:{m5:18,h1:18},marketCap:125000,fdv:130000,pairCreatedAt:now-30_000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({fetchImpl,networks:['solana'],gmgnApiKey:'',gmgnPublicEnabled:false,ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now});
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(out.exactGmgn,false);
+  assert.equal(out.source,'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER');
+  assert.equal(out.discoveryRows,1);
+  assert.equal(out.rows[0].tokenAddress,'FRESHMINT');
+  assert.equal(out.rows[0].ageSeconds,30);
+  assert.ok(out.rows[0].freeTrendSources.includes('GECKOTERMINAL_NEW_PAIRS'));
+  assert.equal(out.execution,'SHADOW_ONLY');
+  assert.equal(out.canExecuteLive,false);
+  assert.ok(calls.some(v=>v.includes('/new_pools')));
+});
+
+"""
+          x=x.replace(marker,test+marker,1)
+          t.write_text(x)
+      - name: Syntax and focused tests
+        run: |
+          node --check expansion-runtime/memecoin-early-radar.mjs
+          node --test expansion-runtime/memecoin-early-radar.test.mjs
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add expansion-runtime/memecoin-early-radar.mjs expansion-runtime/memecoin-early-radar.test.mjs
+          git commit -m 'feat: add fresh new-pair source to W6 discovery'
+          git push origin HEAD:w6-discovery-v2
