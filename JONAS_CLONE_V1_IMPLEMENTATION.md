@@ -1,0 +1,1 @@
+Implemented now: strategy contract, P0 priority adapter, W6 shadow intent mapping, sizing hypothesis, checkpoint and exit-comparison contracts, telemetry schema, safety invariants, validation rules and tests. Not yet proven: production scheduler invocation, runtime persistence and autonomous shadow trade evidence. Those are the next integration stage.
