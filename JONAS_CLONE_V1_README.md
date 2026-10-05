@@ -1,0 +1,3 @@
+# JONAS_CLONE_V1
+
+P0 BIGGJ shadow-research strategy derived from the user's observed ultra-early workflow. This branch adds a standalone policy, W6 shadow-intent adapter, liquidity-proportional sizing hypothesis, fixed observation and exit-comparison windows, execution-realism telemetry requirements, baseline immutability rules, and safety/contract tests. It deliberately does not enable live trading.
