@@ -349,6 +349,8 @@ test('decision cockpit exposes ten focused tabs and preserves evidence boundarie
   assert.match(h,/localStorage\.setItem\('biggj\.decision\.tab'/);
   assert.match(h,/localStorage\.setItem\('biggj\.decision\.token'/);
   assert.match(h,/memeLegacy/);
+  assert.match(h,/memeWallets\(\)\.W6_USER_99K_60S\|\|wallet/);
+  assert.match(h,/\.memeView>\.walletSwitch\{display:none\}/);
 });
 
 
