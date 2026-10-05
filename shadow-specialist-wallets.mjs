@@ -930,7 +930,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
-    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,earlyMomentumScenarioCloses:0,
+    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,earlyMomentumScenarioCloses:0,earlyMomentumEntryAgeCloses:0,
     sourceReady:snapshot?.sourceReady===true,
     strategyVersion:USER_99K_60S_STRATEGY_VERSION,
     entryFunnel:{
@@ -1024,6 +1024,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       0,
       (earlyMomentumChallengerLab?.scenarios||[]).filter(x=>x?.status==='CLOSED').length-priorEarlyMomentumClosed
     );
+    results.earlyMomentumEntryAgeCloses+=Math.max(0,finite(earlyMomentumChallengerLab?.newEntryAgeCloses,0));
     const earlyMomentumChallengerSummary=summarizeEarlyMomentumChallengerLab(earlyMomentumChallengerLab);
     const marked={
       ...baseMarked,
