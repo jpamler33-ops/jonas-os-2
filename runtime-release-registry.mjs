@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { open as openFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { open as openFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { canonicalJson, sha256 } from './institutional-kernel.mjs';
 
 const SCHEMA_VERSION=1;
@@ -345,8 +345,22 @@ export function verifyReleaseRegistry(records){
   return {ok:true,count:records.length,lastSeq:seq-1,tailHash:prev};
 }
 
-export async function openReleaseRegistry(filePath){
+export async function openReleaseRegistry(filePath,{maxFileBytes=16*1024*1024}={}){
   await mkdir(path.dirname(filePath),{recursive:true});
+  const maxBytes=Math.max(1,Math.floor(Number(maxFileBytes)||16*1024*1024));
+  let fileBytes=0;
+  try{
+    fileBytes=(await stat(filePath)).size;
+    if(fileBytes>=maxBytes){
+      return {
+        filePath,healthy:false,
+        verification:{ok:false,error:'REGISTRY_SIZE_LIMIT',detail:'release registry reached configured byte cap'},
+        records:[],seq:0,tailHash:GENESIS,
+        maxFileBytes:maxBytes,fileBytes,writeBlocked:true,
+        recoveredFromTruncatedTail:false,backupPath:null
+      };
+    }
+  }catch(err){if(err?.code!=='ENOENT') throw err;}
   let records=[];
   let recoveredFromTruncatedTail=false;
   let backupPath=null;
@@ -381,6 +395,7 @@ export async function openReleaseRegistry(filePath){
             throw err;
           }
           recoveredFromTruncatedTail=true;
+          fileBytes=Buffer.byteLength(repaired,'utf8');
         }catch(err){
           if(tempHandle) await tempHandle.close().catch(()=>{});
           await unlink(tempPath).catch(()=>{});
@@ -394,7 +409,8 @@ export async function openReleaseRegistry(filePath){
       return {
         filePath,healthy:false,
         verification:{ok:false,error:'REGISTRY_READ_OR_PARSE_FAILURE',detail:err instanceof Error?err.message:String(err)},
-        records:[],seq:0,tailHash:GENESIS
+        records:[],seq:0,tailHash:GENESIS,
+        maxFileBytes:maxBytes,fileBytes,writeBlocked:true
       };
     }
   }
@@ -407,7 +423,10 @@ export async function openReleaseRegistry(filePath){
     seq:verification.ok?verification.lastSeq:0,
     tailHash:verification.ok?verification.tailHash:GENESIS,
     recoveredFromTruncatedTail,
-    backupPath
+    backupPath,
+    maxFileBytes:maxBytes,
+    fileBytes,
+    writeBlocked:false
   };
 }
 
@@ -423,11 +442,29 @@ export async function registerRuntimeRelease(registry,manifest,{registeredAt=Dat
     manifest
   });
   const record={...core,recordHash:sha256(core)};
+  const serialized=canonicalJson(record)+'\n';
+  const nextFileBytes=Math.max(0,Number(registry.fileBytes)||0)+Buffer.byteLength(serialized,'utf8');
+  const maxFileBytes=Math.max(1,Number(registry.maxFileBytes)||16*1024*1024);
+  if(nextFileBytes>maxFileBytes){
+    registry.healthy=false;
+    registry.writeBlocked=true;
+    registry.verification={
+      ok:false,
+      error:'REGISTRY_SIZE_LIMIT',
+      detail:'release registry byte cap would be exceeded',
+      count:Number(registry.seq||0),
+      lastSeq:Number(registry.seq||0),
+      tailHash:String(registry.tailHash||GENESIS)
+    };
+    const err=new Error('RELEASE_REGISTRY_SIZE_LIMIT');
+    err.code='RELEASE_REGISTRY_SIZE_LIMIT';
+    throw err;
+  }
 
   let fh;
   try{
     fh=await openFile(registry.filePath,'a',0o600);
-    await fh.write(canonicalJson(record)+'\n',null,'utf8');
+    await fh.write(serialized,null,'utf8');
     await fh.sync();
   }catch(err){
     registry.healthy=false;
@@ -437,6 +474,8 @@ export async function registerRuntimeRelease(registry,manifest,{registeredAt=Dat
     if(fh) await fh.close();
   }
 
+  registry.fileBytes=nextFileBytes;
+  registry.writeBlocked=false;
   registry.records.push(record);
   registry.seq=record.seq;
   registry.tailHash=record.recordHash;
