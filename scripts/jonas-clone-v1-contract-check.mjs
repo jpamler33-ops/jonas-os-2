@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {JONAS_CLONE_V1_POLICY,jonasCloneSizeSol} from '../jonas-clone-v1.mjs';
+import {applyJonasClonePriority,jonasCloneCandidateToShadowIntent} from '../jonas-clone-v1-integration.mjs';
+assert.equal(JONAS_CLONE_V1_POLICY.priority,'P0');
+assert.deepEqual(JONAS_CLONE_V1_POLICY.observation.exitComparisonsSeconds,[180,240,300,600]);
+assert.equal(JONAS_CLONE_V1_POLICY.observation.trackLiquidityDecay,true);
+assert.equal(JONAS_CLONE_V1_POLICY.observation.trackPriceImpact,true);
+assert.equal(jonasCloneSizeSol(20000),8);
+const runtime=applyJonasClonePriority({});
+assert.equal(runtime.canExecuteLive,false);
+const intent=jonasCloneCandidateToShadowIntent({ageSeconds:30,marketCapUsd:110000,liquidityUsd:20000,trendFeed:true});
+assert.equal(intent.walletId,'W6_USER_99K_60S');
+assert.equal(intent.preserveBaseline,true);
+console.log('JONAS_CLONE_V1_CONTRACT_PASS');
