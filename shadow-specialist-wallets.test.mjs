@@ -9,6 +9,7 @@ import {
   recordUser99k60sExitObservation,
   user99k60sExitLearningSummary,
   specialistWalletSummary,
+  shouldPersistUser99k60sUpdate,
   WALLET_3_TRADER_COPY,
   WALLET_4_MEME_SCOUT,
   WALLET_5_MEME_COPY,
@@ -944,4 +945,12 @@ test('wallet 6 runs the early-momentum size and hold challenger without changing
   assert.ok(p.earlyMomentumChallengerSummary.bestUser4SolPer10kHypothesis);
   assert.ok(p.earlyMomentumChallengerSummary.bestEntryAgeArm);
   assert.equal(p.canExecuteLive,false);
+});
+
+
+test('W6 persistence gate keeps challenger-only evidence across restarts',()=>{
+  assert.equal(shouldPersistUser99k60sUpdate({earlyMomentumScenarioCloses:1}),true);
+  assert.equal(shouldPersistUser99k60sUpdate({earlyMomentumEntryAgeCloses:2}),true);
+  assert.equal(shouldPersistUser99k60sUpdate({cloneCheckpoints:1}),true);
+  assert.equal(shouldPersistUser99k60sUpdate({}),false);
 });
