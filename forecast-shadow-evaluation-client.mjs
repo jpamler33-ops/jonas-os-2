@@ -1,14 +1,16 @@
 import { Worker } from 'node:worker_threads';
 
 export const FORECAST_SHADOW_EVALUATION_WORKER_VERSION='TCX_FORECAST_SHADOW_EVALUATION_WORKER_V1';
-export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V4';
+
+export const FORECAST_SHADOW_EVALUATION_ADMISSION_VERSION='TCX_FORECAST_SHADOW_EVALUATION_ADMISSION_V3';
+
 export const AUTOLEARN_MEMORY_ADMISSION_VERSION='TCX_AUTOLEARN_MEMORY_ADMISSION_V2';
 
 export function evaluateAutoLearnMemoryAdmission({phase='ISSUE',heapUsedMb=0,rssMb=0,externalMb=0,issueHeapMb=320,issueRssMb=720,issueExternalMb=64,resumeHeapMb=300,resumeRssMb=620,resumeExternalMb=48}={}){
   const normalized=String(phase||'ISSUE').trim().toUpperCase()==='RESUME'?'RESUME':'ISSUE';
   const memory={heapUsedMb:Math.max(0,Number(heapUsedMb)||0),rssMb:Math.max(0,Number(rssMb)||0),externalMb:Math.max(0,Number(externalMb)||0)};
   const issue={heapUsedMb:Math.max(1,Number(issueHeapMb)||320),rssMb:Math.max(1,Number(issueRssMb)||720),externalMb:Math.max(1,Number(issueExternalMb)||64)};
-  const resume={heapUsedMb:Math.min(issue.heapUsedMb,Math.max(1,Number(resumeHeapMb)||300)),rssMb:Math.min(issue.rssMb,Math.max(1,Number(resumeRssMb)||620)),externalMb:Math.min(issue.externalMb,Math.max(1,Number(resumeExternalMb)||48))};
+  const resume={heapUsedMb:Math.min(issue.heapUsedMb,Math.max(1,Number(resumeHeapMb)||280)),rssMb:Math.min(issue.rssMb,Math.max(1,Number(resumeRssMb)||620)),externalMb:Math.min(issue.externalMb,Math.max(1,Number(resumeExternalMb)||48))};
   const limits=normalized==='RESUME'?resume:issue,exceeded=[];
   if(memory.heapUsedMb>=limits.heapUsedMb) exceeded.push('HEAP');
   if(memory.rssMb>=limits.rssMb) exceeded.push('RSS');
@@ -27,26 +29,25 @@ export function evaluateShadowWorkerAdmission({mode='AUTO',heapUsedMb=0,rssMb=0,
   return {allowed:true,mode:effectiveMode,reason:'MEMORY_HEADROOM_AVAILABLE',memory,limits};
 }
 
-export function deriveShadowWorkerReplayPlan({mode='AUTO',heapUsedMb=0,rssMb=0,externalMb=0,configuredHistoryRows=1200,effectiveHistoryRows=1200,minHistoryRows=500,baseAutoHeapMb=260,baseAutoRssMb=620,autoExternalMb=64,hardExternalMb=160,maxAdaptiveAutoHeapMb=365,maxAdaptiveAutoRssMb=740,maxAdaptiveHardHeapMb=380,hardRssMb=900}={}){
+export function deriveShadowWorkerReplayPlan({mode='AUTO',heapUsedMb=0,rssMb=0,externalMb=0,configuredHistoryRows=1200,effectiveHistoryRows=1200,minHistoryRows=500,baseAutoHeapMb=260,baseAutoRssMb=620,autoExternalMb=64,hardExternalMb=160,maxAdaptiveAutoHeapMb=360,maxAdaptiveAutoRssMb=720,maxAdaptiveHardHeapMb=370,hardRssMb=900}={}){
   const configured=Math.max(1,Math.floor(Number(configuredHistoryRows)||1200));
-  const minimum=Math.max(40,Math.min(configured,Math.floor(Number(minHistoryRows)||500)));
+  const minimum=Math.max(40,Math.min(configured,Math.floor(Number(minHistoryRows)||500));
   const initial=Math.max(minimum,Math.min(configured,Math.floor(Number(effectiveHistoryRows)||configured)));
   const candidates=[initial];
-  if(String(mode||'AUTO').trim().toUpperCase()==='AUTO') for(const ratio of [.80,.65,.50,.40,.33]) candidates.push(Math.max(minimum,Math.floor(initial*ratio)));
-  candidates.push(minimum);
+  if(String(mode||'AUTO').trim().toUpperCase()==='AUTO'){for(const ratio of [.80,.65,.50]) candidates.push(Math.max(minimum,Math.floor(initial*ratio)));candidates.push(minimum);}
   const seen=new Set();let first=null,last=null;
   for(const rows of candidates){
     if(seen.has(rows)) continue;seen.add(rows);
-    const replayWindowRatio=Math.max(.20,Math.min(1,rows/configured));
-    const adaptiveAutoHeapMb=Math.min(Math.max(1,Number(maxAdaptiveAutoHeapMb)||365),Math.max(1,Number(baseAutoHeapMb)||260)+Math.round((1-replayWindowRatio)*155));
-    const adaptiveAutoRssMb=Math.min(Math.max(1,Number(maxAdaptiveAutoRssMb)||740),Math.max(1,Number(baseAutoRssMb)||620)+Math.round((1-replayWindowRatio)*170));
-    const adaptiveHardHeapMb=Math.min(Math.max(1,Number(maxAdaptiveHardHeapMb)||380),Math.max(300,adaptiveAutoHeapMb+15));
+    const replayWindowRatio=Math.max(.25,Math.min(1,rows/configured));
+    const adaptiveAutoHeapMb=Math.min(Math.max(1,Number(maxAdaptiveAutoHeapMb)||345),Math.max(1,Number(baseAutoHeapMb)||260)+Math.round((1-replayWindowRatio)*145));
+    const adaptiveAutoRssMb=Math.min(Math.max(1,Number(maxAdaptiveAutoRssMb)||720),Math.max(1,Number(baseAutoRssMb)||620)+Math.round((1-replayWindowRatio)*150));
+    const adaptiveHardHeapMb=Math.min(Math.max(1,Number(maxAdaptiveHardHeapMb)||370),Math.max(300,adaptiveAutoHeapMb+25));
     const admission=evaluateShadowWorkerAdmission({mode,heapUsedMb,rssMb,externalMb,autoHeapMb:adaptiveAutoHeapMb,autoRssMb:adaptiveAutoRssMb,autoExternalMb,hardHeapMb:adaptiveHardHeapMb,hardRssMb,hardExternalMb});
     const plan={...admission,historyRows:rows,configuredHistoryRows:configured,replayWindowRatio,compacted:rows<initial,limits:{...admission.limits,effectiveHistoryRows:rows,configuredHistoryRows:configured}};
     if(!first) first=plan;last=plan;
     if(admission.allowed) return {...plan,replayMode:rows<initial?'COMPACT':'FULL',initialHistoryRows:initial};
     if(admission.reason==='DISABLED') return {...plan,replayMode:'DEFERRED',initialHistoryRows:initial};
-    const absoluteHardPressure=Number(heapUsedMb)>=Math.max(1,Number(maxAdaptiveHardHeapMb)||380)||Number(rssMb)>=Math.max(1,Number(hardRssMb)||900)||Number(externalMb)>=Math.max(1,Number(hardExternalMb)||160);
+    const absoluteHardPressure=Number(heapUsedMb)>=Math.max(1,Number(maxAdaptiveHardHeapMb)||370)||Number(rssMb)>=Math.max(1,Number(hardRssMb)||900)||Number(externalMb)>=Math.max(1,Number(hardExternalMb)||160);
     if(admission.reason==='HARD_MEMORY_PRESSURE'&&absoluteHardPressure) return {...plan,replayMode:'DEFERRED',initialHistoryRows:initial};
   }
   return {...(last||first||evaluateShadowWorkerAdmission({mode,heapUsedMb,rssMb,externalMb})),replayMode:'DEFERRED',initialHistoryRows:initial,historyRows:last?.historyRows??initial,configuredHistoryRows:configured,compacted:(last?.historyRows??initial)<initial};
