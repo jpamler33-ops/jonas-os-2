@@ -1,0 +1,1 @@
+Review focus: safety invariants, eligibility semantics, liquidity sizing hypothesis, telemetry completeness, baseline immutability, and compatibility with existing W6 runtime. Do not merge on contract tests alone if scheduler wiring is absent.
