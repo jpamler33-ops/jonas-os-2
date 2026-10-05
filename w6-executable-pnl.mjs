@@ -25,8 +25,6 @@ export function estimateW6ExecutableExit({
     return {version:W6_EXECUTABLE_PNL_VERSION,status:'UNFILLABLE',reason:'EXIT_TOO_LARGE_FOR_POOL',executable:false,poolFraction};
   }
 
-  // For x*y=k, selling quote value q into one side gives an approximate average
-  // execution discount q/(reserve+q). Add explicit base slippage conservatively.
   const impactFraction=positionValueAtMark/(poolSideUsd+positionValueAtMark);
   const explicitSlip=Math.max(0,finite(baseSlippageBps,0))/10000;
   const totalSlip=clamp(impactFraction+explicitSlip,0,0.99);
@@ -48,7 +46,6 @@ export function captureW6ExecutableCheckpoint(position,market,{now=Date.now(),fe
   if(!(openedAt>0))return null;
   const ageSeconds=Math.max(0,(Number(now)-openedAt)/1000);
   const targets=[60,120,180,240,300,480,600];
-  const target=targets.find(t=>ageSeconds>=t&&!Array.isArray(position?.executableCheckpoints)||false);
   const existing=new Set((Array.isArray(position?.executableCheckpoints)?position.executableCheckpoints:[]).map(x=>Number(x?.targetSeconds)));
   const due=targets.find(t=>ageSeconds>=t&&!existing.has(t));
   if(!due)return null;
