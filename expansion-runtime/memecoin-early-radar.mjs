@@ -51,7 +51,8 @@ export function createMemecoinEarlyRadarProvider(options={}){
   const dex=String(options.dexBase||'https://api.dexscreener.com').replace(/\/+$/,'');
   const cache=new Map(),pending=new Map();
   const timeoutMs=Math.max(1000,Math.min(10000,Number(options.timeoutMs)||7000));
-  // Failures are cached too: a five-second scheduler must not retry a 429 every tick.
+  const geckoCacheMs=Math.max(1000,Math.min(300000,Number(options.ultraGeckoCacheMs)||30000));
+  const dexCacheMs=Math.max(1000,Math.min(60000,Number(options.ultraDexCacheMs)||5000));
   async function cachedJson(url,ttl){
     const t=Number(nowFn()),hit=cache.get(url);
     if(hit&&t<hit.until){if(hit.error)throw new Error(hit.error);return hit.body;}
@@ -85,9 +86,9 @@ export function createMemecoinEarlyRadarProvider(options={}){
     let fresh=[];
     const feedStatus={};
     const sourceSpecs=[
-      ['geckoNew',gecko+'/networks/solana/new_pools?include=base_token%2Cquote_token&page=1',30000],
-      ['dexLatestBoosts',dex+'/token-boosts/latest/v1',10000],
-      ['dexLatestProfiles',dex+'/token-profiles/latest/v1',30000]
+      ['geckoNew',gecko+'/networks/solana/new_pools?include=base_token%2Cquote_token&page=1',geckoCacheMs],
+      ['dexLatestBoosts',dex+'/token-boosts/latest/v1',dexCacheMs],
+      ['dexLatestProfiles',dex+'/token-profiles/latest/v1',Math.max(dexCacheMs,30000)]
     ];
     const settled=await Promise.allSettled(sourceSpecs.map(([,url,ttl])=>cachedJson(url,ttl)));
     for(let i=0;i<settled.length;i++){
@@ -108,20 +109,20 @@ export function createMemecoinEarlyRadarProvider(options={}){
       const list=Array.isArray(settled[i].value)?settled[i].value:[];
       for(const row of list.filter(x=>x?.chainId==='solana'&&String(x?.tokenAddress||'').trim()&&(i!==1||(finite(x.amount)??finite(x.totalAmount)??0)>0)).slice(0,30)){
         const address=String(row.tokenAddress),old=seeds.get(address)||{};
+        const isBoost=i===1;
         seeds.set(address,{...old,chainId:'solana',tokenAddress:address,
-          signalBoost:old.signalBoost===true||i===1,signalProfile:old.signalProfile===true||i===2,
-          boostAmount:i===1?finite(row.amount):old.boostAmount,
-          // Boosts are a labelled paid-attention proxy, never exact GMGN or organic momentum.
-          signalTrending:old.signalTrending===true||i===1,
-          trendSource:i===1?'DEXSCREENER_LATEST_BOOSTS':old.trendSource||'DEXSCREENER_LATEST_PROFILES',
-          attentionSemantics:i===1?'PAID_BOOST_ATTENTION_PROXY':old.attentionSemantics||'PROFILE_DISCOVERY_ONLY'});
+          signalBoost:old.signalBoost===true||isBoost,signalProfile:old.signalProfile===true||i===2,
+          boostAmount:isBoost?finite(row.amount):old.boostAmount,
+          signalTrending:old.signalTrending===true||isBoost,
+          trendSource:isBoost?'DEXSCREENER_LATEST_BOOSTS':old.trendSource||'DEXSCREENER_LATEST_PROFILES',
+          attentionSemantics:isBoost?'PAID_BOOST_ATTENTION_PROXY':old.attentionSemantics||'PROFILE_DISCOVERY_ONLY'});
       }
     }
     const addresses=[...seeds.keys()].slice(0,60),dexPairs=[];
     for(let offset=0;offset<addresses.length;offset+=30){
       const batch=addresses.slice(offset,offset+30);
       try{
-        const body=await cachedJson(dex+'/tokens/v1/solana/'+batch.map(encodeURIComponent).join(','),5000);
+        const body=await cachedJson(dex+'/tokens/v1/solana/'+batch.map(encodeURIComponent).join(','),dexCacheMs);
         for(const raw of Array.isArray(body)?body:(Array.isArray(body?.pairs)?body.pairs:[])){
           const row=normalizeDexSupplement(raw);
           if(row.chainId==='solana'&&batch.includes(row.tokenAddress))dexPairs.push(row);
@@ -138,7 +139,6 @@ export function createMemecoinEarlyRadarProvider(options={}){
       const pair=bestPairs.get(seed.tokenAddress);
       const row={...seed};
       if(pair){
-        // Do not reset launch age using a newer second pool for an existing token.
         for(const [k,v] of Object.entries(pair))if(v!=null&&v!=='')row[k]=v;
         const times=[seed.pairCreatedAt,pair.pairCreatedAt].filter(x=>finite(x)!=null).map(Number);
         row.pairCreatedAt=times.length?Math.min(...times):null;
@@ -157,7 +157,17 @@ export function createMemecoinEarlyRadarProvider(options={}){
       const key=String(row?.tokenAddress||'');if(!key)continue;
       const old=merged.get(key);
       if(!old)merged.set(key,row);
-      else merged.set(key,{...row,...old,pairCreatedAt:Math.min(...[row?.pairCreatedAt,old?.pairCreatedAt].filter(x=>finite(x)!=null).map(Number)),signalTrending:row?.signalTrending===true||old?.signalTrending===true,signalNewPair:Boolean(row?.signalNewPair||old?.signalNewPair),freeTrendSources:[...new Set([...(row?.freeTrendSources||[]),...(old?.freeTrendSources||[])])]});
+      else {
+        const pairCreatedTimes=[row?.pairCreatedAt,old?.pairCreatedAt].filter(x=>finite(x)!=null).map(Number);
+        merged.set(key,{...row,...old,
+          pairCreatedAt:pairCreatedTimes.length?Math.min(...pairCreatedTimes):null,
+          signalTrending:row?.signalTrending===true||old?.signalTrending===true,
+          signalNewPair:Boolean(row?.signalNewPair||old?.signalNewPair),
+          signalBoost:Boolean(row?.signalBoost||old?.signalBoost),
+          signalProfile:Boolean(row?.signalProfile||old?.signalProfile),
+          attentionSemantics:row?.attentionSemantics||old?.attentionSemantics,
+          freeTrendSources:[...new Set([...(row?.freeTrendSources||[]),...(old?.freeTrendSources||[])])]});
+      }
     }
     const rows=[...merged.values()].map(row=>{
       const ageSeconds=row?.pairCreatedAt==null?null:Math.max(0,(capturedAt-Number(row.pairCreatedAt))/1000);
