@@ -1,3 +1,4 @@
+import {providerDeadline} from './provider-deadline.mjs';
 import * as legacy from './memecoin-early-radar-legacy.mjs';
 
 export const MEMECOIN_EARLY_RADAR_VERSION=legacy.MEMECOIN_EARLY_RADAR_VERSION;
@@ -45,6 +46,7 @@ function normalizeDexSupplement(pair){
 
 export function createMemecoinEarlyRadarProvider(options={}){
   const base=legacy.createMemecoinEarlyRadarProvider(options);
+  let priorPending=null;
   const fetchImpl=options.fetchImpl||globalThis.fetch;
   const gecko=String(options.geckoBase||'https://api.geckoterminal.com/api/v2').replace(/\/+$/,'');
   const nowFn=typeof options.now==='function'?options.now:()=>Date.now();
@@ -53,36 +55,52 @@ export function createMemecoinEarlyRadarProvider(options={}){
   const timeoutMs=Math.max(1000,Math.min(10000,Number(options.timeoutMs)||7000));
   const geckoCacheMs=Math.max(1000,Math.min(300000,Number(options.ultraGeckoCacheMs)||30000));
   const dexCacheMs=Math.max(1000,Math.min(60000,Number(options.ultraDexCacheMs)||5000));
-  async function cachedJson(url,ttl){
+  const discoveryMs=Math.max(50,Math.min(3500,Number(options.ultraDiscoveryTimeoutMs)||3500));
+  const enrichmentMs=Math.max(50,Math.min(1500,Number(options.ultraEnrichmentTimeoutMs)||1500));
+  const legacyMs=Math.max(50,Math.min(6000,Number(options.ultraLegacyTimeoutMs)||6000));
+  async function cachedJson(url,ttl,budgetMs=discoveryMs){
     const t=Number(nowFn()),hit=cache.get(url);
     if(hit&&t<hit.until){if(hit.error)throw new Error(hit.error);return hit.body;}
     if(pending.has(url))return pending.get(url);
     const job=(async()=>{
-      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+      const controller=new AbortController();
       try{
-        const res=await Promise.resolve().then(()=>fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 W6-multifeed-research'},signal:controller.signal}));
-        if(!res?.ok){
-          const error='HTTP_'+String(res?.status??'UNKNOWN');
-          const retry=Number(res?.headers?.get?.('retry-after'));
-          const wait=res?.status===429?Math.max(60000,Math.min(300000,Number.isFinite(retry)&&retry>0?retry*1000:60000)):10000;
-          cache.set(url,{until:Number(nowFn())+wait,error});throw new Error(error);
-        }
-        const body=await res.json();cache.set(url,{until:Number(nowFn())+ttl,body});return body;
+        const body=await providerDeadline(async()=>{
+          const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 W6-multifeed-research'},signal:controller.signal});
+          if(controller.signal.aborted)throw new Error('W6_REQUEST_TIMEOUT');
+          if(!res?.ok){
+            const error='HTTP_'+String(res?.status??'UNKNOWN');
+            const retry=Number(res?.headers?.get?.('retry-after'));
+            const wait=res?.status===429?Math.max(60000,Math.min(300000,Number.isFinite(retry)&&retry>0?retry*1000:60000)):10000;
+            cache.set(url,{until:Number(nowFn())+wait,error});throw new Error(error);
+          }
+          return await res.json();
+        },Math.min(timeoutMs,budgetMs),'W6_REQUEST',()=>controller.abort());
+        cache.set(url,{until:Number(nowFn())+ttl,body});return body;
       }catch(err){
         if(!cache.get(url)?.error||cache.get(url).until<=Number(nowFn()))cache.set(url,{until:Number(nowFn())+10000,error:err instanceof Error?err.message:String(err)});
         throw err;
       }finally{
-        clearTimeout(timer);pending.delete(url);
+        pending.delete(url);
         while(cache.size>64)cache.delete(cache.keys().next().value);
       }
     })();pending.set(url,job);return job;
   }
   return Object.freeze({...base,async fetchUltraEarlySolana(args={}){
-    const prior=await base.fetchUltraEarlySolana(args);
-    if(prior?.exactGmgn===true)return prior;
+    const started=Date.now();
+    // Legacy fallback and independent feeds start together. Single-flight keeps
+    // a timed-out legacy call from accumulating overlapping background work.
+    if(!priorPending){
+      const job=Promise.resolve().then(()=>base.fetchUltraEarlySolana(args));
+      priorPending=job;
+      job.then(()=>{if(priorPending===job)priorPending=null;},()=>{if(priorPending===job)priorPending=null;});
+    }
+    const legacyJob=priorPending;
+    const priorResult=providerDeadline(()=>legacyJob,legacyMs,'W6_LEGACY_DISCOVERY')
+      .then(value=>({value}),error=>({error}));
     const capturedAt=Number(nowFn());
     const maxAge=Math.max(60,Math.min(600,Number(args?.maxAgeSeconds)||180));
-    const errors=[...(Array.isArray(prior?.errors)?prior.errors:[])];
+    const errors=[];
     let fresh=[];
     const feedStatus={};
     const sourceSpecs=[
@@ -119,17 +137,19 @@ export function createMemecoinEarlyRadarProvider(options={}){
       }
     }
     const addresses=[...seeds.keys()].slice(0,60),dexPairs=[];
-    for(let offset=0;offset<addresses.length;offset+=30){
-      const batch=addresses.slice(offset,offset+30);
-      try{
-        const body=await cachedJson(dex+'/tokens/v1/solana/'+batch.map(encodeURIComponent).join(','),dexCacheMs);
-        for(const raw of Array.isArray(body)?body:(Array.isArray(body?.pairs)?body.pairs:[])){
-          const row=normalizeDexSupplement(raw);
-          if(row.chainId==='solana'&&batch.includes(row.tokenAddress))dexPairs.push(row);
-        }
-        feedStatus.dexEnrichment={ok:true};
-      }catch(err){errors.push('dex:enrichment:'+String(err?.message||err));feedStatus.dexEnrichment={ok:false,error:String(err?.message||err)};}
-    }
+    const batches=[];
+    for(let offset=0;offset<addresses.length;offset+=30)batches.push(addresses.slice(offset,offset+30));
+    const enriched=await Promise.allSettled(batches.map(async batch=>{
+      const body=await cachedJson(dex+'/tokens/v1/solana/'+batch.map(encodeURIComponent).join(','),dexCacheMs,enrichmentMs);
+      return (Array.isArray(body)?body:(Array.isArray(body?.pairs)?body.pairs:[]))
+        .map(normalizeDexSupplement).filter(row=>row.chainId==='solana'&&batch.includes(row.tokenAddress));
+    }));
+    enriched.forEach((r,i)=>{
+      if(r.status==='fulfilled')dexPairs.push(...r.value);
+      else errors.push('dex:enrichment:'+i+':'+String(r.reason?.message||r.reason));
+    });
+    feedStatus.dexEnrichment={ok:enriched.every(r=>r.status==='fulfilled'),batches:enriched.length,
+      fulfilled:enriched.filter(r=>r.status==='fulfilled').length,failed:enriched.filter(r=>r.status==='rejected').length};
     const bestPairs=new Map();
     for(const row of dexPairs){
       const old=bestPairs.get(row.tokenAddress);
@@ -152,6 +172,15 @@ export function createMemecoinEarlyRadarProvider(options={}){
       row.freeTrendSources=[seed.trendSource].filter(Boolean);
       return row;
     }).filter(x=>x.pairCreatedAt!=null&&x.pairCreatedAt<=capturedAt&&(capturedAt-x.pairCreatedAt)/1000<=maxAge);
+    const legacyResult=await priorResult;
+    // Never relabel a previous invocation's delayed legacy marks as fresh.
+    const legacyFresh=legacyResult.value&&Number(legacyResult.value.capturedAt)>=capturedAt;
+    const prior=legacyFresh?legacyResult.value:{rows:[],errors:[],exactGmgn:false};
+    if(legacyResult.value&&!legacyFresh)errors.push('legacy:STALE_SNAPSHOT');
+    if(legacyResult.error)errors.push('legacy:'+String(legacyResult.error?.message||legacyResult.error));
+    errors.push(...(Array.isArray(prior.errors)?prior.errors:[]));
+    feedStatus.legacy={ok:!legacyResult.error};
+    if(prior.exactGmgn===true)return Object.freeze({...prior,providerDurationMs:Date.now()-started,feedStatus});
     const merged=new Map();
     for(const row of [...fresh,...(Array.isArray(prior?.rows)?prior.rows:[])]){
       const key=String(row?.tokenAddress||'');if(!key)continue;
@@ -176,6 +205,6 @@ export function createMemecoinEarlyRadarProvider(options={}){
     const limit=Math.max(1,Math.min(30,Number(args?.limit)||30));
     const selected=rows.filter((x,i)=>x?.w6TrackingOnly===true||x?.candidateTracking===true||i<limit);
     const discoveryRows=selected.filter(x=>x?.w6TrackingOnly!==true).length;
-    return Object.freeze({...prior,capturedAt,feedStatus,rows:Object.freeze(selected),errors:Object.freeze(errors),source:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER',sourceReady:selected.length>0||errors.length===0,discoveryRows,candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,trackingRows:selected.filter(x=>x?.w6TrackingOnly===true).length,execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false});
+    return Object.freeze({...prior,capturedAt,providerDurationMs:Date.now()-started,feedStatus,rows:Object.freeze(selected),errors:Object.freeze(errors),source:'FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER',sourceReady:selected.length>0||errors.length===0,discoveryRows,candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,trackingRows:selected.filter(x=>x?.w6TrackingOnly===true).length,execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false});
   }});
 }

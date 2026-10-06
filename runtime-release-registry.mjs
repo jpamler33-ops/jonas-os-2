@@ -91,6 +91,7 @@ export const DEFAULT_RUNTIME_FILES=[
   'early-momentum-challenger-v1.mjs',
   'expansion-runtime/memecoin-early-radar.mjs',
   'expansion-runtime/memecoin-early-radar-legacy.mjs',
+  'expansion-runtime/provider-deadline.mjs',
   'expansion-runtime/memecoin-security-provider.mjs',
   'expansion-runtime/memecoin-security-outcome-tracker.mjs',
   'expansion-runtime/memecoin-social-attention.mjs',
