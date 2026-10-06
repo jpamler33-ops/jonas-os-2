@@ -55,3 +55,4 @@ jobs:
           fi
           git commit -m 'fix(w6): strict <120s entry with migrated tests [w6-120s-tests-applied]'
           git push origin HEAD:main
+# retrigger: 2026-10-06
