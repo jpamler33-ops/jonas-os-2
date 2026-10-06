@@ -361,3 +361,14 @@ test('W6 candidate memory preserves launch age but is no longer current New Pair
   assert.equal(out.rows[0].marketCap,125000);
   assert.equal(out.rows[0].ageSeconds,45);
 });
+
+test('legacy discovery backs off HTTP 429 even during forced refresh and retries after cooldown',async()=>{
+ let now=1700000000000,calls=0;
+ const p=createMemecoinEarlyRadarProvider({now:()=>now,gmgnPublicEnabled:false,fetchImpl:async url=>{
+  if(String(url).includes('geckoterminal')){calls++;return {ok:false,status:429};}
+  return {ok:true,status:200,json:async()=>[]};
+ }});
+ await p.fetchUltraEarlySolana({force:true});const initial=calls;assert.ok(initial>0);
+ now+=5000;await p.fetchUltraEarlySolana({force:true});assert.equal(calls,initial);
+ now+=60000;await p.fetchUltraEarlySolana({force:true});assert.ok(calls>initial);
+});

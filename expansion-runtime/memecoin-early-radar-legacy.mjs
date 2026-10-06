@@ -461,10 +461,17 @@ export function createMemecoinEarlyRadarProvider({
   }
   async function cached(key,ttl,fn,{force=false}={}){
     const t=Number(now()),hit=cache.get(key);
-    if(!force&&hit&&t-hit.at<ttl)return hit.value;
-    const value=await fn();
-    cache.set(key,{at:t,value});
-    return value;
+    if(hit?.error&&t<hit.retryAt)throw new Error(hit.error);
+    if(!force&&hit&&!hit.error&&t-hit.at<ttl)return hit.value;
+    try{
+      const value=await fn();
+      cache.set(key,{at:t,value});
+      return value;
+    }catch(err){
+      const message=err instanceof Error?err.message:String(err);
+      cache.set(key,{at:t,error:message,retryAt:Number(now())+(/HTTP_429/.test(message)?60000:10000)});
+      throw err;
+    }
   }
   async function dexList(path,{force=false}={}){
     return cached('dex:'+path,dexCacheMs,async()=>{
