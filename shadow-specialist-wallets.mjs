@@ -9,6 +9,7 @@ export const WALLET_4_MEME_SCOUT='W4_MEME_SCOUT';
 export const WALLET_5_MEME_COPY='W5_MEME_COPY';
 export const WALLET_6_USER_99K_60S='W6_USER_99K_60S';
 export const USER_99K_60S_STRATEGY_VERSION='BIGGJ_USER_99K_60S_STRATEGY_V1';
+export const W6_CURRENT_GMGN_CONTRACT='GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1';
 
 const EPS=1e-12;
 const DEFAULT_MEME_SYMBOLS=new Set([
@@ -27,6 +28,23 @@ function text(v,max=160){
   return s.length<=max?s:s.slice(0,max-1)+'…';
 }
 function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function isCurrentW6ClonePosition(p={}){
+  const age=finite(p?.entryAgeSeconds);
+  const green=finite(p?.entryGreenPercent);
+  return (
+    p?.strategyVersion==='JONAS_CLONE_V1'&&
+    p?.entryThresholdMode==='GMGN_GREEN_PERCENT'&&
+    p?.exactGmgnTrendAtEntry===true&&
+    age!=null&&age>=0&&age<120&&
+    green!=null&&green>=99_000
+  );
+}
+function classifyW6ContractPosition(p={}){
+  if(isCurrentW6ClonePosition(p)){
+    return {...p,w6Contract:W6_CURRENT_GMGN_CONTRACT,w6StrategyScope:'CURRENT_GMGN_99K_4M',legacyW6:false};
+  }
+  return {...p,w6StrategyScope:'LEGACY_PRE_GMGN_99K_4M',legacyW6:true};
+}
 function freeze(v){
   if(v&&typeof v==='object'&&!Object.isFrozen(v)){
     Object.freeze(v);
@@ -1269,6 +1287,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
+  if(clonePolicy){
+    wallet.positions=(wallet.positions||[]).map(classifyW6ContractPosition);
+    wallet.closed=(wallet.closed||[]).map(classifyW6ContractPosition);
+  }
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
   const captured=finite(snapshot?.capturedAt);
@@ -1439,11 +1461,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     results.marked++;
 
     let reason=null;
-    const clonePosition=clonePolicy&&(
-      p?.strategy==='JONAS_CLONE_V1'||
-      p?.strategyVersion==='JONAS_CLONE_V1'||
-      p?.jonasClone?.strategy==='JONAS_CLONE_V1'
-    );
+    const clonePosition=clonePolicy&&isCurrentW6ClonePosition(p);
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
     const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
     const catastrophicLoss=Math.max(.50,Math.min(.99,finite(catastrophicDrawdownPct,.90)));
@@ -1532,11 +1550,13 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     }
     results.matched++;
     const key=user99k60sPositionKey(row);
-    if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key)){
+    const currentClosed=clonePolicy?wallet.closed.filter(isCurrentW6ClonePosition):wallet.closed;
+    if(wallet.positions.some(x=>x.positionKey===key)||currentClosed.some(x=>x.positionKey===key)){
       results.entryFunnel.duplicateBlocked++;
       continue;
     }
-    if(wallet.positions.length>=Math.max(1,Number(maxOpenOperational)||30)){
+    const currentOpenCount=clonePolicy?wallet.positions.filter(isCurrentW6ClonePosition).length:wallet.positions.length;
+    if(currentOpenCount>=Math.max(1,Number(maxOpenOperational)||30)){
       results.entryFunnel.capacityBlocked++;
       continue;
     }
@@ -1613,7 +1633,13 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       minExitMarketCapUsd:clonePolicy?null:(finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null),
       marketCapExitTracking:clonePolicy?'DISABLED_FIXED_4M_EXIT':(finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE'),
       entryStrategySignal:clone(signal),
-      ...(clonePolicy?{jonasClone:{strategy:'JONAS_CLONE_V1',intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},strategy:'JONAS_CLONE_V1'}:{}),
+      ...(clonePolicy?{
+        jonasClone:{strategy:'JONAS_CLONE_V1',contract:W6_CURRENT_GMGN_CONTRACT,intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},
+        strategy:'JONAS_CLONE_V1',
+        w6Contract:W6_CURRENT_GMGN_CONTRACT,
+        w6StrategyScope:'CURRENT_GMGN_99K_4M',
+        legacyW6:false
+      }:{}),
       strategyVersion:clonePolicy?'JONAS_CLONE_V1':USER_99K_60S_STRATEGY_VERSION,
       entryRule:signal.thresholdMode==='GMGN_GREEN_PERCENT'
         ?signal.rule
