@@ -19,3 +19,9 @@ test('actual runtime book retains candidates through 60/75/119.999s despite stal
  assert.equal(r.currentW6UltraCandidates(birth+181000).length,0);
 });
 test('missing timestamps cannot enter candidate book',()=>{const r=runtime();r.enrichW6UltraCandidateRows({capturedAt:1700000000000,rows:[{tokenAddress:'BAD',pairCreatedAt:null}]});assert.equal(r.w6UltraCandidateBook.size,0);});
+test('runtime provider deadline rejects a stalled request and preserves normal results',async()=>{
+ const r=vm.createContext({Promise,setTimeout,clearTimeout,Error});
+ vm.runInContext(source.slice(source.indexOf('async function w6BoundedAwait('),source.indexOf('let w6SolPriceCache=')),r);
+ await assert.rejects(r.w6BoundedAwait(new Promise(()=>{}),5,'FEED'),/FEED_TIMEOUT/);
+ assert.equal(await r.w6BoundedAwait(Promise.resolve(7),100,'FEED'),7);
+});

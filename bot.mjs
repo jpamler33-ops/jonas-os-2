@@ -5332,12 +5332,17 @@ function refreshW6UltraEarly(reason='periodic'){
   w6RefreshPending=refreshW6UltraEarlyOnce(reason).finally(()=>{w6RefreshPending=null;});
   return w6RefreshPending;
 }
+async function w6BoundedAwait(work,timeoutMs,label){
+  let timer;
+  try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+'_TIMEOUT')),timeoutMs);})]);}
+  finally{clearTimeout(timer);}
+}
 let w6SolPriceCache={value:null,at:0,error:null};
 async function currentW6SolPriceUsd({force=false}={}){
   const now=Date.now();
   if(!force&&Number(w6SolPriceCache.value)>0&&now-Number(w6SolPriceCache.at||0)<60_000)return Number(w6SolPriceCache.value);
   try{
-    const market=await fetchMarketParts('SOLUSDT');
+    const market=await w6BoundedAwait(fetchMarketParts('SOLUSDT'),10000,'W6_SOL_PRICE');
     const px=Number(market?.ticker?.lastPrice);
     if(!(px>0))throw new Error('SOLUSDT_PRICE_UNAVAILABLE');
     w6SolPriceCache={value:px,at:now,error:null};
@@ -5466,13 +5471,13 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
   const force=reason==='startup'||reason==='manual';
   try{
     const open=(specialistWalletState?.wallets?.[WALLET_6_USER_99K_60S]?.positions||[]);
-    const ultraRaw=await memecoinEarlyProvider.fetchUltraEarlySolana({
+    const ultraRaw=await w6BoundedAwait(memecoinEarlyProvider.fetchUltraEarlySolana({
       limit:30,
       maxAgeSeconds:Math.max(90,Math.min(300,Number(process.env.TCX_W6_ULTRA_DISCOVERY_MAX_AGE_SECONDS||180))),
       trackTokenAddresses:open.map(x=>String(x?.tokenAddress||'')).filter(Boolean),
       candidateRows:currentW6UltraCandidates(),
       force
-    });
+    }),30000,'W6_ULTRA_PROVIDER');
     const ultra=enrichW6UltraCandidateRows(ultraRaw);
     const candidateTemp=w6CandidateBookFile+'.tmp';
     await writeW6File(candidateTemp,JSON.stringify({rows:currentW6UltraCandidates().slice(-1000)}));
