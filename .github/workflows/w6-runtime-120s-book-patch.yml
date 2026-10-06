@@ -1,0 +1,54 @@
+name: W6 Runtime 120s Book Patch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/w6-runtime-120s-book
+      - name: Patch W6 runtime defaults to strict under 120s
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('bot.mjs')
+          s = p.read_text()
+          replacements = {
+              "TCX_W6_USER_99K_60S_MAX_AGE_SECONDS || 60": "TCX_W6_USER_99K_60S_MAX_AGE_SECONDS || 120",
+              "TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS || 75": "TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS || 120",
+          }
+          for old, new in replacements.items():
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one occurrence of {old!r}, got {count}')
+              s = s.replace(old, new)
+          p.write_text(s)
+      - name: Verify patch and safety invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'TCX_W6_USER_99K_60S_MAX_AGE_SECONDS || 120' bot.mjs
+          grep -Fq 'TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS || 120' bot.mjs
+          node --check bot.mjs
+          node --check shadow-specialist-wallets.mjs
+          git diff --check
+          git diff -- bot.mjs
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bot.mjs
+          if git diff --cached --quiet; then
+            echo 'No patch required.'
+            exit 0
+          fi
+          git commit -m 'fix(w6): align runtime candidate window to 120s'
+          git push origin HEAD:fix/w6-runtime-120s-book
