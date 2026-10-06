@@ -251,7 +251,8 @@ test('W6 uses public GMGN Trends 1m before free composite when no personal key i
   assert.equal(out.rows[0].trendSource,'GMGN_PUBLIC_TRENDS_1M_DEFAULT');
   assert.equal(out.rows[0].ageSeconds,25);
   assert.equal(out.rows[0].marketCap,124000);
-  assert.equal(calls.some(x=>x.url.includes('api.geckoterminal.com')),false);
+  // Independent new-pool discovery now starts concurrently; exact GMGN output stays authoritative.
+  assert.equal(calls.some(x=>x.url.includes('/new_pools')),true);
   assert.equal(calls.some(x=>x.url.includes('/token-boosts/top/v1')),false);
 });
 

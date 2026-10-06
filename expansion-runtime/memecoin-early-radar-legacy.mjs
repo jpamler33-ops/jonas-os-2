@@ -1,3 +1,4 @@
+import {providerDeadline} from './provider-deadline.mjs';
 export const MEMECOIN_EARLY_RADAR_VERSION='BIGGJ_MEMECOIN_EARLY_RADAR_V1';
 export const W6_ULTRA_EARLY_FEED_VERSION='BIGGJ_W6_ULTRA_EARLY_FEED_V1';
 
@@ -421,6 +422,7 @@ export function createMemecoinEarlyRadarProvider({
   gmgnApiKey='gmgn_solbscbaseethmonadtron',
   gmgnPublicEnabled=true,
   timeoutMs=7000,
+  ultraEnrichmentTimeoutMs=1500,
   dexCacheMs=15000,
   geckoCacheMs=60000,
   ultraGeckoCacheMs=5000,
@@ -452,12 +454,11 @@ export function createMemecoinEarlyRadarProvider({
 
   async function getJson(url,{headers={}}={}){
     const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||7000));
-    try{
+    return providerDeadline(async()=>{
       const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 early-memecoin-research',...headers},signal:controller.signal});
       if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN')+' '+url);
       return await res.json();
-    }finally{clearTimeout(timer);}
+    },Math.max(1000,Number(timeoutMs)||7000),'PROVIDER_REQUEST',()=>controller.abort());
   }
   async function cached(key,ttl,fn,{force=false}={}){
     const t=Number(now()),hit=cache.get(key);
@@ -755,7 +756,7 @@ export function createMemecoinEarlyRadarProvider({
     for(let i=0;i<allAddresses.length;i+=30)chunks.push(allAddresses.slice(i,i+30));
     const dexRows=[];
     if(chunks.length){
-      const settled=await Promise.allSettled(chunks.map(xs=>dexBatchTokens('solana',xs,{force})));
+      const settled=await Promise.allSettled(chunks.map(xs=>providerDeadline(()=>dexBatchTokens('solana',xs,{force}),Math.max(50,Math.min(1500,Number(ultraEnrichmentTimeoutMs)||1500)),'W6_DEX_ENRICHMENT')));
       settled.forEach((r,i)=>{
         if(r.status==='fulfilled')dexRows.push(...r.value);
         else errors.push('dex:batch:'+i+':'+(r.reason instanceof Error?r.reason.message:String(r.reason)));

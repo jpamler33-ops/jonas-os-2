@@ -5569,6 +5569,8 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       setup:ultra.setup||'GMGN_TRENDS_1M',
       sourceReady:ultra.sourceReady,
       sourceErrors:ultra.errors||[],
+      providerDurationMs:ultra.providerDurationMs??null,
+      feedStatus:ultra.feedStatus||{},
       discoveryRows:ultra.discoveryRows||0,
       candidateTrackingRows:ultra.candidateTrackingRows||0,
       candidateBookSize:ultra.candidateBookSize||0,

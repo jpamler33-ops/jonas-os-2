@@ -59,3 +59,64 @@ test('new-pool discovery is not relabelled as a current trend',async()=>{
  const row=snapshot.rows.find(x=>x.tokenAddress==='FAST');assert.equal(row.signalNewPair,true);assert.equal(row.signalTrending,false);
  assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
 });
+
+function deadlineProvider(handler,options={}){
+ return createMemecoinEarlyRadarProvider({gmgnApiKey:'',gmgnPublicEnabled:false,now:()=>start,
+  ultraDiscoveryTimeoutMs:50,ultraEnrichmentTimeoutMs:50,ultraLegacyTimeoutMs:80,
+  fetchImpl:async(url,opts)=>{
+   const u=new URL(url);
+   const out=await handler(u,opts);
+   if(out)return out;
+   if(u.pathname.includes('/trending_pools'))return json({data:[]});
+   if(u.pathname==='/token-boosts/top/v1')return json([]);
+   if(u.pathname==='/token-boosts/latest/v1'||u.pathname==='/token-profiles/latest/v1')return json([]);
+   if(u.pathname.includes('/new_pools'))return json({data:[]});
+   throw new Error('unexpected '+url);
+  },...options});
+}
+test('enrichment batches start together and one failure retains usable shadow entries',async()=>{
+ const started=[];let release;
+ const barrier=new Promise(resolve=>{release=resolve;});
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname==='/token-boosts/latest/v1')return json(Array.from({length:30},(_,i)=>({chainId:'solana',tokenAddress:'B'+i,amount:1})));
+  if(u.pathname==='/token-profiles/latest/v1')return json(Array.from({length:30},(_,i)=>({chainId:'solana',tokenAddress:'P'+i})));
+  if(u.pathname.startsWith('/tokens/v1/solana/')){
+   const batch=u.pathname.split('/').at(-1).split(',');started.push(batch);
+   if(started.length===2)release();
+   await barrier;
+   if(batch[0]==='P0')throw new Error('ONE_BATCH_DOWN');
+   return json(batch.map(token=>pair(token,start-25000)));
+  }
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({maxAgeSeconds:120});
+ assert.equal(started.length,2);assert.equal(snapshot.feedStatus.dexEnrichment.fulfilled,1);
+ assert.equal(snapshot.feedStatus.dexEnrichment.failed,1);
+ assert.ok(snapshot.errors.some(x=>x.includes('ONE_BATCH_DOWN')));
+ assert.equal(snapshot.rows.length,30);assert.equal(snapshot.rows[0].marketCap,120000);
+ const update=applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120});
+ assert.ok(update.results.opened>0);assert.equal(snapshot.execution,'SHADOW_ONLY');assert.equal(snapshot.canExecuteLive,false);
+});
+test('hung optional enrichment/body reader cannot block complete new-pool discovery',async()=>{
+ let signal;
+ const provider=deadlineProvider(async(u,opts)=>{
+  if(u.pathname.includes('/new_pools'))return json({data:[{id:'solana_p',attributes:{pool_created_at:new Date(start-25000).toISOString(),base_token_price_usd:'.001',reserve_in_usd:'20000',market_cap_usd:'120000'},relationships:{base_token:{data:{id:'solana_FAST'}}}}],included:[{id:'solana_FAST',attributes:{address:'FAST',symbol:'FAST'}}]});
+  if(u.pathname.startsWith('/tokens/v1/solana/')){signal=opts.signal;return {ok:true,json:()=>new Promise(()=>{})};}
+ });
+ const began=Date.now(),snapshot=await provider.fetchUltraEarlySolana({maxAgeSeconds:120});
+ assert.ok(Date.now()-began<500);assert.equal(signal.aborted,true);
+ assert.equal(snapshot.rows[0].marketCap,120000);assert.ok(snapshot.errors.some(x=>x.includes('W6_REQUEST_TIMEOUT')));
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
+});
+test('slow legacy discovery and individual seed failure do not discard healthy Dex discovery',async()=>{
+ let legacyCalls=0;
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname.includes('/trending_pools')){legacyCalls++;return new Promise(()=>{});}
+  if(u.pathname==='/token-profiles/latest/v1')throw new Error('PROFILE_DOWN');
+  if(u.pathname==='/token-boosts/latest/v1')return json([{chainId:'solana',tokenAddress:'FAST',amount:1}]);
+  if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('FAST',start-25000)]);
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({maxAgeSeconds:120});
+ assert.equal(snapshot.rows[0].marketCap,120000);assert.ok(snapshot.errors.some(x=>x.includes('W6_LEGACY_DISCOVERY_TIMEOUT')));
+ assert.ok(snapshot.errors.some(x=>x.includes('PROFILE_DOWN')));
+ await provider.fetchUltraEarlySolana({maxAgeSeconds:120});assert.equal(legacyCalls,1);
+});
