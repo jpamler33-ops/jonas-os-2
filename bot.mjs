@@ -2087,7 +2087,9 @@ async function persistSpecialistWallets(reason='mutation'){
   specialistWalletPersistenceQueue = specialistWalletPersistenceQueue.then(async()=>{
     if(!specialistWalletHealthy) return false;
     try{
-      specialistWalletState = await saveSpecialistWalletState(specialistWalletFile,specialistWalletState);
+      const checkpointState=specialistWalletState;
+      const persistedState=await saveSpecialistWalletState(specialistWalletFile,checkpointState);
+      if(specialistWalletState===checkpointState)specialistWalletState=persistedState;
       specialistWalletLastError=null;
       return true;
     }catch(err){
@@ -5925,7 +5927,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     });
 
     const walletInput={...snapshot,rows:signaledSecuredRows};
-    const walletUpdate=applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
+    const walletUpdate=w6StrategyOnlyEnabled?{state:specialistWalletState,results:{opened:0,closed:0,skipped:true}}:applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
       now:Date.now(),
       marginQuote:Math.max(1,Number(process.env.TCX_W4_MEME_MARGIN_QUOTE||100)),
       minScore:Math.max(0,Math.min(1,Number(process.env.TCX_W4_MEME_MIN_SCORE||.58))),
@@ -5963,7 +5965,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     const user99k60sWallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
     snapshot={...snapshot,tradeLearning:postTradeLearningSummary,user99k60s:{
       version:USER_99K_60S_STRATEGY_VERSION,
-      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      rule:'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetPnlSol:10,
       sizingScenariosSol:[2,5,10,20,40,60,80],
@@ -6275,7 +6277,7 @@ async function refreshPublicExperienceIntel(reason='periodic'){
         })
       }))
     }));
-    const copyUpdate=applyPublicTraderCopySnapshot(specialistWalletState,{
+    const copyUpdate=w6StrategyOnlyEnabled?{state:specialistWalletState,results:{openedW3:0,openedW5:0,closedW3:0,closedW5:0,skipped:true}}:applyPublicTraderCopySnapshot(specialistWalletState,{
       ...traderResult.value,
       traders:copyLearningTraders
     },{
@@ -12840,7 +12842,7 @@ function missionControlData(){
     },
     user99k60s:memecoinEarlySnapshot?.user99k60s||{
       version:USER_99K_60S_STRATEGY_VERSION,
-      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      rule:'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetPnlSol:10,
       sizingScenariosSol:[2,5,10,20,40,60,80],
@@ -13203,6 +13205,7 @@ const server = http.createServer(async (req,res) => {
     res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
     res.end(JSON.stringify({
       ok:readiness.ready,
+      strategyOnlyMode:{enabled:w6StrategyOnlyEnabled,activeStrategy:w6StrategyOnlyEnabled?'W6_USER_99K_60S':'FULL_RESEARCH_STACK',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false},
       service:'BIGGJ Market Science OS',
       readiness,
       releaseId:runtimeManifest?.releaseId||null,
@@ -13216,6 +13219,7 @@ const server = http.createServer(async (req,res) => {
     res.writeHead(200,{'content-type':'application/json'});
     res.end(JSON.stringify({
       ok:true,
+      strategyOnlyMode:{enabled:w6StrategyOnlyEnabled,activeStrategy:w6StrategyOnlyEnabled?'W6_USER_99K_60S':'FULL_RESEARCH_STACK',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false},
       service:'BIGGJ Market Science OS',
       mobileWebApp:{version:BIGGJ_MOBILE_WEBAPP_VERSION,path:'/mission-control',installable:true},
       execution:'SHADOW_ONLY',
