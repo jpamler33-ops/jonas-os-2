@@ -1841,6 +1841,235 @@ export function w6ResearchArchive(state,{asOf=Date.now(),limit=100,tokenAddress=
   });
 }
 
+
+const W6_RESEARCH_ANALYSIS_VERSION='BIGGJ_W6_RESEARCH_ANALYSIS_V1';
+
+function w6ResearchMean(values=[]){
+  const xs=values.map(x=>finite(x)).filter(x=>x!=null);
+  return xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;
+}
+function w6ResearchPearson(rows,xKey,yKey){
+  const pts=rows.map(r=>[finite(r?.[xKey]),finite(r?.[yKey])]).filter(([x,y])=>x!=null&&y!=null);
+  if(pts.length<3)return {samples:pts.length,r:null};
+  const mx=pts.reduce((s,[x])=>s+x,0)/pts.length,my=pts.reduce((s,[,y])=>s+y,0)/pts.length;
+  let num=0,dx=0,dy=0;
+  for(const [x,y] of pts){const a=x-mx,b=y-my;num+=a*b;dx+=a*a;dy+=b*b;}
+  return {samples:pts.length,r:dx>0&&dy>0?num/Math.sqrt(dx*dy):null};
+}
+function w6ResearchBucket(value,thresholds=[],fallback='UNKNOWN'){
+  const n=finite(value);
+  if(n==null)return fallback;
+  for(const t of thresholds)if(n<t.lt)return t.label;
+  return thresholds.length?thresholds[thresholds.length-1].gte:fallback;
+}
+function w6ResearchCohortSummary(rows=[]){
+  const xs=Array.isArray(rows)?rows:[];
+  const pnl=xs.map(x=>finite(x?.realizablePnlQuote)).filter(x=>x!=null);
+  const returns=xs.map(x=>finite(x?.realizableReturnPct)).filter(x=>x!=null);
+  const wins=xs.filter(x=>finite(x?.realizablePnlQuote)>0).length;
+  const losses=xs.filter(x=>finite(x?.realizablePnlQuote)<0).length;
+  const grossProfit=xs.reduce((s,x)=>s+Math.max(0,finite(x?.realizablePnlQuote,0)),0);
+  const grossLoss=Math.abs(xs.reduce((s,x)=>s+Math.min(0,finite(x?.realizablePnlQuote,0)),0));
+  return {
+    samples:xs.length,
+    wins,losses,
+    winRate:xs.length?wins/xs.length:null,
+    totalPnlQuote:pnl.length?pnl.reduce((a,b)=>a+b,0):null,
+    averagePnlQuote:w6ResearchMean(pnl),
+    medianPnlQuote:medianFinite(pnl),
+    averageReturnPct:w6ResearchMean(returns),
+    medianReturnPct:medianFinite(returns),
+    averageHoldSeconds:w6ResearchMean(xs.map(x=>x?.holdSeconds)),
+    medianHoldSeconds:medianFinite(xs.map(x=>x?.holdSeconds)),
+    averageMfeReturnPct:w6ResearchMean(xs.map(x=>x?.mfeReturnPct)),
+    averageMaeReturnPct:w6ResearchMean(xs.map(x=>x?.maeReturnPct)),
+    profitFactor:grossLoss>EPS?grossProfit/grossLoss:(grossProfit>0?Infinity:null)
+  };
+}
+function w6ResearchGroup(rows,key){
+  const groups=new Map();
+  for(const row of rows){
+    const k=String(row?.[key]??'UNKNOWN');
+    if(!groups.has(k))groups.set(k,[]);
+    groups.get(k).push(row);
+  }
+  return [...groups.entries()].map(([value,xs])=>({value,...w6ResearchCohortSummary(xs)}))
+    .sort((a,b)=>b.samples-a.samples||String(a.value).localeCompare(String(b.value)));
+}
+function w6ResearchFeatureContrast(rows,feature){
+  const winners=rows.filter(x=>finite(x?.realizablePnlQuote)>0);
+  const losers=rows.filter(x=>finite(x?.realizablePnlQuote)<0);
+  const win=w6ResearchMean(winners.map(x=>x?.[feature]));
+  const loss=w6ResearchMean(losers.map(x=>x?.[feature]));
+  return {
+    feature,
+    winnerSamples:winners.map(x=>finite(x?.[feature])).filter(x=>x!=null).length,
+    loserSamples:losers.map(x=>finite(x?.[feature])).filter(x=>x!=null).length,
+    winnerMean:win,
+    loserMean:loss,
+    difference:win!=null&&loss!=null?win-loss:null
+  };
+}
+function w6ResearchRecordFromPosition(p){
+  const research=p?.coinResearch||null;
+  if(!research)return null;
+  const observations=Array.isArray(research?.observations)?research.observations:[];
+  const entry=research?.entrySnapshot?.observation||observations.find(x=>String(x?.phase||'').toUpperCase()==='ENTRY')||null;
+  const source=research?.entrySnapshot?.sourceFields||{};
+  const security=research?.entrySnapshot?.security||entry?.security||{};
+  const social=research?.entrySnapshot?.directSocialAttention||entry?.social||{};
+  const score=research?.entrySnapshot?.score||entry?.score||{};
+  const openedAt=finite(p?.openedAt);
+  const closedAt=finite(p?.closedAt);
+  const exposure=Math.max(EPS,finite(p?.initialMarginQuote,finite(p?.marginQuote,0))||EPS);
+  const realizablePnlQuote=finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote));
+  const observedPnlQuote=finite(p?.observedRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote));
+  const entryImpactPct=finite(
+    entry?.entryImpactPct,
+    finite(p?.executableMark?.entryImpactPct,finite(p?.exitExecutionMark?.entryImpactPct))
+  );
+  const buysM5=finite(entry?.buysM5,finite(source?.buysM5));
+  const sellsM5=finite(entry?.sellsM5,finite(source?.sellsM5));
+  const entryAgeSeconds=finite(p?.entryAgeSeconds,finite(entry?.ageSeconds));
+  const entryMarketCapUsd=finite(p?.entryMarketCapUsd,finite(entry?.marketCapUsd,finite(source?.marketCap)));
+  const entryLiquidityUsd=finite(p?.entryLiquidityUsd,finite(entry?.liquidityUsd,finite(source?.liquidityUsd)));
+  const entryNotionalSol=finite(p?.entryNotionalSol);
+  const holdSeconds=openedAt!=null&&closedAt!=null?Math.max(0,(closedAt-openedAt)/1000):null;
+  return {
+    positionKey:p?.positionKey,
+    symbol:text(p?.symbol,80),
+    tokenAddress:String(p?.tokenAddress||''),
+    status:String(p?.status||''),
+    closed:closedAt!=null&&realizablePnlQuote!=null,
+    completeEntrySnapshot:Boolean(research?.entrySnapshot),
+    openedAt,closedAt,holdSeconds,
+    realizablePnlQuote,
+    observedPnlQuote,
+    realizableReturnPct:realizablePnlQuote==null?null:realizablePnlQuote/exposure,
+    entryAgeSeconds,
+    entryMarketCapUsd,
+    entryLiquidityUsd,
+    entryNotionalSol,
+    entryImpactPct,
+    volumeM5:finite(entry?.volumeM5,finite(source?.volumeM5)),
+    buysM5,sellsM5,
+    buySellRatioM5:buysM5!=null&&sellsM5!=null?buysM5/Math.max(1,sellsM5):null,
+    priceChangeM5:finite(entry?.priceChangeM5,finite(source?.priceChangeM5)),
+    researchPriorityScore:finite(score?.researchPriorityScore),
+    top10Share:finite(security?.holderState?.top10Share,finite(security?.top10Share)),
+    largestHolderShare:finite(security?.holderState?.largestHolderShare,finite(security?.largestHolderShare)),
+    socialEngagement:finite(social?.engagement),
+    securityGate:text(security?.evidenceGate||entry?.security?.evidenceGate||'UNKNOWN',40)||'UNKNOWN',
+    trendVisible:Boolean(
+      source?.signalTrending===true||entry?.signalTrending===true||p?.trendVisibleAtEntry===true
+    ),
+    newPairVisible:Boolean(
+      source?.signalNewPair===true||entry?.signalNewPair===true||p?.newPairVisibleAtEntry===true
+    ),
+    dexId:text(research?.entrySnapshot?.identity?.dexId||p?.entryDexId||entry?.dexId||'UNKNOWN',80)||'UNKNOWN',
+    mfeReturnPct:finite(p?.observedMfeReturnPct,finite(p?.peakUnrealizedReturnPct)),
+    maeReturnPct:finite(p?.observedMaeReturnPct,finite(p?.troughUnrealizedReturnPct)),
+    observations:Number(research?.observationCountTotal)||observations.length,
+    dataGaps:Number(research?.dataGapCountTotal)||0,
+    ageBucket:w6ResearchBucket(entryAgeSeconds,[
+      {lt:30,label:'LT_30S'},{lt:60,label:'30_60S'},{lt:90,label:'60_90S'},{lt:120,label:'90_120S',gte:'GTE_120S'}
+    ]),
+    marketCapBucket:w6ResearchBucket(entryMarketCapUsd,[
+      {lt:125_000,label:'99_125K'},{lt:175_000,label:'125_175K'},{lt:250_000,label:'175_250K'},{lt:500_000,label:'250_500K',gte:'GTE_500K'}
+    ]),
+    liquidityBucket:w6ResearchBucket(entryLiquidityUsd,[
+      {lt:25_000,label:'LT_25K'},{lt:50_000,label:'25_50K'},{lt:100_000,label:'50_100K'},{lt:250_000,label:'100_250K',gte:'GTE_250K'}
+    ]),
+    sizeBucket:w6ResearchBucket(entryNotionalSol,[
+      {lt:2.01,label:'LE_2_SOL'},{lt:5.01,label:'2_5_SOL'},{lt:10.01,label:'5_10_SOL'},{lt:20.01,label:'10_20_SOL'},
+      {lt:40.01,label:'20_40_SOL'},{lt:60.01,label:'40_60_SOL'},{lt:80.01,label:'60_80_SOL',gte:'GT_80_SOL'}
+    ]),
+    entryImpactBucket:w6ResearchBucket(entryImpactPct,[
+      {lt:.03,label:'LT_3PCT'},{lt:.05,label:'3_5PCT'},{lt:.10,label:'5_10PCT',gte:'GTE_10PCT'}
+    ]),
+    holdBucket:w6ResearchBucket(holdSeconds,[
+      {lt:180,label:'LT_3M'},{lt:300,label:'3_5M'},{lt:600,label:'5_10M'},{lt:1800,label:'10_30M',gte:'GTE_30M'}
+    ])
+  };
+}
+
+export function w6ResearchAnalysis(state,{
+  asOf=Date.now(),
+  minCohortSamples=20,
+  minCorrelationSamples=30
+}={}){
+  const s=mutableState(state);
+  const wallet=s.wallets[WALLET_6_USER_99K_60S];
+  const all=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+    .map(w6ResearchRecordFromPosition)
+    .filter(Boolean);
+  const closed=all.filter(x=>x.closed);
+  const overall=w6ResearchCohortSummary(closed);
+  const cohortKeys=[
+    'ageBucket','marketCapBucket','liquidityBucket','sizeBucket','entryImpactBucket','holdBucket',
+    'securityGate','trendVisible','newPairVisible','dexId'
+  ];
+  const cohorts={};
+  for(const key of cohortKeys)cohorts[key]=w6ResearchGroup(closed,key);
+  const eligible=[];
+  for(const [dimension,groups] of Object.entries(cohorts)){
+    for(const group of groups)if(group.samples>=Math.max(2,Number(minCohortSamples)||20)){
+      eligible.push({dimension,...group});
+    }
+  }
+  eligible.sort((a,b)=>{
+    const ap=finite(a?.averagePnlQuote,-Infinity),bp=finite(b?.averagePnlQuote,-Infinity);
+    return bp-ap||b.samples-a.samples;
+  });
+  const numericFeatures=[
+    'entryAgeSeconds','entryMarketCapUsd','entryLiquidityUsd','entryNotionalSol','entryImpactPct',
+    'volumeM5','buySellRatioM5','priceChangeM5','researchPriorityScore','top10Share',
+    'largestHolderShare','socialEngagement','holdSeconds'
+  ];
+  const correlations=numericFeatures.map(feature=>{
+    const x=w6ResearchPearson(closed,feature,'realizablePnlQuote');
+    return {feature,...x,evidenceReady:x.samples>=Math.max(3,Number(minCorrelationSamples)||30)};
+  });
+  const contrasts=numericFeatures
+    .filter(x=>x!=='holdSeconds')
+    .map(feature=>w6ResearchFeatureContrast(closed,feature));
+  const complete=all.filter(x=>x.completeEntrySnapshot).length;
+  const totalObservations=all.reduce((sum,x)=>sum+Math.max(0,Number(x.observations)||0),0);
+  const totalDataGaps=all.reduce((sum,x)=>sum+Math.max(0,Number(x.dataGaps)||0),0);
+  const evidenceReady=closed.length>=Math.max(2,Number(minCohortSamples)||20);
+  return freeze({
+    version:W6_RESEARCH_ANALYSIS_VERSION,
+    asOf:Number(asOf),
+    walletId:WALLET_6_USER_99K_60S,
+    status:evidenceReady?'EVIDENCE_BUILDING':'COLLECTING',
+    counts:{
+      records:all.length,
+      open:all.filter(x=>!x.closed).length,
+      closed:closed.length,
+      completeEntrySnapshots:complete,
+      legacyOrIncompleteEntrySnapshots:Math.max(0,all.length-complete),
+      totalObservations,
+      totalDataGaps
+    },
+    thresholds:{
+      minCohortSamples:Math.max(2,Number(minCohortSamples)||20),
+      minCorrelationSamples:Math.max(3,Number(minCorrelationSamples)||30)
+    },
+    overall,
+    cohorts,
+    correlations,
+    winnerLoserFeatureContrasts:contrasts,
+    strongestPositiveCohorts:eligible.filter(x=>finite(x?.averagePnlQuote)>0).slice(0,8),
+    strongestNegativeCohorts:eligible.filter(x=>finite(x?.averagePnlQuote)<0).sort((a,b)=>finite(a?.averagePnlQuote,0)-finite(b?.averagePnlQuote,0)).slice(0,8),
+    evidenceReady,
+    automaticPolicyMutation:false,
+    recommendationAuthority:'RESEARCH_ONLY_REQUIRE_HUMAN_REVIEW_AND_OUT_OF_SAMPLE_CONFIRMATION',
+    execution:'SHADOW_ONLY',
+    canExecute:false,
+    canExecuteLive:false
+  });
+}
+
 export async function loadSpecialistWalletState(filePath){
   try{
     const parsed=JSON.parse(await readFile(filePath,'utf8'));
