@@ -13,7 +13,7 @@ import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, obs
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
 import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TEMPLE_VERSION } from './expansion-runtime/biggj-temporal-temple.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
-import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, w6ResearchArchive, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
+import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, w6ResearchArchive, w6ResearchAnalysis, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
 import { applyMemecoinEntrySignals, MEMECOIN_SIGNAL_CONTROLLER_VERSION } from './memecoin-signal-controller.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -12906,7 +12906,12 @@ function missionControlData(){
     version:SPECIALIST_SHADOW_WALLETS_VERSION,
     healthy:specialistWalletHealthy,
     lastError:specialistWalletLastError,
-    file:specialistWalletFile
+    file:specialistWalletFile,
+    w6ResearchAnalysis:w6ResearchAnalysis(specialistWalletState,{
+      asOf:now,
+      minCohortSamples:Math.max(5,Number(process.env.TCX_W6_RESEARCH_MIN_COHORT_SAMPLES||20)),
+      minCorrelationSamples:Math.max(10,Number(process.env.TCX_W6_RESEARCH_MIN_CORRELATION_SAMPLES||30))
+    })
   },
   telegramPolling:{lastPollAt:telegramLastPollAt,lastPollError:telegramLastPollError},
   discordBridge:discordBridge?discordBridge.snapshot():{enabled:false,reason:'NOT_CONFIGURED'}
@@ -13223,6 +13228,26 @@ const server = http.createServer(async (req,res) => {
       recordError(observability,{scope:'w6_research_archive',message:err instanceof Error?err.message:String(err)});
       res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
       res.end(JSON.stringify({ok:false,error:'W6_RESEARCH_ARCHIVE_UNAVAILABLE',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+    }
+    return;
+  }
+  if (requestPath === '/w6-analysis.json') {
+    try{
+      if(String(req.method||'GET').toUpperCase()!=='GET'){
+        res.writeHead(405,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','allow':'GET'});
+        res.end(JSON.stringify({ok:false,error:'METHOD_NOT_ALLOWED',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+        return;
+      }
+      const u=new URL(String(req.url||''),'http://localhost');
+      const minCohortSamples=Math.max(2,Math.min(200,Number(u.searchParams.get('minCohortSamples')||process.env.TCX_W6_RESEARCH_MIN_COHORT_SAMPLES||20)));
+      const minCorrelationSamples=Math.max(3,Math.min(500,Number(u.searchParams.get('minCorrelationSamples')||process.env.TCX_W6_RESEARCH_MIN_CORRELATION_SAMPLES||30)));
+      const analysis=w6ResearchAnalysis(specialistWalletState,{asOf:Date.now(),minCohortSamples,minCorrelationSamples});
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({ok:true,...analysis}));
+    }catch(err){
+      recordError(observability,{scope:'w6_research_analysis',message:err instanceof Error?err.message:String(err)});
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({ok:false,error:'W6_RESEARCH_ANALYSIS_UNAVAILABLE',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
     }
     return;
   }
