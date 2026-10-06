@@ -5319,11 +5319,20 @@ let w6UltraEarlyLastError=null;
 let w6UltraEarlyLastRefreshAt=null;
 const w6UltraCandidateBook=new Map();
 const w6UltraLaunchStats={discoveredWithin60:0,first99kObservedWithin60:0,first99kObservedAfter60:0,expiredWithout99k:0};
+const W6_CANDIDATE_BOOK_CONTRACT='GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1';
 const w6CandidateBookFile=specialistWalletFile+'.w6-candidates.json';
 try{
   const stored=JSON.parse(await readW6File(w6CandidateBookFile,'utf8'));
-  for(const row of (Array.isArray(stored?.rows)?stored.rows:[]).slice(-1000)){
-    if(row?.tokenAddress&&row?.pairCreatedAt!=null&&Number(row.pairCreatedAt)<=Date.now()&&Date.now()-Number(row.pairCreatedAt)<=180000)w6UltraCandidateBook.set(w6UltraCandidateKey(row),row);
+  if(stored?.contract===W6_CANDIDATE_BOOK_CONTRACT){
+    for(const row of (Array.isArray(stored?.rows)?stored.rows:[]).slice(-1000)){
+      if(row?.tokenAddress&&row?.pairCreatedAt!=null&&Number(row.pairCreatedAt)<=Date.now()&&Date.now()-Number(row.pairCreatedAt)<=180000)w6UltraCandidateBook.set(w6UltraCandidateKey(row),row);
+    }
+  }else{
+    console.log('[BIGGJ_W6_CANDIDATE_BOOK_RESET]',JSON.stringify({
+      storedContract:stored?.contract||'LEGACY_UNVERSIONED',
+      currentContract:W6_CANDIDATE_BOOK_CONTRACT,
+      droppedRows:Array.isArray(stored?.rows)?stored.rows.length:0
+    }));
   }
 }catch(err){if(err?.code!=='ENOENT')console.error('[BIGGJ_W6_CANDIDATE_RESTORE_ERROR]',String(err?.message||err));}
 let w6RefreshPending=null;
@@ -5482,7 +5491,10 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
     }),30000,'W6_ULTRA_PROVIDER');
     const ultra=enrichW6UltraCandidateRows(ultraRaw);
     const candidateTemp=w6CandidateBookFile+'.tmp';
-    await writeW6File(candidateTemp,JSON.stringify({rows:currentW6UltraCandidates().slice(-1000)}));
+    await writeW6File(candidateTemp,JSON.stringify({
+      contract:W6_CANDIDATE_BOOK_CONTRACT,
+      rows:currentW6UltraCandidates().slice(-1000)
+    }));
     await renameW6File(candidateTemp,w6CandidateBookFile);
     const solPriceUsd=await currentW6SolPriceUsd();
     const update=applyJonasCloneSnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
