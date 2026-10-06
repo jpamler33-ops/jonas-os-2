@@ -1,3 +1,4 @@
+import {readFile as readW6File,writeFile as writeW6File,rename as renameW6File} from 'node:fs/promises';
 import {applyJonasCloneSnapshot} from './jonas-clone-v1-integration.mjs';
 import http from 'node:http';
 import { createBiggjAgentAutolearnHook } from './biggj-agent-autolearn-hook.mjs';
@@ -5311,6 +5312,19 @@ let w6UltraEarlyLastError=null;
 let w6UltraEarlyLastRefreshAt=null;
 const w6UltraCandidateBook=new Map();
 const w6UltraLaunchStats={discoveredWithin60:0,first99kObservedWithin60:0,first99kObservedAfter60:0,expiredWithout99k:0};
+const w6CandidateBookFile=specialistWalletFile+'.w6-candidates.json';
+try{
+  const stored=JSON.parse(await readW6File(w6CandidateBookFile,'utf8'));
+  for(const row of (Array.isArray(stored?.rows)?stored.rows:[]).slice(-1000)){
+    if(row?.tokenAddress&&row?.pairCreatedAt!=null&&Number(row.pairCreatedAt)<=Date.now()&&Date.now()-Number(row.pairCreatedAt)<=180000)w6UltraCandidateBook.set(w6UltraCandidateKey(row),row);
+  }
+}catch(err){if(err?.code!=='ENOENT')console.error('[BIGGJ_W6_CANDIDATE_RESTORE_ERROR]',String(err?.message||err));}
+let w6RefreshPending=null;
+function refreshW6UltraEarly(reason='periodic'){
+  if(w6RefreshPending)return w6RefreshPending;
+  w6RefreshPending=refreshW6UltraEarlyOnce(reason).finally(()=>{w6RefreshPending=null;});
+  return w6RefreshPending;
+}
 let w6SolPriceCache={value:null,at:0,error:null};
 async function currentW6SolPriceUsd({force=false}={}){
   const now=Date.now();
@@ -5332,8 +5346,8 @@ function w6StrategyRuntimeOptions(solPriceUsd){
   return {
     now:Date.now(),
     marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
-    maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
-    minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
+    maxAgeSeconds:120,
+    minMarketCapUsd:99_000,
     minGreenChangePct:null,
     requireExactGmgnGreen:false,
     minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
@@ -5358,9 +5372,9 @@ function w6UltraCandidateKey(row){
   return String(row?.chainId||'solana').toLowerCase()+':'+String(row?.tokenAddress||'');
 }
 function currentW6UltraCandidates(now=Date.now()){
-  const maxKeepSeconds=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)));
+  const maxKeepSeconds=Math.max(120,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS)||120));
   for(const [key,row] of w6UltraCandidateBook){
-    const created=Number(row?.pairCreatedAt);
+    const created=row?.pairCreatedAt==null?NaN:Number(row.pairCreatedAt);
     const age=Number.isFinite(created)?Math.max(0,(Number(now)-created)/1000):Infinity;
     if(age>maxKeepSeconds){
       if(row?.w6LaunchTracker?.first99kObservedAt==null)w6UltraLaunchStats.expiredWithout99k++;
@@ -5371,16 +5385,16 @@ function currentW6UltraCandidates(now=Date.now()){
 }
 function enrichW6UltraCandidateRows(snapshot){
   const capturedAt=Number(snapshot?.capturedAt||Date.now());
-  const thresholdUsd=Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000));
+  const thresholdUsd=99_000;
   const rows=(Array.isArray(snapshot?.rows)?snapshot.rows:[]).map(row=>{
     if(row?.w6TrackingOnly===true)return row;
-    const created=Number(row?.pairCreatedAt);
-    const ageSeconds=Number.isFinite(created)?Math.max(0,(capturedAt-created)/1000):null;
+    const created=row?.pairCreatedAt==null?NaN:Number(row.pairCreatedAt);
+    const ageSeconds=Number.isFinite(created)&&created<=capturedAt?(capturedAt-created)/1000:null;
     const key=w6UltraCandidateKey(row);
     const prior=w6UltraCandidateBook.get(key);
     const priorTracker=prior?.w6LaunchTracker||{};
     const firstObservedAt=Number(priorTracker?.firstObservedAt)||capturedAt;
-    const firstObservedAgeSeconds=Number.isFinite(Number(priorTracker?.firstObservedAgeSeconds))
+    const firstObservedAgeSeconds=priorTracker?.firstObservedAgeSeconds!=null&&Number.isFinite(Number(priorTracker.firstObservedAgeSeconds))
       ?Number(priorTracker.firstObservedAgeSeconds)
       :ageSeconds;
     const marketCap=Number(row?.marketCap);
@@ -5396,7 +5410,7 @@ function enrichW6UltraCandidateRows(snapshot){
       ?Math.max(Number.isFinite(priorMaxGreen)?priorMaxGreen:-Infinity,greenPercent)
       :(Number.isFinite(priorMaxGreen)?priorMaxGreen:null);
     let first99kObservedAt=Number(priorTracker?.first99kObservedAt)||null;
-    let first99kObservedAgeSeconds=Number.isFinite(Number(priorTracker?.first99kObservedAgeSeconds))
+    let first99kObservedAgeSeconds=priorTracker?.first99kObservedAgeSeconds!=null&&Number.isFinite(Number(priorTracker.first99kObservedAgeSeconds))
       ?Number(priorTracker.first99kObservedAgeSeconds)
       :null;
     if(first99kObservedAt==null&&marketCapKnown&&marketCap>=thresholdUsd&&ageSeconds!=null){
@@ -5425,8 +5439,9 @@ function enrichW6UltraCandidateRows(snapshot){
       observationSemantics:'FIRST_OBSERVED_MARKET_CAP_USD_GTE_99K_NOT_EXACT_CROSSING_TIME'
     };
     const enriched={...row,w6LaunchTracker:tracker};
-    if(ageSeconds!=null&&ageSeconds<=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)))){
+    if(ageSeconds!=null&&ageSeconds<=Math.max(120,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS)||120))){
       w6UltraCandidateBook.set(key,enriched);
+      while(w6UltraCandidateBook.size>1000)w6UltraCandidateBook.delete(w6UltraCandidateBook.keys().next().value);
     }
     return enriched;
   });
@@ -5439,7 +5454,7 @@ function enrichW6UltraCandidateRows(snapshot){
   };
 }
 
-async function refreshW6UltraEarly(reason='periodic'){
+async function refreshW6UltraEarlyOnce(reason='periodic'){
   const started=Date.now();
   const force=reason==='startup'||reason==='manual';
   try{
@@ -5452,6 +5467,9 @@ async function refreshW6UltraEarly(reason='periodic'){
       force
     });
     const ultra=enrichW6UltraCandidateRows(ultraRaw);
+    const candidateTemp=w6CandidateBookFile+'.tmp';
+    await writeW6File(candidateTemp,JSON.stringify({rows:currentW6UltraCandidates().slice(-1000)}));
+    await renameW6File(candidateTemp,w6CandidateBookFile);
     const solPriceUsd=await currentW6SolPriceUsd();
     const update=applyJonasCloneSnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
     specialistWalletState=update.state;
@@ -5480,6 +5498,8 @@ async function refreshW6UltraEarly(reason='periodic'){
         entryGreenPercent:p?.entryGreenPercent??null,
         entryThresholdMode:p?.entryThresholdMode??null,
         entryMarketCapUsd:p?.entryMarketCapUsd??null,
+        entryLiquidityUsd:p?.entryLiquidityUsd??null,
+        entryNotionalSol:p?.entryNotionalSol??null,
         lastMarketCapUsd:p?.lastMarketCapUsd??null,
         peakMarketCapUsd:p?.peakMarketCapUsd??null,
         troughMarketCapUsd:p?.troughMarketCapUsd??null,
@@ -5540,6 +5560,9 @@ async function refreshW6UltraEarly(reason='periodic'){
       candidateTrackingRows:ultra.candidateTrackingRows||0,
       candidateBookSize:ultra.candidateBookSize||0,
       launchStats:ultra.launchStats||{},
+      effectiveEntryMaxAgeSeconds:120,
+      effectiveMinMarketCapUsd:99000,
+      candidateEvidence:currentW6UltraCandidates().slice(0,100).map(row=>({tokenAddress:row.tokenAddress,ageSeconds:(Date.now()-Number(row.pairCreatedAt))/1000,marketCap:row.marketCap,liquidityUsd:row.liquidityUsd,...row.w6LaunchTracker})),
       trackingRows:ultra.trackingRows||0,
       pollMs:w6UltraEarlyRefreshMs,
       cloneStrategy:update.results.strategyVersion,
@@ -5550,6 +5573,7 @@ async function refreshW6UltraEarly(reason='periodic'){
       active:wallet?.openPositions||0,
       closedTrades:wallet?.closedTrades||0,
       activeTrades,
+      recentClosedTrades:wallet?.recentClosed?.slice(0,5)||[],
       execution:'SHADOW_ONLY',
       canExecuteLive:false
     }));
