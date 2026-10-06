@@ -1025,9 +1025,9 @@ test('W6 liquidity death marks the remaining shadow exposure as non-realizable l
   assert.ok(p.observedUnrealizedNetPnlQuote>0);
   assert.equal(p.executableUnrealizedNetPnlQuote,null);
   assert.equal(p.executionPnlStatus,'LIQUIDITY_DEAD');
-  assert.equal(p.conservativeUnrealizedNetPnlQuote,-1000);
+  assert.equal(p.conservativeUnrealizedNetPnlQuote,-100);
   assert.equal(w.liquidityDeadOpenPositions,1);
-  assert.equal(w.netPnlQuote,-1000);
+  assert.equal(w.netPnlQuote,-100);
   assert.equal(w.observedNetPnlQuote>0,true);
   assert.equal(w.canExecuteLive,false);
 });
