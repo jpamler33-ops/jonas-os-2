@@ -326,6 +326,33 @@ test('research spine is visible in the discovery view',()=>{
 });
 
 
+
+test('W6 webapp includes the evidence-gated research analyzer',()=>{
+  const x={health:{
+    specialistWallets:{
+      wallets:{W6_USER_99K_60S:{walletId:'W6_USER_99K_60S',openPositions:0,closedTrades:24,active:[],recentClosed:[]}},
+      w6ResearchAnalysis:{
+        version:'BIGGJ_W6_RESEARCH_ANALYSIS_V1',
+        status:'EVIDENCE_BUILDING',
+        counts:{records:25,open:1,closed:24,completeEntrySnapshots:22,legacyOrIncompleteEntrySnapshots:3,totalObservations:310,totalDataGaps:2},
+        thresholds:{minCohortSamples:20,minCorrelationSamples:30},
+        overall:{samples:24,wins:15,losses:9,winRate:.625,totalPnlQuote:4200},
+        strongestPositiveCohorts:[{dimension:'ageBucket',value:'60_90S',samples:20,averagePnlQuote:240,winRate:.7}],
+        strongestNegativeCohorts:[{dimension:'entryImpactBucket',value:'GTE_10PCT',samples:21,averagePnlQuote:-180,winRate:.19}],
+        correlations:[{feature:'entryLiquidityUsd',samples:35,r:.41,evidenceReady:true}],
+        evidenceReady:true,automaticPolicyMutation:false,execution:'SHADOW_ONLY',canExecuteLive:false
+      }
+    },
+    memecoinRadar:{sourceReady:true,user99k60s:{exitLearning:{samples:0}},signalController:{counts:{}}}
+  }};
+  const h=renderBiggjMobileApp(x);
+  for(const text of ['W6 Research Analyzer','EVIDENCE_BUILDING','STÄRKSTE POSITIVE KOHORTEN','STÄRKSTE NEGATIVE KOHORTEN','EVIDENCE-READY KORRELATIONEN','REALIZABLE PNL'])assert.match(h,new RegExp(text));
+  assert.match(h,/60_90S/);
+  assert.match(h,/GTE_10PCT/);
+  assert.match(h,/automaticPolicyMutation/);
+  assert.match(h,/keine automatische Regeländerung/);
+});
+
 test('W6 webapp shows expanded sizing and 60m runner lab',()=>{
   const h=renderBiggjMobileApp({health:{specialistWallets:{wallets:{W6_USER_99K_60S:{openPositions:0,closedTrades:0,active:[]}}},memecoinRadar:{user99k60s:{exitLearning:{samples:0}}}}});
   assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
