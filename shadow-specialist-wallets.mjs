@@ -981,7 +981,7 @@ function user99k60sPairIdentity(row={}){
   };
 }
 
-function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30}={}){
+function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30,fresh=true}={}){
   const markPrice=finite(row?.priceUsd,finite(position?.lastPrice));
   const entryPrice=finite(position?.entryPrice);
   const exposureQuote=Math.max(0,finite(position?.exposureQuote,finite(position?.marginQuote,0)));
@@ -992,26 +992,30 @@ function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30}={}){
   const feesQuote=exposureQuote*roundTripFeeRate;
   const currentLiquidityUsd=finite(row?.liquidityUsd);
   const entryLiquidityUsd=finite(position?.entryLiquidityUsd);
-  const solAtEntry=finite(position?.solPriceUsdAtEntry);
-  const sizeSol=finite(position?.entryNotionalSol);
-  const entryImpactPct=user99k60sImpactPct(sizeSol,solAtEntry,entryLiquidityUsd);
-  const exitImpactPct=user99k60sImpactPct(sizeSol,solAtEntry,currentLiquidityUsd);
+  const entryImpactPct=entryLiquidityUsd>0?exposureQuote/(entryLiquidityUsd/2+exposureQuote):null;
+  const tokenValueAtMark=grossQuote==null||entryImpactPct==null?null:(exposureQuote+grossQuote)*(1-entryImpactPct);
+  const quoteReserveUsd=currentLiquidityUsd>0?currentLiquidityUsd/2:null;
+  const exitImpactPct=quoteReserveUsd>0&&tokenValueAtMark!=null?tokenValueAtMark/(quoteReserveUsd+tokenValueAtMark):null;
   const pair=user99k60sPairIdentity(row);
   const entryPoolAddress=text(position?.entryPoolAddress||'',160)||null;
   const pairVerified=entryPoolAddress==null?true:pair.pairAddress!=null;
   const pairMatches=entryPoolAddress==null?true:(pair.pairAddress!=null&&pair.pairAddress===entryPoolAddress);
-  const liquidityDead=currentLiquidityUsd!=null&&currentLiquidityUsd<=W6_LIQUIDITY_DEAD_USD;
+  const liquidityDead=fresh&&pairVerified&&pairMatches&&currentLiquidityUsd!=null&&currentLiquidityUsd>=0&&currentLiquidityUsd<=W6_LIQUIDITY_DEAD_USD;
   const impactKnown=entryImpactPct!=null&&exitImpactPct!=null;
-  const executable=Boolean(markPrice>0&&currentLiquidityUsd>W6_LIQUIDITY_DEAD_USD&&impactKnown&&pairVerified&&pairMatches);
-  const modelledNetPnlQuote=executable&&grossQuote!=null
-    ?grossQuote-feesQuote-exposureQuote*(entryImpactPct+exitImpactPct)
-    :null;
+  const executable=Boolean(fresh&&markPrice>0&&currentLiquidityUsd>W6_LIQUIDITY_DEAD_USD&&impactKnown&&pairVerified&&pairMatches);
+  // Constant-product sell: proceeds can never exceed the quote-side reserve.
+  const grossExitProceedsQuote=liquidityDead?0:(executable?quoteReserveUsd*(tokenValueAtMark/(quoteReserveUsd+tokenValueAtMark)):null);
+  const entryFeeQuote=exposureQuote*roundTripFeeRate/2;
+  const exitFeeQuote=grossExitProceedsQuote==null?null:grossExitProceedsQuote*roundTripFeeRate/2;
+  const exitProceedsQuote=grossExitProceedsQuote==null?null:Math.max(0,grossExitProceedsQuote-exitFeeQuote);
+  const modelledNetPnlQuote=executable?exitProceedsQuote-exposureQuote-entryFeeQuote:null;
   const observedNetPnlQuote=grossQuote==null?null:grossQuote-feesQuote;
   const conservativeNetPnlQuote=liquidityDead
-    ?-exposureQuote
+    ?-exposureQuote-entryFeeQuote
     :(modelledNetPnlQuote!=null?modelledNetPnlQuote:(observedNetPnlQuote==null?null:Math.min(0,observedNetPnlQuote)));
   let status='EXECUTABLE_MODELLED';
-  if(liquidityDead)status='LIQUIDITY_DEAD';
+  if(!fresh)status='STALE_DATA';
+  else if(liquidityDead)status='LIQUIDITY_DEAD';
   else if(!pairMatches)status='PAIR_MISMATCH';
   else if(!pairVerified)status='PAIR_UNVERIFIED';
   else if(currentLiquidityUsd==null)status='LIQUIDITY_UNKNOWN';
@@ -1030,6 +1034,7 @@ function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30}={}){
     pairVerified,
     pairMatches,
     liquidityDead,
+    fresh,quoteReserveUsd,tokenValueAtMark,grossExitProceedsQuote,exitProceedsQuote,entryFeeQuote,exitFeeQuote,
     entryImpactPct,
     exitImpactPct,
     totalImpactPct:impactKnown?entryImpactPct+exitImpactPct:null,
@@ -1044,6 +1049,30 @@ function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30}={}){
     execution:'SHADOW_ONLY',
     canExecuteLive:false
   };
+}
+
+function closeW6Position(wallet,index,{row,at,reason,feeBps=30,executionMark}={}){
+  const p=wallet.positions[index],m=executionMark;
+  const timely=m&&m.fresh!==false&&Number(m.observedAt)<=at&&at-Number(m.observedAt)<=W6_EXECUTABLE_MARK_STALE_MS;
+  if(!p||!timely||(!m.executable&&!m.liquidityDead))return null;
+  const grossProceeds=finite(m.grossExitProceedsQuote);
+  const proceeds=finite(m.exitProceedsQuote);
+  if(grossProceeds==null||proceeds==null||proceeds<0||(!m.liquidityDead&&grossProceeds>finite(m.quoteReserveUsd,-1)))return null;
+  const closed=closePosition(wallet,index,{price:finite(row?.priceUsd)>0?Number(row.priceUsd):finite(p.lastPrice,p.entryPrice),at,reason,feeBps});
+  if(!closed)return null;
+  const exposure=Math.max(0,finite(p.exposureQuote,0));
+  closed.observedRealizedNetPnlQuote=finite(p.observedUnrealizedNetPnlQuote,closed.realizedNetPnlQuote);
+  closed.realizedGrossPnlQuote=finite(p.partialRealizedGrossPnlQuote,0)+grossProceeds-exposure;
+  closed.realizedFeesQuote=finite(p.partialRealizedFeesQuote,0)+finite(m.entryFeeQuote,0)+finite(m.exitFeeQuote,0);
+  closed.realizedNetPnlQuote=finite(p.partialRealizedNetPnlQuote,0)+proceeds-exposure-finite(m.entryFeeQuote,0);
+  closed.realizableRealizedNetPnlQuote=closed.realizedNetPnlQuote;
+  closed.realizedReturnPct=closed.realizedGrossPnlQuote/Math.max(EPS,finite(p.initialExposureQuote,exposure));
+  closed.exitExecutionMark=clone(m);
+  closed.exitProceedsQuote=proceeds;
+  closed.settlementStatus=m.liquidityDead?'ZERO_RECOVERY_WRITE_OFF':'MODELLED_LIQUIDITY_BACKED_EXIT';
+  closed.exitFilled=m.executable===true;
+  closed.settlementSemantics='SHADOW_CONSTANT_PRODUCT_ESTIMATE_NOT_ACTUAL_PAYOUT';
+  return closed;
 }
 
 function user99k60sExecutionOutputView(position,{asOf=Date.now()}={}){
@@ -1239,10 +1268,13 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
+  const captured=finite(snapshot?.capturedAt);
+  const marksFresh=snapshot?.sourceReady===true&&(snapshot?.capturedAt==null||(captured!=null&&captured<=now&&now-captured<=W6_EXECUTABLE_MARK_STALE_MS));
+
   const byKey=new Map(rows.map(x=>[String(x?.chainId||'')+':'+String(x?.tokenAddress||''),x]));
   const results={
     matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
-    marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    marketCapExit:0,catastrophicExit:0,liquidityExit:0,unfillableExits:0,scenarioTargetHits:0,holdScenarioCloses:0,
     researchSnapshotsCaptured:0,researchGapsCaptured:0,
     earlyMomentumScenarioCloses:0,earlyMomentumEntryAgeCloses:0,
     cloneCheckpoints:0,
@@ -1272,7 +1304,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
     const row=byKey.get(String(p.chainId||'')+':'+String(p.tokenAddress||''));
-    if(!row||!(finite(row?.priceUsd)>0)){
+    const deathMark=row?user99k60sExecutableMark(p,row,{now,feeBps,fresh:marksFresh}):null;
+    if(!row||(!(finite(row?.priceUsd)>0)&&!deathMark?.liquidityDead)){
       if(p?.coinResearch){
         const gapCountBefore=Number(p.coinResearch?.dataGapCountTotal)||0;
         const nextResearch=user99k60sRecordResearchGap(p.coinResearch,{
@@ -1288,7 +1321,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const baseMarked=markPosition(p,row.priceUsd,now,feeBps);
     const marketCapUsd=finite(row?.marketCap);
     const currentLiquidityUsd=finite(row?.liquidityUsd);
-    const executionMark=user99k60sExecutableMark(baseMarked,row,{now,feeBps});
+    const executionMark=user99k60sExecutableMark(baseMarked,row,{now,feeBps,fresh:marksFresh});
     const researchCountBefore=Number(p?.coinResearch?.observationCountTotal)||0;
     const coinResearch=user99k60sAppendResearchObservation(p?.coinResearch,row,{...p,...baseMarked},{
       at:now,phase:'MARK',executionMark
@@ -1407,7 +1440,9 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
     const catastrophicLoss=Math.max(.50,Math.min(.99,finite(catastrophicDrawdownPct,.90)));
     const catastrophicMcap=Math.max(0,finite(catastrophicMarketCapUsd,10_000));
-    if(!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
+    if(executionMark.liquidityDead){
+      reason='W6_LIQUIDITY_GONE';
+    }else if(!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
     }else if(!protectedHold&&(
       (ret!=null&&ret<=-catastrophicLoss)||
@@ -1423,18 +1458,21 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         })
       };
       const closeExecution=wallet.positions[i]?.executableMark||null;
-      const closeConservative=finite(wallet.positions[i]?.conservativeUnrealizedNetPnlQuote);
       const closeObserved=finite(wallet.positions[i]?.observedUnrealizedNetPnlQuote,finite(wallet.positions[i]?.unrealizedNetPnlQuote));
       const closingPosition=clone(wallet.positions[i]);
-      const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
+      const closed=closeW6Position(wallet,i,{row,at:now,reason,feeBps,executionMark:closeExecution});
       if(closed){
         closed.observedRealizedNetPnlQuote=closeObserved;
-        closed.realizableRealizedNetPnlQuote=closeConservative!=null?closeConservative:finite(closed.realizedNetPnlQuote);
+        closed.realizableRealizedNetPnlQuote=closed.realizedNetPnlQuote;
         closed.exitExecutionMark=closeExecution?clone(closeExecution):null;
         closed.coinResearch=user99k60sFinalizeResearchDataset(closingPosition,closed,{at:now,reason});
         results.closed++;
+        if(reason==='W6_LIQUIDITY_GONE')results.liquidityExit++;
         if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
         if(reason==='USER_99K_60S_CATASTROPHIC_FAILSAFE')results.catastrophicExit++;
+      }else{
+        results.unfillableExits++;
+        wallet.positions[i]={...wallet.positions[i],pendingExit:{reason,at:now,status:'EXIT_UNFILLABLE',executionStatus:closeExecution?.status}};
       }
     }
   }
@@ -1629,6 +1667,7 @@ export function recordUser99k60sExitObservation(input,{
   const estimatedNetPnlSolBeforeSlippage=notionalSol>0&&ret!=null?notionalSol*(ret-roundTripFeeRate):null;
   wallet.positions[idx]={
     ...marked,
+    observedUnrealizedNetPnlQuote:marked.unrealizedNetPnlQuote,
     lastMarketCapUsd:cap,
     peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
     troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
@@ -1650,7 +1689,7 @@ export function recordUser99k60sExitObservation(input,{
   const closeReason=why==='USER_PROFIT_ENOUGH'?'USER_99K_60S_PROFIT_ENOUGH':'USER_99K_60S_MCAP_TOO_SMALL';
   let current=wallet.positions[idx];
   const syntheticRow={
-    chainId:current?.chainId,tokenAddress:current?.tokenAddress,pairAddress:current?.entryPoolAddress,dexId:current?.entryDexId,
+    chainId:current?.chainId,tokenAddress:current?.tokenAddress,pairAddress:current?.executableMark?.currentPoolAddress,dexId:current?.executableMark?.currentDexId,
     symbol:current?.symbol,name:current?.name,priceUsd:mark,marketCap:finite(marketCapUsd,finite(current?.lastMarketCapUsd)),
     liquidityUsd:finite(current?.lastLiquidityUsd),pairCreatedAt:finite(current?.sourcePairCreatedAt),
     signalTrending:current?.trendVisibleAtEntry===true,signalNewPair:current?.newPairVisibleAtEntry===true,
@@ -1660,17 +1699,19 @@ export function recordUser99k60sExitObservation(input,{
     at:now,phase:'USER_EXIT',executionMark:current?.executableMark,force:true
   })};
   wallet.positions[idx]=current;
-  const closed=closePosition(wallet,idx,{price:mark,at:now,reason:closeReason,feeBps});
+  const priorMark=current?.executableMark;
+  const fresh=priorMark?.fresh!==false&&priorMark?.observedAt!=null&&Number(priorMark.observedAt)<=now&&now-Number(priorMark.observedAt)<=W6_EXECUTABLE_MARK_STALE_MS;
+  const executionMark=user99k60sExecutableMark(current,syntheticRow,{now,feeBps,fresh});
+  const closed=closeW6Position(wallet,idx,{row:syntheticRow,at:now,reason:executionMark.liquidityDead?'W6_LIQUIDITY_GONE':closeReason,feeBps,executionMark});
   if(closed){
     const observed=finite(current?.observedUnrealizedNetPnlQuote,finite(current?.unrealizedNetPnlQuote,finite(closed.realizedNetPnlQuote)));
-    const conservative=finite(current?.conservativeUnrealizedNetPnlQuote,observed);
     closed.observedRealizedNetPnlQuote=observed;
-    closed.realizableRealizedNetPnlQuote=conservative;
-    closed.exitExecutionMark=current?.executableMark?clone(current.executableMark):null;
-    closed.coinResearch=user99k60sFinalizeResearchDataset(current,closed,{at:now,reason:closeReason});
+    closed.realizableRealizedNetPnlQuote=closed.realizedNetPnlQuote;
+    closed.exitExecutionMark=clone(executionMark);
+    closed.coinResearch=user99k60sFinalizeResearchDataset(current,closed,{at:now,reason:closed.closeReason});
   }
   state.updatedAt=Number(now);
-  return {state:freeze(state),recorded:Boolean(closed),error:closed?null:'CLOSE_FAILED',closed:closed?freeze(clone(closed)):null};
+  return {state:freeze(state),recorded:Boolean(closed),error:closed?null:'EXIT_UNFILLABLE',closed:closed?freeze(clone(closed)):null};
 }
 
 export function user99k60sExitLearningSummary(input,{asOf=Date.now()}={}){

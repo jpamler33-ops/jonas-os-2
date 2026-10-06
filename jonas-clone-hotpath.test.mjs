@@ -31,8 +31,11 @@ test('six checkpoints persist, four exit comparisons use observed time; small in
 });
 test('late observations cannot masquerade as on-time profitable exits and zero liquidity has no modelled net profit',()=>{
  let x=apply(createSpecialistWalletState(),[row]);x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.2,liquidityUsd:0}],now+400000);
- const c=x.state.wallets[W6].positions[0].jonasClone.checkpoints[0];
- assert.equal(x.state.wallets[W6].positions[0].jonasClone.liquidityDeath.observedAt,now+400000);
+ const closed=x.state.wallets[W6].closed[0],c=closed.jonasClone.checkpoints[0];
+ assert.equal(x.state.wallets[W6].positions.length,0);
+ assert.equal(closed.closeReason,'W6_LIQUIDITY_GONE');
+ assert.equal(closed.exitProceedsQuote,0);
+ assert.equal(closed.jonasClone.liquidityDeath.observedAt,now+400000);
  assert.equal(c.status,'LATE_OBSERVATION');assert.equal(c.holdSeconds,400);assert.equal(c.modelledNetPnlSol,null);
 });
 test('legacy W6 positions remain legacy across clone deployment',()=>{
