@@ -1069,6 +1069,9 @@ function closeW6Position(wallet,index,{row,at,reason,feeBps=30,executionMark}={}
   closed.realizedReturnPct=closed.realizedGrossPnlQuote/Math.max(EPS,finite(p.initialExposureQuote,exposure));
   closed.exitExecutionMark=clone(m);
   closed.exitProceedsQuote=proceeds;
+  closed.targetHoldSeconds=finite(p?.targetHoldSeconds);
+  closed.actualHoldSeconds=Math.max(0,(Number(at)-Number(p?.openedAt||at))/1000);
+  closed.exitRequestLagSeconds=closed.targetHoldSeconds==null?null:Math.max(0,closed.actualHoldSeconds-closed.targetHoldSeconds);
   closed.settlementStatus=m.liquidityDead?'ZERO_RECOVERY_WRITE_OFF':'MODELLED_LIQUIDITY_BACKED_EXIT';
   closed.exitFilled=m.executable===true;
   closed.settlementSemantics='SHADOW_CONSTANT_PRODUCT_ESTIMATE_NOT_ACTUAL_PAYOUT';
@@ -1442,9 +1445,11 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const catastrophicMcap=Math.max(0,finite(catastrophicMarketCapUsd,10_000));
     if(executionMark.liquidityDead){
       reason='W6_LIQUIDITY_GONE';
-    }else if(!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
+    }else if(clonePolicy&&holdSeconds>=240){
+      reason='W6_HOLD_4M_EXIT';
+    }else if(!clonePolicy&&!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
-    }else if(!protectedHold&&(
+    }else if(!clonePolicy&&!protectedHold&&(
       (ret!=null&&ret<=-catastrophicLoss)||
       (catastrophicMcap>0&&marketCapUsd!=null&&marketCapUsd<catastrophicMcap)
     )){
@@ -1472,7 +1477,14 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         if(reason==='USER_99K_60S_CATASTROPHIC_FAILSAFE')results.catastrophicExit++;
       }else{
         results.unfillableExits++;
-        wallet.positions[i]={...wallet.positions[i],pendingExit:{reason,at:now,status:'EXIT_UNFILLABLE',executionStatus:closeExecution?.status}};
+        wallet.positions[i]={...wallet.positions[i],pendingExit:{
+          reason,
+          at:now,
+          requestedAt:clonePolicy&&reason==='W6_HOLD_4M_EXIT'?Number(p?.openedAt||now)+240_000:now,
+          targetHoldSeconds:clonePolicy?240:null,
+          status:'EXIT_UNFILLABLE',
+          executionStatus:closeExecution?.status
+        }};
       }
     }
   }
@@ -1481,7 +1493,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const signal=evaluateUser99k60sEntry(row,{now,maxAgeSeconds,minMarketCapUsd,minGreenChangePct,requireExactGmgnGreen,requireTrending,requireNewPair});
     const intent=clonePolicy?jonasCloneCandidateToShadowIntent({
       ageSeconds:row?.pairCreatedAt!=null&&Number(row.pairCreatedAt)<=now?(now-Number(row.pairCreatedAt))/1000:null,
-      marketCapUsd:row?.marketCap,liquidityUsd:row?.liquidityUsd,
+      greenPercent:user99k60sGreenPercent(row),
+      gmgn1mChangePct:user99k60sGreenPercent(row),
+      exactGmgnTrend:row?.gmgnExactTrend===true,
+      liquidityUsd:row?.liquidityUsd,
       trendFeed:row?.signalTrending===true||row?.w6TrendVisible===true
     }):null;
     const ageKnown=signal.ageSeconds!=null;
@@ -1586,10 +1601,12 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       holdLabSummary:user99k60sHoldLabSummary(holdLab),
       earlyMomentumChallengerLab,
       earlyMomentumChallengerSummary:summarizeEarlyMomentumChallengerLab(earlyMomentumChallengerLab),
-      minHoldSeconds:Math.max(0,finite(minHoldSeconds,180)),
-      lossExitProtectedUntil:Number(now)+Math.max(0,finite(minHoldSeconds,180))*1000,
-      minExitMarketCapUsd:finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null,
-      marketCapExitTracking:finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE',
+      minHoldSeconds:clonePolicy?240:Math.max(0,finite(minHoldSeconds,180)),
+      lossExitProtectedUntil:Number(now)+(clonePolicy?240:Math.max(0,finite(minHoldSeconds,180)))*1000,
+      targetHoldSeconds:clonePolicy?240:null,
+      exitRequestedAt:clonePolicy?Number(now)+240_000:null,
+      minExitMarketCapUsd:clonePolicy?null:(finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null),
+      marketCapExitTracking:clonePolicy?'DISABLED_FIXED_4M_EXIT':(finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE'),
       entryStrategySignal:clone(signal),
       ...(clonePolicy?{jonasClone:{strategy:'JONAS_CLONE_V1',intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},strategy:'JONAS_CLONE_V1'}:{}),
       strategyVersion:clonePolicy?'JONAS_CLONE_V1':USER_99K_60S_STRATEGY_VERSION,
@@ -1598,12 +1615,12 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         :(requireNewPair
           ?'GMGN_TRENDING_NEW_PAIR_1M_AGE_LT_120S_MCAP_GTE_99K_IMMEDIATE'
           :(requireTrending?'TREND_VISIBLE_AND_AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE':'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE')),
-      exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
-      targetTracking:'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
+      exitRule:clonePolicy?'FIXED_240S_OR_CONFIRMED_LIQUIDITY_DEATH':'DISCRETIONARY_PROFIT_TAKE_OR_MARKET_CAP_EXIT_WITH_3M_PROTECTION_PLUS_CATASTROPHIC_FAILSAFE',
+      targetTracking:clonePolicy?'AUTO_EXIT_AT_240S_LIQUIDITY_BACKED_SETTLEMENT':'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT',
       source:'BIGGJ_MEMECOIN_EARLY_RADAR',
       status:'OPEN',
       execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
-      epistemic:'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
+      epistemic:clonePolicy?'EXACT_GMGN_1M_PERCENT_ENTRY_FIXED_4M_SHADOW_EXIT':'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
     };
     const entryExecutionMark=user99k60sExecutableMark(position,row,{now,feeBps});
     const coinResearch=user99k60sCreateResearchDataset(row,position,{at:now,executionMark:entryExecutionMark});

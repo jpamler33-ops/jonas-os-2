@@ -8,19 +8,25 @@ export function applyJonasClonePriority(runtime={}){
 
 export {jonasCloneCandidateToShadowIntent} from './jonas-clone-v1-intent.mjs';
 
-// The existing wallet engine remains the only position and persistence owner.
-// W6_FORCED_SHADOW intentionally does not require a trending classification:
-// the first fresh observation at >= $99k market cap is the research entry event.
-// Other classifications/gates remain available as evidence but cannot block this
-// isolated shadow-only lane.
+// W6 reproduces the user's GMGN New Pair -> 1m workflow in SHADOW only.
+// "99k" means the observed GMGN 1m performance is >= +99,000%, never
+// $99,000 market cap. A valid entry must be seen on the exact GMGN feed
+// while pair age is strictly <120s. The primary exit is fixed at 240s;
+// confirmed liquidity death closes earlier with zero-recovery settlement.
 import {applyUser99k60sStrategySnapshot} from './shadow-specialist-wallets.mjs';
 export function applyJonasCloneSnapshot(state,snapshot,options={}){
   const now=options.now??Date.now();
   const captured=Number(snapshot?.capturedAt);
   const fresh=snapshot?.capturedAt!=null&&Number.isFinite(captured)&&captured<=now&&now-captured<=15000;
   return applyUser99k60sStrategySnapshot(state,{...snapshot,sourceReady:snapshot?.sourceReady===true&&fresh},{
-    ...options,clonePolicy:true,maxAgeSeconds:120,minMarketCapUsd:99000,
-    minGreenChangePct:null,requireExactGmgnGreen:false,requireTrending:false,
-    requireNewPair:false,minHoldSeconds:180
+    ...options,
+    clonePolicy:true,
+    maxAgeSeconds:120,
+    minMarketCapUsd:null,
+    minGreenChangePct:99000,
+    requireExactGmgnGreen:true,
+    requireTrending:true,
+    requireNewPair:false,
+    minHoldSeconds:240
   });
 }

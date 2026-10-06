@@ -5,55 +5,125 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {applyJonasCloneSnapshot} from './jonas-clone-v1-integration.mjs';
 import {createSpecialistWalletState,saveSpecialistWalletState,loadSpecialistWalletState,WALLET_6_USER_99K_60S as W6} from './shadow-specialist-wallets.mjs';
+
 const now=1700000000000;
-const row={chainId:'solana',tokenAddress:'CLONE',symbol:'CLONE',priceUsd:1,marketCap:120000,liquidityUsd:20000,pairCreatedAt:now-25000,signalTrending:true};
-const snapshot=(rows,capturedAt=now)=>({sourceReady:true,capturedAt,rows});
+const row={
+  chainId:'solana',tokenAddress:'CLONE',symbol:'CLONE',priceUsd:1,
+  marketCap:5000,liquidityUsd:20000,pairAddress:'POOL',
+  pairCreatedAt:now-25000,signalTrending:true,gmgnExactTrend:true,
+  gmgnTrendInterval:'1m',gmgnDisplayedChangePct:100000,priceChangeSelectedPct:100000
+};
+const snapshot=(rows,capturedAt=now)=>({sourceReady:true,capturedAt,exactGmgn:true,trendInterval:'1m',rows});
 const apply=(state,rows,time=now)=>applyJonasCloneSnapshot(state,snapshot(rows,time),{now:time,solPriceUsd:120});
-test('production adapter opens clone at actual hypothesis exposure, preserves wallets and blocks duplicates',()=>{
- const original=createSpecialistWalletState(),x=apply(original,[row]),p=x.state.wallets[W6].positions[0];
- assert.equal(x.results.opened,1);assert.equal(p.strategyVersion,'JONAS_CLONE_V1');
- assert.equal(p.entryNotionalSol,8);assert.equal(p.exposureQuote,960);assert.equal(p.canExecuteLive,false);
- assert.deepEqual(x.state.wallets.W4_MEME_SCOUT,original.wallets.W4_MEME_SCOUT);
- assert.equal(apply(x.state,[row]).results.opened,0);assert.equal(original.wallets[W6].positions.length,0);
-});
-test('missing liquidity, unknown/future age, tracking-only and unready sources abstain',()=>{
- for(const patch of [{liquidityUsd:null},{pairCreatedAt:null},{pairCreatedAt:now+1},{w6TrackingOnly:true}])assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),{...snapshot([row]),sourceReady:false},{now,solPriceUsd:120}).results.opened,0);
-});
-test('six checkpoints persist, four exit comparisons use observed time; small initial loss remains open',async()=>{
- let x=apply(createSpecialistWalletState(),[row]);
- for(const seconds of [60,120,180,240,300,600])x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:seconds===60?.95:1.1}],now+seconds*1000);
- const p=x.state.wallets[W6].positions[0];assert.ok(p);assert.equal(p.jonasClone.checkpoints.length,6);
- assert.deepEqual(p.jonasClone.checkpoints.filter(c=>c.exitComparison).map(c=>c.targetSeconds),[180,240,300,600]);
- assert.equal(p.jonasClone.checkpoints[0].status,'OBSERVED');assert.ok(p.jonasClone.maeReturnPct<0);
- const dir=await mkdtemp(path.join(tmpdir(),'clone-state-'));
- try{const file=path.join(dir,'state.json');await saveSpecialistWalletState(file,x.state);const loaded=await loadSpecialistWalletState(file);assert.equal(loaded.healthy,true);assert.deepEqual(loaded.state.wallets[W6].positions[0].jonasClone,p.jonasClone);}finally{await rm(dir,{recursive:true,force:true});}
-});
-test('late observations cannot masquerade as on-time profitable exits and zero liquidity has no modelled net profit',()=>{
- let x=apply(createSpecialistWalletState(),[row]);x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.2,liquidityUsd:0}],now+400000);
- const closed=x.state.wallets[W6].closed[0],c=closed.jonasClone.checkpoints[0];
- assert.equal(x.state.wallets[W6].positions.length,0);
- assert.equal(closed.closeReason,'W6_LIQUIDITY_GONE');
- assert.equal(closed.exitProceedsQuote,0);
- assert.equal(closed.jonasClone.liquidityDeath.observedAt,now+400000);
- assert.equal(c.status,'LATE_OBSERVATION');assert.equal(c.holdSeconds,400);assert.equal(c.modelledNetPnlSol,null);
-});
-test('legacy W6 positions remain legacy across clone deployment',()=>{
- const state=structuredClone(createSpecialistWalletState());
- state.wallets[W6].positions.push({walletId:W6,positionKey:'legacy',chainId:'solana',tokenAddress:'OLD',entryPrice:1,lastPrice:1,openedAt:now-10000,exposureQuote:100,marginQuote:100,status:'OPEN',side:'LONG',strategyVersion:'LEGACY'});
- const x=apply(state,[]);assert.equal(x.state.wallets[W6].positions[0].strategyVersion,'LEGACY');assert.equal(x.state.wallets[W6].positions[0].jonasClone,undefined);
+
+test('production adapter opens only exact GMGN 1m >=99k% and market cap is irrelevant',()=>{
+  const original=createSpecialistWalletState(),x=apply(original,[row]),p=x.state.wallets[W6].positions[0];
+  assert.equal(x.results.opened,1);
+  assert.equal(p.strategyVersion,'JONAS_CLONE_V1');
+  assert.equal(p.entryThresholdMode,'GMGN_GREEN_PERCENT');
+  assert.equal(p.entryGreenPercent,100000);
+  assert.equal(p.entryMarketCapUsd,5000);
+  assert.equal(p.entryNotionalSol,8);
+  assert.equal(p.exposureQuote,960);
+  assert.equal(p.targetHoldSeconds,240);
+  assert.equal(p.canExecuteLive,false);
+  assert.deepEqual(x.state.wallets.W4_MEME_SCOUT,original.wallets.W4_MEME_SCOUT);
+  assert.equal(apply(x.state,[row]).results.opened,0);
+  assert.equal(original.wallets[W6].positions.length,0);
 });
 
-test('stale or future snapshots cannot open clone positions',()=>{
- for(const capturedAt of [now-16000,now+1,null])assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot([row],capturedAt),{now,solPriceUsd:120}).results.opened,0);
-});
-
- test('production clone enforces strict 120s and 99k independent of obsolete runtime overrides',()=>{
-  for(const age of [60,75,90,119.999]){
-   const x=applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot([{...row,pairCreatedAt:now-age*1000,marketCap:99000}]),{now,solPriceUsd:120,maxAgeSeconds:60,minMarketCapUsd:1});
-   assert.equal(x.results.opened,1);assert.equal(x.state.wallets[W6].positions[0].canExecuteLive,false);
+test('strict entry contract rejects old, below-threshold, non-GMGN and non-current-trend rows',()=>{
+  for(const patch of [
+    {pairCreatedAt:now-120000},
+    {pairCreatedAt:now-120001},
+    {gmgnDisplayedChangePct:98999,priceChangeSelectedPct:98999},
+    {gmgnExactTrend:false},
+    {signalTrending:false}
+  ]){
+    assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
   }
-  for(const patch of [{pairCreatedAt:now-120000},{pairCreatedAt:now-120001},{marketCap:98999}])assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
- });
+  for(const age of [60,75,90,119.999]){
+    const x=applyJonasCloneSnapshot(
+      createSpecialistWalletState(),
+      snapshot([{...row,pairCreatedAt:now-age*1000,marketCap:1,gmgnDisplayedChangePct:99000,priceChangeSelectedPct:99000}]),
+      {now,solPriceUsd:120,maxAgeSeconds:60,minMarketCapUsd:999999999,minGreenChangePct:1}
+    );
+    assert.equal(x.results.opened,1);
+    assert.equal(x.state.wallets[W6].positions[0].canExecuteLive,false);
+  }
+});
 
-test('discovered candidate can enter after leaving the trend list',()=>{assert.equal(apply(createSpecialistWalletState(),[{...row,signalTrending:false,candidateTracking:true,pairCreatedAt:now-90000}]).results.opened,1);});
+test('missing liquidity or stale/unready source cannot fabricate a sized shadow entry',()=>{
+  for(const patch of [{liquidityUsd:null},{pairCreatedAt:null},{pairCreatedAt:now+1},{w6TrackingOnly:true}]){
+    assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
+  }
+  assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),{...snapshot([row]),sourceReady:false},{now,solPriceUsd:120}).results.opened,0);
+  for(const capturedAt of [now-16000,now+1,null]){
+    assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot([row],capturedAt),{now,solPriceUsd:120}).results.opened,0);
+  }
+});
+
+test('clone stays open before 240s, records checkpoints, then exits at 240s against liquidity',async()=>{
+  let x=apply(createSpecialistWalletState(),[row]);
+  for(const seconds of [60,120,180,239]){
+    x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:seconds===60?.95:1.1}],now+seconds*1000);
+    assert.equal(x.state.wallets[W6].positions.length,1);
+  }
+  const p=x.state.wallets[W6].positions[0];
+  assert.deepEqual(p.jonasClone.checkpoints.map(c=>c.targetSeconds),[60,120,180]);
+  assert.ok(p.jonasClone.maeReturnPct<0);
+  const dir=await mkdtemp(path.join(tmpdir(),'clone-state-'));
+  try{
+    const file=path.join(dir,'state.json');
+    await saveSpecialistWalletState(file,x.state);
+    const loaded=await loadSpecialistWalletState(file);
+    assert.equal(loaded.healthy,true);
+    assert.deepEqual(loaded.state.wallets[W6].positions[0].jonasClone,p.jonasClone);
+  }finally{await rm(dir,{recursive:true,force:true});}
+
+  x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.1}],now+240000);
+  assert.equal(x.state.wallets[W6].positions.length,0);
+  const closed=x.state.wallets[W6].closed[0];
+  assert.equal(closed.closeReason,'W6_HOLD_4M_EXIT');
+  assert.equal(closed.targetHoldSeconds,240);
+  assert.equal(closed.actualHoldSeconds,240);
+  assert.equal(closed.exitRequestLagSeconds,0);
+  assert.equal(closed.settlementStatus,'MODELLED_LIQUIDITY_BACKED_EXIT');
+  assert.ok(Number.isFinite(closed.realizedNetPnlQuote));
+  assert.deepEqual(closed.jonasClone.checkpoints.map(c=>c.targetSeconds),[60,120,180,240]);
+});
+
+test('4m exit never invents realized PnL when exit liquidity is unknown; closes on next executable mark',()=>{
+  let x=apply(createSpecialistWalletState(),[row]);
+  x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.2,liquidityUsd:null}],now+240000);
+  assert.equal(x.results.closed,0);
+  assert.equal(x.results.unfillableExits,1);
+  assert.equal(x.state.wallets[W6].closed.length,0);
+  assert.equal(x.state.wallets[W6].positions[0].pendingExit.reason,'W6_HOLD_4M_EXIT');
+  x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.2,liquidityUsd:20000}],now+245000);
+  const closed=x.state.wallets[W6].closed[0];
+  assert.equal(closed.closeReason,'W6_HOLD_4M_EXIT');
+  assert.equal(closed.actualHoldSeconds,245);
+  assert.equal(closed.exitRequestLagSeconds,5);
+  assert.equal(closed.settlementStatus,'MODELLED_LIQUIDITY_BACKED_EXIT');
+});
+
+test('confirmed liquidity death closes immediately with zero recovery before 4m',()=>{
+  let x=apply(createSpecialistWalletState(),[row]);
+  x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.2,liquidityUsd:0}],now+100000);
+  const closed=x.state.wallets[W6].closed[0];
+  assert.equal(x.state.wallets[W6].positions.length,0);
+  assert.equal(closed.closeReason,'W6_LIQUIDITY_GONE');
+  assert.equal(closed.exitProceedsQuote,0);
+  assert.equal(closed.settlementStatus,'ZERO_RECOVERY_WRITE_OFF');
+  assert.equal(closed.exitFilled,false);
+  assert.equal(closed.jonasClone.liquidityDeath.observedAt,now+100000);
+});
+
+test('legacy W6 positions remain legacy across clone deployment',()=>{
+  const state=structuredClone(createSpecialistWalletState());
+  state.wallets[W6].positions.push({walletId:W6,positionKey:'legacy',chainId:'solana',tokenAddress:'OLD',entryPrice:1,lastPrice:1,openedAt:now-10000,exposureQuote:100,marginQuote:100,status:'OPEN',side:'LONG',strategyVersion:'LEGACY'});
+  const x=apply(state,[]);
+  assert.equal(x.state.wallets[W6].positions[0].strategyVersion,'LEGACY');
+  assert.equal(x.state.wallets[W6].positions[0].jonasClone,undefined);
+});

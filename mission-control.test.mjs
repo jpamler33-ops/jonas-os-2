@@ -84,12 +84,14 @@ test('mission-control snapshot exposes isolated user 99k-in-60s strategy for Dis
 });
 
 
-test('W6 runtime follows the user market-cap rule, not the optional green-percent experiment',()=>{
+test('W6 runtime follows the exact GMGN 1m +99k% rule and does not use market cap as the threshold',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
-  assert.ok(source.includes("minMarketCapUsd:99_000"));
-  assert.ok(source.includes('minGreenChangePct:null'));
-  assert.ok(source.includes('requireExactGmgnGreen:false'));
-  assert.ok(source.includes('FIRST_OBSERVED_MARKET_CAP_USD_GTE_99K_NOT_EXACT_CROSSING_TIME'));
+  assert.ok(source.includes("minMarketCapUsd:null"));
+  assert.ok(source.includes('minGreenChangePct:99_000'));
+  assert.ok(source.includes('requireExactGmgnGreen:true'));
+  assert.ok(source.includes('FIRST_OBSERVED_EXACT_GMGN_1M_PERCENT_GTE_99K_NOT_EXACT_HISTORICAL_CROSSING_TIME'));
+  assert.ok(source.includes('effectiveMinMarketCapUsd:null'));
+  assert.ok(source.includes('effectiveMinGmgn1mChangePct:99000'));
 });
 
 test('mission-control exposes W6 descriptive exit learner without automatic policy mutation',()=>{
@@ -101,12 +103,12 @@ test('mission-control exposes W6 descriptive exit learner without automatic poli
 });
 
 
-test('mission-control source exposes W6 three-minute loss protection and hold lab',()=>{
+test('mission-control source exposes W6 fixed four-minute shadow exit and hold research lab',()=>{
   const source=readFileSync(new URL('./bot.mjs',import.meta.url),'utf8');
-  assert.ok(source.includes("TCX_W6_USER_99K_60S_MIN_HOLD_SECONDS||180"));
+  assert.ok(source.includes("minHoldSeconds:240"));
+  assert.ok(source.includes("fixedHoldSeconds:240"));
   assert.ok(source.includes("notionalScenariosSol:[0.5,1,2,3,5,10,20,40,60,80]"));
   assert.ok(source.includes("holdScenarioCloses"));
-  assert.ok(source.includes("DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION"));
   assert.ok(source.includes("canExecuteLive:false"));
 });
 
