@@ -13,7 +13,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Migrate and validate W6 strict 120s contract
+      - name: Migrate W6 strict 120s contract
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -34,8 +34,7 @@ jobs:
           for old,new in replacements:
               s=s.replace(old,new)
           anchor="  const old=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-120_000\n  },{now});"
-          near_marker="pairCreatedAt:now-119_999"
-          if near_marker not in s:
+          if "pairCreatedAt:now-119_999" not in s:
               near="  const nearBoundary=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-119_999\n  },{now});\n  assert.equal(nearBoundary.match,true);\n  assert.equal(nearBoundary.action,'BUY_SHADOW');\n\n"
               if anchor not in s:
                   raise SystemExit('boundary anchor missing')
@@ -43,7 +42,23 @@ jobs:
           p.write_text(s)
           PY
           git diff --check
-          node --test shadow-specialist-wallets.test.mjs
+      - name: Validate migrated W6 tests
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node --test shadow-specialist-wallets.test.mjs 2>&1 | tee w6-test-output.tap
+      - name: Upload W6 test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: w6-test-diagnostics
+          path: w6-test-output.tap
+          if-no-files-found: warn
+          retention-days: 1
+      - name: Fail if validation failed
+        if: steps.tests.outcome != 'success'
+        run: exit 1
       - name: Commit validated migration
         run: |
           git config user.name github-actions[bot]
@@ -55,4 +70,3 @@ jobs:
           fi
           git commit -m 'fix(w6): strict <120s entry with migrated tests [w6-120s-tests-applied]'
           git push origin HEAD:main
-# retrigger: 2026-10-06
