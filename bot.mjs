@@ -13,7 +13,7 @@ import { loadMemecoinSecurityOutcomeState, saveMemecoinSecurityOutcomeState, obs
 import { loadMemecoinEvidenceFactoryState, saveMemecoinEvidenceFactoryState, observeMemecoinEvidence, dueMemecoinEvidenceFollowups, recordMemecoinEvidenceFollowupAttempt, memecoinEvidenceFactorySummary, MEMECOIN_EVIDENCE_FACTORY_VERSION } from './expansion-runtime/memecoin-evidence-factory.mjs';
 import { buildBiggjTemporalTemple, biggjTemporalTempleSummary, BIGGJ_TEMPORAL_TEMPLE_VERSION } from './expansion-runtime/biggj-temporal-temple.mjs';
 import { createMemecoinSocialAttentionProvider, applyDirectSocialAttention, MEMECOIN_SOCIAL_ATTENTION_VERSION } from './expansion-runtime/memecoin-social-attention.mjs';
-import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
+import { loadSpecialistWalletState, saveSpecialistWalletState, applyPublicTraderCopySnapshot, applyMemecoinScoutSnapshot, applyUser99k60sStrategySnapshot, recordUser99k60sExitObservation, user99k60sExitLearningSummary, specialistWalletSummary, w6ResearchArchive, SPECIALIST_SHADOW_WALLETS_VERSION, WALLET_3_TRADER_COPY, WALLET_4_MEME_SCOUT, WALLET_5_MEME_COPY, WALLET_6_USER_99K_60S, USER_99K_60S_STRATEGY_VERSION } from './shadow-specialist-wallets.mjs';
 import { buildMemecoinTradeLearningModel, scoreMemecoinScoutCandidate, scoreMemecoinCopyCandidate, memecoinTradeLearningSummary, MEMECOIN_TRADE_LEARNER_VERSION } from './memecoin-trade-learner.mjs';
 import { applyMemecoinEntrySignals, MEMECOIN_SIGNAL_CONTROLLER_VERSION } from './memecoin-signal-controller.mjs';
 import { createBiggjOfficialIntelProvider } from './biggj-official-intel-provider.mjs';
@@ -4729,9 +4729,9 @@ async function showMemecoinRadar(chatId,messageId,{force=false}={}){
       'WALLET 5 · MEME COPY',
       'Open '+Number(w5.openPositions||0)+' · Closed '+Number(w5.closedTrades||0)+' · Shadow PnL '+compactUsd(w5.netPnlQuote),
       'Kopiert öffentlich sichtbare Memecoin-Positionen qualifizierter OKX Lead-Trader.','',
-      'WALLET 6 · 99K IN 60S · USER STRATEGY V1',
+      'WALLET 6 · 99K IN <120S · USER STRATEGY V1',
       'Open '+Number(w6.openPositions||0)+' · Closed '+Number(w6.closedTrades||0)+' · Winrate '+(w6.winRate==null?'—':Math.round(Number(w6.winRate)*100)+'%'),
-      'Regel: Alter ≤60s + Market Cap ≥99k => sofortiger Shadow-Entry.',
+      'Regel: Alter <120s + Market Cap ≥99k => sofortiger Shadow-Entry.',
       'Exit: diskretionär/positionsgrößenabhängig. Erste 3 Minuten: kein automatischer Verlust-/MC-Exit wegen normalem roten Wackler.',
       'Sizing-Lab: 2 / 5 / 10 / 20 / 40 / 60 / 80 SOL parallel auf demselben Entry.',
       'Hold-Lab: erste 3 Min Verlustschutz; danach 5m / 10m / Runner bis max. 60m, solange der Runner noch gesund wirkt.',
@@ -5487,7 +5487,8 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
     specialistWalletState=update.state;
     if(
       update.results.opened||update.results.closed||update.results.holdScenarioCloses||
-      update.results.scenarioTargetHits||update.results.cloneCheckpoints
+      update.results.scenarioTargetHits||update.results.cloneCheckpoints||
+      update.results.researchSnapshotsCaptured||update.results.researchGapsCaptured
     )await persistSpecialistWallets('w6-ultra-early:'+reason);
     const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
     const activeTrades=(Array.isArray(wallet?.active)?wallet.active:[]).slice(0,5).map(p=>{
@@ -13203,6 +13204,26 @@ const server = http.createServer(async (req,res) => {
   if (requestPath === '/mission-control.json') {
     res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});
     res.end(JSON.stringify(missionControlData()));
+    return;
+  }
+  if (requestPath === '/w6-research.json') {
+    try{
+      if(String(req.method||'GET').toUpperCase()!=='GET'){
+        res.writeHead(405,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','allow':'GET'});
+        res.end(JSON.stringify({ok:false,error:'METHOD_NOT_ALLOWED',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+        return;
+      }
+      const u=new URL(String(req.url||''),'http://localhost');
+      const limit=Math.max(1,Math.min(500,Number(u.searchParams.get('limit')||100)));
+      const token=String(u.searchParams.get('token')||'').trim()||null;
+      const archive=w6ResearchArchive(specialistWalletState,{asOf:Date.now(),limit,tokenAddress:token});
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({ok:true,...archive}));
+    }catch(err){
+      recordError(observability,{scope:'w6_research_archive',message:err instanceof Error?err.message:String(err)});
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.end(JSON.stringify({ok:false,error:'W6_RESEARCH_ARCHIVE_UNAVAILABLE',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false}));
+    }
     return;
   }
   if (requestPath === '/ready') {

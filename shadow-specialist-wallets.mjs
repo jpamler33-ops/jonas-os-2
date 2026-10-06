@@ -626,6 +626,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     };
     if(openPosition(wallet,position)){
       results.opened++;
+      results.researchSnapshotsCaptured++;
       if(contrarianSelected)results.contrarianOpened++;
     }
   }
@@ -765,6 +766,315 @@ function user99k60sMaxEntrySolForImpact(solPriceUsd,liquidityUsd,maxImpactPct=.0
   const quoteReserveUsd=liq/2;
   const maxNotionalUsd=quoteReserveUsd*impact/(1-impact);
   return maxNotionalUsd/sol;
+}
+
+const W6_EXECUTABLE_MARK_STALE_MS=15_000;
+const W6_LIQUIDITY_DEAD_USD=1;
+
+
+const W6_COIN_RESEARCH_DATASET_VERSION='BIGGJ_W6_COIN_RESEARCH_DATASET_V1';
+const W6_COIN_RESEARCH_MAX_OBSERVATIONS=300;
+
+function user99k60sScalarSourceFields(row={}){
+  const out={};
+  for(const [key,value] of Object.entries(row||{})){
+    if(value==null)continue;
+    if(typeof value==='number'){
+      if(Number.isFinite(value))out[key]=value;
+      continue;
+    }
+    if(typeof value==='boolean'){out[key]=value;continue;}
+    if(typeof value==='string')out[key]=text(value,240);
+  }
+  return out;
+}
+
+function user99k60sResearchObservation(row={},{
+  at=Date.now(),phase='MARK',position=null,executionMark=null
+}={}){
+  const score=row?.score||{},security=row?.security||{},social=row?.directSocialAttention||{};
+  const openedAt=finite(position?.openedAt);
+  const pairCreatedAt=finite(row?.pairCreatedAt,finite(position?.sourcePairCreatedAt));
+  const holdSeconds=openedAt==null?0:Math.max(0,(Number(at)-openedAt)/1000);
+  const ageSeconds=pairCreatedAt==null?null:Math.max(0,(Number(at)-pairCreatedAt)/1000);
+  const observedPnl=finite(position?.observedUnrealizedNetPnlQuote,finite(position?.unrealizedNetPnlQuote));
+  const observedReturn=finite(position?.observedUnrealizedReturnPct,finite(position?.unrealizedReturnPct));
+  return {
+    at:Number(at),
+    phase:String(phase||'MARK'),
+    holdSeconds,
+    ageSeconds,
+    pairAddress:text(row?.pairAddress||row?.poolAddress||position?.entryPoolAddress||'',160)||null,
+    dexId:text(row?.dexId||row?.dex||position?.entryDexId||'',80)||null,
+    priceUsd:finite(row?.priceUsd,finite(position?.lastPrice)),
+    marketCapUsd:finite(row?.marketCap,finite(position?.lastMarketCapUsd)),
+    fdvUsd:finite(row?.fdv),
+    liquidityUsd:finite(row?.liquidityUsd,finite(position?.lastLiquidityUsd)),
+    volumeM5:finite(row?.volumeM5),volumeH1:finite(row?.volumeH1),volumeH6:finite(row?.volumeH6),volumeH24:finite(row?.volumeH24),
+    buysM5:finite(row?.buysM5),sellsM5:finite(row?.sellsM5),
+    buysH1:finite(row?.buysH1),sellsH1:finite(row?.sellsH1),
+    buysH6:finite(row?.buysH6),sellsH6:finite(row?.sellsH6),
+    buysH24:finite(row?.buysH24),sellsH24:finite(row?.sellsH24),
+    priceChangeM5:finite(row?.priceChangeM5),priceChangeH1:finite(row?.priceChangeH1),
+    priceChangeH6:finite(row?.priceChangeH6),priceChangeH24:finite(row?.priceChangeH24),
+    trendRank:finite(row?.trendRank),
+    signalTrending:row?.signalTrending===true||row?.w6TrendVisible===true,
+    signalNewPair:row?.signalNewPair===true,
+    signalBoost:row?.signalBoost===true,
+    signalProfile:row?.signalProfile===true,
+    boostAmount:finite(row?.boostAmount),
+    trendSource:text(row?.trendSource||'',120)||null,
+    ultraSource:text(row?.ultraSource||'',120)||null,
+    sourceSetup:text(row?.sourceSetup||row?.setup||'',120)||null,
+    marketCapSource:text(row?.marketCapSource||'',80)||null,
+    score:{
+      stage:text(score?.stage||'',40)||null,
+      researchPriorityScore:finite(score?.researchPriorityScore),
+      ageMinutes:finite(score?.ageMinutes),
+      attentionSignals:(Array.isArray(score?.attentionSignals)?score.attentionSignals:[]).slice(0,20).map(x=>text(x,80)),
+      riskFlags:(Array.isArray(score?.riskFlags)?score.riskFlags:[]).slice(0,20).map(x=>text(x,80))
+    },
+    signal:{
+      action:text(row?.memeSignal?.action||'',40)||null,
+      entryReadinessScore:finite(row?.memeSignal?.entryReadinessScore),
+      blockers:(Array.isArray(row?.memeSignal?.blockers)?row.memeSignal.blockers:[]).slice(0,20).map(x=>text(x,80)),
+      missing:(Array.isArray(row?.memeSignal?.missing)?row.memeSignal.missing:[]).slice(0,20).map(x=>text(x,80))
+    },
+    security:{
+      evidenceGate:text(security?.evidenceGate||'',40)||null,
+      top10Share:finite(security?.holderState?.top10Share),
+      largestHolderShare:finite(security?.holderState?.largestHolderShare),
+      holderCount:finite(security?.holderState?.holderCount),
+      mintAuthorityPresent:security?.mintAuthorityPresent===true||security?.mintable===true,
+      freezeAuthorityPresent:security?.freezeAuthorityPresent===true||security?.freezable===true,
+      criticalRiskFlags:(Array.isArray(security?.criticalRiskFlags)?security.criticalRiskFlags:[]).slice(0,20).map(x=>text(x,80)),
+      warningFlags:(Array.isArray(security?.warningFlags)?security.warningFlags:[]).slice(0,20).map(x=>text(x,80)),
+      unknownReasonCodes:(Array.isArray(security?.unknownReasonCodes)?security.unknownReasonCodes:[]).slice(0,20).map(x=>text(x,80))
+    },
+    social:{
+      posts:finite(social?.posts),uniqueAuthors:finite(social?.uniqueAuthors),engagement:finite(social?.engagement),
+      attentionBand:text(social?.attentionBand||'',40)||null
+    },
+    observedUnrealizedNetPnlQuote:observedPnl,
+    observedUnrealizedReturnPct:observedReturn,
+    executableUnrealizedNetPnlQuote:executionMark?.executable===true?finite(executionMark?.modelledNetPnlQuote):finite(position?.executableUnrealizedNetPnlQuote),
+    conservativeUnrealizedNetPnlQuote:finite(executionMark?.conservativeNetPnlQuote,finite(position?.conservativeUnrealizedNetPnlQuote)),
+    executionPnlStatus:text(executionMark?.status||position?.executionPnlStatus||'',50)||null,
+    entryImpactPct:finite(executionMark?.entryImpactPct),
+    exitImpactPct:finite(executionMark?.exitImpactPct),
+    liquidityDecayFromEntryPct:finite(position?.liquidityDecayFromEntryPct)
+  };
+}
+
+function user99k60sResearchEntrySnapshot(row={},position,{at=Date.now(),executionMark=null}={}){
+  return {
+    version:W6_COIN_RESEARCH_DATASET_VERSION,
+    capturedAt:Number(at),
+    identity:{
+      chainId:text(row?.chainId||position?.chainId||'',40),
+      tokenAddress:text(row?.tokenAddress||position?.tokenAddress||'',160),
+      pairAddress:text(row?.pairAddress||position?.entryPoolAddress||'',160)||null,
+      dexId:text(row?.dexId||position?.entryDexId||'',80)||null,
+      symbol:text(row?.symbol||position?.symbol||'',80),
+      name:text(row?.name||position?.name||'',120)
+    },
+    sourceFields:user99k60sScalarSourceFields(row),
+    launchTracker:row?.w6LaunchTracker?clone(row.w6LaunchTracker):clone(position?.launchTracker||null),
+    score:row?.score?clone(row.score):null,
+    security:row?.security?clone(row.security):null,
+    memeSignal:row?.memeSignal?clone(row.memeSignal):null,
+    memeLearning:row?.memeLearning?clone(row.memeLearning):null,
+    directSocialAttention:row?.directSocialAttention?clone(row.directSocialAttention):null,
+    userStrategy:row?.userStrategy?clone(row.userStrategy):null,
+    observation:user99k60sResearchObservation(row,{at,phase:'ENTRY',position,executionMark})
+  };
+}
+
+function user99k60sResearchSampleIntervalMs(position,at){
+  const openedAt=finite(position?.openedAt,Number(at));
+  const holdSeconds=Math.max(0,(Number(at)-openedAt)/1000);
+  if(holdSeconds<=10*60)return 5_000;
+  if(holdSeconds<=30*60)return 15_000;
+  return 30_000;
+}
+
+function user99k60sRecordResearchGap(dataset,{at=Date.now(),reason='ROW_MISSING',sourceReady=null}={}){
+  if(!dataset||dataset.version!==W6_COIN_RESEARCH_DATASET_VERSION)return dataset;
+  const base=clone(dataset);
+  base.dataGaps=Array.isArray(base.dataGaps)?base.dataGaps:[];
+  const last=base.dataGaps[base.dataGaps.length-1]||null;
+  if(last&&Number(at)-Number(last.at||0)<15_000&&String(last.reason||'')===String(reason||''))return base;
+  base.dataGaps.push({at:Number(at),reason:String(reason||'ROW_MISSING'),sourceReady:sourceReady===true});
+  if(base.dataGaps.length>120)base.dataGaps=base.dataGaps.slice(-120);
+  base.dataGapCountTotal=Math.max(Number(base.dataGapCountTotal)||0,base.dataGaps.length-1)+1;
+  base.lastDataGapAt=Number(at);
+  return base;
+}
+
+function user99k60sAppendResearchObservation(dataset,row,position,{
+  at=Date.now(),phase='MARK',executionMark=null,force=false
+}={}){
+  const base=dataset&&dataset.version===W6_COIN_RESEARCH_DATASET_VERSION
+    ?clone(dataset)
+    :{
+      version:W6_COIN_RESEARCH_DATASET_VERSION,
+      createdAt:Number(at),
+      entrySnapshot:null,
+      observations:[],
+      observationCountTotal:0,
+      samplingPolicy:'0-10m:5s;10-30m:15s;30-60m+:30s;force entry/exit',
+      retainedObservationLimit:W6_COIN_RESEARCH_MAX_OBSERVATIONS,
+      execution:'SHADOW_ONLY',
+      canExecuteLive:false
+    };
+  base.observations=Array.isArray(base.observations)?base.observations:[];
+  const last=base.observations[base.observations.length-1]||null;
+  const gap=user99k60sResearchSampleIntervalMs(position,at);
+  if(!force&&last&&Number(at)-Number(last.at||0)<gap)return base;
+  const obs=user99k60sResearchObservation(row,{at,phase,position,executionMark});
+  base.observations.push(obs);
+  base.observationCountTotal=Math.max(Number(base.observationCountTotal)||0,base.observations.length-1)+1;
+  if(base.observations.length>W6_COIN_RESEARCH_MAX_OBSERVATIONS)base.observations=base.observations.slice(-W6_COIN_RESEARCH_MAX_OBSERVATIONS);
+  base.firstObservedAt=finite(base.firstObservedAt,Number(at));
+  base.lastObservedAt=Number(at);
+  base.latestObservation=obs;
+  return base;
+}
+
+function user99k60sCreateResearchDataset(row,position,{at=Date.now(),executionMark=null}={}){
+  let dataset={
+    version:W6_COIN_RESEARCH_DATASET_VERSION,
+    createdAt:Number(at),
+    entrySnapshot:user99k60sResearchEntrySnapshot(row,position,{at,executionMark}),
+    observations:[],
+    observationCountTotal:0,
+    samplingPolicy:'0-10m:5s;10-30m:15s;30-60m+:30s;force entry/exit',
+    retainedObservationLimit:W6_COIN_RESEARCH_MAX_OBSERVATIONS,
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+  dataset=user99k60sAppendResearchObservation(dataset,row,position,{at,phase:'ENTRY',executionMark,force:true});
+  return dataset;
+}
+
+function user99k60sFinalizeResearchDataset(position,closed,{at=Date.now(),reason=null}={}){
+  const dataset=position?.coinResearch?clone(position.coinResearch):null;
+  if(!dataset)return null;
+  dataset.closedAt=Number(at);
+  dataset.closeReason=String(reason||closed?.closeReason||'CLOSED');
+  dataset.outcome={
+    observedRealizedNetPnlQuote:finite(closed?.observedRealizedNetPnlQuote,finite(closed?.realizedNetPnlQuote)),
+    realizableRealizedNetPnlQuote:finite(closed?.realizableRealizedNetPnlQuote,finite(closed?.realizedNetPnlQuote)),
+    realizedReturnPct:finite(closed?.realizedReturnPct),
+    closePrice:finite(closed?.closePrice),
+    observedMfeReturnPct:finite(closed?.observedMfeReturnPct),
+    observedMaeReturnPct:finite(closed?.observedMaeReturnPct)
+  };
+  dataset.finalized=true;
+  return dataset;
+}
+
+function user99k60sPairIdentity(row={}){
+  return {
+    pairAddress:text(row?.pairAddress||row?.poolAddress||row?.dexPairAddress||row?.pair?.address||'',160)||null,
+    dexId:text(row?.dexId||row?.dex||row?.exchange||'',80)||null
+  };
+}
+
+function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30}={}){
+  const markPrice=finite(row?.priceUsd,finite(position?.lastPrice));
+  const entryPrice=finite(position?.entryPrice);
+  const exposureQuote=Math.max(0,finite(position?.exposureQuote,finite(position?.marginQuote,0)));
+  const side=String(position?.side||'LONG').toUpperCase();
+  const ret=entryPrice>0&&markPrice>0?directionSign(side)*(markPrice/entryPrice-1):null;
+  const grossQuote=ret==null?null:exposureQuote*ret;
+  const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+  const feesQuote=exposureQuote*roundTripFeeRate;
+  const currentLiquidityUsd=finite(row?.liquidityUsd);
+  const entryLiquidityUsd=finite(position?.entryLiquidityUsd);
+  const solAtEntry=finite(position?.solPriceUsdAtEntry);
+  const sizeSol=finite(position?.entryNotionalSol);
+  const entryImpactPct=user99k60sImpactPct(sizeSol,solAtEntry,entryLiquidityUsd);
+  const exitImpactPct=user99k60sImpactPct(sizeSol,solAtEntry,currentLiquidityUsd);
+  const pair=user99k60sPairIdentity(row);
+  const entryPoolAddress=text(position?.entryPoolAddress||'',160)||null;
+  const pairVerified=entryPoolAddress==null?true:pair.pairAddress!=null;
+  const pairMatches=entryPoolAddress==null?true:(pair.pairAddress!=null&&pair.pairAddress===entryPoolAddress);
+  const liquidityDead=currentLiquidityUsd!=null&&currentLiquidityUsd<=W6_LIQUIDITY_DEAD_USD;
+  const impactKnown=entryImpactPct!=null&&exitImpactPct!=null;
+  const executable=Boolean(markPrice>0&&currentLiquidityUsd>W6_LIQUIDITY_DEAD_USD&&impactKnown&&pairVerified&&pairMatches);
+  const modelledNetPnlQuote=executable&&grossQuote!=null
+    ?grossQuote-feesQuote-exposureQuote*(entryImpactPct+exitImpactPct)
+    :null;
+  const observedNetPnlQuote=grossQuote==null?null:grossQuote-feesQuote;
+  const conservativeNetPnlQuote=liquidityDead
+    ?-exposureQuote
+    :(modelledNetPnlQuote!=null?modelledNetPnlQuote:(observedNetPnlQuote==null?null:Math.min(0,observedNetPnlQuote)));
+  let status='EXECUTABLE_MODELLED';
+  if(liquidityDead)status='LIQUIDITY_DEAD';
+  else if(!pairMatches)status='PAIR_MISMATCH';
+  else if(!pairVerified)status='PAIR_UNVERIFIED';
+  else if(currentLiquidityUsd==null)status='LIQUIDITY_UNKNOWN';
+  else if(!impactKnown)status='IMPACT_UNAVAILABLE';
+  return {
+    version:'BIGGJ_W6_EXECUTABLE_MARK_V1',
+    observedAt:Number(now),
+    staleAfterMs:W6_EXECUTABLE_MARK_STALE_MS,
+    markPriceUsd:markPrice,
+    currentLiquidityUsd,
+    entryLiquidityUsd,
+    entryPoolAddress,
+    currentPoolAddress:pair.pairAddress,
+    entryDexId:text(position?.entryDexId||'',80)||null,
+    currentDexId:pair.dexId,
+    pairVerified,
+    pairMatches,
+    liquidityDead,
+    entryImpactPct,
+    exitImpactPct,
+    totalImpactPct:impactKnown?entryImpactPct+exitImpactPct:null,
+    feesQuote,
+    observedReturnPct:ret,
+    observedNetPnlQuote,
+    modelledNetPnlQuote,
+    conservativeNetPnlQuote,
+    executable,
+    status,
+    semantics:'OBSERVED_MARK_SEPARATE_FROM_LIQUIDITY_AND_IMPACT_ADJUSTED_EXIT_MODEL_NOT_LIVE_QUOTE',
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+}
+
+function user99k60sExecutionOutputView(position,{asOf=Date.now()}={}){
+  const observed=finite(position?.observedUnrealizedNetPnlQuote,finite(position?.unrealizedNetPnlQuote));
+  const model=position?.executableMark||null;
+  const lastMarkedAt=finite(position?.lastMarkedAt);
+  const staleAfterMs=Math.max(1,finite(model?.staleAfterMs,W6_EXECUTABLE_MARK_STALE_MS));
+  const markAgeMs=lastMarkedAt==null?null:Math.max(0,Number(asOf)-lastMarkedAt);
+  const stale=markAgeMs==null||markAgeMs>staleAfterMs;
+  const exposureQuote=Math.max(0,finite(position?.exposureQuote,finite(position?.marginQuote,0)));
+  let executableNet=model?.executable===true?finite(model?.modelledNetPnlQuote):null;
+  let conservative=finite(position?.conservativeUnrealizedNetPnlQuote,finite(model?.conservativeNetPnlQuote));
+  let status=String(model?.status||'UNVERIFIED');
+  if(stale){
+    executableNet=null;
+    if(model?.liquidityDead===true)conservative=-exposureQuote;
+    else conservative=observed==null?null:Math.min(0,observed);
+    status='STALE_MARK';
+  }
+  if(conservative==null)conservative=observed==null?0:Math.min(0,observed);
+  return {
+    observedUnrealizedNetPnlQuote:observed,
+    executableUnrealizedNetPnlQuote:executableNet,
+    conservativeUnrealizedNetPnlQuote:conservative,
+    executionPnlStatus:status,
+    executionPnlExecutable:executableNet!=null&&!stale,
+    markFreshness:{lastMarkedAt,markAgeMs,staleAfterMs,stale},
+    lastLiquidityUsd:finite(position?.lastLiquidityUsd,finite(model?.currentLiquidityUsd)),
+    entryPoolAddress:position?.entryPoolAddress||model?.entryPoolAddress||null,
+    currentPoolAddress:model?.currentPoolAddress||null
+  };
 }
 function user99k60sHoldLabScenarios(values=[0.5,1,2,3,5,10,20,40,60,80],{solPriceUsd=null,liquidityUsd=null}={}){
 
@@ -933,6 +1243,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const results={
     matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
     marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    researchSnapshotsCaptured:0,researchGapsCaptured:0,
     earlyMomentumScenarioCloses:0,earlyMomentumEntryAgeCloses:0,
     cloneCheckpoints:0,
     sourceReady:snapshot?.sourceReady===true,
@@ -961,9 +1272,28 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
     const row=byKey.get(String(p.chainId||'')+':'+String(p.tokenAddress||''));
-    if(!row||!(finite(row?.priceUsd)>0))continue;
+    if(!row||!(finite(row?.priceUsd)>0)){
+      if(p?.coinResearch){
+        const gapCountBefore=Number(p.coinResearch?.dataGapCountTotal)||0;
+        const nextResearch=user99k60sRecordResearchGap(p.coinResearch,{
+          at:now,
+          reason:!row?'ROW_MISSING':'PRICE_MISSING',
+          sourceReady:snapshot?.sourceReady===true
+        });
+        if((Number(nextResearch?.dataGapCountTotal)||0)>gapCountBefore)results.researchGapsCaptured++;
+        wallet.positions[i]={...p,coinResearch:nextResearch};
+      }
+      continue;
+    }
     const baseMarked=markPosition(p,row.priceUsd,now,feeBps);
     const marketCapUsd=finite(row?.marketCap);
+    const currentLiquidityUsd=finite(row?.liquidityUsd);
+    const executionMark=user99k60sExecutableMark(baseMarked,row,{now,feeBps});
+    const researchCountBefore=Number(p?.coinResearch?.observationCountTotal)||0;
+    const coinResearch=user99k60sAppendResearchObservation(p?.coinResearch,row,{...p,...baseMarked},{
+      at:now,phase:'MARK',executionMark
+    });
+    if((Number(coinResearch?.observationCountTotal)||0)>researchCountBefore)results.researchSnapshotsCaptured++;
     const peakMarketCapUsd=Math.max(
       finite(p?.peakMarketCapUsd,marketCapUsd??-Infinity),
       marketCapUsd??-Infinity
@@ -1032,12 +1362,33 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const earlyMomentumChallengerSummary=summarizeEarlyMomentumChallengerLab(earlyMomentumChallengerLab);
     const cloneTelemetry=snapshot?.sourceReady===true?observeJonasClone(p,row,now,feeBps):null;
     if(cloneTelemetry)results.cloneCheckpoints+=cloneTelemetry.checkpoints.length-(p?.jonasClone?.checkpoints?.length||0);
+    const liquiditySnapshots=[...(Array.isArray(p?.liquiditySnapshots)?p.liquiditySnapshots:[]),{
+      at:Number(now),
+      priceUsd:finite(row?.priceUsd),
+      marketCapUsd,
+      liquidityUsd:currentLiquidityUsd,
+      pairAddress:user99k60sPairIdentity(row).pairAddress,
+      dexId:user99k60sPairIdentity(row).dexId
+    }].slice(-240);
+    const peakLiquidityUsd=Math.max(finite(p?.peakLiquidityUsd,currentLiquidityUsd??-Infinity),currentLiquidityUsd??-Infinity);
+    const troughLiquidityUsd=Math.min(finite(p?.troughLiquidityUsd,currentLiquidityUsd??Infinity),currentLiquidityUsd??Infinity);
     const marked={
       ...baseMarked,
       ...(cloneTelemetry?{jonasClone:cloneTelemetry}:{}),
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
       troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
+      lastLiquidityUsd:currentLiquidityUsd,
+      peakLiquidityUsd:Number.isFinite(peakLiquidityUsd)?peakLiquidityUsd:null,
+      troughLiquidityUsd:Number.isFinite(troughLiquidityUsd)?troughLiquidityUsd:null,
+      liquidityDecayFromEntryPct:currentLiquidityUsd!=null&&finite(p?.entryLiquidityUsd)>0?1-currentLiquidityUsd/finite(p.entryLiquidityUsd):null,
+      liquiditySnapshots,
+      coinResearch,
+      observedUnrealizedNetPnlQuote:finite(baseMarked?.unrealizedNetPnlQuote),
+      observedUnrealizedReturnPct:finite(baseMarked?.unrealizedReturnPct),
+      executableMark:executionMark,
+      executableUnrealizedNetPnlQuote:executionMark.executable?executionMark.modelledNetPnlQuote:null,
+      conservativeUnrealizedNetPnlQuote:executionMark.conservativeNetPnlQuote,
       estimatedNetPnlSolBeforeSlippage:pnlSolEstimate,
       profitTargetScenarios,
       holdSeconds,
@@ -1065,8 +1416,22 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       reason='USER_99K_60S_CATASTROPHIC_FAILSAFE';
     }
     if(reason){
+      wallet.positions[i]={
+        ...wallet.positions[i],
+        coinResearch:user99k60sAppendResearchObservation(wallet.positions[i]?.coinResearch,row,wallet.positions[i],{
+          at:now,phase:'EXIT',executionMark:wallet.positions[i]?.executableMark,force:true
+        })
+      };
+      const closeExecution=wallet.positions[i]?.executableMark||null;
+      const closeConservative=finite(wallet.positions[i]?.conservativeUnrealizedNetPnlQuote);
+      const closeObserved=finite(wallet.positions[i]?.observedUnrealizedNetPnlQuote,finite(wallet.positions[i]?.unrealizedNetPnlQuote));
+      const closingPosition=clone(wallet.positions[i]);
       const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
       if(closed){
+        closed.observedRealizedNetPnlQuote=closeObserved;
+        closed.realizableRealizedNetPnlQuote=closeConservative!=null?closeConservative:finite(closed.realizedNetPnlQuote);
+        closed.exitExecutionMark=closeExecution?clone(closeExecution):null;
+        closed.coinResearch=user99k60sFinalizeResearchDataset(closingPosition,closed,{at:now,reason});
         results.closed++;
         if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
         if(reason==='USER_99K_60S_CATASTROPHIC_FAILSAFE')results.catastrophicExit++;
@@ -1130,7 +1495,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       solPriceUsd,
       feeBps
     });
-    const position={
+    const entryPair=user99k60sPairIdentity(row);
+    let position={
       walletId:WALLET_6_USER_99K_60S,
       positionKey:key,
       chainId:String(row?.chainId||''),
@@ -1168,6 +1534,16 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
       solPriceUsdAtEntry:finite(solPriceUsd),
       entryLiquidityUsd:finite(row?.liquidityUsd),
+      entryPoolAddress:entryPair.pairAddress,
+      entryDexId:entryPair.dexId,
+      lastLiquidityUsd:finite(row?.liquidityUsd),
+      peakLiquidityUsd:finite(row?.liquidityUsd),
+      troughLiquidityUsd:finite(row?.liquidityUsd),
+      liquidityDecayFromEntryPct:0,
+      liquiditySnapshots:[{
+        at:Number(now),priceUsd:px,marketCapUsd,liquidityUsd:finite(row?.liquidityUsd),
+        pairAddress:entryPair.pairAddress,dexId:entryPair.dexId
+      }],
       holdLab,
       holdLabSummary:user99k60sHoldLabSummary(holdLab),
       earlyMomentumChallengerLab,
@@ -1190,6 +1566,17 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       status:'OPEN',
       execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
       epistemic:'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
+    };
+    const entryExecutionMark=user99k60sExecutableMark(position,row,{now,feeBps});
+    const coinResearch=user99k60sCreateResearchDataset(row,position,{at:now,executionMark:entryExecutionMark});
+    position={
+      ...position,
+      coinResearch,
+      executableMark:entryExecutionMark,
+      executableUnrealizedNetPnlQuote:entryExecutionMark.executable?entryExecutionMark.modelledNetPnlQuote:null,
+      conservativeUnrealizedNetPnlQuote:entryExecutionMark.conservativeNetPnlQuote,
+      observedUnrealizedNetPnlQuote:0,
+      observedUnrealizedReturnPct:0
     };
     if(openPosition(wallet,position)){
       results.opened++;
@@ -1261,7 +1648,27 @@ export function recordUser99k60sExitObservation(input,{
     }
   };
   const closeReason=why==='USER_PROFIT_ENOUGH'?'USER_99K_60S_PROFIT_ENOUGH':'USER_99K_60S_MCAP_TOO_SMALL';
+  let current=wallet.positions[idx];
+  const syntheticRow={
+    chainId:current?.chainId,tokenAddress:current?.tokenAddress,pairAddress:current?.entryPoolAddress,dexId:current?.entryDexId,
+    symbol:current?.symbol,name:current?.name,priceUsd:mark,marketCap:finite(marketCapUsd,finite(current?.lastMarketCapUsd)),
+    liquidityUsd:finite(current?.lastLiquidityUsd),pairCreatedAt:finite(current?.sourcePairCreatedAt),
+    signalTrending:current?.trendVisibleAtEntry===true,signalNewPair:current?.newPairVisibleAtEntry===true,
+    trendRank:current?.trendRankAtEntry,trendSource:current?.trendSourceAtEntry,sourceSetup:current?.sourceSetupAtEntry
+  };
+  current={...current,coinResearch:user99k60sAppendResearchObservation(current?.coinResearch,syntheticRow,current,{
+    at:now,phase:'USER_EXIT',executionMark:current?.executableMark,force:true
+  })};
+  wallet.positions[idx]=current;
   const closed=closePosition(wallet,idx,{price:mark,at:now,reason:closeReason,feeBps});
+  if(closed){
+    const observed=finite(current?.observedUnrealizedNetPnlQuote,finite(current?.unrealizedNetPnlQuote,finite(closed.realizedNetPnlQuote)));
+    const conservative=finite(current?.conservativeUnrealizedNetPnlQuote,observed);
+    closed.observedRealizedNetPnlQuote=observed;
+    closed.realizableRealizedNetPnlQuote=conservative;
+    closed.exitExecutionMark=current?.executableMark?clone(current.executableMark):null;
+    closed.coinResearch=user99k60sFinalizeResearchDataset(current,closed,{at:now,reason:closeReason});
+  }
   state.updatedAt=Number(now);
   return {state:freeze(state),recorded:Boolean(closed),error:closed?null:'CLOSE_FAILED',closed:closed?freeze(clone(closed)):null};
 }
@@ -1302,29 +1709,83 @@ function safePositionForOutput(position){
   if(x&&typeof x==='object'){
     if('symbol' in x)x.symbol=text(x.symbol,80);
     if('name' in x)x.name=text(x.name,120);
+    if(x.coinResearch&&typeof x.coinResearch==='object'){
+      const r=x.coinResearch;
+      x.coinResearch={
+        version:r.version,
+        createdAt:r.createdAt,
+        firstObservedAt:r.firstObservedAt,
+        lastObservedAt:r.lastObservedAt,
+        closedAt:r.closedAt??null,
+        closeReason:r.closeReason??null,
+        finalized:r.finalized===true,
+        observationCountTotal:Number(r.observationCountTotal)||0,
+        retainedObservations:Array.isArray(r.observations)?r.observations.length:0,
+        dataGapCountTotal:Number(r.dataGapCountTotal)||0,
+        retainedDataGaps:Array.isArray(r.dataGaps)?r.dataGaps.length:0,
+        lastDataGapAt:r.lastDataGapAt??null,
+        samplingPolicy:r.samplingPolicy,
+        retainedObservationLimit:r.retainedObservationLimit,
+        entrySnapshot:r.entrySnapshot||null,
+        latestObservation:r.latestObservation||null,
+        outcome:r.outcome||null,
+        fullDatasetEndpoint:'/w6-research.json',
+        execution:'SHADOW_ONLY',
+        canExecuteLive:false
+      };
+    }
   }
   return x;
 }
 
-function walletStats(wallet){
+function walletStats(wallet,{asOf=Date.now()}={}){
   const open=wallet.positions||[],closed=wallet.closed||[];
-  const closedRealized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
+  const isW6=wallet.walletId===WALLET_6_USER_99K_60S;
+  const openViews=isW6
+    ?open.map(p=>({...p,...user99k60sExecutionOutputView(p,{asOf})}))
+    :open;
+  const observedClosedRealized=closed.reduce((s,p)=>s+finite(p?.observedRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0);
+  const conservativeClosedRealized=isW6
+    ?closed.reduce((s,p)=>s+finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0)
+    :observedClosedRealized;
   const openPartialRealized=open.reduce((s,p)=>s+finite(p?.partialRealizedNetPnlQuote,0),0);
-  const realized=closedRealized+openPartialRealized;
-  const unrealized=open.reduce((s,p)=>s+finite(p?.unrealizedNetPnlQuote,0),0);
-  const wins=closed.filter(p=>finite(p?.realizedNetPnlQuote,0)>0);
-  const losses=closed.filter(p=>finite(p?.realizedNetPnlQuote,0)<0);
-  const gp=wins.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
-  const gl=Math.abs(losses.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0));
+  const observedRealized=observedClosedRealized+openPartialRealized;
+  const realized=conservativeClosedRealized+openPartialRealized;
+  const observedUnrealized=openViews.reduce((s,p)=>s+finite(p?.observedUnrealizedNetPnlQuote,finite(p?.unrealizedNetPnlQuote,0)),0);
+  const conservativeUnrealized=isW6
+    ?openViews.reduce((s,p)=>s+finite(p?.conservativeUnrealizedNetPnlQuote,0),0)
+    :observedUnrealized;
+  const executableRows=isW6?openViews.filter(p=>p?.executionPnlExecutable===true&&finite(p?.executableUnrealizedNetPnlQuote)!=null):[];
+  const executableCoverage=isW6?(openViews.length?executableRows.length/openViews.length:1):1;
+  const executableUnrealized=isW6&&executableCoverage===1
+    ?executableRows.reduce((s,p)=>s+finite(p?.executableUnrealizedNetPnlQuote,0),0)
+    :null;
+  const wins=closed.filter(p=>finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))>0);
+  const losses=closed.filter(p=>finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))<0);
+  const gp=wins.reduce((s,p)=>s+finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0);
+  const gl=Math.abs(losses.reduce((s,p)=>s+finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0));
   return freeze({
     walletId:wallet.walletId,label:wallet.label,capitalModel:wallet.capitalModel,capitalLimitQuote:null,
     openPositions:open.length,closedTrades:closed.length,wins:wins.length,losses:losses.length,
     winRate:closed.length?wins.length/closed.length:null,
-    realizedPnlQuote:realized,unrealizedPnlQuote:unrealized,netPnlQuote:realized+unrealized,
+    realizedPnlQuote:realized,unrealizedPnlQuote:conservativeUnrealized,netPnlQuote:realized+conservativeUnrealized,
+    ...(isW6?{
+      observedRealizedPnlQuote:observedRealized,
+      observedUnrealizedPnlQuote:observedUnrealized,
+      observedNetPnlQuote:observedRealized+observedUnrealized,
+      executableUnrealizedPnlQuote:executableUnrealized,
+      executableNetPnlQuote:executableUnrealized==null?null:realized+executableUnrealized,
+      conservativeUnrealizedPnlQuote:conservativeUnrealized,
+      conservativeNetPnlQuote:realized+conservativeUnrealized,
+      executableCoverage,
+      staleOpenPositions:openViews.filter(p=>p?.markFreshness?.stale===true).length,
+      liquidityDeadOpenPositions:openViews.filter(p=>p?.executableMark?.liquidityDead===true).length,
+      pnlSemantics:'HEADLINE_USES_CONSERVATIVE_REALIZABILITY;_OBSERVED_MID_MARK_REPORTED_SEPARATELY'
+    }:{}),
     profitFactor:gl>EPS?gp/gl:null,
     cumulativeMarginUsedQuote:[...open,...closed].reduce((s,p)=>s+Math.max(0,finite(p?.initialMarginQuote,p?.marginQuote)||0),0),
     currentMarginAtRiskQuote:open.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
-    active:open.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
+    active:openViews.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
     recentClosed:closed.slice(-20).reverse().map(safePositionForOutput),
     objective:wallet.objective,primaryPerformanceExcluded:true,
     execution:'SHADOW_ONLY',canExecuteLive:false
@@ -1334,10 +1795,50 @@ function walletStats(wallet){
 export function specialistWalletSummary(state,{asOf=Date.now()}={}){
   const s=mutableState(state);
   const wallets={};
-  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY,WALLET_6_USER_99K_60S])wallets[id]=walletStats(s.wallets[id]);
+  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY,WALLET_6_USER_99K_60S])wallets[id]=walletStats(s.wallets[id],{asOf});
   const core={version:SPECIALIST_SHADOW_WALLETS_VERSION,asOf:Number(asOf),wallets,
     execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,automaticRealOrders:false};
   return freeze({...core,fingerprint:sha256(core)});
+}
+
+export function w6ResearchArchive(state,{asOf=Date.now(),limit=100,tokenAddress=null}={}){
+  const s=mutableState(state);
+  const wallet=s.wallets[WALLET_6_USER_99K_60S];
+  const token=String(tokenAddress||'').trim().toLowerCase();
+  const rows=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+    .filter(p=>p?.coinResearch)
+    .filter(p=>!token||String(p?.tokenAddress||'').toLowerCase()===token)
+    .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))
+    .slice(0,Math.max(1,Math.min(500,Number(limit)||100)))
+    .map(p=>({
+      positionKey:p.positionKey,
+      status:p.status,
+      chainId:p.chainId,
+      tokenAddress:p.tokenAddress,
+      symbol:text(p.symbol,80),
+      name:text(p.name,120),
+      openedAt:p.openedAt,
+      closedAt:p.closedAt??null,
+      closeReason:p.closeReason??null,
+      entryPrice:p.entryPrice,
+      closePrice:p.closePrice??null,
+      entryMarketCapUsd:p.entryMarketCapUsd,
+      entryLiquidityUsd:p.entryLiquidityUsd,
+      entryNotionalSol:p.entryNotionalSol,
+      observedRealizedNetPnlQuote:p.observedRealizedNetPnlQuote??null,
+      realizableRealizedNetPnlQuote:p.realizableRealizedNetPnlQuote??null,
+      research:clone(p.coinResearch)
+    }));
+  return freeze({
+    version:W6_COIN_RESEARCH_DATASET_VERSION,
+    asOf:Number(asOf),
+    walletId:WALLET_6_USER_99K_60S,
+    records:rows.length,
+    rows,
+    execution:'SHADOW_ONLY',
+    canExecute:false,
+    canExecuteLive:false
+  });
 }
 
 export async function loadSpecialistWalletState(filePath){

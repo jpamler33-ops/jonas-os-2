@@ -9,6 +9,7 @@ import {
   recordUser99k60sExitObservation,
   user99k60sExitLearningSummary,
   specialistWalletSummary,
+  w6ResearchArchive,
   WALLET_3_TRADER_COPY,
   WALLET_4_MEME_SCOUT,
   WALLET_5_MEME_COPY,
@@ -950,4 +951,176 @@ test('wallet 6 runs the early-momentum size and hold challenger without changing
   assert.ok(p.earlyMomentumChallengerSummary.bestUser4SolPer10kHypothesis);
   assert.ok(p.earlyMomentumChallengerSummary.bestEntryAgeArm);
   assert.equal(p.canExecuteLive,false);
+});
+
+
+test('W6 separates observed mark PnL from liquidity-impact-adjusted executable PnL',()=>{
+  const now=30_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'EXEC',symbol:'EXEC',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,
+    pairAddress:'POOL_EXEC',dexId:'pumpswap',pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:20,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'EXEC',symbol:'EXEC',priceUsd:2,marketCap:240_000,liquidityUsd:80_000,
+    pairAddress:'POOL_EXEC',dexId:'pumpswap',pairCreatedAt:now-30_000
+  }]},{now:now+10_000,entryNotionalSol:20,solPriceUsd:100}).state;
+
+  const summary=specialistWalletSummary(state,{asOf:now+10_000});
+  const w=summary.wallets[WALLET_6_USER_99K_60S];
+  const p=w.active[0];
+  assert.ok(p.observedUnrealizedNetPnlQuote>0);
+  assert.ok(p.executableUnrealizedNetPnlQuote>0);
+  assert.ok(p.executableUnrealizedNetPnlQuote<p.observedUnrealizedNetPnlQuote);
+  assert.equal(p.executionPnlStatus,'EXECUTABLE_MODELLED');
+  assert.equal(p.executionPnlExecutable,true);
+  assert.equal(p.entryPoolAddress,'POOL_EXEC');
+  assert.equal(p.currentPoolAddress,'POOL_EXEC');
+  assert.equal(w.executableCoverage,1);
+  assert.equal(w.netPnlQuote,w.conservativeNetPnlQuote);
+  assert.ok(w.observedNetPnlQuote>w.netPnlQuote);
+  assert.equal(w.canExecuteLive,false);
+});
+
+test('W6 stale positive spot mark is not allowed to remain positive headline PnL',()=>{
+  const now=31_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'STALE',symbol:'STALE',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,
+    pairAddress:'POOL_STALE',dexId:'pumpswap',pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'STALE',symbol:'STALE',priceUsd:5,marketCap:600_000,liquidityUsd:90_000,
+    pairAddress:'POOL_STALE',dexId:'pumpswap',pairCreatedAt:now-25_000
+  }]},{now:now+5_000,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  const fresh=specialistWalletSummary(state,{asOf:now+5_000}).wallets[WALLET_6_USER_99K_60S];
+  assert.ok(fresh.observedNetPnlQuote>0);
+  assert.ok(fresh.netPnlQuote>0);
+
+  const stale=specialistWalletSummary(state,{asOf:now+25_001}).wallets[WALLET_6_USER_99K_60S];
+  assert.ok(stale.observedNetPnlQuote>0);
+  assert.equal(stale.executableUnrealizedPnlQuote,null);
+  assert.equal(stale.executableNetPnlQuote,null);
+  assert.equal(stale.staleOpenPositions,1);
+  assert.equal(stale.active[0].executionPnlStatus,'STALE_MARK');
+  assert.equal(stale.active[0].executionPnlExecutable,false);
+  assert.equal(stale.active[0].conservativeUnrealizedNetPnlQuote,0);
+  assert.equal(stale.netPnlQuote,0);
+});
+
+test('W6 liquidity death marks the remaining shadow exposure as non-realizable loss',()=>{
+  const now=32_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DEAD',symbol:'DEAD',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,
+    pairAddress:'POOL_DEAD',dexId:'pumpswap',pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DEAD',symbol:'DEAD',priceUsd:20,marketCap:2_400_000,liquidityUsd:0,
+    pairAddress:'POOL_DEAD',dexId:'pumpswap',pairCreatedAt:now-25_000
+  }]},{now:now+5_000,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  const w=specialistWalletSummary(state,{asOf:now+5_000}).wallets[WALLET_6_USER_99K_60S];
+  const p=w.active[0];
+  assert.ok(p.observedUnrealizedNetPnlQuote>0);
+  assert.equal(p.executableUnrealizedNetPnlQuote,null);
+  assert.equal(p.executionPnlStatus,'LIQUIDITY_DEAD');
+  assert.equal(p.conservativeUnrealizedNetPnlQuote,-100);
+  assert.equal(w.liquidityDeadOpenPositions,1);
+  assert.equal(w.netPnlQuote,-100);
+  assert.equal(w.observedNetPnlQuote>0,true);
+  assert.equal(w.canExecuteLive,false);
+});
+
+
+test('W6 persists a bounded full coin research dataset for later evaluation',()=>{
+  const now=33_000_000;
+  const entryRow={
+    chainId:'solana',tokenAddress:'RESEARCH',pairAddress:'POOL_RESEARCH',dexId:'pumpswap',
+    symbol:'RCH',name:'Research Coin',priceUsd:1,marketCap:120_000,fdv:125_000,liquidityUsd:100_000,
+    volumeM5:12_000,volumeH1:30_000,volumeH24:80_000,buysM5:20,sellsM5:8,buysH1:55,sellsH1:30,
+    priceChangeM5:18,priceChangeH1:44,pairCreatedAt:now-20_000,firstSeenAt:now-18_000,
+    signalTrending:true,signalNewPair:true,signalBoost:true,signalProfile:true,boostAmount:50,
+    trendRank:3,trendSource:'DEXSCREENER_LATEST_BOOSTS',ultraSource:'W6_MULTI_FEED_PLUS_DEXSCREENER_BATCH',
+    sourceSetup:'TRENDS_PROXY_RESEARCH',marketCapSource:'DEXSCREENER',
+    score:{stage:'NEW_NOW',researchPriorityScore:.88,ageMinutes:.33,attentionSignals:['NEW_POOL','BOOST'],riskFlags:['ULTRA_NEW_PAIR']},
+    memeSignal:{action:'BUY',entryReadinessScore:.91,blockers:[],missing:[]},
+    security:{evidenceGate:'PASS',criticalRiskFlags:[],warningFlags:[],holderState:{top10Share:.31,largestHolderShare:.08,holderCount:430}},
+    directSocialAttention:{posts:4,uniqueAuthors:3,engagement:88,attentionBand:'RISING'},
+    w6LaunchTracker:{firstObservedAgeSeconds:7,first99kObservedAgeSeconds:20,observed99kWithin120:true}
+  };
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[entryRow]},{
+    now,entryNotionalSol:10,solPriceUsd:100
+  }).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    ...entryRow,priceUsd:1.4,marketCap:168_000,fdv:170_000,liquidityUsd:82_000,
+    volumeM5:25_000,buysM5:35,sellsM5:12,priceChangeM5:40
+  }]},{now:now+6_000,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  const summary=specialistWalletSummary(state,{asOf:now+6_000});
+  const compact=summary.wallets[WALLET_6_USER_99K_60S].active[0].coinResearch;
+  assert.equal(compact.version,'BIGGJ_W6_COIN_RESEARCH_DATASET_V1');
+  assert.equal(compact.retainedObservations,2);
+  assert.equal(compact.entrySnapshot.identity.pairAddress,'POOL_RESEARCH');
+  assert.equal(compact.entrySnapshot.sourceFields.volumeM5,12_000);
+  assert.equal(compact.entrySnapshot.security.evidenceGate,'PASS');
+  assert.equal(compact.entrySnapshot.directSocialAttention.posts,4);
+  assert.equal('observations' in compact,false);
+
+  const archive=w6ResearchArchive(state,{asOf:now+6_000,tokenAddress:'RESEARCH'});
+  assert.equal(archive.records,1);
+  const record=archive.rows[0];
+  assert.equal(record.research.observations.length,2);
+  assert.equal(record.research.observations[0].phase,'ENTRY');
+  assert.equal(record.research.observations[1].phase,'MARK');
+  assert.equal(record.research.observations[1].marketCapUsd,168_000);
+  assert.equal(record.research.observations[1].liquidityUsd,82_000);
+  assert.equal(record.research.observations[1].security.top10Share,.31);
+  assert.equal(record.research.observations[1].pairAddress,'POOL_RESEARCH');
+  assert.equal(archive.canExecuteLive,false);
+});
+
+test('W6 research dataset records provider/feed gaps instead of silently losing them',()=>{
+  const now=34_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'GAP',pairAddress:'POOL_GAP',dexId:'pumpswap',
+    symbol:'GAP',priceUsd:1,marketCap:120_000,liquidityUsd:60_000,pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:5,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:false,rows:[]},{now:now+20_000,entryNotionalSol:5,solPriceUsd:100}).state;
+  const archive=w6ResearchArchive(state,{asOf:now+20_000,tokenAddress:'GAP'});
+  const research=archive.rows[0].research;
+  assert.equal(research.dataGapCountTotal,1);
+  assert.equal(research.dataGaps.length,1);
+  assert.equal(research.dataGaps[0].reason,'ROW_MISSING');
+  assert.equal(research.dataGaps[0].sourceReady,false);
+
+  const compact=specialistWalletSummary(state,{asOf:now+20_000}).wallets[WALLET_6_USER_99K_60S].active[0].coinResearch;
+  assert.equal(compact.dataGapCountTotal,1);
+  assert.equal(compact.retainedDataGaps,1);
+});
+
+test('W6 finalized coin research record survives the close for post-trade analysis',()=>{
+  const now=35_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'CLOSEDATA',pairAddress:'POOL_CLOSE',dexId:'pumpswap',
+    symbol:'CLS',priceUsd:1,marketCap:130_000,liquidityUsd:90_000,pairCreatedAt:now-20_000
+  }]},{now,minExitMarketCapUsd:99_000,entryNotionalSol:5,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'CLOSEDATA',pairAddress:'POOL_CLOSE',dexId:'pumpswap',
+    symbol:'CLS',priceUsd:.7,marketCap:80_000,liquidityUsd:30_000,pairCreatedAt:now-210_000
+  }]},{now:now+190_000,minExitMarketCapUsd:99_000,entryNotionalSol:5,solPriceUsd:100}).state;
+
+  const archive=w6ResearchArchive(state,{asOf:now+190_000,tokenAddress:'CLOSEDATA'});
+  assert.equal(archive.records,1);
+  const record=archive.rows[0];
+  assert.equal(record.status,'CLOSED');
+  assert.equal(record.research.finalized,true);
+  assert.equal(record.research.closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
+  assert.equal(record.research.observations.at(-1).phase,'EXIT');
+  assert.equal(record.research.outcome.closePrice,.7);
+  assert.equal(record.research.canExecuteLive,false);
 });
