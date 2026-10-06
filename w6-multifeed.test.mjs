@@ -23,16 +23,16 @@ function setup({newPool=false,profile=false,missingCap=false,secondPool=false}={
  const provider=createMemecoinEarlyRadarProvider({fetchImpl,gmgnPublicEnabled:false,now:()=>now,ultraDexCacheMs:5000,ultraGeckoCacheMs:30000});
  return {provider,calls,setNow:t=>{now=t;}};
 }
-test('Dex latest boosts produce an independent fully enriched clone candidate during Gecko 429',async()=>{
+test('Dex latest boosts preserve discovery during Gecko 429 but cannot impersonate exact GMGN',async()=>{
  const {provider}=setup();const snapshot=await provider.fetchUltraEarlySolana();const row=snapshot.rows.find(x=>x.tokenAddress==='FAST');
  assert.ok(row);assert.equal(row.marketCap,120000);assert.equal(row.attentionSemantics,'PAID_BOOST_ATTENTION_PROXY');assert.equal(row.gmgnExactTrend,false);
  const update=applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120});
- assert.equal(update.results.opened,1);assert.equal(update.state.wallets[W6].positions[0].entryNotionalSol,8);
+ assert.equal(update.results.opened,0);assert.equal(update.state.wallets[W6].positions.length,0);
 });
 test('profile discovery alone cannot invent trend visibility',async()=>{
  const {provider}=setup({profile:true});const snapshot=await provider.fetchUltraEarlySolana();
  assert.equal(snapshot.rows.find(x=>x.tokenAddress==='FAST').signalTrending,false);
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
 });
 test('FDV is not substituted for unknown market cap',async()=>{
  const {provider}=setup({missingCap:true});const snapshot=await provider.fetchUltraEarlySolana();
@@ -54,10 +54,10 @@ test('successful new-pool response is reused until its 30-second cache expires',
  assert.equal(calls.filter(x=>x.url.includes('/new_pools')).length,1);
  setNow(start+31000);await provider.fetchUltraEarlySolana();assert.equal(calls.filter(x=>x.url.includes('/new_pools')).length,2);
 });
-test('new-pool discovery is not relabelled as a current trend',async()=>{
+test('new-pool discovery is not relabelled as exact GMGN or allowed to enter the clone',async()=>{
  const {provider}=setup({newPool:true,profile:true});const snapshot=await provider.fetchUltraEarlySolana();
  const row=snapshot.rows.find(x=>x.tokenAddress==='FAST');assert.equal(row.signalNewPair,true);assert.equal(row.signalTrending,false);
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
 });
 
 function deadlineProvider(handler,options={}){
@@ -74,7 +74,7 @@ function deadlineProvider(handler,options={}){
    throw new Error('unexpected '+url);
   },...options});
 }
-test('enrichment batches start together and one failure retains usable shadow entries',async()=>{
+test('enrichment batches start together and one failure retains usable discovery rows',async()=>{
  const started=[];let release;
  const barrier=new Promise(resolve=>{release=resolve;});
  const provider=deadlineProvider(async u=>{
@@ -94,7 +94,7 @@ test('enrichment batches start together and one failure retains usable shadow en
  assert.ok(snapshot.errors.some(x=>x.includes('ONE_BATCH_DOWN')));
  assert.equal(snapshot.rows.length,30);assert.equal(snapshot.rows[0].marketCap,120000);
  const update=applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120});
- assert.ok(update.results.opened>0);assert.equal(snapshot.execution,'SHADOW_ONLY');assert.equal(snapshot.canExecuteLive,false);
+ assert.equal(update.results.opened,0);assert.equal(snapshot.execution,'SHADOW_ONLY');assert.equal(snapshot.canExecuteLive,false);
 });
 test('hung optional enrichment/body reader cannot block complete new-pool discovery',async()=>{
  let signal;
@@ -105,7 +105,7 @@ test('hung optional enrichment/body reader cannot block complete new-pool discov
  const began=Date.now(),snapshot=await provider.fetchUltraEarlySolana({maxAgeSeconds:120});
  assert.ok(Date.now()-began<500);assert.equal(signal.aborted,true);
  assert.equal(snapshot.rows[0].marketCap,120000);assert.ok(snapshot.errors.some(x=>x.includes('W6_REQUEST_TIMEOUT')));
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
 });
 test('slow legacy discovery and individual seed failure do not discard healthy Dex discovery',async()=>{
  let legacyCalls=0;
@@ -123,7 +123,7 @@ test('slow legacy discovery and individual seed failure do not discard healthy D
 
 const retainedCandidate=(patch={})=>({chainId:'solana',tokenAddress:'RETAINED',pairCreatedAt:start-90000,
  firstSeenAt:start-70000,marketCap:80000,priceUsd:'.001',liquidityUsd:20000,signalTrending:true,...patch});
-test('retained candidate crosses 99k before 120s through independent refresh during legacy timeout',async()=>{
+test('retained candidate market-cap crossing cannot masquerade as GMGN +99k% during legacy timeout',async()=>{
  const provider=deadlineProvider(async u=>{
   if(u.pathname.includes('/trending_pools'))return new Promise(()=>{});
   if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('RETAINED',start-90000)]);
@@ -133,7 +133,7 @@ test('retained candidate crosses 99k before 120s through independent refresh dur
  assert.ok(row);assert.equal(row.marketCap,120000);assert.equal(row.pairCreatedAt,start-90000);
  assert.equal(row.firstSeenAt,start-70000);assert.equal(row.candidateTracking,true);
  assert.equal(row.signalTrending,false);assert.equal(snapshot.candidateTrackingRows,1);
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
 });
 test('missing candidate enrichment never relabels previous qualifying marks as fresh',async()=>{
  const provider=deadlineProvider(async u=>{
