@@ -310,7 +310,13 @@ function unixMs(v){
   if(n==null)return null;
   return n<10_000_000_000?n*1000:n;
 }
-function normalizeGmgnTrend(row={},rank=null){
+function normalizeGmgnTrend(row={},rank=null,interval='1m'){
+  const selectedInterval=String(interval||'1m').trim();
+  const selectedChange=
+    selectedInterval==='1m'?finite(row?.price_change_percent1m??row?.price_change_percent):
+    selectedInterval==='5m'?finite(row?.price_change_percent5m??row?.price_change_percent):
+    selectedInterval==='1h'?finite(row?.price_change_percent1h??row?.price_change_percent):
+    finite(row?.price_change_percent);
   const links=[
     row?.twitter_username?{type:'x',label:text(row.twitter_username,80),url:'https://x.com/'+String(row.twitter_username).replace(/^@/,'')}:null,
     row?.website?{type:'website',label:'website',url:text(row.website,500)}:null,
@@ -337,7 +343,9 @@ function normalizeGmgnTrend(row={},rank=null){
     sellsH1:Math.max(0,Math.floor(finite(row?.sells_1h??row?.sells)??0)),
     priceChangeM5:finite(row?.price_change_percent5m),
     priceChangeH1:finite(row?.price_change_percent1h),
-    priceChangeSelectedPct:finite(row?.price_change_percent),
+    priceChangeSelectedPct:selectedChange,
+    gmgnDisplayedChangePct:selectedChange,
+    gmgnTrendInterval:selectedInterval,
     marketCap:finite(row?.market_cap),
     fdv:finite(row?.fdv),
     pairCreatedAt:gmgnAgeAt,
@@ -603,7 +611,7 @@ export function createMemecoinEarlyRadarProvider({
     return {rows,errors:sourceErrors};
   }
   async function gmgnTrendingUltraSolana({force=false}={}){
-    return cached('ultra:gmgn:openapi:solana:trending:'+gmgnTrendWindow+':default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+    return cached('ultra:gmgn:openapi:solana:trending:'+gmgnTrendWindow+':'+gmgnTrendSort,Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
       const timestamp=Math.floor(Number(now())/1000);
       const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
@@ -649,11 +657,12 @@ export function createMemecoinEarlyRadarProvider({
         const reason=text(body?.reason||body?.message||body?.msg||body?.error||'NO_REASON',180).replace(/\s+/g,'_');
         throw new Error('GMGN_OPENAPI_TREND_EMPTY_SHAPE_'+text(shape||'NONE',120)+'_REASON_'+reason);
       }
-      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
+      const observedAt=Number(now());
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1,gmgnTrendWindow),gmgnTrendObservedAt:observedAt,trendSource:'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_'+gmgnTrendSort.toUpperCase()})).filter(x=>x.tokenAddress);
     },{force});
   }
   async function gmgnPublicTrendingUltraSolana({force=false}={}){
-    return cached('ultra:gmgn:public:solana:trending:'+gmgnTrendWindow+':default',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+    return cached('ultra:gmgn:public:solana:trending:'+gmgnTrendWindow+':'+gmgnTrendSort,Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
       const url=gmgn+'/defi/quotation/v1/rank/sol/swaps/'+encodeURIComponent(gmgnTrendWindow)+'?orderby='+encodeURIComponent(gmgnTrendSort)+'&direction=desc';
       const body=await getJson(url,{
         headers:{
@@ -667,7 +676,8 @@ export function createMemecoinEarlyRadarProvider({
       const raw=Array.isArray(body?.data?.rank)?body.data.rank:[];
       if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_PUBLIC_CODE_'+String(body.code)+'_'+text(body?.msg,120));
       if(!raw.length)throw new Error('GMGN_PUBLIC_TREND_EMPTY');
-      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1),trendSource:'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT'})).filter(x=>x.tokenAddress);
+      const observedAt=Number(now());
+      return raw.map((x,i)=>({...normalizeGmgnTrend(x,i+1,gmgnTrendWindow),gmgnTrendObservedAt:observedAt,trendSource:'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_'+gmgnTrendSort.toUpperCase()})).filter(x=>x.tokenAddress);
     },{force});
   }
 
