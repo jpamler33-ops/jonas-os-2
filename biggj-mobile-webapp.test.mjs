@@ -5,7 +5,7 @@ import {BIGGJ_MOBILE_WEBAPP_VERSION,biggjWebManifest,biggjAppIconSvg,biggjServic
 
 const sample={generatedAt:1_800_000_000_000,biggj:{science:{frontier:{evidence:294,experiments:3}},worldModel:{markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12,score:.76,price:67842.31,priceChangePercent:1.84,priceChange:1226.4,openPrice:66615.91,highPrice:68410,lowPrice:66102,quoteVolume:38200000000}]}},health:{autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false},biggjObservability:{maturityIndex:.62,trustedSkills:3,totalSkillNodes:12,observedForecasts:44,runtimeRevision:9,evidence:{evidenceTotal:120,validationIndependentEpisodes:18},learningTimeline:{last24h:{total:7},last7d:{total:29},events:[{title:'Regime transfer checked',detail:'OOS evidence advanced'}]},researchQueue:[{title:'Liquidity transfer',nextGate:'FORWARD_SHADOW'}]},biggjProofFeed:{counts:{resolved:20}},marketRadar:{rows:[{symbol:'ETHUSDT',status:'SUPPORTED',regime:'RANGE',witnessAgreement:.7,support:8,score:.61}]}},portfolio:{equityQuote:1012,netPnlQuote:12,openPositions:1,closedTrades:3,positions:[],recentClosed:[]}};
 
-test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V21_W6_ENTRY_FUNNEL');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
+test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V22_DECISION_COCKPIT');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
 test('five user surfaces include the dedicated meme wallet',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading','meme'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/BIGGJ DISCOVERY JOURNAL/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','LIVE TICKER','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · TREND PHASES · FORECAST · LIQUIDITY · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('market terminal exposes persistent multi-scale trend boxes and forecast-per-phase controls',()=>{
@@ -109,7 +109,7 @@ test('base mobile trading view exposes research activity without mission-control
   for(const text of ['PRIMARY +','Research Trading','Research Open','Research Closed','Wallet Research Manager','Zahlenschloss','Control','Experiment','RATCHET STATUS','Discovery Pipeline','Aktueller Blocker','Runtime Gates','Aktive Research Positionen']) assert.match(h,new RegExp(text));
   assert.match(h,/PF /);
   assert.match(h,/Expectancy \+ Profit Factor \+ Stabilität/);
-  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V21_W6_ENTRY_FUNNEL'/);
+  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V22_DECISION_COCKPIT'/);
   assert.match(h,/next\?\.appVersion&&next\.appVersion!==APP_VERSION/);
 });
 
@@ -269,7 +269,7 @@ test('meme wallet mirrors the premium mockup structure and binds only live shado
   for(const text of ['Meme Wallet','Early Meme Scout','SHADOW_ONLY','LIVE DATA','NO REAL ORDERS · PAPER ONLY','Unrealized PnL','Realized PnL','Total PnL','ROI auf Einsatz','Gesamt reingeflossen','Performance Overview','Open Positions','Security Outcome Lab','PASS Holder Fallback','PASS Native','ABSTAIN','UNKNOWN'])assert.match(h,new RegExp(text));
   assert.match(h,/data-meme-wallet="W4_MEME_SCOUT"/);
   assert.match(h,/data-meme-wallet="W6_USER_99K_60S"/);
-  assert.match(h,/99K IN 60S/);
+  assert.match(h,/99K &lt;120S/);
   assert.match(h,/HOLD-LAB/);
   assert.match(h,/3 Minuten/);
   assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
@@ -312,6 +312,45 @@ test('mobile command center surfaces world-model mode and the same memecoin BUY 
   assert.match(h,/BUY '\+x\.buy\+' · READY '\+x\.ready\+' · WATCH '\+x\.watch\+' · BLOCK '\+x\.blocked/);
   assert.match(h,/entryReadinessScore/);
   assert.match(h,/memeSignal/);
+});
+
+
+test('decision cockpit exposes ten focused tabs and preserves evidence boundaries',()=>{
+  const x=structuredClone(sample);
+  x.health.memecoinRadar={
+    sourceReady:true,
+    rows:[{
+      chainId:'solana',tokenAddress:'SoDecision',symbol:'DECIDE',pairCreatedAt:Date.now()-45_000,
+      liquidityUsd:28_000,marketCapUsd:121_000,buysM5:18,sellsM5:6,priceChangeM5:12.4,
+      score:{stage:'NEW_NOW',riskFlags:[]},security:{evidenceGate:'PASS',criticalRiskFlags:[]},
+      memeSignal:{
+        action:'BUY',entryReadinessScore:.84,
+        triggerPillars:{flow:true,turnover:true,momentum:true,attention:true},
+        blockers:[],missing:[],reasons:['SECURITY_PASS','LIQUIDITY_PASS','TRIGGER_FLOW'],
+        evidence:{stage:'NEW_NOW',researchPriorityScore:.78,liquidityUsd:28_000,priceUsd:.001,securityGate:'PASS',flow:{trades:24,buyShare:.75},turnoverRatio:.42,priceChangeM5:12.4,socialPosts:3,socialAuthors:2}
+      }
+    }],
+    user99k60s:{exitLearning:{samples:8,profitEnough:{samples:5},marketCapTooSmall:{samples:3},ruleProposalReady:false}}
+  };
+  x.health.specialistWallets={wallets:{
+    W4_MEME_SCOUT:{openPositions:0,closedTrades:0,active:[],recentClosed:[]},
+    W5_MEME_COPY:{openPositions:0,closedTrades:0,active:[],recentClosed:[]},
+    W6_USER_99K_60S:{openPositions:0,closedTrades:12,wins:10,losses:2,winRate:10/12,netPnlQuote:42,cumulativeMarginUsedQuote:300,active:[],recentClosed:[]}
+  }};
+  const h=renderBiggjMobileApp(x);
+  assert.match(h,/data-decision-tab/);
+  for(const [id,label] of [['now','NOW'],['entry','ENTRY'],['exit','EXIT'],['liq','LIQ'],['momentum','MOMENTUM'],['flow','FLOW'],['early','EARLY'],['danger','DANGER'],['edge','MY EDGE'],['biggj','BIGGJ']])assert.match(h,new RegExp("\\['"+id+"','"+label+"'\\]"));
+  assert.match(h,/DECISION COCKPIT/);
+  assert.match(h,/Readiness ist keine Gewinnwahrscheinlichkeit/);
+  assert.match(h,/Kein erfundener Momentum-Score/);
+  assert.match(h,/Keine Live-Order und keine Profit-Garantie/);
+  assert.match(h,/SHADOW_ONLY/);
+  assert.match(h,/canExecuteLive:false/);
+  assert.match(h,/localStorage\.setItem\('biggj\.decision\.tab'/);
+  assert.match(h,/localStorage\.setItem\('biggj\.decision\.token'/);
+  assert.match(h,/memeLegacy/);
+  assert.match(h,/memeWallets\(\)\.W6_USER_99K_60S\|\|wallet/);
+  assert.match(h,/\.memeView>\.walletSwitch\{display:none\}/);
 });
 
 
