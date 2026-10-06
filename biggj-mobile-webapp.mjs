@@ -269,6 +269,31 @@ function user99StrategyCard(wallet,user99){
  '<div class="contrarianRules"><div class="ml">EXIT-LERNEN</div><div class="contrarianGrid"><div class="contrarianMetric"><span>MARKIERT</span><b>'+N(xl?.samples)+'/20</b></div><div class="contrarianMetric"><span>PROFIT REICHT</span><b>'+N(xl?.profitEnough?.samples)+'</b></div><div class="contrarianMetric"><span>MC ZU KLEIN</span><b>'+N(xl?.marketCapTooSmall?.samples)+'</b></div><div class="contrarianMetric"><span>REGEL</span><b class="'+(xl?.ruleProposalReady?'good':'')+'">'+(xl?.ruleProposalReady?'PRÜFEN':'GESPERRT')+'</b></div></div></div>'+
  '<div class="contrarianNote">Preis/Leistung berücksichtigt Gebühren plus einen heuristischen Liquiditäts-Price-Impact. BIGGJ trennt beste Kapital-Effizienz vom höchsten absoluten PnL. +10 SOL bleibt nur Vergleichsmarke. canExecuteLive:false.</div></div>'
 }
+
+function w6ResearchAnalysisCard(){
+ const a=S.health?.specialistWallets?.w6ResearchAnalysis||null;
+ if(!a)return '<div class="contrarianCard"><div class="contrarianTop"><div><b>⌁ W6 Research Analyzer</b><div class="ms">Noch kein Analyzer-Snapshot verfügbar.</div></div><span>WAITING</span></div></div>';
+ const counts=a.counts||{},overall=a.overall||{},pos=(a.strongestPositiveCohorts||[]).slice(0,4),neg=(a.strongestNegativeCohorts||[]).slice(0,4),cor=(a.correlations||[]).filter(x=>x?.evidenceReady&&Number.isFinite(NUM(x?.r))).sort((x,y)=>Math.abs(NUM(y.r))-Math.abs(NUM(x.r))).slice(0,5);
+ const status=String(a.status||'COLLECTING').toUpperCase(),ready=a.evidenceReady===true;
+ const cohortLabel=x=>E(HUMAN(x?.dimension||'COHORT'))+' · '+E(HUMAN(x?.value||'UNKNOWN'));
+ const cohortRows=(rows,cls)=>rows.length?rows.map(x=>'<div class="contrarianRule"><b>'+cohortLabel(x)+'</b><span>n='+N(x?.samples)+'</span><span class="'+cls+'">'+MONEY(x?.averagePnlQuote)+'</span><span>'+MPCT(x?.winRate)+'</span></div>').join(''):'<div class="emptyMeme">Noch keine Kohorte über Mindeststichprobe.</div>';
+ const corrRows=cor.length?cor.map(x=>'<div class="contrarianRule"><b>'+E(HUMAN(x?.feature))+'</b><span>n='+N(x?.samples)+'</span><span class="'+(N(x?.r)>=0?'good':'bad')+'">r '+NUM(x?.r).toFixed(2)+'</span><span>ready</span></div>').join(''):'<div class="emptyMeme">Korrelationen bleiben gesperrt, bis genug abgeschlossene Trades vorhanden sind.</div>';
+ return '<div class="contrarianCard"><div class="contrarianTop"><div><b>⌁ W6 Research Analyzer</b><div class="ms">Automatische Auswertung nur auf realisierbarer PnL · keine automatische Regeländerung</div></div><span class="'+(ready?'good':'')+'">'+E(status)+'</span></div>'+
+ '<div class="contrarianGrid">'+
+ '<div class="contrarianMetric"><span>RECORDS</span><b>'+N(counts.records)+'</b></div>'+
+ '<div class="contrarianMetric"><span>CLOSED</span><b>'+N(counts.closed)+'</b></div>'+
+ '<div class="contrarianMetric"><span>ENTRY COMPLETE</span><b>'+N(counts.completeEntrySnapshots)+'</b></div>'+
+ '<div class="contrarianMetric"><span>OBSERVATIONS</span><b>'+N(counts.totalObservations)+'</b></div>'+
+ '<div class="contrarianMetric"><span>DATA GAPS</span><b>'+N(counts.totalDataGaps)+'</b></div>'+
+ '<div class="contrarianMetric"><span>EVIDENCE GATE</span><b>'+N(a?.thresholds?.minCohortSamples)+' trades</b></div>'+
+ '<div class="contrarianMetric"><span>WINRATE</span><b>'+MPCT(overall?.winRate)+'</b></div>'+
+ '<div class="contrarianMetric"><span>REALIZABLE PNL</span><b class="'+(N(overall?.totalPnlQuote)>=0?'good':'bad')+'">'+MONEY(overall?.totalPnlQuote)+'</b></div></div>'+
+ '<div class="contrarianRules"><div class="ml">STÄRKSTE POSITIVE KOHORTEN</div>'+cohortRows(pos,'good')+'</div>'+
+ '<div class="contrarianRules"><div class="ml">STÄRKSTE NEGATIVE KOHORTEN</div>'+cohortRows(neg,'bad')+'</div>'+
+ '<div class="contrarianRules"><div class="ml">EVIDENCE-READY KORRELATIONEN</div>'+corrRows+'</div>'+
+ '<div class="contrarianNote">Status '+E(status)+' · Kohorten ab n≥'+N(a?.thresholds?.minCohortSamples)+' · Korrelationen ab n≥'+N(a?.thresholds?.minCorrelationSamples)+'. Legacy-/unvollständige Entry-Snapshots: '+N(counts.legacyOrIncompleteEntrySnapshots)+'. Research-only · SHADOW_ONLY · canExecuteLive:false.</div></div>';
+}
+
 function memeWallet(){
  const radar=memeRadar(),security=radar.security||{},wallet=memeSelectedWallet(),is4=MEME_WALLET==='W4_MEME_SCOUT',is6=MEME_WALLET==='W6_USER_99K_60S',walletNo=is4?'4':is6?'6':'5',realized=N(wallet.realizedPnlQuote),unrealized=N(wallet.unrealizedPnlQuote),net=N(wallet.netPnlQuote),observedNet=is6?NUM(wallet.observedNetPnlQuote):NaN,executableNet=is6?NUM(wallet.executableNetPnlQuote):NaN,coverage=is6?NUM(wallet.executableCoverage):NaN,staleOpen=is6?N(wallet.staleOpenPositions):0,liqDeadOpen=is6?N(wallet.liquidityDeadOpenPositions):0,used=N(wallet.cumulativeMarginUsedQuote),flowAfterPnl=used+net,roi=used>0?net/used:null,series=memeSeries(wallet),rangePnl=series[series.length-1]||0,closed=wallet.recentClosed||[],bw=memeBestWorst(closed),avgHold=memeAvgHold(closed),pass=N(security.pass),checked=N(security.checked),abstain=N(security.abstain),out=security.outcomes||{},coh=out.cohorts||{},panel=MEME_PANEL==='closed'?memeClosedRows(wallet):MEME_PANEL==='analytics'?memeAnalytics(wallet):memePositionRows(wallet),title=is4?'Early Meme Scout':is6?'99K in <120s · User V1':'Meme Copilot';
  const pnlLabel=is6?'Conservative / Realizable Shadow PnL':'Total Shadow PnL';
@@ -279,6 +304,7 @@ function memeWallet(){
  '<div class="memeStatus"><div class="statusPill shadow">◉ SHADOW_ONLY</div><div class="statusPill liveData">● '+(radar.sourceReady?'LIVE DATA':'DATA DEGRADED')+'</div><div class="statusPill">♢ NO REAL ORDERS · PAPER ONLY</div></div>'+
  memeSignalBoard(radar)+
  (is6?user99StrategyCard(wallet,radar?.user99k60s):'')+
+ (is6?w6ResearchAnalysisCard():'')+
  '<div class="walletHero"><div class="walletHeroTop"><div class="walletHeroTitle"><div class="walletIco">▣</div><div><b>WALLET '+walletNo+'</b><div class="walletBadge">'+E(title.toUpperCase())+'</div></div></div><div class="shadowMini">SHADOW_ONLY</div></div>'+
  '<div class="heroValue '+(net>=0?'good':'bad')+'">'+MONEY(net)+'</div><div class="heroDelta"><span>'+(net>=0?'+':'')+MONEY(net)+'</span><span>'+(Number.isFinite(roi)?MPCT(roi):'—')+'</span><small>'+E(pnlLabel)+'</small></div><div class="heroGraph">'+lineSvg(series,false)+'</div>'+\n '<div class="flowStrip"><div class="flowCell"><span>GESAMT REINGEFLOSSEN</span><b>'+MONEY(used)+'</b><small>kumulativer Einsatz aller Trades</small></div><div class="flowCell"><span>PLUS / MINUS</span><b class="'+(net>=0?'good':'bad')+'">'+(net>=0?'+':'')+MONEY(net)+'</b><small>aktueller Gesamt-PnL</small></div><div class="flowCell"><span>EINSATZ ± PnL</span><b class="'+(flowAfterPnl>=used?'good':'bad')+'">'+MONEY(flowAfterPnl)+'</b><small>'+MONEY(used)+' '+(net>=0?'+':'−')+' '+MONEY(Math.abs(net))+'</small></div></div>'+
  w6PnlAudit+'<div class="heroMetrics"><div class="heroMetric"><span>'+(is6?'Conservative Unrealized':'Unrealized PnL')+'</span><b class="'+(unrealized>=0?'good':'bad')+'">'+MONEY(unrealized)+'</b></div><div class="heroMetric"><span>Realized PnL</span><b class="'+(realized>=0?'good':'bad')+'">'+MONEY(realized)+'</b></div><div class="heroMetric"><span>Total PnL</span><b class="'+(net>=0?'good':'bad')+'">'+MONEY(net)+'</b></div><div class="heroMetric"><span>ROI auf Einsatz</span><b class="'+(roi>=0?'good':'bad')+'">'+(Number.isFinite(roi)?MPCT(roi):'—')+'</b></div><div class="heroMetric totalUsed"><span>Gesamt reingeflossen</span><b>'+MONEY(used)+'</b></div></div></div>'+
