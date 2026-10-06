@@ -1163,7 +1163,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       liquiditySnapshots,
       observedUnrealizedNetPnlQuote:finite(baseMarked?.unrealizedNetPnlQuote),
       observedUnrealizedReturnPct:finite(baseMarked?.unrealizedReturnPct),
-      executableMark,
+      executableMark:executionMark,
       executableUnrealizedNetPnlQuote:executionMark.executable?executionMark.modelledNetPnlQuote:null,
       conservativeUnrealizedNetPnlQuote:executionMark.conservativeNetPnlQuote,
       estimatedNetPnlSolBeforeSlippage:pnlSolEstimate,
