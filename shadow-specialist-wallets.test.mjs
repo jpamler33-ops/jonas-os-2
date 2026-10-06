@@ -457,7 +457,7 @@ test('wallet 4 enforced signal gate opens only explicit BUY candidates',()=>{
 });
 
 
-test('user 99k/60s V1 matches only coins already above 99k within 60 seconds',()=>{
+test('user 99k/120s V1 matches only coins already above 99k before 120 seconds',()=>{
   const now=10_000_000;
   const good=evaluateUser99k60sEntry({
     priceUsd:.001,marketCap:105_000,pairCreatedAt:now-42_000
@@ -468,8 +468,14 @@ test('user 99k/60s V1 matches only coins already above 99k within 60 seconds',()
   assert.equal(good.observedTimeTo99kSeconds,42);
   assert.equal(good.canExecuteLive,false);
 
+  const nearBoundary=evaluateUser99k60sEntry({
+    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-119_999
+  },{now});
+  assert.equal(nearBoundary.match,true);
+  assert.equal(nearBoundary.action,'BUY_SHADOW');
+
   const old=evaluateUser99k60sEntry({
-    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-61_000
+    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-120_000
   },{now});
   assert.equal(old.match,false);
   assert.ok(old.blockers.includes('OLDER_THAN_MAX_AGE'));
@@ -499,7 +505,7 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
   assert.equal(p.entryAgeSeconds,25);
   assert.equal(p.observedTimeTo99kSeconds,25);
   assert.equal(p.entryMarketCapUsd,120_000);
-  assert.equal(p.entryRule,'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
+  assert.equal(p.entryRule,'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE');
   assert.equal(p.targetTracking,'OBSERVATIONAL_ONLY_NO_AUTO_PROFIT_EXIT');
   assert.deepEqual(p.profitTargetScenarios.map(x=>x.entryNotionalSol),[0.5,1,2,3,5,10,20,40,60,80]);
   assert.equal(p.minHoldSeconds,180);
@@ -518,7 +524,7 @@ test('user 99k/60s V1 opens immediately in isolated W6 without changing W4 gate'
 test('W6 entry funnel exposes exactly where candidates fail before entry',()=>{
   const now=11_500_000;
   const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[
-    {chainId:'solana',tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-70_000},
+    {chainId:'solana',tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-120_000},
     {chainId:'solana',tokenAddress:'SMALL',symbol:'SMALL',priceUsd:1,marketCap:80_000,pairCreatedAt:now-20_000},
     {chainId:'solana',tokenAddress:'NOPRICE',symbol:'NOPRICE',marketCap:120_000,pairCreatedAt:now-20_000},
     {chainId:'solana',tokenAddress:'GOOD2',symbol:'GOOD2',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000}
@@ -871,7 +877,7 @@ test('W6 Trends 1m uses the green GMGN percentage threshold, not market cap',()=
   assert.equal(p.entryMarketCapUsd,47_800);
   assert.equal(p.entryGreenPercent,999_000);
   assert.equal(p.entryThresholdMode,'GMGN_GREEN_PERCENT');
-  assert.equal(p.entryRule,'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY');
+  assert.equal(p.entryRule,'GMGN_TRENDS_1M_AND_AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY');
   assert.equal(p.sourceSetupAtEntry,'GMGN_TRENDS_1M');
 
   const exact99k=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{

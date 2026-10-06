@@ -666,7 +666,7 @@ export function evaluateUser99k60sEntry(row,{
   if(requireTrending&&!trendVisible)blockers.push('NOT_IN_TREND_FEED');
   if(requireNewPair&&!newPairVisible)blockers.push('NOT_IN_NEW_PAIR_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
-  else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');
+  else if(ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');
   if(greenMode){
     if(requireExactGmgnGreen&&row?.gmgnExactTrend!==true)blockers.push('GMGN_EXACT_TREND_REQUIRED');
     if(greenPercent==null)blockers.push('GMGN_GREEN_PERCENT_UNKNOWN');
@@ -1082,7 +1082,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       trendFeed:row?.signalTrending===true||row?.w6TrendVisible===true
     }):null;
     const ageKnown=signal.ageSeconds!=null;
-    const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;
+    const ageWithin=ageKnown&&signal.ageSeconds<signal.maxAgeSeconds;
     const marketCapKnown=signal.marketCapUsd!=null;
     const marketCapQualified=marketCapKnown&&signal.thresholdUsd!=null&&signal.marketCapUsd>=signal.thresholdUsd;
     const greenPercentKnown=signal.greenPercent!=null;
