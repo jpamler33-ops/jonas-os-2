@@ -136,7 +136,27 @@ export function createMemecoinEarlyRadarProvider(options={}){
           attentionSemantics:isBoost?'PAID_BOOST_ATTENTION_PROXY':old.attentionSemantics||'PROFILE_DISCOVERY_ONLY'});
       }
     }
-    const addresses=[...seeds.keys()].slice(0,60),dexPairs=[];
+    // Retained candidates and open positions must not depend on legacy Trends
+    // finishing. Refresh their marks independently; never replay memory as fresh.
+    const retained=new Map();
+    for(const row of Array.isArray(args.candidateRows)?args.candidateRows:[]){
+      const address=String(row?.tokenAddress||'').trim(),created=finite(row?.pairCreatedAt);
+      if(!address||created==null||created>capturedAt||(capturedAt-created)/1000>=120)continue;
+      if(seeds.has(address)){
+        const seed=seeds.get(address),times=[created,finite(seed.pairCreatedAt)].filter(x=>x!=null);
+        seeds.set(address,{...seed,pairCreatedAt:Math.min(...times),firstSeenAt:row.firstSeenAt??seed.firstSeenAt});
+      }else retained.set(address,{...row,candidateTracking:true,signalTrending:false,
+        wasTrending:row.signalTrending===true||row.wasTrending===true,w6TrackingOnly:false});
+    }
+    const positions=new Set((Array.isArray(args.trackTokenAddresses)?args.trackTokenAddresses:[])
+      .map(x=>String(x||'').trim()).filter(Boolean));
+    for(const address of positions){
+      if(seeds.has(address))seeds.set(address,{...seeds.get(address),w6TrackingOnly:true});
+      else retained.set(address,{...(retained.get(address)||{}),chainId:'solana',tokenAddress:address,w6TrackingOnly:true});
+    }
+    const discoveryAddresses=[...seeds.keys()].slice(0,60);
+    // Open positions have first claim on the bounded supplemental refresh.
+    const addresses=[...new Set([...positions,...retained.keys(),...discoveryAddresses])].slice(0,120),dexPairs=[];
     const batches=[];
     for(let offset=0;offset<addresses.length;offset+=30)batches.push(addresses.slice(offset,offset+30));
     const enriched=await Promise.allSettled(batches.map(async batch=>{
@@ -155,9 +175,10 @@ export function createMemecoinEarlyRadarProvider(options={}){
       const old=bestPairs.get(row.tokenAddress);
       if(!old||(row.liquidityUsd??-1)>(old.liquidityUsd??-1))bestPairs.set(row.tokenAddress,row);
     }
-    fresh=[...seeds.values()].map(seed=>{
+    fresh=[...seeds.values(),...retained.values()].map(seed=>{
       const pair=bestPairs.get(seed.tokenAddress);
-      const row={...seed};
+      if(retained.has(seed.tokenAddress)&&!pair)return null;
+      const row=retained.has(seed.tokenAddress)?{...seed,...pair}:{...seed};
       if(pair){
         for(const [k,v] of Object.entries(pair))if(v!=null&&v!=='')row[k]=v;
         const times=[seed.pairCreatedAt,pair.pairCreatedAt].filter(x=>finite(x)!=null).map(Number);
@@ -168,10 +189,10 @@ export function createMemecoinEarlyRadarProvider(options={}){
       row.marketCap=finite(row.marketCap);
       row.fdv=finite(row.fdv);
       row.firstSeenAt=seed.firstSeenAt??capturedAt;
-      row.gmgnExactTrend=false;row.sourceSetup='TRENDS_PROXY_RESEARCH';row.w6TrackingOnly=false;
+      row.gmgnExactTrend=false;row.sourceSetup='TRENDS_PROXY_RESEARCH';row.w6TrackingOnly=seed.w6TrackingOnly===true;
       row.freeTrendSources=[seed.trendSource].filter(Boolean);
       return row;
-    }).filter(x=>x.pairCreatedAt!=null&&x.pairCreatedAt<=capturedAt&&(capturedAt-x.pairCreatedAt)/1000<=maxAge);
+    }).filter(x=>x&&(x.w6TrackingOnly===true||(x.pairCreatedAt!=null&&x.pairCreatedAt<=capturedAt&&(capturedAt-x.pairCreatedAt)/1000<=maxAge)));
     const legacyResult=await priorResult;
     // Never relabel a previous invocation's delayed legacy marks as fresh.
     const legacyFresh=legacyResult.value&&Number(legacyResult.value.capturedAt)>=capturedAt;
