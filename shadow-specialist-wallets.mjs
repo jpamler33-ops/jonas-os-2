@@ -803,6 +803,8 @@ function user99k60sResearchObservation(row={},{
     phase:String(phase||'MARK'),
     holdSeconds,
     ageSeconds,
+    pairAddress:text(row?.pairAddress||row?.poolAddress||position?.entryPoolAddress||'',160)||null,
+    dexId:text(row?.dexId||row?.dex||position?.entryDexId||'',80)||null,
     priceUsd:finite(row?.priceUsd,finite(position?.lastPrice)),
     marketCapUsd:finite(row?.marketCap,finite(position?.lastMarketCapUsd)),
     fdvUsd:finite(row?.fdv),
@@ -839,6 +841,11 @@ function user99k60sResearchObservation(row={},{
     },
     security:{
       evidenceGate:text(security?.evidenceGate||'',40)||null,
+      top10Share:finite(security?.holderState?.top10Share),
+      largestHolderShare:finite(security?.holderState?.largestHolderShare),
+      holderCount:finite(security?.holderState?.holderCount),
+      mintAuthorityPresent:security?.mintAuthorityPresent===true||security?.mintable===true,
+      freezeAuthorityPresent:security?.freezeAuthorityPresent===true||security?.freezable===true,
       criticalRiskFlags:(Array.isArray(security?.criticalRiskFlags)?security.criticalRiskFlags:[]).slice(0,20).map(x=>text(x,80)),
       warningFlags:(Array.isArray(security?.warningFlags)?security.warningFlags:[]).slice(0,20).map(x=>text(x,80)),
       unknownReasonCodes:(Array.isArray(security?.unknownReasonCodes)?security.unknownReasonCodes:[]).slice(0,20).map(x=>text(x,80))
@@ -888,6 +895,19 @@ function user99k60sResearchSampleIntervalMs(position,at){
   if(holdSeconds<=10*60)return 5_000;
   if(holdSeconds<=30*60)return 15_000;
   return 30_000;
+}
+
+function user99k60sRecordResearchGap(dataset,{at=Date.now(),reason='ROW_MISSING',sourceReady=null}={}){
+  if(!dataset||dataset.version!==W6_COIN_RESEARCH_DATASET_VERSION)return dataset;
+  const base=clone(dataset);
+  base.dataGaps=Array.isArray(base.dataGaps)?base.dataGaps:[];
+  const last=base.dataGaps[base.dataGaps.length-1]||null;
+  if(last&&Number(at)-Number(last.at||0)<15_000&&String(last.reason||'')===String(reason||''))return base;
+  base.dataGaps.push({at:Number(at),reason:String(reason||'ROW_MISSING'),sourceReady:sourceReady===true});
+  if(base.dataGaps.length>120)base.dataGaps=base.dataGaps.slice(-120);
+  base.dataGapCountTotal=Math.max(Number(base.dataGapCountTotal)||0,base.dataGaps.length-1)+1;
+  base.lastDataGapAt=Number(at);
+  return base;
 }
 
 function user99k60sAppendResearchObservation(dataset,row,position,{
@@ -1250,7 +1270,19 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   for(let i=wallet.positions.length-1;i>=0;i--){
     const p=wallet.positions[i];
     const row=byKey.get(String(p.chainId||'')+':'+String(p.tokenAddress||''));
-    if(!row||!(finite(row?.priceUsd)>0))continue;
+    if(!row||!(finite(row?.priceUsd)>0)){
+      if(p?.coinResearch){
+        wallet.positions[i]={
+          ...p,
+          coinResearch:user99k60sRecordResearchGap(p.coinResearch,{
+            at:now,
+            reason:!row?'ROW_MISSING':'PRICE_MISSING',
+            sourceReady:snapshot?.sourceReady===true
+          })
+        };
+      }
+      continue;
+    }
     const baseMarked=markPosition(p,row.priceUsd,now,feeBps);
     const marketCapUsd=finite(row?.marketCap);
     const currentLiquidityUsd=finite(row?.liquidityUsd);
@@ -1685,6 +1717,9 @@ function safePositionForOutput(position){
         finalized:r.finalized===true,
         observationCountTotal:Number(r.observationCountTotal)||0,
         retainedObservations:Array.isArray(r.observations)?r.observations.length:0,
+        dataGapCountTotal:Number(r.dataGapCountTotal)||0,
+        retainedDataGaps:Array.isArray(r.dataGaps)?r.dataGaps.length:0,
+        lastDataGapAt:r.lastDataGapAt??null,
         samplingPolicy:r.samplingPolicy,
         retainedObservationLimit:r.retainedObservationLimit,
         entrySnapshot:r.entrySnapshot||null,
