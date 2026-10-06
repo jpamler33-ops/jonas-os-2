@@ -5585,7 +5585,7 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       active:wallet?.openPositions||0,
       closedTrades:wallet?.closedTrades||0,
       activeTrades,
-      recentClosedTrades:wallet?.recentClosed?.slice(0,5)||[],
+      recentClosedTrades:(wallet?.recentClosed||[]).slice(0,5).map(p=>({tokenAddress:p.tokenAddress,openedAt:p.openedAt,closedAt:p.closedAt,entryAgeSeconds:p.entryAgeSeconds,firstObservedAgeSeconds:p.firstObservedAgeSeconds,first99kObservedAgeSeconds:p.first99kObservedAgeSeconds,entryMarketCap:p.entryMarketCapUsd,entryLiquidityUsd:p.entryLiquidityUsd,entryNotionalSol:p.entryNotionalSol,holdSeconds:(Number(p.closedAt)-Number(p.openedAt))/1000,exitReason:p.closeReason||p.exitReason,pnlQuote:p.realizedNetPnlQuote,liquidityDeath:p.jonasClone?.liquidityDeath||null})),
       execution:'SHADOW_ONLY',
       canExecuteLive:false
     }));
