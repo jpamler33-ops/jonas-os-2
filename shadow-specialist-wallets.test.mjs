@@ -546,10 +546,10 @@ test('W6 entry funnel exposes exactly where candidates fail before entry',()=>{
 test('user 99k/60s V1 can apply a market-cap exit after the three-minute protection when an explicit floor is configured',()=>{
   const now=12_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',liquidityUsd:100_000,priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
   }]},{now,minExitMarketCapUsd:99_000}).state;
   const next=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',priceUsd:.8,marketCap:90_000,pairCreatedAt:now-210_000
+    chainId:'solana',tokenAddress:'DROP',symbol:'DROP',liquidityUsd:100_000,priceUsd:.8,marketCap:90_000,pairCreatedAt:now-210_000
   }]},{now:now+190_000,minExitMarketCapUsd:99_000});
   assert.equal(next.results.closed,1);
   assert.equal(next.results.marketCapExit,1);
@@ -608,9 +608,10 @@ test('user 99k/60s V1 does not invent a market-cap exit threshold',()=>{
 test('W6 user-marked profit exit closes only the shadow position and records context',()=>{
   const now=16_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'USEREXIT',symbol:'USEREXIT',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+    chainId:'solana',tokenAddress:'USEREXIT',symbol:'USEREXIT',liquidityUsd:100_000,priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
   }]},{now,entryNotionalSol:80}).state;
   const p=state.wallets[WALLET_6_USER_99K_60S].positions[0];
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{chainId:'solana',tokenAddress:'USEREXIT',priceUsd:1.2,marketCap:180_000,liquidityUsd:100_000}]},{now:now+45_000}).state;
   const x=recordUser99k60sExitObservation(state,{
     positionKey:p.positionKey,reason:'USER_PROFIT_ENOUGH',now:now+45_000,priceUsd:1.2,marketCapUsd:180_000
   });
@@ -631,9 +632,10 @@ test('W6 exit learner remains descriptive until at least 20 marked exits',()=>{
   for(let i=0;i<2;i++){
     const token='LEARN'+i;
     state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-      chainId:'solana',tokenAddress:token,symbol:token,priceUsd:1,marketCap:120_000,pairCreatedAt:now+i*1000-10_000
+      chainId:'solana',tokenAddress:token,symbol:token,liquidityUsd:100_000,priceUsd:1,marketCap:120_000,pairCreatedAt:now+i*1000-10_000
     }]},{now:now+i*1000}).state;
     const p=state.wallets[WALLET_6_USER_99K_60S].positions.find(x=>x.tokenAddress===token);
+    state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{chainId:'solana',tokenAddress:token,priceUsd:i===0?1.1:.85,marketCap:120_000,liquidityUsd:100_000}]},{now:now+i*1000+30_000}).state;
     state=recordUser99k60sExitObservation(state,{
       positionKey:p.positionKey,
       reason:i===0?'USER_PROFIT_ENOUGH':'USER_MCAP_TOO_SMALL',
@@ -656,17 +658,17 @@ test('W6 exit learner remains descriptive until at least 20 marked exits',()=>{
 test('W6 loss-style market-cap exit is protected during the first three minutes',()=>{
   const now=18_000_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000
+    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',liquidityUsd:100_000,priceUsd:1,marketCap:120_000,pairCreatedAt:now-20_000
   }]},{now,minExitMarketCapUsd:99_000,minHoldSeconds:180}).state;
 
   const early=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',priceUsd:.92,marketCap:90_000,pairCreatedAt:now-100_000
+    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',liquidityUsd:100_000,priceUsd:.92,marketCap:90_000,pairCreatedAt:now-100_000
   }]},{now:now+120_000,minExitMarketCapUsd:99_000,minHoldSeconds:180});
   assert.equal(early.results.closed,0);
   assert.equal(early.state.wallets[WALLET_6_USER_99K_60S].positions.length,1);
 
   const later=applyUser99k60sStrategySnapshot(early.state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',priceUsd:.90,marketCap:88_000,pairCreatedAt:now-210_000
+    chainId:'solana',tokenAddress:'PROTECT3M',symbol:'PROTECT3M',liquidityUsd:100_000,priceUsd:.90,marketCap:88_000,pairCreatedAt:now-210_000
   }]},{now:now+190_000,minExitMarketCapUsd:99_000,minHoldSeconds:180});
   assert.equal(later.results.closed,1);
   assert.equal(later.state.wallets[WALLET_6_USER_99K_60S].closed[0].closeReason,'USER_99K_60S_MCAP_TOO_SMALL');
@@ -675,16 +677,16 @@ test('W6 loss-style market-cap exit is protected during the first three minutes'
 test('W6 catastrophic fail-safe is blocked for 3m then closes extreme collapse',()=>{
   const now=18_500_000;
   let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
+    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',liquidityUsd:100_000,priceUsd:1,marketCap:130_000,pairCreatedAt:now-20_000
   }]},{now,minHoldSeconds:180}).state;
 
   const protectedDrop=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',priceUsd:.05,marketCap:6_500,pairCreatedAt:now-140_000
+    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',liquidityUsd:100_000,priceUsd:.05,marketCap:6_500,pairCreatedAt:now-140_000
   }]},{now:now+120_000,minHoldSeconds:180});
   assert.equal(protectedDrop.results.closed,0);
 
   const afterProtection=applyUser99k60sStrategySnapshot(protectedDrop.state,{sourceReady:true,rows:[{
-    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',priceUsd:.05,marketCap:6_500,pairCreatedAt:now-210_000
+    chainId:'solana',tokenAddress:'CATA',symbol:'CATA',liquidityUsd:100_000,priceUsd:.05,marketCap:6_500,pairCreatedAt:now-210_000
   }]},{now:now+190_000,minHoldSeconds:180});
   assert.equal(afterProtection.results.closed,1);
   assert.equal(afterProtection.results.catastrophicExit,1);
@@ -1023,14 +1025,13 @@ test('W6 liquidity death marks the remaining shadow exposure as non-realizable l
   }]},{now:now+5_000,entryNotionalSol:10,solPriceUsd:100}).state;
 
   const w=specialistWalletSummary(state,{asOf:now+5_000}).wallets[WALLET_6_USER_99K_60S];
-  const p=w.active[0];
-  assert.ok(p.observedUnrealizedNetPnlQuote>0);
-  assert.equal(p.executableUnrealizedNetPnlQuote,null);
-  assert.equal(p.executionPnlStatus,'LIQUIDITY_DEAD');
-  assert.equal(p.conservativeUnrealizedNetPnlQuote,-100);
-  assert.equal(w.liquidityDeadOpenPositions,1);
-  assert.equal(w.netPnlQuote,-100);
-  assert.equal(w.observedNetPnlQuote>0,true);
+  const p=state.wallets[WALLET_6_USER_99K_60S].closed[0];
+  assert.equal(w.active.length,0);
+  assert.ok(p.observedRealizedNetPnlQuote>0);
+  assert.equal(p.closeReason,'W6_LIQUIDITY_GONE');
+  assert.equal(p.exitProceedsQuote,0);
+  assert.equal(p.realizedNetPnlQuote,-100.3);
+  assert.equal(p.settlementStatus,'ZERO_RECOVERY_WRITE_OFF');
   assert.equal(w.canExecuteLive,false);
 });
 
