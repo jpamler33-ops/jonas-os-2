@@ -120,3 +120,63 @@ test('slow legacy discovery and individual seed failure do not discard healthy D
  assert.ok(snapshot.errors.some(x=>x.includes('PROFILE_DOWN')));
  await provider.fetchUltraEarlySolana({maxAgeSeconds:120});assert.equal(legacyCalls,1);
 });
+
+const retainedCandidate=(patch={})=>({chainId:'solana',tokenAddress:'RETAINED',pairCreatedAt:start-90000,
+ firstSeenAt:start-70000,marketCap:80000,priceUsd:'.001',liquidityUsd:20000,signalTrending:true,...patch});
+test('retained candidate crosses 99k before 120s through independent refresh during legacy timeout',async()=>{
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname.includes('/trending_pools'))return new Promise(()=>{});
+  if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('RETAINED',start-90000)]);
+ },{timeoutMs:1000});
+ const snapshot=await provider.fetchUltraEarlySolana({candidateRows:[retainedCandidate()],maxAgeSeconds:120});
+ const row=snapshot.rows.find(x=>x.tokenAddress==='RETAINED');
+ assert.ok(row);assert.equal(row.marketCap,120000);assert.equal(row.pairCreatedAt,start-90000);
+ assert.equal(row.firstSeenAt,start-70000);assert.equal(row.candidateTracking,true);
+ assert.equal(row.signalTrending,false);assert.equal(snapshot.candidateTrackingRows,1);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
+});
+test('missing candidate enrichment never relabels previous qualifying marks as fresh',async()=>{
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname.startsWith('/tokens/v1/solana/'))return new Promise(()=>{});
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({candidateRows:[retainedCandidate({marketCap:120000})],maxAgeSeconds:120});
+ assert.equal(snapshot.rows.length,0);assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
+});
+test('unknown current cap does not reuse retained historic cap; 120-second candidates expire',async()=>{
+ const requests=[];
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname.startsWith('/tokens/v1/solana/')){requests.push(u.pathname);return json([pair('RETAINED',start-90000,{marketCap:null})]);}
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({candidateRows:[retainedCandidate({marketCap:120000}),
+  retainedCandidate({tokenAddress:'EXPIRED',pairCreatedAt:start-120000})],maxAgeSeconds:180});
+ assert.equal(snapshot.rows[0].marketCap,null);assert.equal(snapshot.rows[0].fdv,150000);
+ assert.ok(!snapshot.rows.some(x=>x.tokenAddress==='EXPIRED'));
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
+});
+test('open positions stay independently marked outside discovery age window and cannot become entries',async()=>{
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('OPEN',start-600000)]);
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({trackTokenAddresses:['OPEN'],maxAgeSeconds:120});
+ assert.equal(snapshot.rows.length,1);assert.equal(snapshot.rows[0].w6TrackingOnly,true);
+ assert.equal(snapshot.trackingRows,1);assert.equal(snapshot.discoveryRows,0);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
+});
+
+test('rediscovered retained token keeps original launch age during legacy failure',async()=>{
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname.includes('/trending_pools'))return new Promise(()=>{});
+  if(u.pathname==='/token-boosts/latest/v1')return json([{chainId:'solana',tokenAddress:'RETAINED',amount:1}]);
+  if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('RETAINED',start-5000)]);
+ },{timeoutMs:1000});
+ const snapshot=await provider.fetchUltraEarlySolana({candidateRows:[retainedCandidate()],maxAgeSeconds:120});
+ assert.equal(snapshot.rows[0].pairCreatedAt,start-90000);assert.equal(snapshot.rows[0].firstSeenAt,start-70000);
+});
+test('position rediscovered through boost feed remains tracking-only beyond entry window',async()=>{
+ const provider=deadlineProvider(async u=>{
+  if(u.pathname==='/token-boosts/latest/v1')return json([{chainId:'solana',tokenAddress:'OPEN',amount:1}]);
+  if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('OPEN',start-600000)]);
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({trackTokenAddresses:['OPEN'],maxAgeSeconds:120});
+ assert.equal(snapshot.rows[0].w6TrackingOnly,true);assert.equal(snapshot.trackingRows,1);assert.equal(snapshot.discoveryRows,0);
+});
