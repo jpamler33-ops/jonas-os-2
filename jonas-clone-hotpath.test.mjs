@@ -120,10 +120,12 @@ test('confirmed liquidity death closes immediately with zero recovery before 4m'
   assert.equal(closed.jonasClone.liquidityDeath.observedAt,now+100000);
 });
 
-test('legacy W6 positions remain legacy across clone deployment',()=>{
+test('legacy W6 positions remain legacy and are not forced into the clone 240s exit',()=>{
   const state=structuredClone(createSpecialistWalletState());
-  state.wallets[W6].positions.push({walletId:W6,positionKey:'legacy',chainId:'solana',tokenAddress:'OLD',entryPrice:1,lastPrice:1,openedAt:now-10000,exposureQuote:100,marginQuote:100,status:'OPEN',side:'LONG',strategyVersion:'LEGACY'});
-  const x=apply(state,[]);
+  state.wallets[W6].positions.push({walletId:W6,positionKey:'legacy',chainId:'solana',tokenAddress:'OLD',entryPrice:1,lastPrice:1,openedAt:now-300000,exposureQuote:100,marginQuote:100,status:'OPEN',side:'LONG',strategyVersion:'LEGACY'});
+  const x=apply(state,[{...row,tokenAddress:'OLD',symbol:'OLD',w6TrackingOnly:true,priceUsd:1.1,liquidityUsd:20000,pairAddress:'OLDPOOL'}]);
+  assert.equal(x.state.wallets[W6].positions.length,1);
   assert.equal(x.state.wallets[W6].positions[0].strategyVersion,'LEGACY');
   assert.equal(x.state.wallets[W6].positions[0].jonasClone,undefined);
+  assert.equal(x.state.wallets[W6].closed.length,0);
 });
