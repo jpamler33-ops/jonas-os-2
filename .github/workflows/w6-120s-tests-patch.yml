@@ -20,6 +20,7 @@ jobs:
           code=Path('shadow-specialist-wallets.mjs')
           s=code.read_text()
           s=s.replace("else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');", "else if(ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');")
+          s=s.replace("const ageWithin=ageKnown&&signal.ageSeconds<=signal.maxAgeSeconds;", "const ageWithin=ageKnown&&signal.ageSeconds<signal.maxAgeSeconds;")
           code.write_text(s)
 
           p=Path('shadow-specialist-wallets.test.mjs')
@@ -68,5 +69,5 @@ jobs:
             echo 'No migration changes required.'
             exit 0
           fi
-          git commit -m 'fix(w6): strict <120s entry with migrated tests [w6-120s-tests-applied]'
+          git commit -m 'fix(w6): strict <120s entry with aligned funnel diagnostics [w6-120s-tests-applied]'
           git push origin HEAD:main
