@@ -3,11 +3,20 @@ export class ForecastRevisionTracker {
     options;
     records = new Map();
     maxRecords;
+    maxRevisionsPerRecord;
     constructor(options = {}) {
         this.options = options;
         this.maxRecords = Math.max(100, Math.floor(options.maxRecords ?? 5000));
+        this.maxRevisionsPerRecord = Math.max(16, Math.floor(options.maxRevisionsPerRecord ?? 256));
+    }
+    trimRevisions(record) {
+        if (!record || !Array.isArray(record.revisions) || record.revisions.length <= this.maxRevisionsPerRecord)
+            return;
+        record.revisions.splice(0, record.revisions.length - this.maxRevisionsPerRecord);
     }
     trim() {
+        for (const r of this.records.values())
+            this.trimRevisions(r);
         if (this.records.size <= this.maxRecords)
             return;
         const rows = [...this.records.values()].sort((a, b) => {
@@ -42,8 +51,10 @@ export class ForecastRevisionTracker {
         }
         const assessment = assessForecastInvalidation(r.report, current, r.transitionAtIssue, this.options);
         const prev = r.revisions.at(-1);
-        if (!prev || current.asOf > prev.timestamp)
+        if (!prev || current.asOf > prev.timestamp) {
             r.revisions.push({ timestamp: current.asOf, price: current.price, regimeId: current.regimeId, assessment });
+            this.trimRevisions(r);
+        }
         if (assessment.status === 'INVALIDATED')
             r.status = 'INVALIDATED';
         changed.push(structuredClone(r));
@@ -128,6 +139,9 @@ export class ForecastRevisionTracker {
     all() { return [...this.records.values()].map(x => structuredClone(x)); }
     snapshot() { return { version: 1, records: this.all() }; }
     restore(s) { if (s.version !== 1)
-        throw new Error('unsupported revision snapshot version'); this.records.clear(); for (const r of s.records)
-        this.records.set(r.id, structuredClone(r)); this.trim(); }
+        throw new Error('unsupported revision snapshot version'); this.records.clear(); for (const r of s.records) {
+        const copy = structuredClone(r);
+        this.trimRevisions(copy);
+        this.records.set(copy.id, copy);
+    } this.trim(); }
 }
