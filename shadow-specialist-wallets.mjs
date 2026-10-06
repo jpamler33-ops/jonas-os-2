@@ -1828,8 +1828,12 @@ function safePositionForOutput(position){
 }
 
 function walletStats(wallet,{asOf=Date.now()}={}){
-  const open=wallet.positions||[],closed=wallet.closed||[];
+  const storedOpen=wallet.positions||[],storedClosed=wallet.closed||[];
   const isW6=wallet.walletId===WALLET_6_USER_99K_60S;
+  const open=isW6?storedOpen.filter(isCurrentW6ClonePosition):storedOpen;
+  const closed=isW6?storedClosed.filter(isCurrentW6ClonePosition):storedClosed;
+  const legacyOpen=isW6?storedOpen.filter(p=>!isCurrentW6ClonePosition(p)):[];
+  const legacyClosed=isW6?storedClosed.filter(p=>!isCurrentW6ClonePosition(p)):[];
   const openViews=isW6
     ?open.map(p=>({...p,...user99k60sExecutionOutputView(p,{asOf})}))
     :open;
@@ -1876,6 +1880,16 @@ function walletStats(wallet,{asOf=Date.now()}={}){
     currentMarginAtRiskQuote:open.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
     active:openViews.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
     recentClosed:closed.slice(-20).reverse().map(safePositionForOutput),
+    ...(isW6?{
+      currentContract:W6_CURRENT_GMGN_CONTRACT,
+      totalStoredOpenPositions:storedOpen.length,
+      totalStoredClosedTrades:storedClosed.length,
+      legacyOpenPositions:legacyOpen.length,
+      legacyClosedTrades:legacyClosed.length,
+      legacyActive:legacyOpen.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,10).map(safePositionForOutput),
+      legacyRecentClosed:legacyClosed.slice(-10).reverse().map(safePositionForOutput),
+      legacySemantics:'SEPARATE_PRE_GMGN_99K_PERCENT_DATA_EXCLUDED_FROM_CURRENT_W6_METRICS'
+    }:{}),
     objective:wallet.objective,primaryPerformanceExcluded:true,
     execution:'SHADOW_ONLY',canExecuteLive:false
   });
@@ -1894,7 +1908,9 @@ export function w6ResearchArchive(state,{asOf=Date.now(),limit=100,tokenAddress=
   const s=mutableState(state);
   const wallet=s.wallets[WALLET_6_USER_99K_60S];
   const token=String(tokenAddress||'').trim().toLowerCase();
-  const rows=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+  const stored=[...(wallet?.positions||[]),...(wallet?.closed||[])];
+  const rows=stored
+    .filter(isCurrentW6ClonePosition)
     .filter(p=>p?.coinResearch)
     .filter(p=>!token||String(p?.tokenAddress||'').toLowerCase()===token)
     .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))
@@ -1922,7 +1938,9 @@ export function w6ResearchArchive(state,{asOf=Date.now(),limit=100,tokenAddress=
     version:W6_COIN_RESEARCH_DATASET_VERSION,
     asOf:Number(asOf),
     walletId:WALLET_6_USER_99K_60S,
+    currentContract:W6_CURRENT_GMGN_CONTRACT,
     records:rows.length,
+    legacyRecordsExcluded:stored.filter(p=>!isCurrentW6ClonePosition(p)).length,
     rows,
     execution:'SHADOW_ONLY',
     canExecute:false,
@@ -2089,7 +2107,9 @@ export function w6ResearchAnalysis(state,{
 }={}){
   const s=mutableState(state);
   const wallet=s.wallets[WALLET_6_USER_99K_60S];
-  const all=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+  const stored=[...(wallet?.positions||[]),...(wallet?.closed||[])];
+  const current=stored.filter(isCurrentW6ClonePosition);
+  const all=current
     .map(w6ResearchRecordFromPosition)
     .filter(Boolean);
   const closed=all.filter(x=>x.closed);
@@ -2130,9 +2150,11 @@ export function w6ResearchAnalysis(state,{
     version:W6_RESEARCH_ANALYSIS_VERSION,
     asOf:Number(asOf),
     walletId:WALLET_6_USER_99K_60S,
+    currentContract:W6_CURRENT_GMGN_CONTRACT,
     status:evidenceReady?'EVIDENCE_BUILDING':'COLLECTING',
     counts:{
       records:all.length,
+      legacyRecordsExcluded:Math.max(0,stored.length-current.length),
       open:all.filter(x=>!x.closed).length,
       closed:closed.length,
       completeEntrySnapshots:complete,
