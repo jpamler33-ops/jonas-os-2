@@ -10,6 +10,7 @@ import {
   user99k60sExitLearningSummary,
   specialistWalletSummary,
   w6ResearchArchive,
+  w6ResearchAnalysis,
   WALLET_3_TRADER_COPY,
   WALLET_4_MEME_SCOUT,
   WALLET_5_MEME_COPY,
@@ -1123,4 +1124,90 @@ test('W6 finalized coin research record survives the close for post-trade analys
   assert.equal(record.research.observations.at(-1).phase,'EXIT');
   assert.equal(record.research.outcome.closePrice,.7);
   assert.equal(record.research.canExecuteLive,false);
+});
+
+
+test('W6 research analysis ranks only evidence-qualified cohorts and keeps policy mutation disabled',()=>{
+  const state=JSON.parse(JSON.stringify(createSpecialistWalletState()));
+  const wallet=state.wallets[WALLET_6_USER_99K_60S];
+  const makeClosed=({id,age,mc,liq,size,impact,pnl,hold,trend=true})=>({
+    walletId:WALLET_6_USER_99K_60S,
+    positionKey:'W6:'+id,
+    chainId:'solana',
+    tokenAddress:id,
+    symbol:id,
+    status:'CLOSED',
+    openedAt:1_000_000,
+    closedAt:1_000_000+hold*1000,
+    initialMarginQuote:1000,
+    marginQuote:1000,
+    entryAgeSeconds:age,
+    entryMarketCapUsd:mc,
+    entryLiquidityUsd:liq,
+    entryNotionalSol:size,
+    entryDexId:'pumpswap',
+    trendVisibleAtEntry:trend,
+    realizedNetPnlQuote:pnl,
+    observedRealizedNetPnlQuote:pnl,
+    realizableRealizedNetPnlQuote:pnl,
+    observedMfeReturnPct:pnl>0?.8:.1,
+    observedMaeReturnPct:pnl>0?-.1:-.7,
+    coinResearch:{
+      version:'BIGGJ_W6_COIN_RESEARCH_DATASET_V1',
+      observationCountTotal:12,
+      dataGapCountTotal:0,
+      entrySnapshot:{
+        identity:{chainId:'solana',tokenAddress:id,pairAddress:'POOL_'+id,dexId:'pumpswap',symbol:id,name:id},
+        sourceFields:{signalTrending:trend,signalNewPair:true,volumeM5:20_000,buysM5:30,sellsM5:10,priceChangeM5:25},
+        score:{researchPriorityScore:.8},
+        security:{evidenceGate:'PASS',holderState:{top10Share:.25,largestHolderShare:.08}},
+        directSocialAttention:{engagement:100},
+        observation:{
+          phase:'ENTRY',ageSeconds:age,marketCapUsd:mc,liquidityUsd:liq,
+          entryImpactPct:impact,volumeM5:20_000,buysM5:30,sellsM5:10,priceChangeM5:25
+        }
+      },
+      observations:[]
+    }
+  });
+  wallet.closed.push(
+    makeClosed({id:'A1',age:20,mc:110_000,liq:150_000,size:5,impact:.02,pnl:500,hold:240}),
+    makeClosed({id:'A2',age:25,mc:115_000,liq:160_000,size:5,impact:.02,pnl:300,hold:260}),
+    makeClosed({id:'B1',age:100,mc:190_000,liq:30_000,size:20,impact:.12,pnl:-700,hold:360}),
+    makeClosed({id:'B2',age:105,mc:200_000,liq:28_000,size:20,impact:.13,pnl:-500,hold:380})
+  );
+
+  const analysis=w6ResearchAnalysis(state,{asOf:2_000_000,minCohortSamples:2,minCorrelationSamples:5});
+  assert.equal(analysis.counts.closed,4);
+  assert.equal(analysis.counts.completeEntrySnapshots,4);
+  assert.equal(analysis.evidenceReady,true);
+  assert.equal(analysis.automaticPolicyMutation,false);
+  assert.equal(analysis.recommendationAuthority,'RESEARCH_ONLY_REQUIRE_HUMAN_REVIEW_AND_OUT_OF_SAMPLE_CONFIRMATION');
+  assert.ok(analysis.strongestPositiveCohorts.some(x=>x.dimension==='ageBucket'&&x.value==='LT_30S'));
+  assert.ok(analysis.strongestNegativeCohorts.some(x=>x.dimension==='ageBucket'&&x.value==='90_120S'));
+  assert.ok(analysis.cohorts.entryImpactBucket.some(x=>x.value==='LT_3PCT'&&x.samples===2&&x.averagePnlQuote>0));
+  assert.ok(analysis.cohorts.entryImpactBucket.some(x=>x.value==='GTE_10PCT'&&x.samples===2&&x.averagePnlQuote<0));
+  assert.ok(analysis.correlations.every(x=>x.evidenceReady===false));
+  assert.equal(analysis.execution,'SHADOW_ONLY');
+  assert.equal(analysis.canExecuteLive,false);
+});
+
+test('W6 research analysis stays COLLECTING when closed sample is below the evidence gate',()=>{
+  const state=JSON.parse(JSON.stringify(createSpecialistWalletState()));
+  state.wallets[WALLET_6_USER_99K_60S].closed.push({
+    walletId:WALLET_6_USER_99K_60S,positionKey:'ONE',chainId:'solana',tokenAddress:'ONE',symbol:'ONE',
+    status:'CLOSED',openedAt:1_000,closedAt:181_000,initialMarginQuote:100,marginQuote:100,
+    entryAgeSeconds:40,entryMarketCapUsd:120_000,entryLiquidityUsd:50_000,entryNotionalSol:5,
+    realizedNetPnlQuote:10,observedRealizedNetPnlQuote:10,realizableRealizedNetPnlQuote:10,
+    coinResearch:{version:'BIGGJ_W6_COIN_RESEARCH_DATASET_V1',observationCountTotal:3,dataGapCountTotal:1,entrySnapshot:null,observations:[]}
+  });
+  const analysis=w6ResearchAnalysis(state,{asOf:200_000,minCohortSamples:5,minCorrelationSamples:10});
+  assert.equal(analysis.status,'COLLECTING');
+  assert.equal(analysis.evidenceReady,false);
+  assert.equal(analysis.counts.closed,1);
+  assert.equal(analysis.counts.completeEntrySnapshots,0);
+  assert.equal(analysis.counts.legacyOrIncompleteEntrySnapshots,1);
+  assert.equal(analysis.counts.totalDataGaps,1);
+  assert.equal(analysis.strongestPositiveCohorts.length,0);
+  assert.equal(analysis.strongestNegativeCohorts.length,0);
 });
