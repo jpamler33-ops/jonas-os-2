@@ -1365,6 +1365,8 @@ function observeJonasClone(p,row,now,feeBps){
   t.mfeReturnPct=Math.max(t.mfeReturnPct,ret);
   t.maeReturnPct=Math.min(t.maeReturnPct,ret);
   const elapsed=(now-p.openedAt)/1000;
+  const currentLiquidity=finite(row.liquidityUsd);
+  if(currentLiquidity===0&&!t.liquidityDeath)t.liquidityDeath={observedAt:now,holdSeconds:elapsed,liquidityUsd:0,semantics:'FIRST_OBSERVED_ZERO_LIQUIDITY_NOT_EXACT_DEATH_TIME'};
   for(const second of t.intent.checkpointsSeconds){
     if(elapsed<second||t.checkpoints.some(x=>x.targetSeconds===second))continue;
     const liquidity=finite(row.liquidityUsd),size=p.entryNotionalSol;

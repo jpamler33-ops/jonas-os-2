@@ -32,7 +32,7 @@ test('Dex latest boosts produce an independent fully enriched clone candidate du
 test('profile discovery alone cannot invent trend visibility',async()=>{
  const {provider}=setup({profile:true});const snapshot=await provider.fetchUltraEarlySolana();
  assert.equal(snapshot.rows.find(x=>x.tokenAddress==='FAST').signalTrending,false);
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
 });
 test('FDV is not substituted for unknown market cap',async()=>{
  const {provider}=setup({missingCap:true});const snapshot=await provider.fetchUltraEarlySolana();
@@ -57,5 +57,5 @@ test('successful new-pool response is reused until its 30-second cache expires',
 test('new-pool discovery is not relabelled as a current trend',async()=>{
  const {provider}=setup({newPool:true,profile:true});const snapshot=await provider.fetchUltraEarlySolana();
  const row=snapshot.rows.find(x=>x.tokenAddress==='FAST');assert.equal(row.signalNewPair,true);assert.equal(row.signalTrending,false);
- assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
+ assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,1);
 });

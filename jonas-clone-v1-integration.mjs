@@ -19,7 +19,7 @@ export function applyJonasCloneSnapshot(state,snapshot,options={}){
   const captured=Number(snapshot?.capturedAt);
   const fresh=snapshot?.capturedAt!=null&&Number.isFinite(captured)&&captured<=now&&now-captured<=15000;
   return applyUser99k60sStrategySnapshot(state,{...snapshot,sourceReady:snapshot?.sourceReady===true&&fresh},{
-    ...options,clonePolicy:true,maxAgeSeconds:60,minMarketCapUsd:99000,
+    ...options,clonePolicy:true,maxAgeSeconds:120,minMarketCapUsd:99000,
     minGreenChangePct:null,requireExactGmgnGreen:false,requireTrending:false,
     requireNewPair:false,minHoldSeconds:180
   });

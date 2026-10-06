@@ -1,3 +1,4 @@
+import {readFile as readW6File,writeFile as writeW6File,rename as renameW6File} from 'node:fs/promises';
 import {applyJonasCloneSnapshot} from './jonas-clone-v1-integration.mjs';
 import http from 'node:http';
 import { createBiggjAgentAutolearnHook } from './biggj-agent-autolearn-hook.mjs';
@@ -481,7 +482,8 @@ const researchValidityConfig = Object.freeze({
 const episodeSweepMs = Math.max(60000, Number(process.env.TCX_EPISODE_SWEEP_MS || 300000));
 const forecastOutcomeCheckMs = Math.max(30000, Number(process.env.TCX_FORECAST_OUTCOME_CHECK_MS || 60000));
 const claimAssumptionEvalMs = Math.max(5*60_000, Number(process.env.TCX_CLAIM_ASSUMPTION_EVAL_MS || 15*60_000));
-const autoLearnEnabled = String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
+const w6StrategyOnlyEnabled=['1','true','yes','on'].includes(String(process.env.TCX_STRATEGY_ONLY_MODE??'true').trim().toLowerCase());
+const autoLearnEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_AUTOLEARN_ENABLED || '1') !== '0';
 const autoLearnForecastMs = Math.max(60000, Number(process.env.TCX_AUTOLEARN_FORECAST_MS || 300000));
 const autoLearnSweepMs = Math.max(30000, Number(process.env.TCX_AUTOLEARN_SWEEP_MS || 60000));
 const autoLearnHeapHeadroomMb = Math.max(280, Math.min(380, Number(process.env.TCX_AUTOLEARN_HEAP_HEADROOM_MB || 350)));
@@ -509,7 +511,7 @@ const forecastPersistenceExternalHeadroomMb = Math.max(
   24,
   Math.min(servingGuardExternalMb,Number(process.env.TCX_FORECAST_PERSIST_EXTERNAL_HEADROOM_MB||servingGuardExternalMb))
 );
-const shadowCompetitionEnabled = String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
+const shadowCompetitionEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_SHADOW_COMPETITION_ENABLED || '1') !== '0';
 const shadowCompetitionEvalMs = Math.max(15*60_000, Number(process.env.TCX_SHADOW_COMPETITION_EVAL_MS || 15*60_000));
 const shadowCompetitionMinSeedRows = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_SEED_ROWS || 40));
 const shadowCompetitionMinTrainCases = Math.max(20, Number(process.env.TCX_SHADOW_COMPETITION_MIN_TRAIN_CASES || 40));
@@ -541,7 +543,7 @@ const shadowDefaultLatencyMs = Math.max(0, Math.min(5000, Number(process.env.TCX
 const shadowMakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_MAKER_FEE_BPS || 10));
 const shadowTakerFeeBps = Math.max(0, Number(process.env.TCX_SHADOW_TAKER_FEE_BPS || 10));
 const shadowHiddenQueueBufferPct = Math.max(0, Math.min(2, Number(process.env.TCX_SHADOW_HIDDEN_QUEUE_BUFFER_PCT || 0.15)));
-const autoShadowTradingEnabled = String(process.env.TCX_AUTO_SHADOW_TRADING_ENABLED || '1') !== '0';
+const autoShadowTradingEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_AUTO_SHADOW_TRADING_ENABLED || '1') !== '0';
 const autoShadowNotionalQuote = Math.max(1, Number(process.env.TCX_AUTO_SHADOW_NOTIONAL_QUOTE || 200));
 const autoShadowCooldownMs = Math.max(60_000, Number(process.env.TCX_AUTO_SHADOW_COOLDOWN_MS || 5*60_000));
 const autoShadowMaxPerSymbolPerDay = Math.max(1, Math.floor(Number(process.env.TCX_AUTO_SHADOW_MAX_PER_SYMBOL_DAY || 12) || 12));
@@ -553,12 +555,12 @@ const autoShadowMemecoinMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(p
 const autoShadowMinExpectedReturn = Math.max(0, Number(process.env.TCX_AUTO_SHADOW_MIN_EXPECTED_RETURN || 0.002));
 const autoShadowMinDirectionalProbability = Math.max(0.5, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_DIRECTIONAL_PROB || 0.55)));
 const autoShadowMinProbabilityEdge = Math.max(0, Math.min(0.99, Number(process.env.TCX_AUTO_SHADOW_MIN_PROB_EDGE || 0.08)));
-const mandatoryShadowDiscoveryEnabled = String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
+const mandatoryShadowDiscoveryEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_ENABLED || '1') !== '0';
 const mandatoryShadowDiscoveryNotional = Math.max(1, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_NOTIONAL || 25));
 const mandatoryShadowDiscoveryCooldownMs = Math.max(5*60_000, Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_COOLDOWN_MS || 30*60_000));
 const mandatoryShadowDiscoveryMaxPerSymbolDay = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_PER_SYMBOL_DAY || 4) || 4));
 const mandatoryShadowDiscoveryMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_MANDATORY_SHADOW_DISCOVERY_MAX_OPEN_TOTAL || 6) || 6));
-const coverageCurriculumEnabled = String(process.env.TCX_COVERAGE_CURRICULUM_ENABLED || '1') !== '0';
+const coverageCurriculumEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_COVERAGE_CURRICULUM_ENABLED || '1') !== '0';
 const coverageCurriculumNotional = Math.max(1, Number(process.env.TCX_COVERAGE_CURRICULUM_NOTIONAL || 5));
 const coverageCurriculumMaxOpenTotal = Math.max(8, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_TOTAL || 96) || 96));
 const coverageCurriculumMaxOpenPerLane = Math.max(1, Math.floor(Number(process.env.TCX_COVERAGE_CURRICULUM_MAX_OPEN_PER_LANE || 2) || 2));
@@ -584,7 +586,7 @@ const auditLedgerRotateBytes = Math.max(
   )
 );
 const autonomousResearchFactoryRefreshMs=Math.max(15_000,Number(process.env.TCX_AUTONOMOUS_RESEARCH_FACTORY_REFRESH_MS||60_000));
-const learnedChallengerEnabled = String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
+const learnedChallengerEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_LEARNED_CHALLENGER_ENABLED || '1') !== '0';
 const learnedChallengerBaseNotional = Math.max(1, Number(process.env.TCX_LEARNED_CHALLENGER_BASE_NOTIONAL || 10));
 const learnedChallengerMaxPerIssuance = Math.max(1, Math.min(3, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_PER_ISSUANCE || 2) || 2)));
 const learnedChallengerMaxOpenTotal = Math.max(1, Math.floor(Number(process.env.TCX_LEARNED_CHALLENGER_MAX_OPEN_TOTAL || 8) || 8));
@@ -598,7 +600,7 @@ const walletResearchMinImprovementScore = Math.max(.01, Math.min(.5, Number(proc
 const shadowPortfolioWatchMs = Math.max(5000, Number(process.env.TCX_SHADOW_PORTFOLIO_WATCH_MS || 10000));
 const shadowPortfolioInitialEquity = Math.max(100, Number(process.env.TCX_SHADOW_PORTFOLIO_INITIAL_EQUITY || 10000));
 const shadowStatsTimeZone = String(process.env.TCX_STATS_TIMEZONE || 'Europe/Berlin');
-const strategyLeagueEnabled = String(process.env.TCX_STRATEGY_LEAGUE_ENABLED || '1') !== '0';
+const strategyLeagueEnabled = !w6StrategyOnlyEnabled && String(process.env.TCX_STRATEGY_LEAGUE_ENABLED || '1') !== '0';
 const strategyLeagueWatchMs = Math.max(5000, Number(process.env.TCX_STRATEGY_LEAGUE_WATCH_MS || 10000));
 const strategyLeagueBaseNotionalQuote = Math.max(1, Number(process.env.TCX_STRATEGY_LEAGUE_BASE_NOTIONAL || 50));
 const strategyLeagueInitialEquity = Math.max(100, Number(process.env.TCX_STRATEGY_LEAGUE_INITIAL_EQUITY || 5000));
@@ -1158,6 +1160,7 @@ const biggjLivingResearchDeferredReasons=new Set();
 const biggjLivingResearchDeferredMs=Math.max(250,Math.min(5_000,Number(process.env.TCX_BIGGJ_LIVING_RESEARCH_DEFER_MS||1_000)));
 
 async function refreshBiggjLivingResearch(reason='runtime-refresh',report=claimAssumptionResearchLastReport){
+  if(w6StrategyOnlyEnabled)return {ok:true,skipped:true,reason:'W6_STRATEGY_ONLY',execution:'SHADOW_ONLY',canExecuteLive:false};
   const run=async()=>{
     const started=Date.now();
     try{
@@ -1788,6 +1791,7 @@ try {
     deployment:{
       gitCommit:process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || '',
       gitBranch:process.env.RAILWAY_GIT_BRANCH || process.env.GIT_BRANCH || '',
+      strategyOnlyMode:{enabled:w6StrategyOnlyEnabled,activeStrategy:w6StrategyOnlyEnabled?'W6_USER_99K_60S':'FULL_RESEARCH_STACK',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false},
       service:process.env.RAILWAY_SERVICE_NAME || 'tcx-telegram'
     },
     versions:{
@@ -2083,7 +2087,9 @@ async function persistSpecialistWallets(reason='mutation'){
   specialistWalletPersistenceQueue = specialistWalletPersistenceQueue.then(async()=>{
     if(!specialistWalletHealthy) return false;
     try{
-      specialistWalletState = await saveSpecialistWalletState(specialistWalletFile,specialistWalletState);
+      const checkpointState=specialistWalletState;
+      const persistedState=await saveSpecialistWalletState(specialistWalletFile,checkpointState);
+      if(specialistWalletState===checkpointState)specialistWalletState=persistedState;
       specialistWalletLastError=null;
       return true;
     }catch(err){
@@ -2240,6 +2246,7 @@ async function refreshBiggjDiscoveryLedgerRuntime(reason='PERIODIC'){
 }
 
 async function refreshParallelStrategyWorldsRuntime(reason='PERIODIC'){
+  if(w6StrategyOnlyEnabled)return {ok:true,skipped:true,reason:'W6_STRATEGY_ONLY',execution:'SHADOW_ONLY',canExecuteLive:false};
   const now=Date.now();
   try{
     const qualityModel=buildShadowTradeQualityModel(shadowPortfolioLedger,{asOf:now});
@@ -5080,6 +5087,7 @@ function scheduleBiggjWorldModelRetry(baseDelayMs=30_000){
 }
 
 async function refreshBiggjWorldModelRuntime(reason='PERIODIC_REFRESH'){
+  if(w6StrategyOnlyEnabled)return {ok:true,skipped:true,reason:'W6_STRATEGY_ONLY',execution:'SHADOW_ONLY',canExecuteLive:false};
  const started=Date.now();
  maybeCollectResearchGarbage('WORLD_MODEL_PRECHECK',{triggerHeapMb:Math.max(280,servingGuardHeapMb-10)});
  const pressure=servingMemoryPressure();
@@ -5311,12 +5319,30 @@ let w6UltraEarlyLastError=null;
 let w6UltraEarlyLastRefreshAt=null;
 const w6UltraCandidateBook=new Map();
 const w6UltraLaunchStats={discoveredWithin60:0,first99kObservedWithin60:0,first99kObservedAfter60:0,expiredWithout99k:0};
+const w6CandidateBookFile=specialistWalletFile+'.w6-candidates.json';
+try{
+  const stored=JSON.parse(await readW6File(w6CandidateBookFile,'utf8'));
+  for(const row of (Array.isArray(stored?.rows)?stored.rows:[]).slice(-1000)){
+    if(row?.tokenAddress&&row?.pairCreatedAt!=null&&Number(row.pairCreatedAt)<=Date.now()&&Date.now()-Number(row.pairCreatedAt)<=180000)w6UltraCandidateBook.set(w6UltraCandidateKey(row),row);
+  }
+}catch(err){if(err?.code!=='ENOENT')console.error('[BIGGJ_W6_CANDIDATE_RESTORE_ERROR]',String(err?.message||err));}
+let w6RefreshPending=null;
+function refreshW6UltraEarly(reason='periodic'){
+  if(w6RefreshPending)return w6RefreshPending;
+  w6RefreshPending=refreshW6UltraEarlyOnce(reason).finally(()=>{w6RefreshPending=null;});
+  return w6RefreshPending;
+}
+async function w6BoundedAwait(work,timeoutMs,label){
+  let timer;
+  try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+'_TIMEOUT')),timeoutMs);})]);}
+  finally{clearTimeout(timer);}
+}
 let w6SolPriceCache={value:null,at:0,error:null};
 async function currentW6SolPriceUsd({force=false}={}){
   const now=Date.now();
   if(!force&&Number(w6SolPriceCache.value)>0&&now-Number(w6SolPriceCache.at||0)<60_000)return Number(w6SolPriceCache.value);
   try{
-    const market=await fetchMarketParts('SOLUSDT');
+    const market=await w6BoundedAwait(fetchMarketParts('SOLUSDT'),10000,'W6_SOL_PRICE');
     const px=Number(market?.ticker?.lastPrice);
     if(!(px>0))throw new Error('SOLUSDT_PRICE_UNAVAILABLE');
     w6SolPriceCache={value:px,at:now,error:null};
@@ -5332,8 +5358,8 @@ function w6StrategyRuntimeOptions(solPriceUsd){
   return {
     now:Date.now(),
     marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
-    maxAgeSeconds:Math.max(1,Math.min(300,Number(process.env.TCX_W6_USER_99K_60S_MAX_AGE_SECONDS||60))),
-    minMarketCapUsd:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000)),
+    maxAgeSeconds:120,
+    minMarketCapUsd:99_000,
     minGreenChangePct:null,
     requireExactGmgnGreen:false,
     minExitMarketCapUsd:Number(process.env.TCX_W6_USER_99K_60S_EXIT_MARKET_CAP_USD||0)>0
@@ -5358,9 +5384,9 @@ function w6UltraCandidateKey(row){
   return String(row?.chainId||'solana').toLowerCase()+':'+String(row?.tokenAddress||'');
 }
 function currentW6UltraCandidates(now=Date.now()){
-  const maxKeepSeconds=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)));
+  const maxKeepSeconds=Math.max(120,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS)||120));
   for(const [key,row] of w6UltraCandidateBook){
-    const created=Number(row?.pairCreatedAt);
+    const created=row?.pairCreatedAt==null?NaN:Number(row.pairCreatedAt);
     const age=Number.isFinite(created)?Math.max(0,(Number(now)-created)/1000):Infinity;
     if(age>maxKeepSeconds){
       if(row?.w6LaunchTracker?.first99kObservedAt==null)w6UltraLaunchStats.expiredWithout99k++;
@@ -5371,16 +5397,16 @@ function currentW6UltraCandidates(now=Date.now()){
 }
 function enrichW6UltraCandidateRows(snapshot){
   const capturedAt=Number(snapshot?.capturedAt||Date.now());
-  const thresholdUsd=Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MIN_MARKET_CAP_USD||99_000));
+  const thresholdUsd=99_000;
   const rows=(Array.isArray(snapshot?.rows)?snapshot.rows:[]).map(row=>{
     if(row?.w6TrackingOnly===true)return row;
-    const created=Number(row?.pairCreatedAt);
-    const ageSeconds=Number.isFinite(created)?Math.max(0,(capturedAt-created)/1000):null;
+    const created=row?.pairCreatedAt==null?NaN:Number(row.pairCreatedAt);
+    const ageSeconds=Number.isFinite(created)&&created<=capturedAt?(capturedAt-created)/1000:null;
     const key=w6UltraCandidateKey(row);
     const prior=w6UltraCandidateBook.get(key);
     const priorTracker=prior?.w6LaunchTracker||{};
     const firstObservedAt=Number(priorTracker?.firstObservedAt)||capturedAt;
-    const firstObservedAgeSeconds=Number.isFinite(Number(priorTracker?.firstObservedAgeSeconds))
+    const firstObservedAgeSeconds=priorTracker?.firstObservedAgeSeconds!=null&&Number.isFinite(Number(priorTracker.firstObservedAgeSeconds))
       ?Number(priorTracker.firstObservedAgeSeconds)
       :ageSeconds;
     const marketCap=Number(row?.marketCap);
@@ -5396,7 +5422,7 @@ function enrichW6UltraCandidateRows(snapshot){
       ?Math.max(Number.isFinite(priorMaxGreen)?priorMaxGreen:-Infinity,greenPercent)
       :(Number.isFinite(priorMaxGreen)?priorMaxGreen:null);
     let first99kObservedAt=Number(priorTracker?.first99kObservedAt)||null;
-    let first99kObservedAgeSeconds=Number.isFinite(Number(priorTracker?.first99kObservedAgeSeconds))
+    let first99kObservedAgeSeconds=priorTracker?.first99kObservedAgeSeconds!=null&&Number.isFinite(Number(priorTracker.first99kObservedAgeSeconds))
       ?Number(priorTracker.first99kObservedAgeSeconds)
       :null;
     if(first99kObservedAt==null&&marketCapKnown&&marketCap>=thresholdUsd&&ageSeconds!=null){
@@ -5425,8 +5451,9 @@ function enrichW6UltraCandidateRows(snapshot){
       observationSemantics:'FIRST_OBSERVED_MARKET_CAP_USD_GTE_99K_NOT_EXACT_CROSSING_TIME'
     };
     const enriched={...row,w6LaunchTracker:tracker};
-    if(ageSeconds!=null&&ageSeconds<=Math.max(65,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS||75)))){
+    if(ageSeconds!=null&&ageSeconds<=Math.max(120,Math.min(180,Number(process.env.TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS)||120))){
       w6UltraCandidateBook.set(key,enriched);
+      while(w6UltraCandidateBook.size>1000)w6UltraCandidateBook.delete(w6UltraCandidateBook.keys().next().value);
     }
     return enriched;
   });
@@ -5439,19 +5466,22 @@ function enrichW6UltraCandidateRows(snapshot){
   };
 }
 
-async function refreshW6UltraEarly(reason='periodic'){
+async function refreshW6UltraEarlyOnce(reason='periodic'){
   const started=Date.now();
   const force=reason==='startup'||reason==='manual';
   try{
     const open=(specialistWalletState?.wallets?.[WALLET_6_USER_99K_60S]?.positions||[]);
-    const ultraRaw=await memecoinEarlyProvider.fetchUltraEarlySolana({
+    const ultraRaw=await w6BoundedAwait(memecoinEarlyProvider.fetchUltraEarlySolana({
       limit:30,
       maxAgeSeconds:Math.max(90,Math.min(300,Number(process.env.TCX_W6_ULTRA_DISCOVERY_MAX_AGE_SECONDS||180))),
       trackTokenAddresses:open.map(x=>String(x?.tokenAddress||'')).filter(Boolean),
       candidateRows:currentW6UltraCandidates(),
       force
-    });
+    }),30000,'W6_ULTRA_PROVIDER');
     const ultra=enrichW6UltraCandidateRows(ultraRaw);
+    const candidateTemp=w6CandidateBookFile+'.tmp';
+    await writeW6File(candidateTemp,JSON.stringify({rows:currentW6UltraCandidates().slice(-1000)}));
+    await renameW6File(candidateTemp,w6CandidateBookFile);
     const solPriceUsd=await currentW6SolPriceUsd();
     const update=applyJonasCloneSnapshot(specialistWalletState,ultra,w6StrategyRuntimeOptions(solPriceUsd));
     specialistWalletState=update.state;
@@ -5480,6 +5510,8 @@ async function refreshW6UltraEarly(reason='periodic'){
         entryGreenPercent:p?.entryGreenPercent??null,
         entryThresholdMode:p?.entryThresholdMode??null,
         entryMarketCapUsd:p?.entryMarketCapUsd??null,
+        entryLiquidityUsd:p?.entryLiquidityUsd??null,
+        entryNotionalSol:p?.entryNotionalSol??null,
         lastMarketCapUsd:p?.lastMarketCapUsd??null,
         peakMarketCapUsd:p?.peakMarketCapUsd??null,
         troughMarketCapUsd:p?.troughMarketCapUsd??null,
@@ -5540,6 +5572,9 @@ async function refreshW6UltraEarly(reason='periodic'){
       candidateTrackingRows:ultra.candidateTrackingRows||0,
       candidateBookSize:ultra.candidateBookSize||0,
       launchStats:ultra.launchStats||{},
+      effectiveEntryMaxAgeSeconds:120,
+      effectiveMinMarketCapUsd:99000,
+      candidateEvidence:currentW6UltraCandidates().slice(0,100).map(row=>({tokenAddress:row.tokenAddress,ageSeconds:(Date.now()-Number(row.pairCreatedAt))/1000,marketCap:row.marketCap,liquidityUsd:row.liquidityUsd,...row.w6LaunchTracker})),
       trackingRows:ultra.trackingRows||0,
       pollMs:w6UltraEarlyRefreshMs,
       cloneStrategy:update.results.strategyVersion,
@@ -5550,6 +5585,7 @@ async function refreshW6UltraEarly(reason='periodic'){
       active:wallet?.openPositions||0,
       closedTrades:wallet?.closedTrades||0,
       activeTrades,
+      recentClosedTrades:wallet?.recentClosed?.slice(0,5)||[],
       execution:'SHADOW_ONLY',
       canExecuteLive:false
     }));
@@ -5896,7 +5932,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     });
 
     const walletInput={...snapshot,rows:signaledSecuredRows};
-    const walletUpdate=applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
+    const walletUpdate=w6StrategyOnlyEnabled?{state:specialistWalletState,results:{opened:0,closed:0,skipped:true}}:applyMemecoinScoutSnapshot(specialistWalletState,walletInput,{
       now:Date.now(),
       marginQuote:Math.max(1,Number(process.env.TCX_W4_MEME_MARGIN_QUOTE||100)),
       minScore:Math.max(0,Math.min(1,Number(process.env.TCX_W4_MEME_MIN_SCORE||.58))),
@@ -5934,7 +5970,7 @@ async function refreshMemecoinEarlyRadar(reason='periodic'){
     const user99k60sWallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
     snapshot={...snapshot,tradeLearning:postTradeLearningSummary,user99k60s:{
       version:USER_99K_60S_STRATEGY_VERSION,
-      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      rule:'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetPnlSol:10,
       sizingScenariosSol:[2,5,10,20,40,60,80],
@@ -6246,7 +6282,7 @@ async function refreshPublicExperienceIntel(reason='periodic'){
         })
       }))
     }));
-    const copyUpdate=applyPublicTraderCopySnapshot(specialistWalletState,{
+    const copyUpdate=w6StrategyOnlyEnabled?{state:specialistWalletState,results:{openedW3:0,openedW5:0,closedW3:0,closedW5:0,skipped:true}}:applyPublicTraderCopySnapshot(specialistWalletState,{
       ...traderResult.value,
       traders:copyLearningTraders
     },{
@@ -10985,6 +11021,7 @@ async function onchainResearchStartupProbe(){
 }
 
 async function syncFeatureResearch(reason='update'){
+  if(w6StrategyOnlyEnabled)return {ok:true,skipped:true,reason:'W6_STRATEGY_ONLY',execution:'SHADOW_ONLY',canExecuteLive:false};
   const started=Date.now();
   try{
     const beforeStatus=featureResearchState?.status||'UNINITIALIZED';
@@ -11050,6 +11087,7 @@ async function persistIndicatorEvolution(reason='mutation'){
 }
 
 async function syncIndicatorEvolution(reason='update'){
+  if(w6StrategyOnlyEnabled)return {ok:true,skipped:true,reason:'W6_STRATEGY_ONLY',execution:'SHADOW_ONLY',canExecuteLive:false};
   const started=Date.now();
   try{
     maybeCollectResearchGarbage('INDICATOR_EVOLUTION_PRECHECK',{
@@ -12243,6 +12281,7 @@ function autonomousResearchFactoryInputs(now=Date.now()){
 }
 
 async function refreshAutonomousResearchFactory(reason='PERIODIC_REFRESH'){
+  if(w6StrategyOnlyEnabled)return {ok:true,skipped:true,reason:'W6_STRATEGY_ONLY',execution:'SHADOW_ONLY',canExecuteLive:false};
   const started=Date.now();
   try{
     const now=Date.now();
@@ -12808,7 +12847,7 @@ function missionControlData(){
     },
     user99k60s:memecoinEarlySnapshot?.user99k60s||{
       version:USER_99K_60S_STRATEGY_VERSION,
-      rule:'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
+      rule:'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE',
       exitRule:'DISCRETIONARY_PROFIT_TAKE_OR_OBSERVED_USER_MARKET_CAP_EXIT_RULE_WITH_3M_LOSS_PROTECTION',
       targetPnlSol:10,
       sizingScenariosSol:[2,5,10,20,40,60,80],
@@ -13171,6 +13210,7 @@ const server = http.createServer(async (req,res) => {
     res.writeHead(readiness.httpStatus,{'content-type':'application/json','cache-control':'no-store'});
     res.end(JSON.stringify({
       ok:readiness.ready,
+      strategyOnlyMode:{enabled:w6StrategyOnlyEnabled,activeStrategy:w6StrategyOnlyEnabled?'W6_USER_99K_60S':'FULL_RESEARCH_STACK',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false},
       service:'BIGGJ Market Science OS',
       readiness,
       releaseId:runtimeManifest?.releaseId||null,
@@ -13184,6 +13224,7 @@ const server = http.createServer(async (req,res) => {
     res.writeHead(200,{'content-type':'application/json'});
     res.end(JSON.stringify({
       ok:true,
+      strategyOnlyMode:{enabled:w6StrategyOnlyEnabled,activeStrategy:w6StrategyOnlyEnabled?'W6_USER_99K_60S':'FULL_RESEARCH_STACK',execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false},
       service:'BIGGJ Market Science OS',
       mobileWebApp:{version:BIGGJ_MOBILE_WEBAPP_VERSION,path:'/mission-control',installable:true},
       execution:'SHADOW_ONLY',
@@ -13651,4 +13692,4 @@ try{
     canExecuteLive:false
   }));
 }
-await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),autoLearnForecastWatcher(),shadowCompetitionWatcher(),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),strategyLeagueWatcher(),venueQualityWatcher(),marketFabricMaintenanceWatcher(),autonomousResearchFactoryWatcher(),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),memecoinEarlyWatcher(),w6UltraEarlyWatcher(),biggjWorldModelWatcher()]);
+await Promise.all([poll(),telegramChatResetWatcher(),refresher(),alertWatcher(),episodeWatcher(),...(w6StrategyOnlyEnabled?[]:[autoLearnForecastWatcher(),shadowCompetitionWatcher()]),forecastOutcomeWatcher(),shadowOmsWatcher(),shadowPortfolioWatcher(),...(w6StrategyOnlyEnabled?[]:[strategyLeagueWatcher()]),venueQualityWatcher(),marketFabricMaintenanceWatcher(),...(w6StrategyOnlyEnabled?[]:[autonomousResearchFactoryWatcher()]),autonomousOperatorWatcher(),publicExperienceIntelWatcher(),memecoinEarlyWatcher(),w6UltraEarlyWatcher(),...(w6StrategyOnlyEnabled?[]:[biggjWorldModelWatcher()])]);

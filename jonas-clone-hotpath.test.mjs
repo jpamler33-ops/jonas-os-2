@@ -16,8 +16,8 @@ test('production adapter opens clone at actual hypothesis exposure, preserves wa
  assert.deepEqual(x.state.wallets.W4_MEME_SCOUT,original.wallets.W4_MEME_SCOUT);
  assert.equal(apply(x.state,[row]).results.opened,0);assert.equal(original.wallets[W6].positions.length,0);
 });
-test('missing liquidity, unknown/future age, tracking-only, not trending and unready sources abstain',()=>{
- for(const patch of [{liquidityUsd:null},{pairCreatedAt:null},{pairCreatedAt:now+1},{w6TrackingOnly:true},{signalTrending:false}])assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
+test('missing liquidity, unknown/future age, tracking-only and unready sources abstain',()=>{
+ for(const patch of [{liquidityUsd:null},{pairCreatedAt:null},{pairCreatedAt:now+1},{w6TrackingOnly:true}])assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
  assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),{...snapshot([row]),sourceReady:false},{now,solPriceUsd:120}).results.opened,0);
 });
 test('six checkpoints persist, four exit comparisons use observed time; small initial loss remains open',async()=>{
@@ -32,6 +32,7 @@ test('six checkpoints persist, four exit comparisons use observed time; small in
 test('late observations cannot masquerade as on-time profitable exits and zero liquidity has no modelled net profit',()=>{
  let x=apply(createSpecialistWalletState(),[row]);x=apply(x.state,[{...row,w6TrackingOnly:true,priceUsd:1.2,liquidityUsd:0}],now+400000);
  const c=x.state.wallets[W6].positions[0].jonasClone.checkpoints[0];
+ assert.equal(x.state.wallets[W6].positions[0].jonasClone.liquidityDeath.observedAt,now+400000);
  assert.equal(c.status,'LATE_OBSERVATION');assert.equal(c.holdSeconds,400);assert.equal(c.modelledNetPnlSol,null);
 });
 test('legacy W6 positions remain legacy across clone deployment',()=>{
@@ -43,3 +44,13 @@ test('legacy W6 positions remain legacy across clone deployment',()=>{
 test('stale or future snapshots cannot open clone positions',()=>{
  for(const capturedAt of [now-16000,now+1,null])assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot([row],capturedAt),{now,solPriceUsd:120}).results.opened,0);
 });
+
+ test('production clone enforces strict 120s and 99k independent of obsolete runtime overrides',()=>{
+  for(const age of [60,75,90,119.999]){
+   const x=applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot([{...row,pairCreatedAt:now-age*1000,marketCap:99000}]),{now,solPriceUsd:120,maxAgeSeconds:60,minMarketCapUsd:1});
+   assert.equal(x.results.opened,1);assert.equal(x.state.wallets[W6].positions[0].canExecuteLive,false);
+  }
+  for(const patch of [{pairCreatedAt:now-120000},{pairCreatedAt:now-120001},{marketCap:98999}])assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
+ });
+
+test('discovered candidate can enter after leaving the trend list',()=>{assert.equal(apply(createSpecialistWalletState(),[{...row,signalTrending:false,candidateTracking:true,pairCreatedAt:now-90000}]).results.opened,1);});

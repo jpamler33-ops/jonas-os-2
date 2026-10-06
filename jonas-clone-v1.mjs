@@ -9,7 +9,7 @@ export const JONAS_CLONE_V1_POLICY=Object.freeze({
   canExecuteLive:false,
   automaticPrimaryMutation:false,
   objective:'REPRODUCE_AND_MEASURE_USER_ULTRA_EARLY_MEMECOIN_WORKFLOW_BEFORE_OPTIMIZATION',
-  discovery:Object.freeze({maxAgeSeconds:60,minMarketCapUsd:99000,requireTrendFeed:true}),
+  discovery:Object.freeze({maxAgeSeconds:120,minMarketCapUsd:99000,requireTrendFeed:false}),
   sizing:Object.freeze({mode:'LIQUIDITY_PROPORTIONAL_RESEARCH',solPerLiquidityUsd:4/10000,epistemic:'USER_HYPOTHESIS_NOT_LIVE_SAFE_LIMIT'}),
   observation:Object.freeze({checkpointsSeconds:Object.freeze([60,120,180,240,300,600]),exitComparisonsSeconds:Object.freeze([180,240,300,600]),minimumNormalLossExitSeconds:180,trackLiquidityDecay:true,trackMfeMae:true,trackFees:true,trackPriceImpact:true,trackExitLiquidity:true}),
   telemetry:Object.freeze(['candidateAgeSeconds','marketCapUsd','liquidityUsd','sizeSol','entryPrice','priceImpactBps','feesQuote','mfeReturnPct','maeReturnPct','liquidityDecayPct','exitLiquidityUsd','holdSeconds','grossPnl','netPnl','exitReason']),
@@ -26,8 +26,7 @@ export function jonasCloneEligible(row={}){
   const rawAge=row.ageSeconds??row.tokenAgeSeconds;
   const age=rawAge==null?NaN:Number(rawAge);
   const mcap=Number(row.marketCapUsd??row.marketCap);
-  const trend=row.trendFeed===true||row.fromTrendFeed===true||row.source==='TREND_FEED';
-  return Number.isFinite(age)&&age>=0&&age<=60&&Number.isFinite(mcap)&&mcap>=99000&&trend;
+  return Number.isFinite(age)&&age>=0&&age<120&&Number.isFinite(mcap)&&mcap>=99000;
 }
 
 export function jonasCloneResearchPlan(row={}){
