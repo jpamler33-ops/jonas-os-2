@@ -20,35 +20,28 @@ jobs:
 
           code=Path('shadow-specialist-wallets.mjs')
           s=code.read_text()
-          old="else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');"
-          new="else if(ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');"
-          if old in s:
-              s=s.replace(old,new,1)
-              code.write_text(s)
-          assert new in code.read_text(), 'strict <120s production boundary missing'
+          s=s.replace("else if(ageSeconds>Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');", "else if(ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');")
+          code.write_text(s)
 
           p=Path('shadow-specialist-wallets.test.mjs')
           s=p.read_text()
-          replacements={
-            "test('user 99k/60s V1 matches only coins already above 99k within 60 seconds'":"test('user 99k/120s V1 matches only coins already above 99k before 120 seconds'",
-            "pairCreatedAt:now-61_000":"pairCreatedAt:now-120_000",
-            "'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'":"'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'",
-            "tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-70_000":"tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-120_000",
-            "'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'":"'GMGN_TRENDS_1M_AND_AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'"
-          }
-          for old,new in replacements.items():
-              if old in s:
-                  s=s.replace(old,new,1)
-              assert new in s, f'migrated expectation missing: {new}'
-
+          s=s.replace("test('user 99k/60s V1 matches only coins already above 99k within 60 seconds'", "test('user 99k/120s V1 matches only coins already above 99k before 120 seconds'")
+          s=s.replace("pairCreatedAt:now-61_000", "pairCreatedAt:now-120_000")
+          s=s.replace("'AGE_LTE_60S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'", "'AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE'")
+          s=s.replace("tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-70_000", "tokenAddress:'OLD',symbol:'OLD',priceUsd:1,marketCap:150_000,pairCreatedAt:now-120_000")
+          s=s.replace("'GMGN_TRENDS_1M_AND_AGE_LTE_60S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'", "'GMGN_TRENDS_1M_AND_AGE_LT_120S_AND_GREEN_PERCENT_GTE_99K_THEN_IMMEDIATE_ENTRY'")
           anchor="  const old=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-120_000\n  },{now});"
           marker="  const nearBoundary=evaluateUser99k60sEntry({"
           if marker not in s:
               near="  const nearBoundary=evaluateUser99k60sEntry({\n    priceUsd:.001,marketCap:150_000,pairCreatedAt:now-119_999\n  },{now});\n  assert.equal(nearBoundary.match,true);\n  assert.equal(nearBoundary.action,'BUY_SHADOW');\n\n"
-              assert anchor in s, 'boundary anchor missing'
+              if anchor not in s:
+                  raise SystemExit('boundary anchor missing after migration')
               s=s.replace(anchor,near+anchor,1)
           p.write_text(s)
           PY
+          grep -F "ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120)" shadow-specialist-wallets.mjs
+          grep -F "pairCreatedAt:now-119_999" shadow-specialist-wallets.test.mjs
+          grep -F "AGE_LT_120S_AND_MARKET_CAP_GTE_99K_IMMEDIATE" shadow-specialist-wallets.test.mjs
           git diff --check
           node --test shadow-specialist-wallets.test.mjs
       - name: Commit validated migration
