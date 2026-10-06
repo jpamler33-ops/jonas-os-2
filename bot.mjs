@@ -5487,7 +5487,8 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
     specialistWalletState=update.state;
     if(
       update.results.opened||update.results.closed||update.results.holdScenarioCloses||
-      update.results.scenarioTargetHits||update.results.cloneCheckpoints
+      update.results.scenarioTargetHits||update.results.cloneCheckpoints||
+      update.results.researchSnapshotsCaptured||update.results.researchGapsCaptured
     )await persistSpecialistWallets('w6-ultra-early:'+reason);
     const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
     const activeTrades=(Array.isArray(wallet?.active)?wallet.active:[]).slice(0,5).map(p=>{
