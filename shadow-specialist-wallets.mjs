@@ -626,6 +626,7 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
     };
     if(openPosition(wallet,position)){
       results.opened++;
+      results.researchSnapshotsCaptured++;
       if(contrarianSelected)results.contrarianOpened++;
     }
   }
@@ -1242,6 +1243,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
   const results={
     matched:0,opened:0,openedExactGmgn:0,openedTrendProxy:0,closed:0,marked:0,
     marketCapExit:0,catastrophicExit:0,scenarioTargetHits:0,holdScenarioCloses:0,
+    researchSnapshotsCaptured:0,researchGapsCaptured:0,
     earlyMomentumScenarioCloses:0,earlyMomentumEntryAgeCloses:0,
     cloneCheckpoints:0,
     sourceReady:snapshot?.sourceReady===true,
@@ -1272,14 +1274,14 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const row=byKey.get(String(p.chainId||'')+':'+String(p.tokenAddress||''));
     if(!row||!(finite(row?.priceUsd)>0)){
       if(p?.coinResearch){
-        wallet.positions[i]={
-          ...p,
-          coinResearch:user99k60sRecordResearchGap(p.coinResearch,{
-            at:now,
-            reason:!row?'ROW_MISSING':'PRICE_MISSING',
-            sourceReady:snapshot?.sourceReady===true
-          })
-        };
+        const gapCountBefore=Number(p.coinResearch?.dataGapCountTotal)||0;
+        const nextResearch=user99k60sRecordResearchGap(p.coinResearch,{
+          at:now,
+          reason:!row?'ROW_MISSING':'PRICE_MISSING',
+          sourceReady:snapshot?.sourceReady===true
+        });
+        if((Number(nextResearch?.dataGapCountTotal)||0)>gapCountBefore)results.researchGapsCaptured++;
+        wallet.positions[i]={...p,coinResearch:nextResearch};
       }
       continue;
     }
@@ -1287,9 +1289,11 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const marketCapUsd=finite(row?.marketCap);
     const currentLiquidityUsd=finite(row?.liquidityUsd);
     const executionMark=user99k60sExecutableMark(baseMarked,row,{now,feeBps});
+    const researchCountBefore=Number(p?.coinResearch?.observationCountTotal)||0;
     const coinResearch=user99k60sAppendResearchObservation(p?.coinResearch,row,{...p,...baseMarked},{
       at:now,phase:'MARK',executionMark
     });
+    if((Number(coinResearch?.observationCountTotal)||0)>researchCountBefore)results.researchSnapshotsCaptured++;
     const peakMarketCapUsd=Math.max(
       finite(p?.peakMarketCapUsd,marketCapUsd??-Infinity),
       marketCapUsd??-Infinity
