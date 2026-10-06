@@ -9,6 +9,7 @@ export const WALLET_4_MEME_SCOUT='W4_MEME_SCOUT';
 export const WALLET_5_MEME_COPY='W5_MEME_COPY';
 export const WALLET_6_USER_99K_60S='W6_USER_99K_60S';
 export const USER_99K_60S_STRATEGY_VERSION='BIGGJ_USER_99K_60S_STRATEGY_V1';
+export const W6_CURRENT_GMGN_CONTRACT='GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1';
 
 const EPS=1e-12;
 const DEFAULT_MEME_SYMBOLS=new Set([
@@ -27,6 +28,23 @@ function text(v,max=160){
   return s.length<=max?s:s.slice(0,max-1)+'…';
 }
 function clone(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function isCurrentW6ClonePosition(p={}){
+  const age=finite(p?.entryAgeSeconds);
+  const green=finite(p?.entryGreenPercent);
+  return (
+    p?.strategyVersion==='JONAS_CLONE_V1'&&
+    p?.entryThresholdMode==='GMGN_GREEN_PERCENT'&&
+    p?.exactGmgnTrendAtEntry===true&&
+    age!=null&&age>=0&&age<120&&
+    green!=null&&green>=99_000
+  );
+}
+function classifyW6ContractPosition(p={}){
+  if(isCurrentW6ClonePosition(p)){
+    return {...p,w6Contract:W6_CURRENT_GMGN_CONTRACT,w6StrategyScope:'CURRENT_GMGN_99K_4M',legacyW6:false};
+  }
+  return {...p,w6StrategyScope:'LEGACY_PRE_GMGN_99K_4M',legacyW6:true};
+}
 function freeze(v){
   if(v&&typeof v==='object'&&!Object.isFrozen(v)){
     Object.freeze(v);
@@ -1269,6 +1287,10 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
 }={}){
   const state=mutableState(input);
   const wallet=state.wallets[WALLET_6_USER_99K_60S];
+  if(clonePolicy){
+    wallet.positions=(wallet.positions||[]).map(classifyW6ContractPosition);
+    wallet.closed=(wallet.closed||[]).map(classifyW6ContractPosition);
+  }
   const rows=Array.isArray(snapshot?.rows)?snapshot.rows:[];
   const entryRows=rows.filter(x=>x?.w6TrackingOnly!==true);
   const captured=finite(snapshot?.capturedAt);
@@ -1439,11 +1461,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     results.marked++;
 
     let reason=null;
-    const clonePosition=clonePolicy&&(
-      p?.strategy==='JONAS_CLONE_V1'||
-      p?.strategyVersion==='JONAS_CLONE_V1'||
-      p?.jonasClone?.strategy==='JONAS_CLONE_V1'
-    );
+    const clonePosition=clonePolicy&&isCurrentW6ClonePosition(p);
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
     const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
     const catastrophicLoss=Math.max(.50,Math.min(.99,finite(catastrophicDrawdownPct,.90)));
@@ -1532,11 +1550,13 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     }
     results.matched++;
     const key=user99k60sPositionKey(row);
-    if(wallet.positions.some(x=>x.positionKey===key)||wallet.closed.some(x=>x.positionKey===key)){
+    const currentClosed=clonePolicy?wallet.closed.filter(isCurrentW6ClonePosition):wallet.closed;
+    if(wallet.positions.some(x=>x.positionKey===key)||currentClosed.some(x=>x.positionKey===key)){
       results.entryFunnel.duplicateBlocked++;
       continue;
     }
-    if(wallet.positions.length>=Math.max(1,Number(maxOpenOperational)||30)){
+    const currentOpenCount=clonePolicy?wallet.positions.filter(isCurrentW6ClonePosition).length:wallet.positions.length;
+    if(currentOpenCount>=Math.max(1,Number(maxOpenOperational)||30)){
       results.entryFunnel.capacityBlocked++;
       continue;
     }
@@ -1613,7 +1633,13 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       minExitMarketCapUsd:clonePolicy?null:(finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null),
       marketCapExitTracking:clonePolicy?'DISABLED_FIXED_4M_EXIT':(finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE'),
       entryStrategySignal:clone(signal),
-      ...(clonePolicy?{jonasClone:{strategy:'JONAS_CLONE_V1',intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},strategy:'JONAS_CLONE_V1'}:{}),
+      ...(clonePolicy?{
+        jonasClone:{strategy:'JONAS_CLONE_V1',contract:W6_CURRENT_GMGN_CONTRACT,intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},
+        strategy:'JONAS_CLONE_V1',
+        w6Contract:W6_CURRENT_GMGN_CONTRACT,
+        w6StrategyScope:'CURRENT_GMGN_99K_4M',
+        legacyW6:false
+      }:{}),
       strategyVersion:clonePolicy?'JONAS_CLONE_V1':USER_99K_60S_STRATEGY_VERSION,
       entryRule:signal.thresholdMode==='GMGN_GREEN_PERCENT'
         ?signal.rule
@@ -1802,8 +1828,12 @@ function safePositionForOutput(position){
 }
 
 function walletStats(wallet,{asOf=Date.now()}={}){
-  const open=wallet.positions||[],closed=wallet.closed||[];
+  const storedOpen=wallet.positions||[],storedClosed=wallet.closed||[];
   const isW6=wallet.walletId===WALLET_6_USER_99K_60S;
+  const open=isW6?storedOpen.filter(isCurrentW6ClonePosition):storedOpen;
+  const closed=isW6?storedClosed.filter(isCurrentW6ClonePosition):storedClosed;
+  const legacyOpen=isW6?storedOpen.filter(p=>!isCurrentW6ClonePosition(p)):[];
+  const legacyClosed=isW6?storedClosed.filter(p=>!isCurrentW6ClonePosition(p)):[];
   const openViews=isW6
     ?open.map(p=>({...p,...user99k60sExecutionOutputView(p,{asOf})}))
     :open;
@@ -1850,6 +1880,16 @@ function walletStats(wallet,{asOf=Date.now()}={}){
     currentMarginAtRiskQuote:open.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
     active:openViews.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
     recentClosed:closed.slice(-20).reverse().map(safePositionForOutput),
+    ...(isW6?{
+      currentContract:W6_CURRENT_GMGN_CONTRACT,
+      totalStoredOpenPositions:storedOpen.length,
+      totalStoredClosedTrades:storedClosed.length,
+      legacyOpenPositions:legacyOpen.length,
+      legacyClosedTrades:legacyClosed.length,
+      legacyActive:legacyOpen.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,10).map(safePositionForOutput),
+      legacyRecentClosed:legacyClosed.slice(-10).reverse().map(safePositionForOutput),
+      legacySemantics:'SEPARATE_PRE_GMGN_99K_PERCENT_DATA_EXCLUDED_FROM_CURRENT_W6_METRICS'
+    }:{}),
     objective:wallet.objective,primaryPerformanceExcluded:true,
     execution:'SHADOW_ONLY',canExecuteLive:false
   });
@@ -1868,7 +1908,9 @@ export function w6ResearchArchive(state,{asOf=Date.now(),limit=100,tokenAddress=
   const s=mutableState(state);
   const wallet=s.wallets[WALLET_6_USER_99K_60S];
   const token=String(tokenAddress||'').trim().toLowerCase();
-  const rows=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+  const stored=[...(wallet?.positions||[]),...(wallet?.closed||[])];
+  const rows=stored
+    .filter(isCurrentW6ClonePosition)
     .filter(p=>p?.coinResearch)
     .filter(p=>!token||String(p?.tokenAddress||'').toLowerCase()===token)
     .sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0))
@@ -1896,7 +1938,9 @@ export function w6ResearchArchive(state,{asOf=Date.now(),limit=100,tokenAddress=
     version:W6_COIN_RESEARCH_DATASET_VERSION,
     asOf:Number(asOf),
     walletId:WALLET_6_USER_99K_60S,
+    currentContract:W6_CURRENT_GMGN_CONTRACT,
     records:rows.length,
+    legacyRecordsExcluded:stored.filter(p=>!isCurrentW6ClonePosition(p)).length,
     rows,
     execution:'SHADOW_ONLY',
     canExecute:false,
@@ -2063,7 +2107,9 @@ export function w6ResearchAnalysis(state,{
 }={}){
   const s=mutableState(state);
   const wallet=s.wallets[WALLET_6_USER_99K_60S];
-  const all=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+  const stored=[...(wallet?.positions||[]),...(wallet?.closed||[])];
+  const current=stored.filter(isCurrentW6ClonePosition);
+  const all=current
     .map(w6ResearchRecordFromPosition)
     .filter(Boolean);
   const closed=all.filter(x=>x.closed);
@@ -2104,9 +2150,11 @@ export function w6ResearchAnalysis(state,{
     version:W6_RESEARCH_ANALYSIS_VERSION,
     asOf:Number(asOf),
     walletId:WALLET_6_USER_99K_60S,
+    currentContract:W6_CURRENT_GMGN_CONTRACT,
     status:evidenceReady?'EVIDENCE_BUILDING':'COLLECTING',
     counts:{
       records:all.length,
+      legacyRecordsExcluded:Math.max(0,stored.length-current.length),
       open:all.filter(x=>!x.closed).length,
       closed:closed.length,
       completeEntrySnapshots:complete,

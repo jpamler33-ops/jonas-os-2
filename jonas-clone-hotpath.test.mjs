@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {applyJonasCloneSnapshot} from './jonas-clone-v1-integration.mjs';
-import {createSpecialistWalletState,saveSpecialistWalletState,loadSpecialistWalletState,WALLET_6_USER_99K_60S as W6} from './shadow-specialist-wallets.mjs';
+import {createSpecialistWalletState,saveSpecialistWalletState,loadSpecialistWalletState,specialistWalletSummary,w6ResearchAnalysis,WALLET_6_USER_99K_60S as W6,W6_CURRENT_GMGN_CONTRACT} from './shadow-specialist-wallets.mjs';
 
 const now=1700000000000;
 const row={
@@ -128,4 +128,52 @@ test('legacy W6 positions remain legacy and are not forced into the clone 240s e
   assert.equal(x.state.wallets[W6].positions[0].strategyVersion,'LEGACY');
   assert.equal(x.state.wallets[W6].positions[0].jonasClone,undefined);
   assert.equal(x.state.wallets[W6].closed.length,0);
+});
+
+
+test('pre-correction JONAS_CLONE_V1 market-cap positions are legacy, not current 4m clone positions',()=>{
+  const state=structuredClone(createSpecialistWalletState());
+  state.wallets[W6].positions.push({
+    walletId:W6,positionKey:'solana:OLDMCAP',chainId:'solana',tokenAddress:'OLDMCAP',
+    entryPrice:1,lastPrice:1,openedAt:now-300000,exposureQuote:100,marginQuote:100,
+    status:'OPEN',side:'LONG',strategy:'JONAS_CLONE_V1',strategyVersion:'JONAS_CLONE_V1',
+    entryThresholdMode:'MARKET_CAP_USD',entryGreenPercent:null,entryAgeSeconds:30,
+    exactGmgnTrendAtEntry:false,jonasClone:{strategy:'JONAS_CLONE_V1',checkpoints:[]}
+  });
+  const x=apply(state,[{...row,tokenAddress:'OLDMCAP',symbol:'OLD',w6TrackingOnly:true,priceUsd:1.1,liquidityUsd:20000,pairAddress:'OLDPOOL'}]);
+  assert.equal(x.state.wallets[W6].positions.length,1);
+  const old=x.state.wallets[W6].positions[0];
+  assert.equal(old.legacyW6,true);
+  assert.equal(old.w6StrategyScope,'LEGACY_PRE_GMGN_99K_4M');
+  assert.equal(x.state.wallets[W6].closed.length,0);
+});
+
+test('W6 summary and research isolate legacy market-cap history from the exact GMGN contract',()=>{
+  let x=apply(createSpecialistWalletState(),[row]);
+  const state=structuredClone(x.state);
+  state.wallets[W6].positions.push({
+    walletId:W6,positionKey:'legacy-open',chainId:'solana',tokenAddress:'LEGACYOPEN',
+    entryPrice:1,lastPrice:1,openedAt:now-300000,exposureQuote:100,marginQuote:100,
+    status:'OPEN',side:'LONG',strategy:'JONAS_CLONE_V1',strategyVersion:'JONAS_CLONE_V1',
+    entryThresholdMode:'MARKET_CAP_USD',entryGreenPercent:null,entryAgeSeconds:20,exactGmgnTrendAtEntry:false
+  });
+  state.wallets[W6].closed.push({
+    walletId:W6,positionKey:'legacy-closed',chainId:'solana',tokenAddress:'LEGACYCLOSED',
+    entryPrice:1,closePrice:2,openedAt:now-500000,closedAt:now-400000,
+    exposureQuote:100,marginQuote:100,status:'CLOSED',side:'LONG',realizedNetPnlQuote:100,
+    realizableRealizedNetPnlQuote:100,strategy:'JONAS_CLONE_V1',strategyVersion:'JONAS_CLONE_V1',
+    entryThresholdMode:'MARKET_CAP_USD',entryGreenPercent:null,entryAgeSeconds:20,exactGmgnTrendAtEntry:false
+  });
+  const summary=specialistWalletSummary(state,{asOf:now}).wallets[W6];
+  assert.equal(summary.currentContract,W6_CURRENT_GMGN_CONTRACT);
+  assert.equal(summary.openPositions,1);
+  assert.equal(summary.closedTrades,0);
+  assert.equal(summary.legacyOpenPositions,1);
+  assert.equal(summary.legacyClosedTrades,1);
+  assert.equal(summary.active[0].tokenAddress,'CLONE');
+  assert.equal(summary.legacyActive[0].tokenAddress,'LEGACYOPEN');
+  assert.equal(summary.realizedPnlQuote,0);
+  const analysis=w6ResearchAnalysis(state,{asOf:now});
+  assert.equal(analysis.currentContract,W6_CURRENT_GMGN_CONTRACT);
+  assert.equal(analysis.counts.legacyRecordsExcluded,2);
 });

@@ -40,3 +40,11 @@ test('runtime provider deadline rejects a stalled request and preserves normal r
  await assert.rejects(r.w6BoundedAwait(new Promise(()=>{}),5,'FEED'),/FEED_TIMEOUT/);
  assert.equal(await r.w6BoundedAwait(Promise.resolve(7),100,'FEED'),7);
 });
+
+
+test('persisted candidate book is versioned so legacy market-cap tracker rows are not restored',()=>{
+ assert.ok(source.includes("const W6_CANDIDATE_BOOK_CONTRACT='GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1'"));
+ assert.ok(source.includes("if(stored?.contract===W6_CANDIDATE_BOOK_CONTRACT)"));
+ assert.ok(source.includes("contract:W6_CANDIDATE_BOOK_CONTRACT"));
+ assert.ok(source.includes("[BIGGJ_W6_CANDIDATE_BOOK_RESET]"));
+});
