@@ -766,6 +766,112 @@ function user99k60sMaxEntrySolForImpact(solPriceUsd,liquidityUsd,maxImpactPct=.0
   const maxNotionalUsd=quoteReserveUsd*impact/(1-impact);
   return maxNotionalUsd/sol;
 }
+
+const W6_EXECUTABLE_MARK_STALE_MS=15_000;
+const W6_LIQUIDITY_DEAD_USD=1;
+
+function user99k60sPairIdentity(row={}){
+  return {
+    pairAddress:text(row?.pairAddress||row?.poolAddress||row?.dexPairAddress||row?.pair?.address||'',160)||null,
+    dexId:text(row?.dexId||row?.dex||row?.exchange||'',80)||null
+  };
+}
+
+function user99k60sExecutableMark(position,row,{now=Date.now(),feeBps=30}={}){
+  const markPrice=finite(row?.priceUsd,finite(position?.lastPrice));
+  const entryPrice=finite(position?.entryPrice);
+  const exposureQuote=Math.max(0,finite(position?.exposureQuote,finite(position?.marginQuote,0)));
+  const side=String(position?.side||'LONG').toUpperCase();
+  const ret=entryPrice>0&&markPrice>0?directionSign(side)*(markPrice/entryPrice-1):null;
+  const grossQuote=ret==null?null:exposureQuote*ret;
+  const roundTripFeeRate=Math.max(0,finite(feeBps,30))/10000*2;
+  const feesQuote=exposureQuote*roundTripFeeRate;
+  const currentLiquidityUsd=finite(row?.liquidityUsd);
+  const entryLiquidityUsd=finite(position?.entryLiquidityUsd);
+  const solAtEntry=finite(position?.solPriceUsdAtEntry);
+  const sizeSol=finite(position?.entryNotionalSol);
+  const entryImpactPct=user99k60sImpactPct(sizeSol,solAtEntry,entryLiquidityUsd);
+  const exitImpactPct=user99k60sImpactPct(sizeSol,solAtEntry,currentLiquidityUsd);
+  const pair=user99k60sPairIdentity(row);
+  const entryPoolAddress=text(position?.entryPoolAddress||'',160)||null;
+  const pairVerified=entryPoolAddress==null?true:pair.pairAddress!=null;
+  const pairMatches=entryPoolAddress==null?true:(pair.pairAddress!=null&&pair.pairAddress===entryPoolAddress);
+  const liquidityDead=currentLiquidityUsd!=null&&currentLiquidityUsd<=W6_LIQUIDITY_DEAD_USD;
+  const impactKnown=entryImpactPct!=null&&exitImpactPct!=null;
+  const executable=Boolean(markPrice>0&&currentLiquidityUsd>W6_LIQUIDITY_DEAD_USD&&impactKnown&&pairVerified&&pairMatches);
+  const modelledNetPnlQuote=executable&&grossQuote!=null
+    ?grossQuote-feesQuote-exposureQuote*(entryImpactPct+exitImpactPct)
+    :null;
+  const observedNetPnlQuote=grossQuote==null?null:grossQuote-feesQuote;
+  const conservativeNetPnlQuote=liquidityDead
+    ?-exposureQuote
+    :(modelledNetPnlQuote!=null?modelledNetPnlQuote:(observedNetPnlQuote==null?null:Math.min(0,observedNetPnlQuote)));
+  let status='EXECUTABLE_MODELLED';
+  if(liquidityDead)status='LIQUIDITY_DEAD';
+  else if(!pairMatches)status='PAIR_MISMATCH';
+  else if(!pairVerified)status='PAIR_UNVERIFIED';
+  else if(currentLiquidityUsd==null)status='LIQUIDITY_UNKNOWN';
+  else if(!impactKnown)status='IMPACT_UNAVAILABLE';
+  return {
+    version:'BIGGJ_W6_EXECUTABLE_MARK_V1',
+    observedAt:Number(now),
+    staleAfterMs:W6_EXECUTABLE_MARK_STALE_MS,
+    markPriceUsd:markPrice,
+    currentLiquidityUsd,
+    entryLiquidityUsd,
+    entryPoolAddress,
+    currentPoolAddress:pair.pairAddress,
+    entryDexId:text(position?.entryDexId||'',80)||null,
+    currentDexId:pair.dexId,
+    pairVerified,
+    pairMatches,
+    liquidityDead,
+    entryImpactPct,
+    exitImpactPct,
+    totalImpactPct:impactKnown?entryImpactPct+exitImpactPct:null,
+    feesQuote,
+    observedReturnPct:ret,
+    observedNetPnlQuote,
+    modelledNetPnlQuote,
+    conservativeNetPnlQuote,
+    executable,
+    status,
+    semantics:'OBSERVED_MARK_SEPARATE_FROM_LIQUIDITY_AND_IMPACT_ADJUSTED_EXIT_MODEL_NOT_LIVE_QUOTE',
+    execution:'SHADOW_ONLY',
+    canExecuteLive:false
+  };
+}
+
+function user99k60sExecutionOutputView(position,{asOf=Date.now()}={}){
+  const observed=finite(position?.observedUnrealizedNetPnlQuote,finite(position?.unrealizedNetPnlQuote));
+  const model=position?.executableMark||null;
+  const lastMarkedAt=finite(position?.lastMarkedAt);
+  const staleAfterMs=Math.max(1,finite(model?.staleAfterMs,W6_EXECUTABLE_MARK_STALE_MS));
+  const markAgeMs=lastMarkedAt==null?null:Math.max(0,Number(asOf)-lastMarkedAt);
+  const stale=markAgeMs==null||markAgeMs>staleAfterMs;
+  const exposureQuote=Math.max(0,finite(position?.exposureQuote,finite(position?.marginQuote,0)));
+  let executableNet=model?.executable===true?finite(model?.modelledNetPnlQuote):null;
+  let conservative=finite(position?.conservativeUnrealizedNetPnlQuote,finite(model?.conservativeNetPnlQuote));
+  let status=String(model?.status||'UNVERIFIED');
+  if(stale){
+    executableNet=null;
+    if(model?.liquidityDead===true)conservative=-exposureQuote;
+    else conservative=observed==null?null:Math.min(0,observed);
+    status='STALE_MARK';
+  }
+  if(conservative==null)conservative=observed==null?0:Math.min(0,observed);
+  return {
+    observedUnrealizedNetPnlQuote:observed,
+    executableUnrealizedNetPnlQuote:executableNet,
+    conservativeUnrealizedNetPnlQuote:conservative,
+    executionPnlStatus:status,
+    executionPnlExecutable:executableNet!=null&&!stale,
+    markFreshness:{lastMarkedAt,markAgeMs,staleAfterMs,stale},
+    lastLiquidityUsd:finite(position?.lastLiquidityUsd,finite(model?.currentLiquidityUsd)),
+    entryPoolAddress:position?.entryPoolAddress||model?.entryPoolAddress||null,
+    currentPoolAddress:model?.currentPoolAddress||null
+  };
+}
 function user99k60sHoldLabScenarios(values=[0.5,1,2,3,5,10,20,40,60,80],{solPriceUsd=null,liquidityUsd=null}={}){
 
   const policies=[
@@ -964,6 +1070,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     if(!row||!(finite(row?.priceUsd)>0))continue;
     const baseMarked=markPosition(p,row.priceUsd,now,feeBps);
     const marketCapUsd=finite(row?.marketCap);
+    const currentLiquidityUsd=finite(row?.liquidityUsd);
+    const executionMark=user99k60sExecutableMark(baseMarked,row,{now,feeBps});
     const peakMarketCapUsd=Math.max(
       finite(p?.peakMarketCapUsd,marketCapUsd??-Infinity),
       marketCapUsd??-Infinity
@@ -1032,12 +1140,32 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     const earlyMomentumChallengerSummary=summarizeEarlyMomentumChallengerLab(earlyMomentumChallengerLab);
     const cloneTelemetry=snapshot?.sourceReady===true?observeJonasClone(p,row,now,feeBps):null;
     if(cloneTelemetry)results.cloneCheckpoints+=cloneTelemetry.checkpoints.length-(p?.jonasClone?.checkpoints?.length||0);
+    const liquiditySnapshots=[...(Array.isArray(p?.liquiditySnapshots)?p.liquiditySnapshots:[]),{
+      at:Number(now),
+      priceUsd:finite(row?.priceUsd),
+      marketCapUsd,
+      liquidityUsd:currentLiquidityUsd,
+      pairAddress:user99k60sPairIdentity(row).pairAddress,
+      dexId:user99k60sPairIdentity(row).dexId
+    }].slice(-240);
+    const peakLiquidityUsd=Math.max(finite(p?.peakLiquidityUsd,currentLiquidityUsd??-Infinity),currentLiquidityUsd??-Infinity);
+    const troughLiquidityUsd=Math.min(finite(p?.troughLiquidityUsd,currentLiquidityUsd??Infinity),currentLiquidityUsd??Infinity);
     const marked={
       ...baseMarked,
       ...(cloneTelemetry?{jonasClone:cloneTelemetry}:{}),
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:Number.isFinite(peakMarketCapUsd)?peakMarketCapUsd:null,
       troughMarketCapUsd:Number.isFinite(troughMarketCapUsd)?troughMarketCapUsd:null,
+      lastLiquidityUsd:currentLiquidityUsd,
+      peakLiquidityUsd:Number.isFinite(peakLiquidityUsd)?peakLiquidityUsd:null,
+      troughLiquidityUsd:Number.isFinite(troughLiquidityUsd)?troughLiquidityUsd:null,
+      liquidityDecayFromEntryPct:currentLiquidityUsd!=null&&finite(p?.entryLiquidityUsd)>0?1-currentLiquidityUsd/finite(p.entryLiquidityUsd):null,
+      liquiditySnapshots,
+      observedUnrealizedNetPnlQuote:finite(baseMarked?.unrealizedNetPnlQuote),
+      observedUnrealizedReturnPct:finite(baseMarked?.unrealizedReturnPct),
+      executableMark,
+      executableUnrealizedNetPnlQuote:executionMark.executable?executionMark.modelledNetPnlQuote:null,
+      conservativeUnrealizedNetPnlQuote:executionMark.conservativeNetPnlQuote,
       estimatedNetPnlSolBeforeSlippage:pnlSolEstimate,
       profitTargetScenarios,
       holdSeconds,
@@ -1065,8 +1193,14 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       reason='USER_99K_60S_CATASTROPHIC_FAILSAFE';
     }
     if(reason){
+      const closeExecution=wallet.positions[i]?.executableMark||null;
+      const closeConservative=finite(wallet.positions[i]?.conservativeUnrealizedNetPnlQuote);
+      const closeObserved=finite(wallet.positions[i]?.observedUnrealizedNetPnlQuote,finite(wallet.positions[i]?.unrealizedNetPnlQuote));
       const closed=closePosition(wallet,i,{price:row.priceUsd,at:now,reason,feeBps});
       if(closed){
+        closed.observedRealizedNetPnlQuote=closeObserved;
+        closed.realizableRealizedNetPnlQuote=closeConservative!=null?closeConservative:finite(closed.realizedNetPnlQuote);
+        closed.exitExecutionMark=closeExecution?clone(closeExecution):null;
         results.closed++;
         if(reason==='USER_99K_60S_MCAP_TOO_SMALL')results.marketCapExit++;
         if(reason==='USER_99K_60S_CATASTROPHIC_FAILSAFE')results.catastrophicExit++;
@@ -1130,7 +1264,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       solPriceUsd,
       feeBps
     });
-    const position={
+    const entryPair=user99k60sPairIdentity(row);
+    let position={
       walletId:WALLET_6_USER_99K_60S,
       positionKey:key,
       chainId:String(row?.chainId||''),
@@ -1168,6 +1303,16 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       profitTargetScenarios:user99k60sTargetScenarios(targetPnlSol,notionalScenariosSol,feeBps),
       solPriceUsdAtEntry:finite(solPriceUsd),
       entryLiquidityUsd:finite(row?.liquidityUsd),
+      entryPoolAddress:entryPair.pairAddress,
+      entryDexId:entryPair.dexId,
+      lastLiquidityUsd:finite(row?.liquidityUsd),
+      peakLiquidityUsd:finite(row?.liquidityUsd),
+      troughLiquidityUsd:finite(row?.liquidityUsd),
+      liquidityDecayFromEntryPct:0,
+      liquiditySnapshots:[{
+        at:Number(now),priceUsd:px,marketCapUsd,liquidityUsd:finite(row?.liquidityUsd),
+        pairAddress:entryPair.pairAddress,dexId:entryPair.dexId
+      }],
       holdLab,
       holdLabSummary:user99k60sHoldLabSummary(holdLab),
       earlyMomentumChallengerLab,
@@ -1190,6 +1335,15 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       status:'OPEN',
       execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,
       epistemic:'USER_DISCOVERED_ENTRY_RULE_FROZEN_V1_EXIT_DISCRETIONARY_NO_AUTO_PROFIT_TARGET'
+    };
+    const entryExecutionMark=user99k60sExecutableMark(position,row,{now,feeBps});
+    position={
+      ...position,
+      executableMark:entryExecutionMark,
+      executableUnrealizedNetPnlQuote:entryExecutionMark.executable?entryExecutionMark.modelledNetPnlQuote:null,
+      conservativeUnrealizedNetPnlQuote:entryExecutionMark.conservativeNetPnlQuote,
+      observedUnrealizedNetPnlQuote:0,
+      observedUnrealizedReturnPct:0
     };
     if(openPosition(wallet,position)){
       results.opened++;
@@ -1261,7 +1415,15 @@ export function recordUser99k60sExitObservation(input,{
     }
   };
   const closeReason=why==='USER_PROFIT_ENOUGH'?'USER_99K_60S_PROFIT_ENOUGH':'USER_99K_60S_MCAP_TOO_SMALL';
+  const current=wallet.positions[idx];
   const closed=closePosition(wallet,idx,{price:mark,at:now,reason:closeReason,feeBps});
+  if(closed){
+    const observed=finite(current?.observedUnrealizedNetPnlQuote,finite(current?.unrealizedNetPnlQuote,finite(closed.realizedNetPnlQuote)));
+    const conservative=finite(current?.conservativeUnrealizedNetPnlQuote,observed);
+    closed.observedRealizedNetPnlQuote=observed;
+    closed.realizableRealizedNetPnlQuote=conservative;
+    closed.exitExecutionMark=current?.executableMark?clone(current.executableMark):null;
+  }
   state.updatedAt=Number(now);
   return {state:freeze(state),recorded:Boolean(closed),error:closed?null:'CLOSE_FAILED',closed:closed?freeze(clone(closed)):null};
 }
@@ -1306,25 +1468,54 @@ function safePositionForOutput(position){
   return x;
 }
 
-function walletStats(wallet){
+function walletStats(wallet,{asOf=Date.now()}={}){
   const open=wallet.positions||[],closed=wallet.closed||[];
-  const closedRealized=closed.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
+  const isW6=wallet.walletId===WALLET_6_USER_99K_60S;
+  const openViews=isW6
+    ?open.map(p=>({...p,...user99k60sExecutionOutputView(p,{asOf})}))
+    :open;
+  const observedClosedRealized=closed.reduce((s,p)=>s+finite(p?.observedRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0);
+  const conservativeClosedRealized=isW6
+    ?closed.reduce((s,p)=>s+finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0)
+    :observedClosedRealized;
   const openPartialRealized=open.reduce((s,p)=>s+finite(p?.partialRealizedNetPnlQuote,0),0);
-  const realized=closedRealized+openPartialRealized;
-  const unrealized=open.reduce((s,p)=>s+finite(p?.unrealizedNetPnlQuote,0),0);
-  const wins=closed.filter(p=>finite(p?.realizedNetPnlQuote,0)>0);
-  const losses=closed.filter(p=>finite(p?.realizedNetPnlQuote,0)<0);
-  const gp=wins.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0);
-  const gl=Math.abs(losses.reduce((s,p)=>s+finite(p?.realizedNetPnlQuote,0),0));
+  const observedRealized=observedClosedRealized+openPartialRealized;
+  const realized=conservativeClosedRealized+openPartialRealized;
+  const observedUnrealized=openViews.reduce((s,p)=>s+finite(p?.observedUnrealizedNetPnlQuote,finite(p?.unrealizedNetPnlQuote,0)),0);
+  const conservativeUnrealized=isW6
+    ?openViews.reduce((s,p)=>s+finite(p?.conservativeUnrealizedNetPnlQuote,0),0)
+    :observedUnrealized;
+  const executableRows=isW6?openViews.filter(p=>p?.executionPnlExecutable===true&&finite(p?.executableUnrealizedNetPnlQuote)!=null):[];
+  const executableCoverage=isW6?(openViews.length?executableRows.length/openViews.length:1):1;
+  const executableUnrealized=isW6&&executableCoverage===1
+    ?executableRows.reduce((s,p)=>s+finite(p?.executableUnrealizedNetPnlQuote,0),0)
+    :null;
+  const wins=closed.filter(p=>finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))>0);
+  const losses=closed.filter(p=>finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))<0);
+  const gp=wins.reduce((s,p)=>s+finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0);
+  const gl=Math.abs(losses.reduce((s,p)=>s+finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0));
   return freeze({
     walletId:wallet.walletId,label:wallet.label,capitalModel:wallet.capitalModel,capitalLimitQuote:null,
     openPositions:open.length,closedTrades:closed.length,wins:wins.length,losses:losses.length,
     winRate:closed.length?wins.length/closed.length:null,
-    realizedPnlQuote:realized,unrealizedPnlQuote:unrealized,netPnlQuote:realized+unrealized,
+    realizedPnlQuote:realized,unrealizedPnlQuote:conservativeUnrealized,netPnlQuote:realized+conservativeUnrealized,
+    ...(isW6?{
+      observedRealizedPnlQuote:observedRealized,
+      observedUnrealizedPnlQuote:observedUnrealized,
+      observedNetPnlQuote:observedRealized+observedUnrealized,
+      executableUnrealizedPnlQuote:executableUnrealized,
+      executableNetPnlQuote:executableUnrealized==null?null:realized+executableUnrealized,
+      conservativeUnrealizedPnlQuote:conservativeUnrealized,
+      conservativeNetPnlQuote:realized+conservativeUnrealized,
+      executableCoverage,
+      staleOpenPositions:openViews.filter(p=>p?.markFreshness?.stale===true).length,
+      liquidityDeadOpenPositions:openViews.filter(p=>p?.executableMark?.liquidityDead===true).length,
+      pnlSemantics:'HEADLINE_USES_CONSERVATIVE_REALIZABILITY;_OBSERVED_MID_MARK_REPORTED_SEPARATELY'
+    }:{}),
     profitFactor:gl>EPS?gp/gl:null,
     cumulativeMarginUsedQuote:[...open,...closed].reduce((s,p)=>s+Math.max(0,finite(p?.initialMarginQuote,p?.marginQuote)||0),0),
     currentMarginAtRiskQuote:open.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
-    active:open.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
+    active:openViews.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
     recentClosed:closed.slice(-20).reverse().map(safePositionForOutput),
     objective:wallet.objective,primaryPerformanceExcluded:true,
     execution:'SHADOW_ONLY',canExecuteLive:false
@@ -1334,7 +1525,7 @@ function walletStats(wallet){
 export function specialistWalletSummary(state,{asOf=Date.now()}={}){
   const s=mutableState(state);
   const wallets={};
-  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY,WALLET_6_USER_99K_60S])wallets[id]=walletStats(s.wallets[id]);
+  for(const id of [WALLET_3_TRADER_COPY,WALLET_4_MEME_SCOUT,WALLET_5_MEME_COPY,WALLET_6_USER_99K_60S])wallets[id]=walletStats(s.wallets[id],{asOf});
   const core={version:SPECIALIST_SHADOW_WALLETS_VERSION,asOf:Number(asOf),wallets,
     execution:'SHADOW_ONLY',canExecute:false,canExecuteLive:false,automaticRealOrders:false};
   return freeze({...core,fingerprint:sha256(core)});
