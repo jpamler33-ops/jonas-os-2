@@ -1439,17 +1439,22 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     results.marked++;
 
     let reason=null;
+    const clonePosition=clonePolicy&&(
+      p?.strategy==='JONAS_CLONE_V1'||
+      p?.strategyVersion==='JONAS_CLONE_V1'||
+      p?.jonasClone?.strategy==='JONAS_CLONE_V1'
+    );
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
     const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
     const catastrophicLoss=Math.max(.50,Math.min(.99,finite(catastrophicDrawdownPct,.90)));
     const catastrophicMcap=Math.max(0,finite(catastrophicMarketCapUsd,10_000));
     if(executionMark.liquidityDead){
       reason='W6_LIQUIDITY_GONE';
-    }else if(clonePolicy&&holdSeconds>=240){
+    }else if(clonePosition&&holdSeconds>=240){
       reason='W6_HOLD_4M_EXIT';
-    }else if(!clonePolicy&&!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
+    }else if(!clonePosition&&!protectedHold&&marketCapFloor>0&&marketCapUsd!=null&&marketCapUsd<marketCapFloor){
       reason='USER_99K_60S_MCAP_TOO_SMALL';
-    }else if(!clonePolicy&&!protectedHold&&(
+    }else if(!clonePosition&&!protectedHold&&(
       (ret!=null&&ret<=-catastrophicLoss)||
       (catastrophicMcap>0&&marketCapUsd!=null&&marketCapUsd<catastrophicMcap)
     )){
@@ -1480,8 +1485,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
         wallet.positions[i]={...wallet.positions[i],pendingExit:{
           reason,
           at:now,
-          requestedAt:clonePolicy&&reason==='W6_HOLD_4M_EXIT'?Number(p?.openedAt||now)+240_000:now,
-          targetHoldSeconds:clonePolicy?240:null,
+          requestedAt:clonePosition&&reason==='W6_HOLD_4M_EXIT'?Number(p?.openedAt||now)+240_000:now,
+          targetHoldSeconds:clonePosition?240:null,
           status:'EXIT_UNFILLABLE',
           executionStatus:closeExecution?.status
         }};
