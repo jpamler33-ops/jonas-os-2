@@ -951,3 +951,83 @@ test('wallet 6 runs the early-momentum size and hold challenger without changing
   assert.ok(p.earlyMomentumChallengerSummary.bestEntryAgeArm);
   assert.equal(p.canExecuteLive,false);
 });
+
+
+test('W6 separates observed mark PnL from liquidity-impact-adjusted executable PnL',()=>{
+  const now=30_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'EXEC',symbol:'EXEC',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,
+    pairAddress:'POOL_EXEC',dexId:'pumpswap',pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:20,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'EXEC',symbol:'EXEC',priceUsd:2,marketCap:240_000,liquidityUsd:80_000,
+    pairAddress:'POOL_EXEC',dexId:'pumpswap',pairCreatedAt:now-30_000
+  }]},{now:now+10_000,entryNotionalSol:20,solPriceUsd:100}).state;
+
+  const summary=specialistWalletSummary(state,{asOf:now+10_000});
+  const w=summary.wallets[WALLET_6_USER_99K_60S];
+  const p=w.active[0];
+  assert.ok(p.observedUnrealizedNetPnlQuote>0);
+  assert.ok(p.executableUnrealizedNetPnlQuote>0);
+  assert.ok(p.executableUnrealizedNetPnlQuote<p.observedUnrealizedNetPnlQuote);
+  assert.equal(p.executionPnlStatus,'EXECUTABLE_MODELLED');
+  assert.equal(p.executionPnlExecutable,true);
+  assert.equal(p.entryPoolAddress,'POOL_EXEC');
+  assert.equal(p.currentPoolAddress,'POOL_EXEC');
+  assert.equal(w.executableCoverage,1);
+  assert.equal(w.netPnlQuote,w.conservativeNetPnlQuote);
+  assert.ok(w.observedNetPnlQuote>w.netPnlQuote);
+  assert.equal(w.canExecuteLive,false);
+});
+
+test('W6 stale positive spot mark is not allowed to remain positive headline PnL',()=>{
+  const now=31_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'STALE',symbol:'STALE',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,
+    pairAddress:'POOL_STALE',dexId:'pumpswap',pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'STALE',symbol:'STALE',priceUsd:5,marketCap:600_000,liquidityUsd:90_000,
+    pairAddress:'POOL_STALE',dexId:'pumpswap',pairCreatedAt:now-25_000
+  }]},{now:now+5_000,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  const fresh=specialistWalletSummary(state,{asOf:now+5_000}).wallets[WALLET_6_USER_99K_60S];
+  assert.ok(fresh.observedNetPnlQuote>0);
+  assert.ok(fresh.netPnlQuote>0);
+
+  const stale=specialistWalletSummary(state,{asOf:now+25_001}).wallets[WALLET_6_USER_99K_60S];
+  assert.ok(stale.observedNetPnlQuote>0);
+  assert.equal(stale.executableUnrealizedPnlQuote,null);
+  assert.equal(stale.executableNetPnlQuote,null);
+  assert.equal(stale.staleOpenPositions,1);
+  assert.equal(stale.active[0].executionPnlStatus,'STALE_MARK');
+  assert.equal(stale.active[0].executionPnlExecutable,false);
+  assert.equal(stale.active[0].conservativeUnrealizedNetPnlQuote,0);
+  assert.equal(stale.netPnlQuote,0);
+});
+
+test('W6 liquidity death marks the remaining shadow exposure as non-realizable loss',()=>{
+  const now=32_000_000;
+  let state=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DEAD',symbol:'DEAD',priceUsd:1,marketCap:120_000,liquidityUsd:100_000,
+    pairAddress:'POOL_DEAD',dexId:'pumpswap',pairCreatedAt:now-20_000
+  }]},{now,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  state=applyUser99k60sStrategySnapshot(state,{sourceReady:true,rows:[{
+    chainId:'solana',tokenAddress:'DEAD',symbol:'DEAD',priceUsd:20,marketCap:2_400_000,liquidityUsd:0,
+    pairAddress:'POOL_DEAD',dexId:'pumpswap',pairCreatedAt:now-25_000
+  }]},{now:now+5_000,entryNotionalSol:10,solPriceUsd:100}).state;
+
+  const w=specialistWalletSummary(state,{asOf:now+5_000}).wallets[WALLET_6_USER_99K_60S];
+  const p=w.active[0];
+  assert.ok(p.observedUnrealizedNetPnlQuote>0);
+  assert.equal(p.executableUnrealizedNetPnlQuote,null);
+  assert.equal(p.executionPnlStatus,'LIQUIDITY_DEAD');
+  assert.equal(p.conservativeUnrealizedNetPnlQuote,-1000);
+  assert.equal(w.liquidityDeadOpenPositions,1);
+  assert.equal(w.netPnlQuote,-1000);
+  assert.equal(w.observedNetPnlQuote>0,true);
+  assert.equal(w.canExecuteLive,false);
+});
