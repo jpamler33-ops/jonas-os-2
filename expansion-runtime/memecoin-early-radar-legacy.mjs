@@ -1039,23 +1039,25 @@ export function createMemecoinEarlyRadarProvider({
         }
       }
     }
-    // Generic Trending is diagnostic fallback only when New Pair itself is
-    // unavailable for a non-rate-limit reason. Never spend more GMGN quota
-    // after a 429/cooldown, and never replace an already-valid New Pair feed.
-    if(hasAnyGmgnKey&&!pools.length&&!gmgnRateLimitedThisCycle&&!gmgnRateLimitActive()){
-      trendSource='GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_'+gmgnTrendSort.toUpperCase();
-      try{
-        pools=await gmgnTrendingUltraSolana({force:false});
-        exactGmgn=true;
-      }catch(err){
-        errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
+    // W6's production contract requires exact GMGN New Pair evidence.
+    // Generic GMGN Trending and third-party trend feeds cannot satisfy the
+    // New-Pair gate, so using them here only blocks the 5s hotpath when the
+    // authoritative New Pair surface is temporarily empty/unavailable.
+    // Keep current candidates/open positions trackable, fail closed for entry,
+    // and retry the authoritative GMGN surface on the next W6 cycle.
+    if(hasAnyGmgnKey&&!pools.length){
+      trendSource=gmgnRateLimitedThisCycle||gmgnRateLimitActive()
+        ?'GMGN_OPENAPI_NEW_CREATION_COOLDOWN_TRACKING_ONLY'
+        :'GMGN_OPENAPI_NEW_CREATION_UNAVAILABLE_TRACKING_ONLY';
+      exactGmgn=false;
+      if(!gmgnRateLimitedThisCycle&&!gmgnRateLimitActive()&&!errors.some(x=>String(x).startsWith('gmgn:openapi:solana:new_creation:'))){
+        errors.push('gmgn:openapi:solana:new_creation:EMPTY_TRACKING_ONLY');
       }
     }
-    // Preserve the user's exact GMGN Trends semantics before any independent
-    // fallback. If OpenAPI is unavailable, try the public Trends endpoint; if
-    // both fail we may enrich/monitor from free sources, but exactGmgn stays
-    // false so the W6 green-% entry gate remains fail-closed.
-    if(!pools.length&&gmgnPublicAllowed){
+    // Diagnostic fallback remains available only for deployments with no GMGN
+    // OpenAPI key at all. BIGGJ Production always has the read-only key, so
+    // these non-entry feeds never sit in the W6 timing-critical path.
+    if(!hasAnyGmgnKey&&!pools.length&&gmgnPublicAllowed){
       trendSource='GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
       try{
         pools=await gmgnPublicTrendingUltraSolana({force});
@@ -1064,7 +1066,7 @@ export function createMemecoinEarlyRadarProvider({
         errors.push('gmgn:public:solana:trending:'+(publicErr instanceof Error?publicErr.message:String(publicErr)));
       }
     }
-    if(!pools.length){
+    if(!hasAnyGmgnKey&&!pools.length){
       trendSource='FREE_TRENDS_COMPOSITE_GECKO_DEXSCREENER';
       exactGmgn=false;
       const free=await freeTrendingCompositeSolana({force});
