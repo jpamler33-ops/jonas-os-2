@@ -202,6 +202,8 @@ test('W6 keeps GMGN discovery unfiltered and applies green threshold downstream'
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:60});
   assert.equal(out.rows.length,1);
   assert.equal(out.rows[0].priceChangeSelectedPct,999000);
+  assert.equal(out.rows[0].signalNewPair,false);
+  assert.equal(out.rows[0].gmgnExactNewPair,undefined);
   assert.equal(out.minPriceChangePct,99000);
   assert.equal(out.exactGmgn,true);
 });
