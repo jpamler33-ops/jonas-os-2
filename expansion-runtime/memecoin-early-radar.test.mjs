@@ -556,7 +556,7 @@ test('W6 candidate memory preserves launch age but is no longer current New Pair
 
 test('legacy discovery backs off HTTP 429 even during forced refresh and retries after cooldown',async()=>{
  let now=1700000000000,calls=0;
- const p=createMemecoinEarlyRadarProvider({now:()=>now,gmgnPublicEnabled:false,fetchImpl:async url=>{
+ const p=createMemecoinEarlyRadarProvider({now:()=>now,gmgnApiKey:'',gmgnPublicEnabled:false,fetchImpl:async url=>{
   if(String(url).includes('geckoterminal')){calls++;return {ok:false,status:429};}
   return {ok:true,status:200,json:async()=>[]};
  }});
