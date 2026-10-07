@@ -108,7 +108,21 @@ export function createMemecoinEarlyRadarProvider(options={}){
       ['dexLatestBoosts',dex+'/token-boosts/latest/v1',dexCacheMs],
       ['dexLatestProfiles',dex+'/token-profiles/latest/v1',Math.max(dexCacheMs,30000)]
     ];
-    const settled=await Promise.allSettled(sourceSpecs.map(([,url,ttl])=>cachedJson(url,ttl)));
+    // Start optional discovery concurrently, but never make an already-valid
+    // exact GMGN result wait for these non-entry feeds.
+    const optionalDiscovery=Promise.allSettled(sourceSpecs.map(([,url,ttl])=>cachedJson(url,ttl)));
+    const legacyResult=await priorResult;
+    const legacyFresh=legacyResult.value&&Number(legacyResult.value.capturedAt)>=capturedAt;
+    const prior=legacyFresh?legacyResult.value:{rows:[],errors:[],exactGmgn:false};
+    feedStatus.legacy={ok:!legacyResult.error};
+    if(prior.exactGmgn===true){
+      feedStatus.optionalDiscovery={awaited:false,reason:'EXACT_GMGN_READY'};
+      return Object.freeze({...prior,providerDurationMs:Date.now()-started,feedStatus});
+    }
+    if(legacyResult.value&&!legacyFresh)errors.push('legacy:STALE_SNAPSHOT');
+    if(legacyResult.error)errors.push('legacy:'+String(legacyResult.error?.message||legacyResult.error));
+    errors.push(...(Array.isArray(prior.errors)?prior.errors:[]));
+    const settled=await optionalDiscovery;
     for(let i=0;i<settled.length;i++){
       const [name]=sourceSpecs[i],r=settled[i];
       feedStatus[name]={ok:r.status==='fulfilled',error:r.status==='rejected'?String(r.reason?.message||r.reason):null};
@@ -193,15 +207,9 @@ export function createMemecoinEarlyRadarProvider(options={}){
       row.freeTrendSources=[seed.trendSource].filter(Boolean);
       return row;
     }).filter(x=>x&&(x.w6TrackingOnly===true||(x.pairCreatedAt!=null&&x.pairCreatedAt<=capturedAt&&(capturedAt-x.pairCreatedAt)/1000<=maxAge)));
-    const legacyResult=await priorResult;
-    // Never relabel a previous invocation's delayed legacy marks as fresh.
-    const legacyFresh=legacyResult.value&&Number(legacyResult.value.capturedAt)>=capturedAt;
-    const prior=legacyFresh?legacyResult.value:{rows:[],errors:[],exactGmgn:false};
-    if(legacyResult.value&&!legacyFresh)errors.push('legacy:STALE_SNAPSHOT');
-    if(legacyResult.error)errors.push('legacy:'+String(legacyResult.error?.message||legacyResult.error));
-    errors.push(...(Array.isArray(prior.errors)?prior.errors:[]));
-    feedStatus.legacy={ok:!legacyResult.error};
-    if(prior.exactGmgn===true)return Object.freeze({...prior,providerDurationMs:Date.now()-started,feedStatus});
+    // Exact GMGN already returned above. From here on we are explicitly in
+    // tracking/diagnostic fallback mode, where waiting for optional discovery
+    // is acceptable because no valid W6 entry can be emitted.
     const merged=new Map();
     for(const row of [...fresh,...(Array.isArray(prior?.rows)?prior.rows:[])]){
       const key=String(row?.tokenAddress||'');if(!key)continue;
