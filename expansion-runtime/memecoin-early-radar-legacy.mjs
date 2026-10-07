@@ -619,7 +619,7 @@ export function createMemecoinEarlyRadarProvider({
       const qs=new URLSearchParams({
         chain:'sol',
         interval:gmgnTrendWindow,
-        limit:demoKey?'3':'100',
+        limit:'100',
         timestamp:String(timestamp),
         client_id:String(clientId)
       });
@@ -876,6 +876,7 @@ export function createMemecoinEarlyRadarProvider({
       trendInterval:gmgnTrendWindow,
       trendOrderBy:gmgnTrendSort,
       minPriceChangePct:gmgnTrendMinChange,
+      gmgnAuthMode:exactGmgn?(gmgnReadApiKey==='gmgn_solbscbaseethmonadtron'?'PUBLIC_DEMO_READ_ONLY':'PERSONAL_API_READ_ONLY'):(gmgnReadApiKey?'OPENAPI_FAILED':'NO_OPENAPI_KEY'),
       setup:exactGmgn?'GMGN_TRENDS_1M':'TRENDS_PROXY_RESEARCH',
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
