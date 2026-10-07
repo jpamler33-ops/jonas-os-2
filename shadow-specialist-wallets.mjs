@@ -1506,6 +1506,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       greenPercent:user99k60sGreenPercent(row),
       gmgn1mChangePct:user99k60sGreenPercent(row),
       exactGmgnTrend:row?.gmgnExactTrend===true,
+      signalNewPair:row?.signalNewPair===true,
       liquidityUsd:row?.liquidityUsd,
       trendFeed:row?.signalTrending===true||row?.w6TrendVisible===true
     }):null;

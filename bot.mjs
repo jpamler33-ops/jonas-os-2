@@ -5372,7 +5372,7 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     solPriceUsd,
     maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
     requireTrending:true,
-    requireNewPair:false,
+    requireNewPair:true,
     catastrophicDrawdownPct:Math.max(.50,Math.min(.99,Number(process.env.TCX_W6_CATASTROPHIC_DRAWDOWN_PCT||.90))),
     catastrophicMarketCapUsd:Math.max(0,Number(process.env.TCX_W6_CATASTROPHIC_MCAP_USD||10_000))
   };
@@ -5415,7 +5415,7 @@ function enrichW6UltraCandidateRows(snapshot){
       :(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:null);
     const greenPercent=Number(row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct);
     const greenPercentKnown=Number.isFinite(greenPercent);
-    const exactGmgn1m=row?.gmgnExactTrend===true&&String(row?.gmgnTrendInterval||snapshot?.trendInterval||'1m')==='1m'&&row?.signalTrending===true;
+    const exactGmgn1m=row?.gmgnExactTrend===true&&String(row?.gmgnTrendInterval||snapshot?.trendInterval||'1m')==='1m'&&row?.signalTrending===true&&row?.signalNewPair===true;
     const priorMaxGreen=Number(priorTracker?.maxObservedGreenPercent);
     const maxObservedGreenPercent=greenPercentKnown
       ?Math.max(Number.isFinite(priorMaxGreen)?priorMaxGreen:-Infinity,greenPercent)
@@ -5586,6 +5586,7 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       effectiveMinMarketCapUsd:null,
       effectiveMinGmgn1mChangePct:99000,
       requireExactGmgn1m:true,
+      requireExactGmgnNewPair:true,
       fixedHoldSeconds:240,
       candidateEvidence:currentW6UltraCandidates().slice(0,100).map(row=>({tokenAddress:row.tokenAddress,ageSeconds:(Date.now()-Number(row.pairCreatedAt))/1000,gmgn1mChangePct:row.gmgnDisplayedChangePct??row.priceChangeSelectedPct??null,marketCap:row.marketCap,liquidityUsd:row.liquidityUsd,exactGmgn:row.gmgnExactTrend===true,...row.w6LaunchTracker})),
       trackingRows:ultra.trackingRows||0,

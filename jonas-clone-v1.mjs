@@ -15,6 +15,7 @@ export const JONAS_CLONE_V1_POLICY=Object.freeze({
     minGmgn1mChangePct:99000,
     requireExactGmgnTrend:true,
     requireTrendFeed:true,
+    requireNewPair:true,
     marketCapGate:false
   }),
   sizing:Object.freeze({mode:'LIQUIDITY_PROPORTIONAL_RESEARCH',solPerLiquidityUsd:4/10000,epistemic:'USER_HYPOTHESIS_NOT_LIVE_SAFE_LIMIT'}),
@@ -50,7 +51,8 @@ export function jonasCloneEligible(row={}){
   const green=Number(row.gmgn1mChangePct??row.greenPercent??row.gmgnDisplayedChangePct??row.priceChangeSelectedPct);
   const exact=row.exactGmgnTrend===true||row.gmgnExactTrend===true;
   const trendVisible=row.trendFeed===true||row.signalTrending===true||row.w6TrendVisible===true;
-  return Number.isFinite(age)&&age>=0&&age<120&&exact&&trendVisible&&Number.isFinite(green)&&green>=99000;
+  const newPairVisible=row.signalNewPair===true&&trendVisible;
+  return Number.isFinite(age)&&age>=0&&age<120&&exact&&newPairVisible&&Number.isFinite(green)&&green>=99000;
 }
 
 export function jonasCloneResearchPlan(row={}){
