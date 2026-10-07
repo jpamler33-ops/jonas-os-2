@@ -20,7 +20,7 @@ function setup({newPool=false,profile=false,missingCap=false,secondPool=false}={
   if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('FAST',secondPool?start-5000:start-25000,{marketCap:missingCap?null:120000})]);
   throw new Error('unexpected '+url);
  };
- const provider=createMemecoinEarlyRadarProvider({fetchImpl,gmgnPublicEnabled:false,now:()=>now,ultraDexCacheMs:5000,ultraGeckoCacheMs:30000});
+ const provider=createMemecoinEarlyRadarProvider({fetchImpl,gmgnApiKey:'',gmgnPublicEnabled:false,now:()=>now,ultraDexCacheMs:5000,ultraGeckoCacheMs:30000});
  return {provider,calls,setNow:t=>{now=t;}};
 }
 test('Dex latest boosts preserve discovery during Gecko 429 but cannot impersonate exact GMGN',async()=>{
@@ -58,6 +58,48 @@ test('new-pool discovery is not relabelled as exact GMGN or allowed to enter the
  const {provider}=setup({newPool:true,profile:true});const snapshot=await provider.fetchUltraEarlySolana();
  const row=snapshot.rows.find(x=>x.tokenAddress==='FAST');assert.equal(row.signalNewPair,true);assert.equal(row.signalTrending,false);
  assert.equal(applyJonasCloneSnapshot(createSpecialistWalletState(),snapshot,{now:start,solPriceUsd:120}).results.opened,0);
+});
+
+test('exact GMGN New Pair result returns before hung optional multifeed discovery',async()=>{
+ let optionalCalls=0;
+ const fetchImpl=async(url)=>{
+  const u=new URL(url);
+  if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+   return json({code:0,data:{new_creation:[{
+    address:'EXACT',symbol:'EXACT',name:'Exact Meme',price:'0.001',
+    liquidity:'20000',usd_market_cap:'120000',
+    created_timestamp:Math.floor((start-20_000)/1000)
+   }]}});
+  }
+  if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/')){
+   return json([pair('EXACT',start-20_000)]);
+  }
+  if(
+   u.hostname==='api.geckoterminal.com'||
+   u.pathname==='/token-boosts/latest/v1'||
+   u.pathname==='/token-profiles/latest/v1'
+  ){
+   optionalCalls++;
+   return new Promise(()=>{});
+  }
+  throw new Error('unexpected '+url);
+ };
+ const provider=createMemecoinEarlyRadarProvider({
+  fetchImpl,now:()=>start,gmgnApiKey:'gmgn_solbscbaseethmonadtron',gmgnPublicEnabled:false,
+  gmgnRequestGapMs:0,ultraDiscoveryTimeoutMs:250,ultraEnrichmentTimeoutMs:100,ultraLegacyTimeoutMs:1000
+ });
+ const began=Date.now();
+ const snapshot=await provider.fetchUltraEarlySolana({maxAgeSeconds:120});
+ const elapsed=Date.now()-began;
+ assert.equal(snapshot.exactGmgn,true);
+ assert.equal(snapshot.source,'GMGN_OPENAPI_NEW_CREATION_1M');
+ assert.equal(snapshot.rows[0].tokenAddress,'EXACT');
+ assert.equal(snapshot.feedStatus.optionalDiscovery.awaited,false);
+ assert.equal(snapshot.feedStatus.optionalDiscovery.started,false);
+ assert.equal(snapshot.feedStatus.optionalDiscovery.reason,'EXACT_GMGN_READY');
+ assert.equal(optionalCalls,0,'optional free feeds must not start in GMGN-configured W6 hotpath');
+ assert.ok(elapsed<200,'exact GMGN should not wait for optional feed deadlines');
+ assert.equal(snapshot.canExecuteLive,false);
 });
 
 function deadlineProvider(handler,options={}){
