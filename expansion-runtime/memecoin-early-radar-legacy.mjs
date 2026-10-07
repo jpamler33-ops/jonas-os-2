@@ -999,11 +999,12 @@ export function createMemecoinEarlyRadarProvider({
             if(distanceA!==distanceB)return distanceA-distanceB;
             if(!aNever&&aa!==ba)return aa-ba;
             return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
-          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,3):gmgnTokenInfoSamples);
+          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,2):gmgnTokenInfoSamples);
           // Never serialize several potentially slow GMGN token-info calls.
-          // GMGN's documented Free bucket is capacity 5: trenches/new_creation
-          // costs weight 2 and token/info costs weight 1, so three token-info
-          // reads is the maximum safe same-cycle budget (2 + 3 = 5).
+          // Production verification on the shared/public demo key showed that a
+          // 3-token batch immediately triggers RATE_LIMIT_EXCEEDED even though
+          // nominal route weights suggest 2+3=5. Treat live provider behavior
+          // as authoritative and hard-cap the demo-key batch at two.
           // One pacing gap protects the bucket, then the bounded batch runs
           // concurrently so a single slow provider response cannot push W6
           // through the unchanged 30s outer timeout.
