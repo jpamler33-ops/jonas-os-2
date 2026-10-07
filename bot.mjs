@@ -5413,7 +5413,8 @@ function enrichW6UltraCandidateRows(snapshot){
     const maxObservedMarketCapUsd=marketCapKnown
       ?Math.max(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:-Infinity,marketCap)
       :(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:null);
-    const greenPercent=Number(row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct);
+    const greenRaw=row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct;
+    const greenPercent=greenRaw==null||greenRaw===''?NaN:Number(greenRaw);
     const greenPercentKnown=Number.isFinite(greenPercent);
     const exactGmgn1m=row?.gmgnExactTrend===true&&String(row?.gmgnTrendInterval||snapshot?.trendInterval||'1m')==='1m'&&row?.signalTrending===true&&row?.signalNewPair===true;
     const priorMaxGreen=Number(priorTracker?.maxObservedGreenPercent);
@@ -5550,6 +5551,10 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
           capturedAt:ultra.capturedAt,
           source:ultra.source,
           sourceReady:ultra.sourceReady,
+          gmgnOneMinuteRows:ultra.gmgnOneMinuteRows||0,
+          gmgnOneMinuteMatchedNewPairs:ultra.gmgnOneMinuteMatchedNewPairs||0,
+          gmgnOneMinuteCoverage:ultra.gmgnOneMinuteCoverage??null,
+          gmgnOneMinuteError:ultra.gmgnOneMinuteError||null,
           discoveryRows:ultra.discoveryRows||0,
           candidateTrackingRows:ultra.candidateTrackingRows||0,
           candidateBookSize:ultra.candidateBookSize||0,
@@ -5576,6 +5581,10 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       setup:ultra.setup||'GMGN_TRENDS_1M',
       sourceReady:ultra.sourceReady,
       sourceErrors:ultra.errors||[],
+      gmgnOneMinuteRows:ultra.gmgnOneMinuteRows||0,
+      gmgnOneMinuteMatchedNewPairs:ultra.gmgnOneMinuteMatchedNewPairs||0,
+      gmgnOneMinuteCoverage:ultra.gmgnOneMinuteCoverage??null,
+      gmgnOneMinuteError:ultra.gmgnOneMinuteError||null,
       providerDurationMs:ultra.providerDurationMs??null,
       feedStatus:ultra.feedStatus||{},
       discoveryRows:ultra.discoveryRows||0,

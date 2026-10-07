@@ -662,6 +662,49 @@ export function createMemecoinEarlyRadarProvider({
     },{force});
   }
 
+  async function gmgnOneMinutePerformanceSolana({force=false}={}){
+    return cached('ultra:gmgn:openapi:solana:performance:1m:change1m',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+      if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
+      const timestamp=Math.floor(Number(now())/1000);
+      const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
+      const qs=new URLSearchParams({
+        chain:'sol',
+        interval:'1m',
+        limit:'100',
+        order_by:'change1m',
+        direction:'desc',
+        timestamp:String(timestamp),
+        client_id:String(clientId)
+      });
+      const body=await getJson(gmgnOpenApi+'/v1/market/rank?'+qs.toString(),{
+        headers:{
+          'X-APIKEY':gmgnReadApiKey,
+          'Content-Type':'application/json',
+          'user-agent':'gmgn-cli/1.6.6'
+        }
+      });
+      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_OPENAPI_1M_PERFORMANCE_CODE_'+String(body.code)+'_'+text(body?.message||body?.msg||body?.error,120));
+      const payload=body?.data??body;
+      const raw=
+        Array.isArray(payload?.rank)?payload.rank:
+        Array.isArray(payload?.list)?payload.list:
+        Array.isArray(payload?.tokens)?payload.tokens:
+        Array.isArray(payload)?payload:
+        [];
+      if(!raw.length){
+        const shape=payload&&typeof payload==='object'&&!Array.isArray(payload)?Object.keys(payload).slice(0,12).join(','):(Array.isArray(payload)?'ARRAY_0':typeof payload);
+        throw new Error('GMGN_OPENAPI_1M_PERFORMANCE_EMPTY_SHAPE_'+text(shape||'NONE',120));
+      }
+      const observedAt=Number(now());
+      return raw.map((x,i)=>({
+        ...normalizeGmgnTrend(x,i+1,'1m'),
+        gmgnTrendObservedAt:observedAt,
+        gmgnOneMinuteRank:i+1,
+        gmgnOneMinutePerformanceSource:'GMGN_OPENAPI_TRENDS_1M_CHANGE1M'
+      })).filter(x=>x.tokenAddress);
+    },{force});
+  }
+
   async function gmgnTrendingUltraSolana({force=false}={}){
     return cached('ultra:gmgn:openapi:solana:trending:'+gmgnTrendWindow+':'+gmgnTrendSort,Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
@@ -767,17 +810,47 @@ export function createMemecoinEarlyRadarProvider({
     const hasAnyGmgnKey=Boolean(gmgnReadApiKey);
     let trendSource=hasAnyGmgnKey?'GMGN_OPENAPI_NEW_CREATION_1M':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
     let exactGmgn=false;
-    // The user's manual workflow starts from GMGN New Pair. GMGN's official
-    // OpenAPI exposes that surface as Trenches/new_creation. Prefer it before
-    // generic Trending; both remain exact GMGN and the strategy still requires
-    // an observed 1m percentage plus strict age <120s.
+    let gmgnOneMinuteRows=[];
+    let gmgnOneMinuteError=null;
+    let gmgnOneMinuteMatchedNewPairs=0;
+    // New Pair identity and 1m performance are distinct official GMGN surfaces:
+    // Trenches/new_creation establishes exact launch identity + creation age,
+    // while market/rank interval=1m ordered by change1m supplies GMGN's exact
+    // 1m performance field. Run both concurrently, then join strictly by token
+    // address. Missing rank coverage stays UNKNOWN and can never fabricate entry.
     if(hasAnyGmgnKey){
-      try{
-        pools=await gmgnNewCreationUltraSolana({force});
+      const [newPairsR,performanceR]=await Promise.allSettled([
+        gmgnNewCreationUltraSolana({force}),
+        gmgnOneMinutePerformanceSolana({force})
+      ]);
+      if(newPairsR.status==='fulfilled'){
+        pools=newPairsR.value;
         exactGmgn=true;
         trendSource='GMGN_OPENAPI_NEW_CREATION_1M';
-      }catch(err){
-        errors.push('gmgn:openapi:solana:new_creation:'+(err instanceof Error?err.message:String(err)));
+      }else{
+        errors.push('gmgn:openapi:solana:new_creation:'+(newPairsR.reason instanceof Error?newPairsR.reason.message:String(newPairsR.reason)));
+      }
+      if(performanceR.status==='fulfilled'){
+        gmgnOneMinuteRows=performanceR.value;
+      }else{
+        gmgnOneMinuteError=performanceR.reason instanceof Error?performanceR.reason.message:String(performanceR.reason);
+        errors.push('gmgn:openapi:solana:performance:1m:'+gmgnOneMinuteError);
+      }
+      if(pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'){
+        const byAddress=new Map(gmgnOneMinuteRows.map(row=>[tokenKey('solana',row?.tokenAddress),row]));
+        pools=pools.map(pool=>{
+          const perf=byAddress.get(tokenKey('solana',pool?.tokenAddress))||null;
+          const pct=finite(perf?.gmgnDisplayedChangePct??perf?.priceChangeSelectedPct);
+          if(pct!=null)gmgnOneMinuteMatchedNewPairs++;
+          return {
+            ...pool,
+            priceChangeSelectedPct:pct,
+            gmgnDisplayedChangePct:pct,
+            gmgnOneMinuteRank:finite(perf?.gmgnOneMinuteRank??perf?.trendRank),
+            gmgnOneMinutePerformanceObservedAt:finite(perf?.gmgnTrendObservedAt),
+            gmgnOneMinutePerformanceSource:pct==null?null:'GMGN_OPENAPI_TRENDS_1M_CHANGE1M'
+          };
+        });
       }
     }
     if(hasAnyGmgnKey&&!pools.length){
@@ -940,6 +1013,11 @@ export function createMemecoinEarlyRadarProvider({
       trendInterval:gmgnTrendWindow,
       trendOrderBy:gmgnTrendSort,
       minPriceChangePct:gmgnTrendMinChange,
+      gmgnOneMinutePerformanceSource:'GMGN_OPENAPI_TRENDS_1M_CHANGE1M',
+      gmgnOneMinuteRows:gmgnOneMinuteRows.length,
+      gmgnOneMinuteMatchedNewPairs,
+      gmgnOneMinuteCoverage:pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'?gmgnOneMinuteMatchedNewPairs/pools.length:null,
+      gmgnOneMinuteError,
       gmgnAuthMode:exactGmgn?(gmgnReadApiKey==='gmgn_solbscbaseethmonadtron'?'PUBLIC_DEMO_READ_ONLY':'PERSONAL_API_READ_ONLY'):(gmgnReadApiKey?'OPENAPI_FAILED':'NO_OPENAPI_KEY'),
       setup:exactGmgn?(String(trendSource).includes('NEW_CREATION')?'GMGN_NEW_PAIR_1M':'GMGN_TRENDS_1M'):'TRENDS_PROXY_RESEARCH',
       sourceReady:errors.length===0||selected.length>0,
