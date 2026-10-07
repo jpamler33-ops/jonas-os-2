@@ -5585,6 +5585,7 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       gmgnOneMinuteMatchedNewPairs:ultra.gmgnOneMinuteMatchedNewPairs||0,
       gmgnOneMinuteCoverage:ultra.gmgnOneMinuteCoverage??null,
       gmgnOneMinuteError:ultra.gmgnOneMinuteError||null,
+      gmgnRateLimit:ultra.gmgnRateLimit||null,
       providerDurationMs:ultra.providerDurationMs??null,
       feedStatus:ultra.feedStatus||{},
       discoveryRows:ultra.discoveryRows||0,
