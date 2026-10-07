@@ -322,7 +322,7 @@ function normalizeGmgnTrend(row={},rank=null,interval='1m'){
     row?.website?{type:'website',label:'website',url:text(row.website,500)}:null,
     row?.telegram?{type:'telegram',label:'telegram',url:text(row.telegram,500)}:null
   ].filter(Boolean);
-  const gmgnAgeAt=unixMs(row?.open_timestamp)??unixMs(row?.creation_timestamp)??unixMs(row?.pool_creation_timestamp);
+  const gmgnAgeAt=unixMs(row?.created_timestamp)??unixMs(row?.creation_timestamp)??unixMs(row?.open_timestamp)??unixMs(row?.pool_creation_timestamp);
   return {
     chainId:'solana',
     tokenAddress:text(row?.address,200),
@@ -346,11 +346,11 @@ function normalizeGmgnTrend(row={},rank=null,interval='1m'){
     priceChangeSelectedPct:selectedChange,
     gmgnDisplayedChangePct:selectedChange,
     gmgnTrendInterval:selectedInterval,
-    marketCap:finite(row?.market_cap),
+    marketCap:finite(row?.market_cap??row?.usd_market_cap),
     fdv:finite(row?.fdv),
     pairCreatedAt:gmgnAgeAt,
     gmgnOpenTimestamp:unixMs(row?.open_timestamp),
-    gmgnPoolCreationTimestamp:unixMs(row?.creation_timestamp)??unixMs(row?.pool_creation_timestamp),
+    gmgnPoolCreationTimestamp:unixMs(row?.created_timestamp)??unixMs(row?.creation_timestamp)??unixMs(row?.pool_creation_timestamp),
     holderCount:finite(row?.holder_count),
     smartBuy24h:finite(row?.smart_buy_24h),
     smartSell24h:finite(row?.smart_sell_24h),
@@ -460,10 +460,16 @@ export function createMemecoinEarlyRadarProvider({
   const gmgnTrendSort=String(gmgnTrendOrderBy||'default').trim()||'default';
   const gmgnTrendMinChange=finite(gmgnTrendMinPriceChangePct);
 
-  async function getJson(url,{headers={}}={}){
+  async function getJson(url,{headers={},method='GET',body=null}={}){
     const controller=new AbortController();
     return providerDeadline(async()=>{
-      const res=await fetchImpl(url,{headers:{accept:'application/json','user-agent':'BIGGJ/1.0 early-memecoin-research',...headers},signal:controller.signal});
+      const bodyText=body==null?undefined:(typeof body==='string'?body:JSON.stringify(body));
+      const res=await fetchImpl(url,{
+        method,
+        headers:{accept:'application/json','user-agent':'BIGGJ/1.0 early-memecoin-research',...headers},
+        body:bodyText,
+        signal:controller.signal
+      });
       if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN')+' '+url);
       return await res.json();
     },Math.max(1000,Number(timeoutMs)||7000),'PROVIDER_REQUEST',()=>controller.abort());
@@ -610,6 +616,52 @@ export function createMemecoinEarlyRadarProvider({
     });
     return {rows,errors:sourceErrors};
   }
+  async function gmgnNewCreationUltraSolana({force=false}={}){
+    return cached('ultra:gmgn:openapi:solana:new_creation',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+      if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
+      const timestamp=Math.floor(Number(now())/1000);
+      const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
+      const qs=new URLSearchParams({chain:'sol',timestamp:String(timestamp),client_id:String(clientId)});
+      // Mirrors the official gmgn-cli buildTrenchesBody() for
+      // market trenches --chain sol --type new_creation --limit 80.
+      const body=await getJson(gmgnOpenApi+'/v1/trenches?'+qs.toString(),{
+        method:'POST',
+        headers:{
+          'X-APIKEY':gmgnReadApiKey,
+          'Content-Type':'application/json',
+          'user-agent':'gmgn-cli/1.6.6'
+        },
+        body:{
+          version:'v2',
+          new_creation:{
+            filters:['offchain','onchain'],
+            launchpad_platform_v2:true,
+            limit:80,
+            quote_address_type:[4,5,3,1,13,0]
+          }
+        }
+      });
+      if(body?.code!=null&&Number(body.code)!==0)throw new Error('GMGN_OPENAPI_TRENCHES_CODE_'+String(body.code)+'_'+text(body?.message||body?.msg||body?.error,120));
+      const payload=body?.data??body;
+      const raw=Array.isArray(payload?.new_creation)?payload.new_creation:[];
+      if(!raw.length){
+        const shape=payload&&typeof payload==='object'&&!Array.isArray(payload)?Object.keys(payload).slice(0,12).join(','):(Array.isArray(payload)?'ARRAY_0':typeof payload);
+        const reason=text(body?.reason||body?.message||body?.msg||body?.error||'NO_REASON',180).replace(/\s+/g,'_');
+        throw new Error('GMGN_OPENAPI_NEW_CREATION_EMPTY_SHAPE_'+text(shape||'NONE',120)+'_REASON_'+reason);
+      }
+      const observedAt=Number(now());
+      return raw.map((x,i)=>({
+        ...normalizeGmgnTrend(x,i+1,'1m'),
+        gmgnTrendObservedAt:observedAt,
+        gmgnExactNewPair:true,
+        signalNewPair:true,
+        signalTrending:true,
+        sourceSetup:'GMGN_NEW_PAIR_1M',
+        trendSource:'GMGN_OPENAPI_NEW_CREATION_1M'
+      })).filter(x=>x.tokenAddress);
+    },{force});
+  }
+
   async function gmgnTrendingUltraSolana({force=false}={}){
     return cached('ultra:gmgn:openapi:solana:trending:'+gmgnTrendWindow+':'+gmgnTrendSort,Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
@@ -713,12 +765,23 @@ export function createMemecoinEarlyRadarProvider({
     const errors=[];
     let pools=[];
     const hasAnyGmgnKey=Boolean(gmgnReadApiKey);
-    let trendSource=hasAnyGmgnKey?'GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
+    let trendSource=hasAnyGmgnKey?'GMGN_OPENAPI_NEW_CREATION_1M':'GMGN_PUBLIC_TRENDS_'+gmgnTrendWindowLabel+'_DEFAULT';
     let exactGmgn=false;
-    // Railway's public gmgn.ai Trends endpoint can return HTTP 403. Prefer
-    // openapi.gmgn.ai whenever any configured key is available, including the
-    // built-in read-only demo key, and only then try the public web endpoint.
+    // The user's manual workflow starts from GMGN New Pair. GMGN's official
+    // OpenAPI exposes that surface as Trenches/new_creation. Prefer it before
+    // generic Trending; both remain exact GMGN and the strategy still requires
+    // an observed 1m percentage plus strict age <120s.
     if(hasAnyGmgnKey){
+      try{
+        pools=await gmgnNewCreationUltraSolana({force});
+        exactGmgn=true;
+        trendSource='GMGN_OPENAPI_NEW_CREATION_1M';
+      }catch(err){
+        errors.push('gmgn:openapi:solana:new_creation:'+(err instanceof Error?err.message:String(err)));
+      }
+    }
+    if(hasAnyGmgnKey&&!pools.length){
+      trendSource='GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_'+gmgnTrendSort.toUpperCase();
       try{
         pools=await gmgnTrendingUltraSolana({force});
         exactGmgn=true;
@@ -877,7 +940,7 @@ export function createMemecoinEarlyRadarProvider({
       trendOrderBy:gmgnTrendSort,
       minPriceChangePct:gmgnTrendMinChange,
       gmgnAuthMode:exactGmgn?(gmgnReadApiKey==='gmgn_solbscbaseethmonadtron'?'PUBLIC_DEMO_READ_ONLY':'PERSONAL_API_READ_ONLY'):(gmgnReadApiKey?'OPENAPI_FAILED':'NO_OPENAPI_KEY'),
-      setup:exactGmgn?'GMGN_TRENDS_1M':'TRENDS_PROXY_RESEARCH',
+      setup:exactGmgn?(String(trendSource).includes('NEW_CREATION')?'GMGN_NEW_PAIR_1M':'GMGN_TRENDS_1M'):'TRENDS_PROXY_RESEARCH',
       sourceReady:errors.length===0||selected.length>0,
       discoveryRows:discoveryCount,
       candidateTrackingRows:selected.filter(x=>x?.candidateTracking===true).length,
