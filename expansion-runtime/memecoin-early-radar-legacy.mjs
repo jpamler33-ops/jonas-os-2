@@ -436,6 +436,8 @@ export function createMemecoinEarlyRadarProvider({
   ultraGeckoCacheMs=5000,
   ultraDexCacheMs=5000,
   gmgnTrendCacheMs=5000,
+  gmgnPerformanceCacheMs=15000,
+  gmgnRequestGapMs=450,
   gmgnTrendInterval='1m',
   gmgnTrendOrderBy='default',
   gmgnTrendMinPriceChangePct=null,
@@ -459,8 +461,34 @@ export function createMemecoinEarlyRadarProvider({
   const gmgnTrendWindowLabel=gmgnTrendWindow.toUpperCase();
   const gmgnTrendSort=String(gmgnTrendOrderBy||'default').trim()||'default';
   const gmgnTrendMinChange=finite(gmgnTrendMinPriceChangePct);
+  const gmgnPerformanceTtl=Math.max(5000,Number(gmgnPerformanceCacheMs)||15000);
+  const gmgnGapMs=Math.max(0,Math.min(2000,Number(gmgnRequestGapMs)||450));
+  let gmgnRateLimitUntilMs=0;
+  let gmgnRateLimitReason=null;
 
+  function gmgnOpenApiRequest(url){return String(url||'').startsWith(gmgnOpenApi+'/');}
+  function gmgnRateLimitActive(){return Number(now())<gmgnRateLimitUntilMs;}
+  function gmgnRateLimitSnapshot(){
+    return Object.freeze({
+      active:gmgnRateLimitActive(),
+      until:gmgnRateLimitUntilMs||null,
+      remainingMs:Math.max(0,gmgnRateLimitUntilMs-Number(now())),
+      reason:gmgnRateLimitReason
+    });
+  }
+  function gmgnResetMs(res,body){
+    const headerRaw=res?.headers?.get?.('x-ratelimit-reset');
+    const header=finite(headerRaw);
+    const bodyReset=finite(body?.reset_at??body?.data?.reset_at);
+    const values=[header,bodyReset].filter(v=>v!=null).map(v=>v<1e12?v*1000:v);
+    const authoritative=values.length?Math.max(...values):null;
+    return authoritative!=null&&authoritative>Number(now())?authoritative+1000:Number(now())+60_000;
+  }
   async function getJson(url,{headers={},method='GET',body=null}={}){
+    const isGmgnOpenApi=gmgnOpenApiRequest(url);
+    if(isGmgnOpenApi&&gmgnRateLimitActive()){
+      throw new Error('GMGN_RATE_LIMIT_COOLDOWN_UNTIL_'+String(gmgnRateLimitUntilMs));
+    }
     const controller=new AbortController();
     return providerDeadline(async()=>{
       const bodyText=body==null?undefined:(typeof body==='string'?body:JSON.stringify(body));
@@ -470,8 +498,18 @@ export function createMemecoinEarlyRadarProvider({
         body:bodyText,
         signal:controller.signal
       });
+      let parsed=null;
+      try{parsed=await res.json();}catch{}
+      const status=Number(res?.status);
+      const apiRateLimited=isGmgnOpenApi&&(status===429||Number(parsed?.code)===429||/RATE_LIMIT_(?:EXCEEDED|BANNED)/.test(String(parsed?.error||parsed?.message||'')));
+      if(apiRateLimited){
+        gmgnRateLimitUntilMs=Math.max(gmgnRateLimitUntilMs,gmgnResetMs(res,parsed));
+        gmgnRateLimitReason=text(parsed?.error||parsed?.reason||parsed?.message||'HTTP_429',160);
+        throw new Error('HTTP_429_GMGN_RESET_AT_'+String(gmgnRateLimitUntilMs)+'_'+gmgnRateLimitReason+' '+url);
+      }
       if(!res?.ok)throw new Error('HTTP_'+String(res?.status??'UNKNOWN')+' '+url);
-      return await res.json();
+      if(parsed==null)throw new Error('INVALID_JSON '+url);
+      return parsed;
     },Math.max(1000,Number(timeoutMs)||7000),'PROVIDER_REQUEST',()=>controller.abort());
   }
   async function cached(key,ttl,fn,{force=false}={}){
@@ -484,7 +522,8 @@ export function createMemecoinEarlyRadarProvider({
       return value;
     }catch(err){
       const message=err instanceof Error?err.message:String(err);
-      cache.set(key,{at:t,error:message,retryAt:Number(now())+(/HTTP_429/.test(message)?60000:10000)});
+      const rateLimited=/HTTP_429|GMGN_RATE_LIMIT_COOLDOWN/.test(message);
+      cache.set(key,{at:t,error:message,retryAt:rateLimited?Math.max(Number(now())+10_000,gmgnRateLimitUntilMs):Number(now())+10_000});
       throw err;
     }
   }
@@ -663,7 +702,7 @@ export function createMemecoinEarlyRadarProvider({
   }
 
   async function gmgnOneMinutePerformanceSolana({force=false}={}){
-    return cached('ultra:gmgn:openapi:solana:performance:1m:change1m',Math.max(1000,Number(gmgnTrendCacheMs)||5000),async()=>{
+    return cached('ultra:gmgn:openapi:solana:performance:1m:change1m',gmgnPerformanceTtl,async()=>{
       if(!gmgnReadApiKey)throw new Error('GMGN_API_KEY_MISSING');
       const timestamp=Math.floor(Number(now())/1000);
       const clientId=globalThis.crypto?.randomUUID?.()||('biggj-'+String(Number(now()))+'-'+Math.random().toString(16).slice(2));
@@ -693,7 +732,8 @@ export function createMemecoinEarlyRadarProvider({
         [];
       if(!raw.length){
         const shape=payload&&typeof payload==='object'&&!Array.isArray(payload)?Object.keys(payload).slice(0,12).join(','):(Array.isArray(payload)?'ARRAY_0':typeof payload);
-        throw new Error('GMGN_OPENAPI_1M_PERFORMANCE_EMPTY_SHAPE_'+text(shape||'NONE',120));
+        const reason=text(body?.reason||body?.message||body?.msg||body?.error||'NO_REASON',180).replace(/\s+/g,'_');
+        throw new Error('GMGN_OPENAPI_1M_PERFORMANCE_EMPTY_SHAPE_'+text(shape||'NONE',120)+'_REASON_'+reason);
       }
       const observedAt=Number(now());
       return raw.map((x,i)=>({
@@ -818,45 +858,61 @@ export function createMemecoinEarlyRadarProvider({
     // while market/rank interval=1m ordered by change1m supplies GMGN's exact
     // 1m performance field. Run both concurrently, then join strictly by token
     // address. Missing rank coverage stays UNKNOWN and can never fabricate entry.
+    let gmgnRateLimitedThisCycle=false;
     if(hasAnyGmgnKey){
-      const [newPairsR,performanceR]=await Promise.allSettled([
-        gmgnNewCreationUltraSolana({force}),
-        gmgnOneMinutePerformanceSolana({force})
-      ]);
-      if(newPairsR.status==='fulfilled'){
-        pools=newPairsR.value;
-        exactGmgn=true;
-        trendSource='GMGN_OPENAPI_NEW_CREATION_1M';
+      if(gmgnRateLimitActive()){
+        gmgnRateLimitedThisCycle=true;
+        const cooldown='GMGN_RATE_LIMIT_COOLDOWN_UNTIL_'+String(gmgnRateLimitUntilMs);
+        gmgnOneMinuteError=cooldown;
+        errors.push('gmgn:openapi:cooldown:'+cooldown);
       }else{
-        errors.push('gmgn:openapi:solana:new_creation:'+(newPairsR.reason instanceof Error?newPairsR.reason.message:String(newPairsR.reason)));
-      }
-      if(performanceR.status==='fulfilled'){
-        gmgnOneMinuteRows=performanceR.value;
-      }else{
-        gmgnOneMinuteError=performanceR.reason instanceof Error?performanceR.reason.message:String(performanceR.reason);
-        errors.push('gmgn:openapi:solana:performance:1m:'+gmgnOneMinuteError);
-      }
-      if(pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'){
-        const byAddress=new Map(gmgnOneMinuteRows.map(row=>[tokenKey('solana',row?.tokenAddress),row]));
-        pools=pools.map(pool=>{
-          const perf=byAddress.get(tokenKey('solana',pool?.tokenAddress))||null;
-          const pct=finite(perf?.gmgnDisplayedChangePct??perf?.priceChangeSelectedPct);
-          if(pct!=null)gmgnOneMinuteMatchedNewPairs++;
-          return {
-            ...pool,
-            priceChangeSelectedPct:pct,
-            gmgnDisplayedChangePct:pct,
-            gmgnOneMinuteRank:finite(perf?.gmgnOneMinuteRank??perf?.trendRank),
-            gmgnOneMinutePerformanceObservedAt:finite(perf?.gmgnTrendObservedAt),
-            gmgnOneMinutePerformanceSource:pct==null?null:'GMGN_OPENAPI_TRENDS_1M_CHANGE1M'
-          };
-        });
+        try{
+          // Do not burst the whole free/demo bucket at once. New Pair identity
+          // is the first required surface; only ask for 1m performance after it
+          // succeeds, with a small pacing gap.
+          pools=await gmgnNewCreationUltraSolana({force:false});
+          exactGmgn=true;
+          trendSource='GMGN_OPENAPI_NEW_CREATION_1M';
+        }catch(err){
+          const message=err instanceof Error?err.message:String(err);
+          gmgnRateLimitedThisCycle=/HTTP_429|GMGN_RATE_LIMIT_COOLDOWN/.test(message);
+          errors.push('gmgn:openapi:solana:new_creation:'+message);
+        }
+        if(pools.length&&!gmgnRateLimitActive()){
+          if(gmgnGapMs>0)await new Promise(resolve=>setTimeout(resolve,gmgnGapMs));
+          try{
+            gmgnOneMinuteRows=await gmgnOneMinutePerformanceSolana({force:false});
+          }catch(err){
+            gmgnOneMinuteError=err instanceof Error?err.message:String(err);
+            gmgnRateLimitedThisCycle=/HTTP_429|GMGN_RATE_LIMIT_COOLDOWN/.test(gmgnOneMinuteError);
+            errors.push('gmgn:openapi:solana:performance:1m:'+gmgnOneMinuteError);
+          }
+        }
+        if(pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'){
+          const byAddress=new Map(gmgnOneMinuteRows.map(row=>[tokenKey('solana',row?.tokenAddress),row]));
+          pools=pools.map(pool=>{
+            const perf=byAddress.get(tokenKey('solana',pool?.tokenAddress))||null;
+            const pct=finite(perf?.gmgnDisplayedChangePct??perf?.priceChangeSelectedPct);
+            if(pct!=null)gmgnOneMinuteMatchedNewPairs++;
+            return {
+              ...pool,
+              priceChangeSelectedPct:pct,
+              gmgnDisplayedChangePct:pct,
+              gmgnOneMinuteRank:finite(perf?.gmgnOneMinuteRank??perf?.trendRank),
+              gmgnOneMinutePerformanceObservedAt:finite(perf?.gmgnTrendObservedAt),
+              gmgnOneMinutePerformanceSource:pct==null?null:'GMGN_OPENAPI_TRENDS_1M_CHANGE1M'
+            };
+          });
+        }
       }
     }
-    if(hasAnyGmgnKey&&!pools.length){
+    // Generic Trending is diagnostic fallback only when New Pair itself is
+    // unavailable for a non-rate-limit reason. Never spend more GMGN quota
+    // after a 429/cooldown, and never replace an already-valid New Pair feed.
+    if(hasAnyGmgnKey&&!pools.length&&!gmgnRateLimitedThisCycle&&!gmgnRateLimitActive()){
       trendSource='GMGN_OPENAPI_TRENDS_'+gmgnTrendWindowLabel+'_'+gmgnTrendSort.toUpperCase();
       try{
-        pools=await gmgnTrendingUltraSolana({force});
+        pools=await gmgnTrendingUltraSolana({force:false});
         exactGmgn=true;
       }catch(err){
         errors.push('gmgn:openapi:solana:trending:'+(err instanceof Error?err.message:String(err)));
@@ -1018,6 +1074,7 @@ export function createMemecoinEarlyRadarProvider({
       gmgnOneMinuteMatchedNewPairs,
       gmgnOneMinuteCoverage:pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'?gmgnOneMinuteMatchedNewPairs/pools.length:null,
       gmgnOneMinuteError,
+      gmgnRateLimit:gmgnRateLimitSnapshot(),
       gmgnAuthMode:exactGmgn?(gmgnReadApiKey==='gmgn_solbscbaseethmonadtron'?'PUBLIC_DEMO_READ_ONLY':'PERSONAL_API_READ_ONLY'):(gmgnReadApiKey?'OPENAPI_FAILED':'NO_OPENAPI_KEY'),
       setup:exactGmgn?(String(trendSource).includes('NEW_CREATION')?'GMGN_NEW_PAIR_1M':'GMGN_TRENDS_1M'):'TRENDS_PROXY_RESEARCH',
       sourceReady:errors.length===0||selected.length>0,
