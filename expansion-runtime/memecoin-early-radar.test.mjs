@@ -370,9 +370,9 @@ test('W6 batches demo-key token-info sampling instead of serially amplifying pro
     ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
   });
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
-  assert.equal(tokenInfoCalls,3,'demo key reserves weight 2 for trenches and weight 3 for token-info');
+  assert.equal(tokenInfoCalls,2,'production-safe demo-key budget is two token-info calls');
   assert.ok(maxActiveTokenInfo>=2,'token-info calls must overlap instead of running serially');
-  assert.equal(out.gmgnOneMinuteMatchedNewPairs,3);
+  assert.equal(out.gmgnOneMinuteMatchedNewPairs,2);
   assert.equal(out.canExecuteLive,false);
 });
 
