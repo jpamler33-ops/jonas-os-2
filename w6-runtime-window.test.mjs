@@ -24,6 +24,17 @@ test('runtime retains candidates through <120s and tracks exact GMGN 1m >=99k%, 
  assert.match(x.rows[0].w6LaunchTracker.observationSemantics,/GMGN_1M_PERCENT/);
  assert.equal(r.currentW6UltraCandidates(birth+181000).length,0);
 });
+test('missing GMGN 1m percentage stays unknown instead of becoming a synthetic zero',()=>{
+ const r=runtime(),birth=1700000000000;
+ const x=r.enrichW6UltraCandidateRows({capturedAt:birth+30000,trendInterval:'1m',rows:[{
+   chainId:'solana',tokenAddress:'NULLPCT',pairCreatedAt:birth,signalTrending:true,signalNewPair:true,
+   gmgnExactTrend:true,gmgnTrendInterval:'1m',gmgnDisplayedChangePct:null,priceChangeSelectedPct:null
+ }]});
+ assert.equal(x.rows[0].w6LaunchTracker.lastObservedGreenPercent,null);
+ assert.equal(x.rows[0].w6LaunchTracker.maxObservedGreenPercent,null);
+ assert.equal(x.rows[0].w6LaunchTracker.firstGreen99kObservedAt,null);
+});
+
 test('free proxy cannot be recorded as the 99k GMGN threshold crossing',()=>{
  const r=runtime(),birth=1700000000000;
  const x=r.enrichW6UltraCandidateRows({capturedAt:birth+30000,trendInterval:'1m',rows:[{
