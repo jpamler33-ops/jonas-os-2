@@ -286,17 +286,17 @@ test('W6 never drops an exact GMGN 1m match behind either 30-row selection cap',
   const launches=Array.from({length:35},(_,i)=>({
     address:'CAP'+String(i).padStart(2,'0'),symbol:'C'+i,name:'Cap '+i,price:'0.001',
     usd_market_cap:'10000',liquidity:'8000',
-    created_timestamp:Math.floor((now-(10_000+i*1000))/1000)
+    created_timestamp:Math.floor((now-(30_000+i*1000))/1000)
   }));
-  const oldest=launches[34].address;
+  const exactTarget=launches[30].address;
   const fetchImpl=async url=>{
     const u=new URL(url);
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
       return json({code:0,data:{new_creation:launches}});
     }
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
-      assert.equal(u.searchParams.get('address'),oldest);
-      return json({address:oldest,price:{price:'0.001',price_1m:'0.000001'}});
+      assert.equal(u.searchParams.get('address'),exactTarget);
+      return json({address:exactTarget,price:{price:'0.001',price_1m:'0.000001'}});
     }
     if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/')){
       const addresses=decodeURIComponent(u.pathname.split('/').pop()).split(',');
@@ -322,7 +322,7 @@ test('W6 never drops an exact GMGN 1m match behind either 30-row selection cap',
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120,candidateRows});
   assert.equal(out.gmgnOneMinuteMatchedNewPairs,1);
   assert.ok(out.rows.length>30,'always-retained candidate memory may expand the bounded output');
-  const matched=out.rows.find(x=>x.tokenAddress===oldest);
+  const matched=out.rows.find(x=>x.tokenAddress===exactTarget);
   assert.ok(matched,'exact GMGN 1m match must survive the 30-row cap');
   assert.equal(matched.gmgnExactOneMinutePerformance,true);
   assert.ok(matched.gmgnDisplayedChangePct>=99000);
