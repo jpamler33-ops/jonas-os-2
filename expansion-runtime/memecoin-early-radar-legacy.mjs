@@ -480,6 +480,9 @@ export function createMemecoinEarlyRadarProvider({
   const gmgnDemoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
   let gmgnRateLimitUntilMs=0;
   let gmgnRateLimitReason=null;
+  const gmgnDemoMaxTokenInfoBudget=Math.min(gmgnTokenInfoSamples,3);
+  let gmgnDemoTokenInfoBudget=gmgnDemoMaxTokenInfoBudget;
+  let gmgnDemoCleanTokenInfoCycles=0;
 
   function gmgnOpenApiRequest(url){return String(url||'').startsWith(gmgnOpenApi+'/');}
   function gmgnRateLimitActive(){return Number(now())<gmgnRateLimitUntilMs;}
@@ -999,7 +1002,7 @@ export function createMemecoinEarlyRadarProvider({
             if(distanceA!==distanceB)return distanceA-distanceB;
             if(!aNever&&aa!==ba)return aa-ba;
             return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
-          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,3):gmgnTokenInfoSamples);
+          }).slice(0,gmgnDemoKey?gmgnDemoTokenInfoBudget:gmgnTokenInfoSamples);
           // Never serialize several potentially slow GMGN token-info calls.
           // GMGN's documented Free bucket is capacity 5: trenches/new_creation
           // costs weight 2 and token/info costs weight 1, so three token-info
@@ -1013,6 +1016,8 @@ export function createMemecoinEarlyRadarProvider({
             const settled=await Promise.allSettled(eligibleForInfo.map(pool=>
               gmgnTokenInfoOneMinuteSolana(pool?.tokenAddress,{force:false})
             ));
+            let tokenInfoRateLimited=false;
+            let tokenInfoFailures=0;
             for(let i=0;i<settled.length;i++){
               const pool=eligibleForInfo[i];
               const key=tokenKey('solana',pool?.tokenAddress);
@@ -1022,13 +1027,29 @@ export function createMemecoinEarlyRadarProvider({
                 continue;
               }
               const message=result.reason instanceof Error?result.reason.message:String(result.reason);
+              tokenInfoFailures++;
               gmgnTokenInfoObserved.set(key,{at:sampledAt,error:message});
               if(/HTTP_429|GMGN_RATE_LIMIT_COOLDOWN/.test(message)){
+                tokenInfoRateLimited=true;
                 gmgnRateLimitedThisCycle=true;
                 gmgnOneMinuteError=message;
                 if(!errors.some(x=>String(x).startsWith('gmgn:openapi:solana:token-info:1m:'))){
                   errors.push('gmgn:openapi:solana:token-info:1m:'+message);
                 }
+              }
+            }
+            if(gmgnDemoKey){
+              if(tokenInfoRateLimited){
+                gmgnDemoTokenInfoBudget=Math.max(1,gmgnDemoTokenInfoBudget-1);
+                gmgnDemoCleanTokenInfoCycles=0;
+              }else if(settled.length>0&&tokenInfoFailures===0){
+                gmgnDemoCleanTokenInfoCycles++;
+                if(gmgnDemoCleanTokenInfoCycles>=12&&gmgnDemoTokenInfoBudget<gmgnDemoMaxTokenInfoBudget){
+                  gmgnDemoTokenInfoBudget++;
+                  gmgnDemoCleanTokenInfoCycles=0;
+                }
+              }else{
+                gmgnDemoCleanTokenInfoCycles=0;
               }
             }
           }
@@ -1250,6 +1271,8 @@ export function createMemecoinEarlyRadarProvider({
       gmgnOneMinuteMatchedNewPairs,
       gmgnOneMinuteCoverage:pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'?gmgnOneMinuteMatchedNewPairs/pools.length:null,
       gmgnTokenInfoSamplesPerCycle:gmgnTokenInfoSamples,
+      gmgnTokenInfoActiveBudget:gmgnDemoKey?gmgnDemoTokenInfoBudget:gmgnTokenInfoSamples,
+      gmgnTokenInfoCleanCycles:gmgnDemoKey?gmgnDemoCleanTokenInfoCycles:null,
       gmgnTokenInfoTargetAgeSeconds,
       gmgnTokenInfoMinSampleAgeSeconds,
       gmgnTokenInfoResampleSeconds:gmgnTokenInfoResampleMs/1000,
