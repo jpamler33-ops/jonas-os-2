@@ -471,6 +471,10 @@ export function createMemecoinEarlyRadarProvider({
   const gmgnPerformanceTtl=Math.max(5000,Number(gmgnPerformanceCacheMs)||15000);
   const gmgnTokenInfoTtl=Math.max(5000,Number(gmgnTokenInfoCacheMs)||12000);
   const gmgnTokenInfoSamples=Math.max(1,Math.min(10,Number(gmgnTokenInfoSamplePerCycle)||3));
+  const gmgnTokenInfoTargetAgeSeconds=60;
+  const gmgnTokenInfoMinSampleAgeSeconds=50;
+  const gmgnTokenInfoResampleMs=20_000;
+  const gmgnTokenInfoObservationRetentionMs=180_000;
   const gmgnGapInput=Number(gmgnRequestGapMs);
   const gmgnGapMs=Math.max(0,Math.min(2000,Number.isFinite(gmgnGapInput)?gmgnGapInput:450));
   const gmgnDemoKey=gmgnReadApiKey==='gmgn_solbscbaseethmonadtron';
@@ -962,16 +966,39 @@ export function createMemecoinEarlyRadarProvider({
           // from two GMGN values. Sample a bounded round-robin subset per cycle
           // to stay under the shared demo-key rate limit.
           const currentAt=Number(now());
+          // Keep only the short research horizon we can still act on. Without
+          // pruning, a long-running 5s sampler would retain tens of thousands
+          // of dead token observations that can never re-enter the <120s gate.
+          for(const [observedKey,observed] of gmgnTokenInfoObserved){
+            const observedAt=finite(observed?.at);
+            if(observedAt==null||currentAt-observedAt>gmgnTokenInfoObservationRetentionMs){
+              gmgnTokenInfoObserved.delete(observedKey);
+            }
+          }
           const eligibleForInfo=pools.filter(pool=>{
             if(finite(pool?.gmgnDisplayedChangePct)!=null)return false;
             const created=finite(pool?.pairCreatedAt);
-            return created!=null&&currentAt>=created&&(currentAt-created)/1000<120;
+            if(created==null||currentAt<created)return false;
+            const ageSeconds=(currentAt-created)/1000;
+            if(ageSeconds<gmgnTokenInfoMinSampleAgeSeconds||ageSeconds>=120)return false;
+            const key=tokenKey('solana',pool?.tokenAddress);
+            const observedAt=finite(gmgnTokenInfoObserved.get(key)?.at);
+            return observedAt==null||currentAt-observedAt>=gmgnTokenInfoResampleMs;
           }).sort((a,b)=>{
+            const ageA=(currentAt-(finite(a?.pairCreatedAt)??currentAt))/1000;
+            const ageB=(currentAt-(finite(b?.pairCreatedAt)??currentAt))/1000;
             const ak=tokenKey('solana',a?.tokenAddress),bk=tokenKey('solana',b?.tokenAddress);
-            const aa=finite(gmgnTokenInfoObserved.get(ak)?.at)??-Infinity;
-            const ba=finite(gmgnTokenInfoObserved.get(bk)?.at)??-Infinity;
-            if(aa!==ba)return aa-ba;
-            return (finite(a?.pairCreatedAt)??0)-(finite(b?.pairCreatedAt)??0);
+            const aa=finite(gmgnTokenInfoObserved.get(ak)?.at);
+            const ba=finite(gmgnTokenInfoObserved.get(bk)?.at);
+            const aNever=aa==null,bNever=ba==null;
+            if(aNever!==bNever)return aNever?-1:1;
+            // The user's manual entry is around one minute old. Sample closest
+            // to 60s first instead of burning quota on coins already at 118-119s.
+            const distanceA=Math.abs(ageA-gmgnTokenInfoTargetAgeSeconds);
+            const distanceB=Math.abs(ageB-gmgnTokenInfoTargetAgeSeconds);
+            if(distanceA!==distanceB)return distanceA-distanceB;
+            if(!aNever&&aa!==ba)return aa-ba;
+            return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
           }).slice(0,gmgnTokenInfoSamples);
           for(const pool of eligibleForInfo){
             if(gmgnRateLimitActive())break;
@@ -1207,6 +1234,9 @@ export function createMemecoinEarlyRadarProvider({
       gmgnOneMinuteMatchedNewPairs,
       gmgnOneMinuteCoverage:pools.length&&trendSource==='GMGN_OPENAPI_NEW_CREATION_1M'?gmgnOneMinuteMatchedNewPairs/pools.length:null,
       gmgnTokenInfoSamplesPerCycle:gmgnTokenInfoSamples,
+      gmgnTokenInfoTargetAgeSeconds,
+      gmgnTokenInfoMinSampleAgeSeconds,
+      gmgnTokenInfoResampleSeconds:gmgnTokenInfoResampleMs/1000,
       gmgnTokenInfoObserved:gmgnTokenInfoObserved.size,
       gmgnOneMinuteError,
       gmgnRateLimit:gmgnRateLimitSnapshot(),
