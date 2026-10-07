@@ -116,6 +116,7 @@ test('W6 exact GMGN Trends 1m feed keeps launch age and displayed green percenta
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
       assert.equal(u.searchParams.get('chain'),'sol');
       assert.equal(u.searchParams.get('interval'),'1m');
+      assert.equal(u.searchParams.get('limit'),'100');
       assert.equal(u.searchParams.get('order_by'),null);
       assert.equal(u.searchParams.get('direction'),null);
       assert.equal(opts?.headers?.['X-APIKEY'],'personal-test-key');
@@ -161,6 +162,7 @@ test('W6 exact GMGN Trends 1m feed keeps launch age and displayed green percenta
   assert.equal(out.trendInterval,'1m');
   assert.equal(out.trendOrderBy,'default');
   assert.equal(out.setup,'GMGN_TRENDS_1M');
+  assert.equal(out.gmgnAuthMode,'PERSONAL_API_READ_ONLY');
   assert.equal(out.source,'GMGN_OPENAPI_TRENDS_1M_DEFAULT');
   assert.equal(out.rows[0].priceChangeSelectedPct,999000);
   assert.equal(out.rows[0].canExecuteLive,undefined);

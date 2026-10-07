@@ -729,7 +729,7 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   gmgnTrendInterval:String(process.env.TCX_W6_GMGN_TREND_INTERVAL||'1m').trim(),
   gmgnTrendOrderBy:String(process.env.TCX_W6_GMGN_TREND_ORDER_BY||'creation_timestamp').trim(),
   gmgnTrendMinPriceChangePct:null,
-  gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'').trim(),
+  gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'gmgn_solbscbaseethmonadtron').trim(),
   gmgnPublicEnabled:String(process.env.TCX_GMGN_PUBLIC_ENABLED||'0')==='1',
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
@@ -5493,7 +5493,8 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       update.results.researchSnapshotsCaptured||update.results.researchGapsCaptured
     )await persistSpecialistWallets('w6-ultra-early:'+reason);
     const wallet=specialistWalletSummary(specialistWalletState,{asOf:Date.now()}).wallets?.[WALLET_6_USER_99K_60S]||null;
-    const activeTrades=(Array.isArray(wallet?.active)?wallet.active:[]).slice(0,5).map(p=>{
+    const currentStrategyWallet=wallet?.strategy||wallet;
+    const activeTrades=(Array.isArray(currentStrategyWallet?.active)?currentStrategyWallet.active:[]).slice(0,5).map(p=>{
       const now=Date.now();
       const holdSeconds=Math.max(0,(now-Number(p?.openedAt||now))/1000);
       const protectionRemainingSeconds=Math.max(0,(Number(p?.lossExitProtectedUntil||0)-now)/1000);
@@ -5594,10 +5595,12 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       funnel:update.results.entryFunnel||{},
       blockers:update.results.entryBlockers||{},
       opened:update.results.opened||0,
-      active:wallet?.openPositions||0,
-      closedTrades:wallet?.closedTrades||0,
+      active:currentStrategyWallet?.openPositions||0,
+      closedTrades:currentStrategyWallet?.closedTrades||0,
+      legacyActive:wallet?.legacy?.openPositions||0,
+      legacyClosed:wallet?.legacy?.closedTrades||0,
       activeTrades,
-      recentClosedTrades:(wallet?.recentClosed||[]).slice(0,5).map(p=>({
+      recentClosedTrades:(currentStrategyWallet?.recentClosed||[]).slice(0,5).map(p=>({
         tokenAddress:p.tokenAddress,
         openedAt:p.openedAt,
         closedAt:p.closedAt,

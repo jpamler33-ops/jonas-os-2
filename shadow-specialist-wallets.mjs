@@ -634,8 +634,17 @@ export function applyMemecoinScoutSnapshot(input,snapshot,{
   return {state:freeze(state),results:freeze(results)};
 }
 
+const W6_EXACT_GMGN_4M_CONTRACT='GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1';
 function user99k60sPositionKey(row){
   return WALLET_6_USER_99K_60S+':'+String(row?.chainId||'')+':'+String(row?.tokenAddress||'');
+}
+function isCurrentW6ClonePosition(position){
+  if(!position||typeof position!=='object')return false;
+  if(position?.strategyContract===W6_EXACT_GMGN_4M_CONTRACT)return true;
+  return position?.entryThresholdMode==='GMGN_GREEN_PERCENT'&&
+    finite(position?.entryGreenPercent)!=null&&finite(position.entryGreenPercent)>=99_000&&
+    position?.exactGmgnTrendAtEntry===true&&
+    finite(position?.targetHoldSeconds)===240;
 }
 function user99k60sAgeSeconds(row,now){
   const created=finite(row?.pairCreatedAt);
@@ -1439,11 +1448,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
     results.marked++;
 
     let reason=null;
-    const clonePosition=clonePolicy&&(
-      p?.strategy==='JONAS_CLONE_V1'||
-      p?.strategyVersion==='JONAS_CLONE_V1'||
-      p?.jonasClone?.strategy==='JONAS_CLONE_V1'
-    );
+    const clonePosition=clonePolicy&&isCurrentW6ClonePosition(p);
     const marketCapFloor=finite(p?.minExitMarketCapUsd,finite(minExitMarketCapUsd));
     const protectedHold=holdSeconds<Math.max(0,finite(p?.minHoldSeconds,finite(minHoldSeconds,180)));
     const catastrophicLoss=Math.max(.50,Math.min(.99,finite(catastrophicDrawdownPct,.90)));
@@ -1573,6 +1578,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       observedTimeToGreen99kSeconds:signal.observedTimeToGreen99kSeconds,
       entryGreenPercent:signal.greenPercent,
       entryThresholdMode:signal.thresholdMode,
+      strategyContract:clonePolicy?W6_EXACT_GMGN_4M_CONTRACT:null,
       entryMarketCapUsd:marketCapUsd,
       lastMarketCapUsd:marketCapUsd,
       peakMarketCapUsd:marketCapUsd,
@@ -1613,7 +1619,7 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       minExitMarketCapUsd:clonePolicy?null:(finite(minExitMarketCapUsd)>0?finite(minExitMarketCapUsd):null),
       marketCapExitTracking:clonePolicy?'DISABLED_FIXED_4M_EXIT':(finite(minExitMarketCapUsd)>0?'ACTIVE_EXACT_FLOOR':'WAITING_FOR_OBSERVED_USER_EXIT_RULE'),
       entryStrategySignal:clone(signal),
-      ...(clonePolicy?{jonasClone:{strategy:'JONAS_CLONE_V1',intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},strategy:'JONAS_CLONE_V1'}:{}),
+      ...(clonePolicy?{jonasClone:{strategy:'JONAS_CLONE_V1',contract:W6_EXACT_GMGN_4M_CONTRACT,intent:clone(intent),checkpoints:[],mfeReturnPct:0,maeReturnPct:0},strategy:'JONAS_CLONE_V1'}:{}),
       strategyVersion:clonePolicy?'JONAS_CLONE_V1':USER_99K_60S_STRATEGY_VERSION,
       entryRule:signal.thresholdMode==='GMGN_GREEN_PERCENT'
         ?signal.rule
@@ -1807,6 +1813,10 @@ function walletStats(wallet,{asOf=Date.now()}={}){
   const openViews=isW6
     ?open.map(p=>({...p,...user99k60sExecutionOutputView(p,{asOf})}))
     :open;
+  const strategyOpenViews=isW6?openViews.filter(isCurrentW6ClonePosition):openViews;
+  const legacyOpenViews=isW6?openViews.filter(p=>!isCurrentW6ClonePosition(p)):[];
+  const strategyClosed=isW6?closed.filter(isCurrentW6ClonePosition):closed;
+  const legacyClosed=isW6?closed.filter(p=>!isCurrentW6ClonePosition(p)):[];
   const observedClosedRealized=closed.reduce((s,p)=>s+finite(p?.observedRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0);
   const conservativeClosedRealized=isW6
     ?closed.reduce((s,p)=>s+finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0)
@@ -1825,6 +1835,15 @@ function walletStats(wallet,{asOf=Date.now()}={}){
     :null;
   const wins=closed.filter(p=>finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))>0);
   const losses=closed.filter(p=>finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))<0);
+  const strategyWins=isW6?strategyClosed.filter(p=>finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))>0):wins;
+  const strategyLosses=isW6?strategyClosed.filter(p=>finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0))<0):losses;
+  const strategyRealized=isW6?strategyClosed.reduce((s,p)=>s+finite(p?.realizableRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0):realized;
+  const strategyObservedRealized=isW6?strategyClosed.reduce((s,p)=>s+finite(p?.observedRealizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0):observedRealized;
+  const strategyObservedUnrealized=isW6?strategyOpenViews.reduce((s,p)=>s+finite(p?.observedUnrealizedNetPnlQuote,finite(p?.unrealizedNetPnlQuote,0)),0):observedUnrealized;
+  const strategyConservativeUnrealized=isW6?strategyOpenViews.reduce((s,p)=>s+finite(p?.conservativeUnrealizedNetPnlQuote,0),0):conservativeUnrealized;
+  const strategyExecRows=isW6?strategyOpenViews.filter(p=>p?.executionPnlExecutable===true&&finite(p?.executableUnrealizedNetPnlQuote)!=null):[];
+  const strategyExecutableCoverage=isW6?(strategyOpenViews.length?strategyExecRows.length/strategyOpenViews.length:1):1;
+  const strategyExecutableUnrealized=isW6&&strategyExecutableCoverage===1?strategyExecRows.reduce((s,p)=>s+finite(p?.executableUnrealizedNetPnlQuote,0),0):null;
   const gp=wins.reduce((s,p)=>s+finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0);
   const gl=Math.abs(losses.reduce((s,p)=>s+finite(isW6?p?.realizableRealizedNetPnlQuote:p?.realizedNetPnlQuote,finite(p?.realizedNetPnlQuote,0)),0));
   return freeze({
@@ -1843,7 +1862,43 @@ function walletStats(wallet,{asOf=Date.now()}={}){
       executableCoverage,
       staleOpenPositions:openViews.filter(p=>p?.markFreshness?.stale===true).length,
       liquidityDeadOpenPositions:openViews.filter(p=>p?.executableMark?.liquidityDead===true).length,
-      pnlSemantics:'HEADLINE_USES_CONSERVATIVE_REALIZABILITY;_OBSERVED_MID_MARK_REPORTED_SEPARATELY'
+      pnlSemantics:'HEADLINE_USES_CONSERVATIVE_REALIZABILITY;_OBSERVED_MID_MARK_REPORTED_SEPARATELY',
+      strategyContract:W6_EXACT_GMGN_4M_CONTRACT,
+      strategy:{
+        walletId:wallet.walletId,
+        label:wallet.label,
+        strategyContract:W6_EXACT_GMGN_4M_CONTRACT,
+        openPositions:strategyOpenViews.length,
+        closedTrades:strategyClosed.length,
+        wins:strategyWins.length,
+        losses:strategyLosses.length,
+        winRate:strategyClosed.length?strategyWins.length/strategyClosed.length:null,
+        realizedPnlQuote:strategyRealized,
+        unrealizedPnlQuote:strategyConservativeUnrealized,
+        netPnlQuote:strategyRealized+strategyConservativeUnrealized,
+        observedRealizedPnlQuote:strategyObservedRealized,
+        observedUnrealizedPnlQuote:strategyObservedUnrealized,
+        observedNetPnlQuote:strategyObservedRealized+strategyObservedUnrealized,
+        executableUnrealizedPnlQuote:strategyExecutableUnrealized,
+        executableNetPnlQuote:strategyExecutableUnrealized==null?null:strategyRealized+strategyExecutableUnrealized,
+        conservativeUnrealizedPnlQuote:strategyConservativeUnrealized,
+        conservativeNetPnlQuote:strategyRealized+strategyConservativeUnrealized,
+        executableCoverage:strategyExecutableCoverage,
+        staleOpenPositions:strategyOpenViews.filter(p=>p?.markFreshness?.stale===true).length,
+        liquidityDeadOpenPositions:strategyOpenViews.filter(p=>p?.executableMark?.liquidityDead===true).length,
+        cumulativeMarginUsedQuote:[...strategyOpenViews,...strategyClosed].reduce((s,p)=>s+Math.max(0,finite(p?.initialMarginQuote,p?.marginQuote)||0),0),
+        currentMarginAtRiskQuote:strategyOpenViews.reduce((s,p)=>s+Math.max(0,finite(p?.marginQuote,0)),0),
+        active:strategyOpenViews.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
+        recentClosed:strategyClosed.slice(-20).reverse().map(safePositionForOutput),
+        execution:'SHADOW_ONLY',canExecuteLive:false
+      },
+      legacy:{
+        openPositions:legacyOpenViews.length,
+        closedTrades:legacyClosed.length,
+        active:legacyOpenViews.slice().sort((a,b)=>Number(b?.openedAt||0)-Number(a?.openedAt||0)).slice(0,20).map(safePositionForOutput),
+        recentClosed:legacyClosed.slice(-20).reverse().map(safePositionForOutput),
+        semantics:'PRE_GMGN_99K_PERCENT_CONTRACT_EXCLUDED_FROM_CURRENT_STRATEGY_STATS'
+      }
     }:{}),
     profitFactor:gl>EPS?gp/gl:null,
     cumulativeMarginUsedQuote:[...open,...closed].reduce((s,p)=>s+Math.max(0,finite(p?.initialMarginQuote,p?.marginQuote)||0),0),
@@ -2064,6 +2119,7 @@ export function w6ResearchAnalysis(state,{
   const s=mutableState(state);
   const wallet=s.wallets[WALLET_6_USER_99K_60S];
   const all=[...(wallet?.positions||[]),...(wallet?.closed||[])]
+    .filter(isCurrentW6ClonePosition)
     .map(w6ResearchRecordFromPosition)
     .filter(Boolean);
   const closed=all.filter(x=>x.closed);

@@ -1138,6 +1138,13 @@ test('W6 research analysis ranks only evidence-qualified cohorts and keeps polic
     tokenAddress:id,
     symbol:id,
     status:'CLOSED',
+    strategy:'JONAS_CLONE_V1',
+    strategyVersion:'JONAS_CLONE_V1',
+    strategyContract:'GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1',
+    entryThresholdMode:'GMGN_GREEN_PERCENT',
+    entryGreenPercent:100000,
+    exactGmgnTrendAtEntry:true,
+    targetHoldSeconds:240,
     openedAt:1_000_000,
     closedAt:1_000_000+hold*1000,
     initialMarginQuote:1000,
@@ -1197,7 +1204,10 @@ test('W6 research analysis stays COLLECTING when closed sample is below the evid
   const state=JSON.parse(JSON.stringify(createSpecialistWalletState()));
   state.wallets[WALLET_6_USER_99K_60S].closed.push({
     walletId:WALLET_6_USER_99K_60S,positionKey:'ONE',chainId:'solana',tokenAddress:'ONE',symbol:'ONE',
-    status:'CLOSED',openedAt:1_000,closedAt:181_000,initialMarginQuote:100,marginQuote:100,
+    status:'CLOSED',strategy:'JONAS_CLONE_V1',strategyVersion:'JONAS_CLONE_V1',
+    strategyContract:'GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1',entryThresholdMode:'GMGN_GREEN_PERCENT',
+    entryGreenPercent:100000,exactGmgnTrendAtEntry:true,targetHoldSeconds:240,
+    openedAt:1_000,closedAt:181_000,initialMarginQuote:100,marginQuote:100,
     entryAgeSeconds:40,entryMarketCapUsd:120_000,entryLiquidityUsd:50_000,entryNotionalSol:5,
     realizedNetPnlQuote:10,observedRealizedNetPnlQuote:10,realizableRealizedNetPnlQuote:10,
     coinResearch:{version:'BIGGJ_W6_COIN_RESEARCH_DATASET_V1',observationCountTotal:3,dataGapCountTotal:1,entrySnapshot:null,observations:[]}
