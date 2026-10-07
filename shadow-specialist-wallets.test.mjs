@@ -908,7 +908,7 @@ test('W6 Trends 1m uses the green GMGN percentage threshold, not market cap',()=
     minGreenChangePct:99_000,requireExactGmgnGreen:true
   });
   assert.equal(fallback.results.opened,0);
-  assert.equal(fallback.results.entryBlockers.GMGN_EXACT_TREND_REQUIRED,1);
+  assert.equal(fallback.results.entryBlockers.GMGN_EXACT_1M_REQUIRED,1);
 });
 
 
