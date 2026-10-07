@@ -223,3 +223,55 @@ test('position rediscovered through boost feed remains tracking-only beyond entr
  const snapshot=await provider.fetchUltraEarlySolana({trackTokenAddresses:['OPEN'],maxAgeSeconds:120});
  assert.equal(snapshot.rows[0].w6TrackingOnly,true);assert.equal(snapshot.trackingRows,1);assert.equal(snapshot.discoveryRows,0);
 });
+
+
+test('retained exact GMGN New Pair candidates keep receiving scarce token-info coverage until <120s expires',async()=>{
+ let tokenInfoCalls=[];
+ const retained={
+  chainId:'solana',tokenAddress:'RETAINED99',pairAddress:'RETAINED99PAIR',
+  symbol:'R99',name:'Retained 99',priceUsd:'.001',liquidityUsd:20000,
+  marketCap:120000,fdv:150000,pairCreatedAt:start-60_000,firstSeenAt:start-60_000,
+  signalTrending:true,signalNewPair:true,gmgnExactTrend:true,gmgnExactNewPair:true,
+  sourceSetup:'GMGN_NEW_PAIR_1M',trendSource:'GMGN_OPENAPI_NEW_CREATION_1M'
+ };
+ const fetchImpl=async(url)=>{
+  const u=new URL(url);
+  if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+   return json({code:0,data:{new_creation:[{
+    address:'CURRENT55',symbol:'CUR',name:'Current',price:'0.001',
+    liquidity:'20000',usd_market_cap:'120000',
+    created_timestamp:Math.floor((start-55_000)/1000)
+   }]}});
+  }
+  if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
+   const address=u.searchParams.get('address');
+   tokenInfoCalls.push(address);
+   if(address==='RETAINED99')return json({code:0,data:{address,price:{price:'1000',price_1m:'0.001'}}});
+   return json({code:0,data:{address,price:{price:'0.0011',price_1m:'0.001'}}});
+  }
+  if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/')){
+   return json([
+    pair('RETAINED99',start-60_000,{priceUsd:'1000',marketCap:120000,liquidity:{usd:20000}}),
+    pair('CURRENT55',start-55_000,{priceUsd:'.001',marketCap:120000,liquidity:{usd:20000}})
+   ]);
+  }
+  throw new Error('unexpected '+url);
+ };
+ const provider=createMemecoinEarlyRadarProvider({
+  fetchImpl,now:()=>start,gmgnApiKey:'gmgn_solbscbaseethmonadtron',gmgnPublicEnabled:false,
+  gmgnTokenInfoSamplePerCycle:1,gmgnRequestGapMs:0,ultraEnrichmentTimeoutMs:250
+ });
+ const snapshot=await provider.fetchUltraEarlySolana({candidateRows:[retained],maxAgeSeconds:120});
+ const row=snapshot.rows.find(x=>x.tokenAddress==='RETAINED99');
+ assert.ok(row);
+ assert.deepEqual(tokenInfoCalls,['RETAINED99']);
+ assert.equal(snapshot.gmgnTokenInfoCandidateMemoryEligible,1);
+ assert.equal(snapshot.gmgnTokenInfoCandidateMemorySampled,1);
+ assert.equal(row.candidateTracking,true);
+ assert.equal(row.gmgnExactNewPair,true);
+ assert.equal(row.gmgnExactOneMinutePerformance,true);
+ assert.ok(row.gmgnDisplayedChangePct>=99_000);
+ assert.equal(row.gmgnOneMinutePerformanceSource,'GMGN_OPENAPI_TOKEN_INFO_PRICE_1M');
+ assert.equal(snapshot.execution,'SHADOW_ONLY');
+ assert.equal(snapshot.canExecuteLive,false);
+});
