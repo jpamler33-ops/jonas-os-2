@@ -10,7 +10,7 @@ const now=1700000000000;
 const row={
   chainId:'solana',tokenAddress:'CLONE',symbol:'CLONE',priceUsd:1,
   marketCap:5000,liquidityUsd:20000,pairAddress:'POOL',
-  pairCreatedAt:now-25000,signalTrending:true,gmgnExactTrend:true,
+  pairCreatedAt:now-25000,signalTrending:true,signalNewPair:true,gmgnExactTrend:true,
   gmgnTrendInterval:'1m',gmgnDisplayedChangePct:100000,priceChangeSelectedPct:100000
 };
 const snapshot=(rows,capturedAt=now)=>({sourceReady:true,capturedAt,exactGmgn:true,trendInterval:'1m',rows});
@@ -39,7 +39,8 @@ test('strict entry contract rejects old, below-threshold, non-GMGN and non-curre
     {pairCreatedAt:now-120001},
     {gmgnDisplayedChangePct:98999,priceChangeSelectedPct:98999},
     {gmgnExactTrend:false},
-    {signalTrending:false}
+    {signalTrending:false},
+    {signalNewPair:false}
   ]){
     assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
   }
