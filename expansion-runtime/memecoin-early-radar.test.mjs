@@ -106,7 +106,7 @@ test('provider merges keyless new pools with DexScreener launch-attention signal
   assert.equal(out.canExecuteLive,false);
 });
 
-test('W6 exact GMGN New Pair feed uses Trenches/new_creation 1m field and preserves creation age',async()=>{
+test('W6 joins exact GMGN New Pair identity with exact GMGN 1m change rank by token address',async()=>{
   const now=2_100_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
   const calls=[];
@@ -117,18 +117,26 @@ test('W6 exact GMGN New Pair feed uses Trenches/new_creation 1m field and preser
       assert.equal(u.searchParams.get('chain'),'sol');
       assert.equal(opts?.method,'POST');
       assert.equal(opts?.headers?.['X-APIKEY'],'personal-test-key');
-      assert.equal(opts?.headers?.['user-agent'],'gmgn-cli/1.6.6');
       const body=JSON.parse(opts.body);
       assert.equal(body.version,'v2');
       assert.equal(body.new_creation.limit,80);
-      assert.deepEqual(body.new_creation.filters,['offchain','onchain']);
-      assert.deepEqual(body.new_creation.quote_address_type,[4,5,3,1,13,0]);
       return json({code:0,msg:'success',data:{new_creation:[{
         chain:'sol',address:'FASTMINT',symbol:'FAST',name:'Fast Meme',
         price:0.001,liquidity:45000,usd_market_cap:120000,
-        price_change_percent1m:999000,price_change_percent5m:12,price_change_percent1h:12,
         created_timestamp:Math.floor((now-22_000)/1000),
         holder_count:77
+      }]}});
+    }
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
+      assert.equal(u.searchParams.get('chain'),'sol');
+      assert.equal(u.searchParams.get('interval'),'1m');
+      assert.equal(u.searchParams.get('limit'),'100');
+      assert.equal(u.searchParams.get('order_by'),'change1m');
+      assert.equal(u.searchParams.get('direction'),'desc');
+      return json({code:0,data:{rank:[{
+        address:'FASTMINT',symbol:'FAST',name:'Fast Meme',price:.001,
+        price_change_percent1m:999000,price_change_percent:999000,
+        creation_timestamp:Math.floor((now-22_000)/1000)
       }]}});
     }
     if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
@@ -142,7 +150,7 @@ test('W6 exact GMGN New Pair feed uses Trenches/new_creation 1m field and preser
   };
   const p=createMemecoinEarlyRadarProvider({
     fetchImpl,networks:['solana'],gmgnApiKey:'personal-test-key',gmgnTrendInterval:'1m',
-    ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,gmgnTrendCacheMs:1,now:()=>now
   });
   const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
   assert.equal(out.version,W6_ULTRA_EARLY_FEED_VERSION);
@@ -152,20 +160,21 @@ test('W6 exact GMGN New Pair feed uses Trenches/new_creation 1m field and preser
   assert.equal(out.rows[0].marketCap,125000);
   assert.equal(out.rows[0].pairCreatedAt,now-22_000);
   assert.equal(out.rows[0].ageSeconds,22);
-  assert.equal(out.rows[0].signalTrending,true);
   assert.equal(out.rows[0].signalNewPair,true);
   assert.equal(out.rows[0].gmgnExactTrend,true);
   assert.equal(out.rows[0].gmgnExactNewPair,true);
   assert.equal(out.rows[0].trendSource,'GMGN_OPENAPI_NEW_CREATION_1M');
   assert.equal(out.rows[0].priceChangeSelectedPct,999000);
   assert.equal(out.rows[0].gmgnDisplayedChangePct,999000);
+  assert.equal(out.rows[0].gmgnOneMinutePerformanceSource,'GMGN_OPENAPI_TRENDS_1M_CHANGE1M');
   assert.equal(out.exactGmgn,true);
-  assert.equal(out.trendInterval,'1m');
   assert.equal(out.setup,'GMGN_NEW_PAIR_1M');
-  assert.equal(out.gmgnAuthMode,'PERSONAL_API_READ_ONLY');
-  assert.equal(out.source,'GMGN_OPENAPI_NEW_CREATION_1M');
+  assert.equal(out.gmgnOneMinuteRows,1);
+  assert.equal(out.gmgnOneMinuteMatchedNewPairs,1);
+  assert.equal(out.gmgnOneMinuteCoverage,1);
+  assert.equal(out.gmgnOneMinuteError,null);
   assert.equal(out.canExecuteLive,false);
-  assert.equal(calls.some(x=>x.url.includes('/v1/market/rank')),false);
+  assert.equal(calls.filter(x=>x.url.includes('/v1/market/rank')).length,1);
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
 });
 
@@ -179,8 +188,13 @@ test('W6 keeps GMGN discovery unfiltered and applies green threshold downstream'
     }
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/market/rank'){
       assert.equal(u.searchParams.get('interval'),'1m');
-      assert.equal(u.searchParams.get('order_by'),null);
       assert.equal(u.searchParams.get('min_price_change_percent'),null);
+      if(u.searchParams.get('order_by')==='change1m'){
+        return json({code:0,data:{rank:[{
+          address:'OTHER',symbol:'OTHER',price:.001,price_change_percent1m:200000
+        }]}});
+      }
+      assert.equal(u.searchParams.get('order_by'),null);
       return json({code:0,data:{rank:[{
         address:'GREENMINT',symbol:'GREEN',name:'Green Meme',price:.001,market_cap:47800,
         price_change_percent:999000,open_timestamp:Math.floor((now-50_000)/1000)
