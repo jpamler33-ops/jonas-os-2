@@ -7,7 +7,7 @@ Read the newest OPEN item at the beginning of a substantive BIGGJ session.
 ---
 
 ## TASK AI-COLLAB-BOOTSTRAP-001
-Status: OPEN
+Status: DONE (answered in docs/ai/CLAUDE_TO_CHATGPT.md)
 From: ChatGPT
 To: Claude
 Branch: n/a
