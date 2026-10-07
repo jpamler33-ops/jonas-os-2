@@ -958,16 +958,19 @@ export function createMemecoinEarlyRadarProvider({
           // from two GMGN values. Sample a bounded round-robin subset per cycle
           // to stay under the shared demo-key rate limit.
           const currentAt=Number(now());
-          const eligibleForInfo=pools.filter(pool=>{
+          const activeWindowForInfo=pools.filter(pool=>{
             if(finite(pool?.gmgnDisplayedChangePct)!=null)return false;
             const created=finite(pool?.pairCreatedAt);
             return created!=null&&currentAt>=created&&(currentAt-created)/1000<120;
-          }).sort((a,b)=>{
+          }).sort((a,b)=>(finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0)).slice(0,30);
+          const eligibleForInfo=activeWindowForInfo.sort((a,b)=>{
             const ak=tokenKey('solana',a?.tokenAddress),bk=tokenKey('solana',b?.tokenAddress);
             const aa=finite(gmgnTokenInfoObserved.get(ak)?.at)??-Infinity;
             const ba=finite(gmgnTokenInfoObserved.get(bk)?.at)??-Infinity;
             if(aa!==ba)return aa-ba;
-            return (finite(a?.pairCreatedAt)??0)-(finite(b?.pairCreatedAt)??0);
+            // On equal sampling age, inspect the freshest New Pair first because
+            // fetchUltraEarlySolana later keeps the 30 freshest rows for entry.
+            return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
           }).slice(0,gmgnTokenInfoSamples);
           for(const pool of eligibleForInfo){
             if(gmgnRateLimitActive())break;
