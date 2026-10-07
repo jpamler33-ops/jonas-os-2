@@ -235,7 +235,7 @@ test('W6 public demo key derives exact 1m percent only from GMGN token-info pric
   assert.equal(out.canExecuteLive,false);
 });
 
-test('W6 never drops an exact GMGN 1m match behind the 30-row enrichment cap',async()=>{
+test('W6 never drops an exact GMGN 1m match behind either 30-row selection cap',async()=>{
   const now=2_104_000_000_000;
   const json=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
   const launches=Array.from({length:35},(_,i)=>({
@@ -269,9 +269,14 @@ test('W6 never drops an exact GMGN 1m match behind the 30-row enrichment cap',as
     fetchImpl,networks:['solana'],gmgnRequestGapMs:0,gmgnTokenInfoSamplePerCycle:1,
     ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
   });
-  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  const candidateRows=Array.from({length:25},(_,i)=>({
+    chainId:'solana',tokenAddress:'MEM'+String(i).padStart(2,'0'),
+    pairAddress:'MEMPOOL'+i,pairCreatedAt:now-(1_000+i*500),
+    firstSeenAt:now-(1_000+i*500),marketCap:9000,liquidityUsd:7000,priceUsd:0.001
+  }));
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120,candidateRows});
   assert.equal(out.gmgnOneMinuteMatchedNewPairs,1);
-  assert.equal(out.rows.length,30);
+  assert.ok(out.rows.length>30,'always-retained candidate memory may expand the bounded output');
   const matched=out.rows.find(x=>x.tokenAddress===oldest);
   assert.ok(matched,'exact GMGN 1m match must survive the 30-row cap');
   assert.equal(matched.gmgnExactOneMinutePerformance,true);

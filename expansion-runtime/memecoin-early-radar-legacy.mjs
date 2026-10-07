@@ -1178,7 +1178,19 @@ export function createMemecoinEarlyRadarProvider({
       return (finite(a?.ageSeconds)??Infinity)-(finite(b?.ageSeconds)??Infinity);
     });
     const discoveryCount=rows.filter(x=>x?.w6TrackingOnly!==true).length;
-    const selected=rows.filter(x=>x?.w6TrackingOnly===true||x?.candidateTracking===true||rows.indexOf(x)<Math.max(1,Math.min(30,Number(limit)||30)));
+    const boundedDiscoveryLimit=Math.max(1,Math.min(30,Number(limit)||30));
+    const selected=rows.filter((x,index)=>{
+      const exactOneMinuteNewPair=
+        x?.signalNewPair===true&&
+        x?.gmgnExactNewPair===true&&
+        x?.gmgnExactOneMinutePerformance===true&&
+        finite(x?.gmgnDisplayedChangePct??x?.priceChangeSelectedPct)!=null;
+      // Position tracking and candidate memory are always retained. Exact
+      // GMGN 1m New-Pair observations are also non-droppable: otherwise
+      // younger memory rows can consume the positional top-N and erase the
+      // only rows capable of satisfying the +99,000% strategy gate.
+      return x?.w6TrackingOnly===true||x?.candidateTracking===true||exactOneMinuteNewPair||index<boundedDiscoveryLimit;
+    });
 
     return Object.freeze({
       version:W6_ULTRA_EARLY_FEED_VERSION,
