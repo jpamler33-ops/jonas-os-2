@@ -330,6 +330,52 @@ test('W6 never drops an exact GMGN 1m match behind either 30-row selection cap',
   assert.equal(matched.gmgnExactNewPair,true);
 });
 
+test('W6 batches demo-key token-info sampling instead of serially amplifying provider latency',async()=>{
+  const now=2_104_500_000_000;
+  let activeTokenInfo=0,maxActiveTokenInfo=0,tokenInfoCalls=0;
+  const json=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
+  const launches=Array.from({length:5},(_,i)=>({
+    address:'BATCH'+i,symbol:'B'+i,name:'Batch '+i,price:'0.001',
+    usd_market_cap:'10000',liquidity:'8000',
+    created_timestamp:Math.floor((now-60_000-i*100)/1000)
+  }));
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+      return json({code:0,data:{new_creation:launches}});
+    }
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
+      tokenInfoCalls++;
+      activeTokenInfo++;
+      maxActiveTokenInfo=Math.max(maxActiveTokenInfo,activeTokenInfo);
+      await new Promise(resolve=>setTimeout(resolve,40));
+      activeTokenInfo--;
+      const address=u.searchParams.get('address');
+      return json({address,price:{price:'0.001',price_1m:'0.000001'}});
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/')){
+      const addresses=decodeURIComponent(u.pathname.split('/').pop()).split(',');
+      return json(addresses.map(address=>({
+        chainId:'solana',pairAddress:'POOL_'+address,dexId:'pump',
+        baseToken:{address,symbol:address,name:address},quoteToken:{symbol:'SOL'},
+        priceUsd:'0.001',liquidity:{usd:9000},volume:{m5:100,h1:100,h24:100},
+        txns:{m5:{buys:2,sells:0},h1:{buys:2,sells:0}},priceChange:{m5:1,h1:1},
+        marketCap:10000,fdv:10000,pairCreatedAt:now-60_000
+      })));
+    }
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],gmgnRequestGapMs:0,gmgnTokenInfoSamplePerCycle:5,
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(tokenInfoCalls,4,'demo key leaves one burst slot for new_creation');
+  assert.ok(maxActiveTokenInfo>=2,'token-info calls must overlap instead of running serially');
+  assert.equal(out.gmgnOneMinuteMatchedNewPairs,4);
+  assert.equal(out.canExecuteLive,false);
+});
+
 test('W6 stops all exact GMGN follow-up requests during authoritative 429 cooldown',async()=>{
   let now=2_105_000_000_000;
   const calls=[];
