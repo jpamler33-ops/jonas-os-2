@@ -5375,7 +5375,7 @@ function w6StrategyRuntimeOptions(solPriceUsd){
     minHoldSeconds:240,
     solPriceUsd,
     maxOpenOperational:Math.max(1,Math.min(100,Number(process.env.TCX_W6_USER_99K_60S_MAX_OPEN||30))),
-    requireTrending:true,
+    requireTrending:false,
     requireNewPair:true,
     catastrophicDrawdownPct:Math.max(.50,Math.min(.99,Number(process.env.TCX_W6_CATASTROPHIC_DRAWDOWN_PCT||.90))),
     catastrophicMarketCapUsd:Math.max(0,Number(process.env.TCX_W6_CATASTROPHIC_MCAP_USD||10_000))
@@ -5420,7 +5420,14 @@ function enrichW6UltraCandidateRows(snapshot){
     const greenRaw=row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct;
     const greenPercent=greenRaw==null||greenRaw===''?NaN:Number(greenRaw);
     const greenPercentKnown=Number.isFinite(greenPercent);
-    const exactGmgn1m=row?.gmgnExactTrend===true&&String(row?.gmgnTrendInterval||snapshot?.trendInterval||'1m')==='1m'&&row?.signalTrending===true&&row?.signalNewPair===true;
+    const exactGmgn1m=
+      row?.gmgnExactTrend===true&&
+      row?.gmgnExactOneMinutePerformance===true&&
+      String(row?.gmgnTrendInterval||snapshot?.trendInterval||'1m')==='1m'&&
+      (
+        row?.gmgnExactNewPair===true||
+        (row?.signalTrending===true&&row?.signalNewPair===true)
+      );
     const priorMaxGreen=Number(priorTracker?.maxObservedGreenPercent);
     const maxObservedGreenPercent=greenPercentKnown
       ?Math.max(Number.isFinite(priorMaxGreen)?priorMaxGreen:-Infinity,greenPercent)
@@ -5593,6 +5600,10 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       gmgnTokenInfoMinSampleAgeSeconds:ultra.gmgnTokenInfoMinSampleAgeSeconds??null,
       gmgnTokenInfoResampleSeconds:ultra.gmgnTokenInfoResampleSeconds??null,
       gmgnTokenInfoObserved:ultra.gmgnTokenInfoObserved||0,
+      gmgnTokenInfoEligibleThisCycle:ultra.gmgnTokenInfoEligibleThisCycle||0,
+      gmgnTokenInfoSampledThisCycle:ultra.gmgnTokenInfoSampledThisCycle||0,
+      gmgnTokenInfoCandidateMemoryEligible:ultra.gmgnTokenInfoCandidateMemoryEligible||0,
+      gmgnTokenInfoCandidateMemorySampled:ultra.gmgnTokenInfoCandidateMemorySampled||0,
       gmgnOneMinuteError:ultra.gmgnOneMinuteError||null,
       gmgnRateLimit:ultra.gmgnRateLimit||null,
       providerDurationMs:ultra.providerDurationMs??null,

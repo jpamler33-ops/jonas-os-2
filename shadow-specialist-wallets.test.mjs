@@ -865,7 +865,7 @@ test('W6 Trends 1m uses the green GMGN percentage threshold, not market cap',()=
   const base={
     chainId:'solana',tokenAddress:'GREEN999K',symbol:'GREEN',priceUsd:.001,
     marketCap:47_800,pairCreatedAt:now-50_000,
-    signalTrending:true,signalNewPair:false,gmgnExactTrend:true,trendRank:4,
+    signalTrending:true,signalNewPair:false,gmgnExactTrend:true,gmgnExactOneMinutePerformance:true,trendRank:4,
     priceChangeSelectedPct:999_000,sourceSetup:'GMGN_TRENDS_1M'
   };
   const x=applyUser99k60sStrategySnapshot(createSpecialistWalletState(),{

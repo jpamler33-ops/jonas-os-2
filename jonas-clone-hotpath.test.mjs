@@ -11,6 +11,7 @@ const row={
   chainId:'solana',tokenAddress:'CLONE',symbol:'CLONE',priceUsd:1,
   marketCap:5000,liquidityUsd:20000,pairAddress:'POOL',
   pairCreatedAt:now-25000,signalTrending:true,signalNewPair:true,gmgnExactTrend:true,
+  gmgnExactNewPair:true,gmgnExactOneMinutePerformance:true,
   gmgnTrendInterval:'1m',gmgnDisplayedChangePct:100000,priceChangeSelectedPct:100000
 };
 const snapshot=(rows,capturedAt=now)=>({sourceReady:true,capturedAt,exactGmgn:true,trendInterval:'1m',rows});
@@ -33,17 +34,20 @@ test('production adapter opens only exact GMGN 1m >=99k% and market cap is irrel
   assert.equal(original.wallets[W6].positions.length,0);
 });
 
-test('strict entry contract rejects old, below-threshold, non-GMGN and non-current-trend rows',()=>{
+test('strict entry contract rejects old, below-threshold, non-exact and non-New-Pair rows while preserving exact New Pair provenance',()=>{
   for(const patch of [
     {pairCreatedAt:now-120000},
     {pairCreatedAt:now-120001},
     {gmgnDisplayedChangePct:98999,priceChangeSelectedPct:98999},
     {gmgnExactTrend:false},
-    {signalTrending:false},
-    {signalNewPair:false}
+    {gmgnExactOneMinutePerformance:false},
+    {gmgnExactNewPair:false,signalNewPair:false}
   ]){
     assert.equal(apply(createSpecialistWalletState(),[{...row,...patch}]).results.opened,0);
   }
+  const rotated=apply(createSpecialistWalletState(),[{...row,signalTrending:false,signalNewPair:false}]);
+  assert.equal(rotated.results.opened,1);
+  assert.equal(rotated.state.wallets[W6].positions[0].canExecuteLive,false);
   for(const age of [60,75,90,119.999]){
     const x=applyJonasCloneSnapshot(
       createSpecialistWalletState(),

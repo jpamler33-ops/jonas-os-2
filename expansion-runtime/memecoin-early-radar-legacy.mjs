@@ -906,6 +906,10 @@ export function createMemecoinEarlyRadarProvider({
     let gmgnOneMinuteRows=[];
     let gmgnOneMinuteError=null;
     let gmgnOneMinuteMatchedNewPairs=0;
+    let gmgnTokenInfoEligibleThisCycle=0;
+    let gmgnTokenInfoSampledThisCycle=0;
+    let gmgnTokenInfoCandidateMemoryEligible=0;
+    let gmgnTokenInfoCandidateMemorySampled=0;
     // New Pair identity and 1m performance are distinct official GMGN surfaces:
     // Trenches/new_creation establishes exact launch identity + creation age,
     // while market/rank interval=1m ordered by change1m supplies GMGN's exact
@@ -975,13 +979,45 @@ export function createMemecoinEarlyRadarProvider({
               gmgnTokenInfoObserved.delete(observedKey);
             }
           }
-          const eligibleForInfo=pools.filter(pool=>{
-            if(finite(pool?.gmgnDisplayedChangePct)!=null)return false;
+          // The live New Pair page can rotate faster than the two-read demo-key
+          // budget can cover. Candidate memory therefore remains eligible for
+          // exact GMGN token/info sampling until the strict <120s entry window
+          // expires. This increases coverage without changing the strategy gate:
+          // only exact GMGN New Pair provenance + exact GMGN 1m performance can
+          // ever become an entry.
+          const currentPoolKeys=new Set(pools.map(pool=>tokenKey('solana',pool?.tokenAddress)).filter(Boolean));
+          const samplingUniverse=new Map();
+          for(const pool of pools){
+            const key=tokenKey('solana',pool?.tokenAddress);
+            if(key)samplingUniverse.set(key,pool);
+          }
+          for(const candidate of Array.isArray(candidateRows)?candidateRows:[]){
+            const key=tokenKey('solana',candidate?.tokenAddress);
+            const created=finite(candidate?.pairCreatedAt);
+            if(
+              !key||
+              candidate?.gmgnExactNewPair!==true||
+              created==null||
+              currentAt<created
+            )continue;
+            const ageSeconds=(currentAt-created)/1000;
+            if(ageSeconds<gmgnTokenInfoMinSampleAgeSeconds||ageSeconds>=120)continue;
+            if(!samplingUniverse.has(key)){
+              samplingUniverse.set(key,{...candidate,gmgnTokenInfoCandidateMemory:true});
+            }
+          }
+          const eligibleUniverse=[...samplingUniverse.values()].filter(pool=>{
+            const key=tokenKey('solana',pool?.tokenAddress);
+            const isCurrentPool=currentPoolKeys.has(key);
+            // A current authoritative New Pair row that already carries an exact
+            // 1m value needs no token/info fallback. Candidate-memory values are
+            // allowed to refresh after the normal resample interval because a
+            // threshold crossing can occur later inside the <120s window.
+            if(isCurrentPool&&finite(pool?.gmgnDisplayedChangePct)!=null)return false;
             const created=finite(pool?.pairCreatedAt);
             if(created==null||currentAt<created)return false;
             const ageSeconds=(currentAt-created)/1000;
             if(ageSeconds<gmgnTokenInfoMinSampleAgeSeconds||ageSeconds>=120)return false;
-            const key=tokenKey('solana',pool?.tokenAddress);
             const observedAt=finite(gmgnTokenInfoObserved.get(key)?.at);
             return observedAt==null||currentAt-observedAt>=gmgnTokenInfoResampleMs;
           }).sort((a,b)=>{
@@ -999,7 +1035,12 @@ export function createMemecoinEarlyRadarProvider({
             if(distanceA!==distanceB)return distanceA-distanceB;
             if(!aNever&&aa!==ba)return aa-ba;
             return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
-          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,2):gmgnTokenInfoSamples);
+          });
+          gmgnTokenInfoEligibleThisCycle=eligibleUniverse.length;
+          gmgnTokenInfoCandidateMemoryEligible=eligibleUniverse.filter(x=>x?.gmgnTokenInfoCandidateMemory===true).length;
+          const eligibleForInfo=eligibleUniverse.slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,2):gmgnTokenInfoSamples);
+          gmgnTokenInfoSampledThisCycle=eligibleForInfo.length;
+          gmgnTokenInfoCandidateMemorySampled=eligibleForInfo.filter(x=>x?.gmgnTokenInfoCandidateMemory===true).length;
           // Never serialize several potentially slow GMGN token-info calls.
           // Production verification on the shared/public demo key showed that a
           // 3-token batch immediately triggers RATE_LIMIT_EXCEEDED even though
@@ -1175,11 +1216,24 @@ export function createMemecoinEarlyRadarProvider({
       if(!dexRow)return null;
       if(!firstSeen.has(key))firstSeen.set(key,finite(candidate?.firstSeenAt)??capturedAt);
       const merged=mergeCandidate(candidate,dexRow);
-      return {
+      const observed=gmgnTokenInfoObserved.get(key)?.value||null;
+      const observedPct=finite(observed?.gmgnDisplayedChangePct);
+      const withExactOneMinute=observedPct==null?merged:{
         ...merged,
+        priceChangeSelectedPct:observedPct,
+        gmgnDisplayedChangePct:observedPct,
+        gmgnOneMinutePerformanceObservedAt:finite(observed?.gmgnOneMinutePerformanceObservedAt),
+        gmgnOneMinutePerformanceSource:observed?.gmgnOneMinutePerformanceSource,
+        gmgnOneMinuteCalculation:observed?.gmgnOneMinuteCalculation,
+        gmgnCurrentPriceUsd:observed?.gmgnCurrentPriceUsd,
+        gmgnOneMinuteStartPriceUsd:observed?.gmgnOneMinuteStartPriceUsd,
+        gmgnExactOneMinutePerformance:true
+      };
+      return {
+        ...withExactOneMinute,
         chainId:'solana',
         tokenAddress:String(candidate?.tokenAddress||dexRow?.tokenAddress||''),
-        pairAddress:String(candidate?.pairAddress||merged?.pairAddress||''),
+        pairAddress:String(candidate?.pairAddress||withExactOneMinute?.pairAddress||''),
         pairCreatedAt:finite(candidate?.pairCreatedAt)??finite(dexRow?.pairCreatedAt),
         firstSeenAt:finite(candidate?.firstSeenAt)??firstSeen.get(key),
         signalNewPool:false,
@@ -1187,6 +1241,7 @@ export function createMemecoinEarlyRadarProvider({
         signalNewPair:false,
         wasTrending:true,
         gmgnExactTrend:candidate?.gmgnExactTrend===true,
+        gmgnExactNewPair:candidate?.gmgnExactNewPair===true,
         trendSource:text(candidate?.trendSource||'W6_TREND_MEMORY',80),
         ultraEarly:true,
         candidateTracking:true,
@@ -1255,6 +1310,10 @@ export function createMemecoinEarlyRadarProvider({
       gmgnTokenInfoMinSampleAgeSeconds,
       gmgnTokenInfoResampleSeconds:gmgnTokenInfoResampleMs/1000,
       gmgnTokenInfoObserved:gmgnTokenInfoObserved.size,
+      gmgnTokenInfoEligibleThisCycle,
+      gmgnTokenInfoSampledThisCycle,
+      gmgnTokenInfoCandidateMemoryEligible,
+      gmgnTokenInfoCandidateMemorySampled,
       gmgnOneMinuteError,
       gmgnRateLimit:gmgnRateLimitSnapshot(),
       gmgnAuthMode:exactGmgn?(gmgnReadApiKey==='gmgn_solbscbaseethmonadtron'?'PUBLIC_DEMO_READ_ONLY':'PERSONAL_API_READ_ONLY'):(gmgnReadApiKey?'OPENAPI_FAILED':'NO_OPENAPI_KEY'),
