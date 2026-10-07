@@ -231,20 +231,20 @@ function user99StrategyCard(wallet,user99){
  const p=(wallet?.active||[])[0]||null,sc=p?.profitTargetScenarios||[],xl=user99?.exitLearning||{},f=user99?.results?.entryFunnel||{},uf=user99?.ultraFeed||{},ls=uf?.launchStats||{},blockers=user99?.results?.entryBlockers||{},hs=p?.holdLabSummary||{},best=hs?.best||null,bestAbs=hs?.bestAbsolutePnl||null,guide=hs?.entrySizingGuide||{};
  const scenarios=sc.length?sc.map(x=>'<div class="contrarianMetric"><span>'+E(x.entryNotionalSol)+' SOL</span><b class="'+(x.targetHit?'good':'')+'">'+(x.targetHit?'REF ✓':((N(x.targetPriceReturnApprox)*100).toFixed(1)+'%'))+'</b></div>').join(''):'<div class="contrarianMetric"><span>SIZING</span><b>0.5/1/2/3/5/10/20/40/60/80 SOL</b></div>';
  const activeSizeRows=p?(p?.holdLab||[]).filter(x=>String(x?.policyId||'')==='RUNNER').slice(0,10).map(x=>{const v=NUM(x?.estimatedNetPnlSol);return '<span class="'+(Number.isFinite(v)?(v>=0?'good':'bad'):'')+'">'+E(x?.entryNotionalSol)+' SOL '+(Number.isFinite(v)?((v>=0?'+':'')+v.toFixed(2)+' SOL'):'—')+'</span>'}).join(' · '):'';
- const activeHold=p?Math.max(0,(Date.now()-N(p?.openedAt))/1000):0,protect=p?Math.max(0,(N(p?.lossExitProtectedUntil)-Date.now())/1000):0;
+ const activeHold=p?Math.max(0,(Date.now()-N(p?.openedAt))/1000):0,targetRemain=p?Math.max(0,240-activeHold):0;
  const sizingGuide=Number.isFinite(NUM(guide?.normalMaxEntrySol))?'<div class="ms">REALISTISCH MAX (~3% Impact): <b>'+N(guide.normalMaxEntrySol).toFixed(2)+' SOL</b> · AGGRESSIV (~5%): <b>'+N(guide.aggressiveMaxEntrySol).toFixed(2)+' SOL</b> · Pool '+MONEY(guide.liquidityUsdAtEntry)+'</div>':'';
  const activeBox=p?'<div class="contrarianRules"><div class="ml">AKTIVER W6 TRADE · '+E(p?.symbol||'MEME')+'</div><div class="contrarianGrid">'+
  '<div class="contrarianMetric"><span>ENTRY ALTER</span><b>'+((Number.isFinite(NUM(p?.entryAgeSeconds)))?N(p.entryAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
  '<div class="contrarianMetric"><span>ERSTMALS GESEHEN</span><b>'+((Number.isFinite(NUM(p?.firstObservedAgeSeconds)))?N(p.firstObservedAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
- '<div class="contrarianMetric"><span>≥99K BEOBACHTET</span><b>'+((Number.isFinite(NUM(p?.first99kObservedAgeSeconds)))?N(p.first99kObservedAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
- '<div class="contrarianMetric"><span>HOLD</span><b>'+activeHold.toFixed(0)+'s</b></div>'+
- '<div class="contrarianMetric"><span>ENTRY MC</span><b>'+MONEY(p?.entryMarketCapUsd)+'</b></div>'+
- '<div class="contrarianMetric"><span>AKTUELL MC</span><b>'+MONEY(p?.lastMarketCapUsd)+'</b></div>'+
+ '<div class="contrarianMetric"><span>GMGN +99K% BEOBACHTET</span><b>'+((Number.isFinite(NUM(p?.first99kObservedAgeSeconds)))?N(p.first99kObservedAgeSeconds).toFixed(1)+'s':'—')+'</b></div>'+
+ '<div class="contrarianMetric"><span>HOLD</span><b>'+activeHold.toFixed(0)+'s / 240s</b></div>'+
+ '<div class="contrarianMetric"><span>GMGN 1M ENTRY</span><b>'+((Number.isFinite(NUM(p?.entryGreenPercent)))?N(p.entryGreenPercent).toFixed(0)+'%':'—')+'</b></div>'+
+ '<div class="contrarianMetric"><span>EXIT IN</span><b>'+targetRemain.toFixed(0)+'s</b></div>'+
  '<div class="contrarianMetric"><span>OBSERVED RETURN</span><b class="'+(N(p?.observedUnrealizedReturnPct??p?.unrealizedReturnPct)>=0?'good':'bad')+'">'+MPCT(p?.observedUnrealizedReturnPct??p?.unrealizedReturnPct)+'</b></div>'+
  '<div class="contrarianMetric"><span>EXECUTABLE PNL</span><b class="'+(N(p?.conservativeUnrealizedNetPnlQuote)>=0?'good':'bad')+'">'+MONEY(p?.conservativeUnrealizedNetPnlQuote)+'</b></div>'+
  '<div class="contrarianMetric"><span>OBSERVED MARK PNL</span><b class="'+(N(p?.observedUnrealizedNetPnlQuote??p?.unrealizedNetPnlQuote)>=0?'good':'bad')+'">'+MONEY(p?.observedUnrealizedNetPnlQuote??p?.unrealizedNetPnlQuote)+'</b></div>'+
  '<div class="contrarianMetric"><span>EXIT STATUS</span><b>'+E(p?.executionPnlStatus||p?.executableMark?.status||'UNVERIFIED')+'</b></div></div>'+
- '<div class="ms">'+(protect>0?('Loss-Schutz noch '+protect.toFixed(0)+'s'):'Loss-Schutz abgelaufen')+' · Peak MC '+MONEY(p?.peakMarketCapUsd)+' · Trough MC '+MONEY(p?.troughMarketCapUsd)+'</div>'+
+ '<div class="ms">Primärer Exit exakt bei 240s; bei bestätigtem Liquiditäts-Tod früher. MC nur Telemetrie: Entry '+MONEY(p?.entryMarketCapUsd)+' · aktuell '+MONEY(p?.lastMarketCapUsd)+'</div>'+
  (activeSizeRows?'<div class="ms">Sizing jetzt: '+activeSizeRows+'</div>':'')+
  sizingGuide+
  '<div class="ms">Quelle '+E(p?.trendFidelityAtEntry==='EXACT_GMGN_TRENDS'?'EXACT GMGN TRENDS':'FREE TRENDS PROXY')+' · Token '+E(String(p?.tokenAddress||'').slice(0,8))+'…'+E(String(p?.tokenAddress||'').slice(-6))+' · SHADOW_ONLY</div></div>':'<div class="contrarianRules"><div class="ml">AKTIVER W6 TRADE</div><div class="ms">Aktuell keine offene W6-Position.</div></div>';
@@ -253,21 +253,21 @@ function user99StrategyCard(wallet,user99){
  const funnel='<div class="contrarianRules"><div class="ml">ENTRY FUNNEL · LETZTER SCAN</div><div class="contrarianGrid">'+
  '<div class="contrarianMetric"><span>GESEHEN</span><b>'+N(f.rowsSeen)+'</b></div>'+
  '<div class="contrarianMetric"><span>&lt;120s</span><b>'+N(f.ageWithinLimit)+'</b></div>'+
- '<div class="contrarianMetric"><span>≥99K NACH AGE</span><b>'+N(f.marketCapQualifiedAfterAge)+'</b></div>'+
+ '<div class="contrarianMetric"><span>GMGN ≥+99K%</span><b>'+N(f.greenPercentQualifiedAfterAge)+'</b></div>'+
  '<div class="contrarianMetric"><span>DATEN OK</span><b>'+N(f.dataCompleteAfterThreshold)+'</b></div>'+
  '<div class="contrarianMetric"><span>ENTRY MATCH</span><b class="'+(N(f.eligible)>0?'good':'')+'">'+N(f.eligible)+'</b></div>'+
  '<div class="contrarianMetric"><span>OPENED</span><b class="'+(N(f.opened)>0?'good':'')+'">'+N(f.opened)+'</b></div>'+
  '<div class="contrarianMetric"><span>SIZE VARIANTEN</span><b>'+N(f.capitalVariantsStarted)+'</b></div>'+
  '<div class="contrarianMetric"><span>HOLD VARIANTEN</span><b>'+N(f.holdVariantsStarted)+'</b></div></div>'+
- '<div class="ms">Ultra-Feed: ~'+(N(uf.pollMs)/1000).toFixed(1)+'s · Hot Candidates '+N(uf.candidateBookSize)+' · Historische 60s-Telemetrie: entdeckt '+N(ls.discoveredWithin60)+' · ≥99k ≤60s '+N(ls.first99kObservedWithin60)+' · ≥99k erst >60s '+N(ls.first99kObservedAfter60)+'</div><div class="ms">Blocker: '+blockerText+(N(f.duplicateBlocked)?' · DUPLIKAT '+N(f.duplicateBlocked):'')+(N(f.capacityBlocked)?' · KAPAZITÄT '+N(f.capacityBlocked):'')+(N(f.sourceNotReadyBlocked)?' · SOURCE NOT READY '+N(f.sourceNotReadyBlocked):'')+'</div></div>';
- return '<div class="contrarianCard"><div class="contrarianTop"><div><b>⚡ 99K IN &lt;120S · USER STRATEGY V1</b><div class="ms">Sizing + Hold Lab · keine Live-Orders</div></div><span>SHADOW_ONLY</span></div>'+
- '<div class="contrarianGrid"><div class="contrarianMetric"><span>OPEN</span><b>'+N(wallet?.openPositions)+'</b></div><div class="contrarianMetric"><span>CLOSED</span><b>'+N(wallet?.closedTrades)+'</b></div><div class="contrarianMetric"><span>WINRATE</span><b>'+((wallet?.winRate==null)?'—':MPCT(wallet.winRate))+'</b></div><div class="contrarianMetric"><span>MIN HOLD</span><b>3m</b></div></div>'+
- '<div class="contrarianRules"><div class="ml">ENTRY</div><div class="ms">Coin &lt;120 Sekunden alt + Market Cap ≥ $99k → sofortiger Shadow-Entry.</div></div>'+
+ '<div class="ms">Ultra-Feed: ~'+(N(uf.pollMs)/1000).toFixed(1)+'s · Hot Candidates '+N(uf.candidateBookSize)+' · Historische Telemetrie: entdeckt ≤60s '+N(ls.discoveredWithin60)+' · GMGN +99k% ≤60s '+N(ls.first99kObservedWithin60)+' · erst >60s '+N(ls.first99kObservedAfter60)+'</div><div class="ms">Blocker: '+blockerText+(N(f.duplicateBlocked)?' · DUPLIKAT '+N(f.duplicateBlocked):'')+(N(f.capacityBlocked)?' · KAPAZITÄT '+N(f.capacityBlocked):'')+(N(f.sourceNotReadyBlocked)?' · SOURCE NOT READY '+N(f.sourceNotReadyBlocked):'')+'</div></div>';
+ return '<div class="contrarianCard"><div class="contrarianTop"><div><b>⚡ GMGN 1M ≥ +99.000% · &lt;120S · 4M</b><div class="ms">Exakter Strategy-Contract · keine Live-Orders</div></div><span>SHADOW_ONLY</span></div>'+
+ '<div class="contrarianGrid"><div class="contrarianMetric"><span>OPEN</span><b>'+N(wallet?.openPositions)+'</b></div><div class="contrarianMetric"><span>CLOSED</span><b>'+N(wallet?.closedTrades)+'</b></div><div class="contrarianMetric"><span>WINRATE</span><b>'+((wallet?.winRate==null)?'—':MPCT(wallet.winRate))+'</b></div><div class="contrarianMetric"><span>FIXED HOLD</span><b>240s</b></div></div>'+
+ '<div class="contrarianRules"><div class="ml">ENTRY</div><div class="ms">Exact GMGN Trends · 1m · angezeigte Performance ≥ +99.000% · Pair-Alter strikt &lt;120s → sofortiger Shadow-Entry. Market Cap ist kein Gate.</div></div>'+
  funnel+
- '<div class="contrarianRules"><div class="ml">SIZING · GLEICHZEITIG</div><div class="contrarianGrid">'+scenarios+'</div></div>'+
- '<div class="contrarianRules"><div class="ml">HOLD-LAB</div><div class="ms">Kein Verlust-Exit in den ersten 3 Minuten. Danach werden 5m, 10m und Runner bis max. 60m parallel verglichen.</div>'+bestBox+'</div>'+
- '<div class="contrarianRules"><div class="ml">EXIT-LERNEN</div><div class="contrarianGrid"><div class="contrarianMetric"><span>MARKIERT</span><b>'+N(xl?.samples)+'/20</b></div><div class="contrarianMetric"><span>PROFIT REICHT</span><b>'+N(xl?.profitEnough?.samples)+'</b></div><div class="contrarianMetric"><span>MC ZU KLEIN</span><b>'+N(xl?.marketCapTooSmall?.samples)+'</b></div><div class="contrarianMetric"><span>REGEL</span><b class="'+(xl?.ruleProposalReady?'good':'')+'">'+(xl?.ruleProposalReady?'PRÜFEN':'GESPERRT')+'</b></div></div></div>'+
- '<div class="contrarianNote">Preis/Leistung berücksichtigt Gebühren plus einen heuristischen Liquiditäts-Price-Impact. BIGGJ trennt beste Kapital-Effizienz vom höchsten absoluten PnL. +10 SOL bleibt nur Vergleichsmarke. canExecuteLive:false.</div></div>'
+ '<div class="contrarianRules"><div class="ml">PRIMARY EXIT</div><div class="ms">Exit-Anfrage exakt 240 Sekunden nach Entry. Realized PnL wird nur gebucht, wenn frische Same-Pool-Liquidität den modellierten Verkauf stützt. Bei bestätigtem Liquiditäts-Tod: sofort schließen, Zero-Recovery-Write-off.</div></div>'+
+ '<div class="contrarianRules"><div class="ml">SIZING RESEARCH · NICHT ENTRY-GATE</div><div class="contrarianGrid">'+scenarios+'</div>'+sizingGuide+'</div>'+
+ '<div class="contrarianRules"><div class="ml">SECONDARY HOLD RESEARCH</div><div class="ms">5m/10m/Runner-Vergleiche sind nur Gegenfaktual-Forschung; sie verändern den primären 240s-Trade nicht.</div>'+bestBox+'</div>'+
+ '<div class="contrarianNote">Legacy-Market-Cap-Trades sind separat und fließen nicht in diese Winrate/PnL-Auswertung ein. SHADOW_ONLY · canExecuteLive:false.</div></div>'
 }
 
 function w6ResearchAnalysisCard(){
