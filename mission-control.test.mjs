@@ -89,6 +89,7 @@ test('W6 runtime follows the exact GMGN 1m +99k% rule and does not use market ca
   assert.ok(source.includes("minMarketCapUsd:null"));
   assert.ok(source.includes('minGreenChangePct:99_000'));
   assert.ok(source.includes('requireExactGmgnGreen:true'));
+  assert.ok(source.includes('requireNewPair:true'));
   assert.ok(source.includes('FIRST_OBSERVED_EXACT_GMGN_1M_PERCENT_GTE_99K_NOT_EXACT_HISTORICAL_CROSSING_TIME'));
   assert.ok(source.includes('effectiveMinMarketCapUsd:null'));
   assert.ok(source.includes('effectiveMinGmgn1mChangePct:99000'));
