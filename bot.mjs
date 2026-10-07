@@ -731,6 +731,11 @@ const memecoinEarlyProvider=createMemecoinEarlyRadarProvider({
   gmgnTrendMinPriceChangePct:null,
   gmgnApiKey:String(process.env.TCX_GMGN_API_KEY||process.env.GMGN_API_KEY||'gmgn_solbscbaseethmonadtron').trim(),
   gmgnPublicEnabled:String(process.env.TCX_GMGN_PUBLIC_ENABLED||'0')==='1',
+  // Free/demo GMGN bucket is 5/5. Trenches costs weight 2, token/info
+  // costs weight 1. Five paced token-info samples per 5s cycle stay below
+  // sustained throughput while the existing cooldown remains the hard brake.
+  gmgnTokenInfoSamplePerCycle:Math.max(1,Math.min(5,Number(process.env.TCX_W6_GMGN_TOKEN_INFO_SAMPLES_PER_CYCLE||5))),
+  gmgnRequestGapMs:Math.max(350,Math.min(1000,Number(process.env.TCX_W6_GMGN_REQUEST_GAP_MS||450))),
   networks:String(process.env.TCX_MEMECOIN_NETWORKS||'solana,base,ethereum').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
   pairLookupLimit:Math.max(4,Math.min(16,Number(process.env.TCX_MEMECOIN_PAIR_LOOKUP_LIMIT||10)))
 });
