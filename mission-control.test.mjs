@@ -92,6 +92,8 @@ test('W6 runtime follows the exact GMGN 1m +99k% rule and does not use market ca
   assert.ok(source.includes('FIRST_OBSERVED_EXACT_GMGN_1M_PERCENT_GTE_99K_NOT_EXACT_HISTORICAL_CROSSING_TIME'));
   assert.ok(source.includes('effectiveMinMarketCapUsd:null'));
   assert.ok(source.includes('effectiveMinGmgn1mChangePct:99000'));
+  assert.ok(source.includes("gmgn_solbscbaseethmonadtron"));
+  assert.ok(source.includes("gmgnTrendOrderBy:String(process.env.TCX_W6_GMGN_TREND_ORDER_BY||'creation_timestamp')"));
 });
 
 test('mission-control exposes W6 descriptive exit learner without automatic policy mutation',()=>{
