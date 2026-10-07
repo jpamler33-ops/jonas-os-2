@@ -376,6 +376,62 @@ test('W6 batches demo-key token-info sampling instead of serially amplifying pro
   assert.equal(out.canExecuteLive,false);
 });
 
+test('W6 demo sampler backs down after live token-info 429 instead of repeating the theoretical max',async()=>{
+  let now=2_104_800_000_000;
+  let tokenInfoCalls=0;
+  const json=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
+  const launches=Array.from({length:5},(_,i)=>({
+    address:'ADAPT'+i,symbol:'A'+i,name:'Adaptive '+i,price:'0.001',
+    usd_market_cap:'10000',liquidity:'8000',
+    created_timestamp:Math.floor((now-60_000)/1000)
+  }));
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+      return json({code:0,data:{new_creation:launches.map(x=>({...x,created_timestamp:Math.floor((now-60_000)/1000)}))}});
+    }
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
+      tokenInfoCalls++;
+      const address=u.searchParams.get('address');
+      if(tokenInfoCalls===3){
+        return {
+          ok:false,status:429,
+          headers:{get:name=>String(name).toLowerCase()==='x-ratelimit-reset'?String(Math.floor((now+1000)/1000)):null},
+          json:async()=>({code:429,error:'RATE_LIMIT_EXCEEDED',reset_at:Math.floor((now+1000)/1000)})
+        };
+      }
+      return json({address,price:{price:'0.001',price_1m:'0.000001'}});
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/')){
+      const addresses=decodeURIComponent(u.pathname.split('/').pop()).split(',');
+      return json(addresses.map(address=>({
+        chainId:'solana',pairAddress:'POOL_'+address,dexId:'pump',
+        baseToken:{address,symbol:address,name:address},quoteToken:{symbol:'SOL'},
+        priceUsd:'0.001',liquidity:{usd:9000},volume:{m5:100,h1:100,h24:100},
+        txns:{m5:{buys:2,sells:0},h1:{buys:2,sells:0}},priceChange:{m5:1,h1:1},
+        marketCap:10000,fdv:10000,pairCreatedAt:now-60_000
+      })));
+    }
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],gmgnRequestGapMs:0,gmgnTokenInfoSamplePerCycle:3,
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,gmgnTrendCacheMs:1,now:()=>now
+  });
+  const first=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(tokenInfoCalls,3);
+  assert.equal(first.gmgnTokenInfoActiveBudget,2);
+  assert.equal(first.gmgnTokenInfoCleanCycles,0);
+  assert.equal(first.gmgnRateLimit.active,true);
+
+  now+=25_000;
+  const second=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(tokenInfoCalls,5,'next clean cycle must use the backed-down budget of two');
+  assert.equal(second.gmgnTokenInfoActiveBudget,2);
+  assert.equal(second.gmgnTokenInfoCleanCycles,1);
+  assert.equal(second.canExecuteLive,false);
+});
+
 test('W6 stops all exact GMGN follow-up requests during authoritative 429 cooldown',async()=>{
   let now=2_105_000_000_000;
   const calls=[];
