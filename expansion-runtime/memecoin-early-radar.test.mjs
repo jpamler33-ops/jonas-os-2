@@ -178,6 +178,41 @@ test('W6 joins exact GMGN New Pair identity with exact GMGN 1m change rank by to
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
 });
 
+test('W6 stops all exact GMGN follow-up requests during authoritative 429 cooldown',async()=>{
+  let now=2_105_000_000_000;
+  const calls=[];
+  const ok=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
+  const limited=()=>({
+    ok:false,status:429,
+    headers:{get:name=>String(name).toLowerCase()==='x-ratelimit-reset'?String(Math.floor((now+60_000)/1000)):null},
+    json:async()=>({code:429,error:'RATE_LIMIT_BANNED',reset_at:Math.floor((now+60_000)/1000)})
+  });
+  const fetchImpl=async url=>{
+    calls.push(String(url));
+    const u=new URL(url);
+    if(u.hostname==='openapi.gmgn.ai')return limited();
+    if(u.hostname==='api.geckoterminal.com')return ok({data:[],included:[]});
+    if(u.hostname==='api.dexscreener.com')return ok([]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],gmgnApiKey:'shared-demo-key',gmgnPublicEnabled:false,
+    gmgnRequestGapMs:0,ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const first=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(calls.filter(x=>x.includes('openapi.gmgn.ai')).length,1);
+  assert.equal(calls.some(x=>x.includes('/v1/market/rank')),false);
+  assert.equal(first.exactGmgn,false);
+  assert.equal(first.gmgnRateLimit.active,true);
+  assert.ok(first.gmgnRateLimit.until>now);
+  now+=5_000;
+  const before=calls.filter(x=>x.includes('openapi.gmgn.ai')).length;
+  const second=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(calls.filter(x=>x.includes('openapi.gmgn.ai')).length,before);
+  assert.equal(second.gmgnRateLimit.active,true);
+  assert.equal(second.canExecuteLive,false);
+});
+
 test('W6 keeps GMGN discovery unfiltered and applies green threshold downstream',async()=>{
   const now=2_110_000_000_000;
   const json=data=>({ok:true,status:200,json:async()=>data});
