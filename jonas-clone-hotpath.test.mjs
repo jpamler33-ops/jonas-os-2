@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {applyJonasCloneSnapshot} from './jonas-clone-v1-integration.mjs';
-import {createSpecialistWalletState,saveSpecialistWalletState,loadSpecialistWalletState,WALLET_6_USER_99K_60S as W6} from './shadow-specialist-wallets.mjs';
+import {createSpecialistWalletState,saveSpecialistWalletState,loadSpecialistWalletState,specialistWalletSummary,WALLET_6_USER_99K_60S as W6} from './shadow-specialist-wallets.mjs';
 
 const now=1700000000000;
 const row={
@@ -20,6 +20,7 @@ test('production adapter opens only exact GMGN 1m >=99k% and market cap is irrel
   const original=createSpecialistWalletState(),x=apply(original,[row]),p=x.state.wallets[W6].positions[0];
   assert.equal(x.results.opened,1);
   assert.equal(p.strategyVersion,'JONAS_CLONE_V1');
+  assert.equal(p.strategyContract,'GMGN_NEW_PAIR_1M_GREEN_99K_HOLD_4M_V1');
   assert.equal(p.entryThresholdMode,'GMGN_GREEN_PERCENT');
   assert.equal(p.entryGreenPercent,100000);
   assert.equal(p.entryMarketCapUsd,5000);
@@ -120,12 +121,22 @@ test('confirmed liquidity death closes immediately with zero recovery before 4m'
   assert.equal(closed.jonasClone.liquidityDeath.observedAt,now+100000);
 });
 
-test('legacy W6 positions remain legacy and are not forced into the clone 240s exit',()=>{
+test('pre-correction market-cap JONAS positions are legacy and never forced into the new 240s contract',()=>{
   const state=structuredClone(createSpecialistWalletState());
-  state.wallets[W6].positions.push({walletId:W6,positionKey:'legacy',chainId:'solana',tokenAddress:'OLD',entryPrice:1,lastPrice:1,openedAt:now-300000,exposureQuote:100,marginQuote:100,status:'OPEN',side:'LONG',strategyVersion:'LEGACY'});
-  const x=apply(state,[{...row,tokenAddress:'OLD',symbol:'OLD',w6TrackingOnly:true,priceUsd:1.1,liquidityUsd:20000,pairAddress:'OLDPOOL'}]);
+  state.wallets[W6].positions.push({
+    walletId:W6,positionKey:'legacy',chainId:'solana',tokenAddress:'OLD',
+    entryPrice:1,lastPrice:1,openedAt:now-300000,exposureQuote:100,marginQuote:100,
+    initialExposureQuote:100,initialMarginQuote:100,status:'OPEN',side:'LONG',
+    strategy:'JONAS_CLONE_V1',strategyVersion:'JONAS_CLONE_V1',
+    entryThresholdMode:'MARKET_CAP_USD',entryMarketCapUsd:120000,
+    entryLiquidityUsd:20000,entryPoolAddress:'OLDPOOL',entryDexId:null
+  });
+  const x=apply(state,[{...row,tokenAddress:'OLD',symbol:'OLD',w6TrackingOnly:true,priceUsd:1.1,liquidityUsd:20000,pairAddress:'OLDPOOL'}],now+300000);
   assert.equal(x.state.wallets[W6].positions.length,1);
-  assert.equal(x.state.wallets[W6].positions[0].strategyVersion,'LEGACY');
-  assert.equal(x.state.wallets[W6].positions[0].jonasClone,undefined);
   assert.equal(x.state.wallets[W6].closed.length,0);
+  const summary=specialistWalletSummary(x.state,{asOf:now+300000}).wallets[W6];
+  assert.equal(summary.strategy.openPositions,0);
+  assert.equal(summary.legacy.openPositions,1);
+  assert.equal(summary.strategy.active.length,0);
+  assert.equal(summary.legacy.active[0].entryThresholdMode,'MARKET_CAP_USD');
 });
