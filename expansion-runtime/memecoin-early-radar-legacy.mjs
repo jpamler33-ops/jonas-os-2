@@ -999,22 +999,35 @@ export function createMemecoinEarlyRadarProvider({
             if(distanceA!==distanceB)return distanceA-distanceB;
             if(!aNever&&aa!==ba)return aa-ba;
             return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
-          }).slice(0,gmgnTokenInfoSamples);
-          for(const pool of eligibleForInfo){
-            if(gmgnRateLimitActive())break;
+          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,4):gmgnTokenInfoSamples);
+          // Never serialize several potentially slow GMGN token-info calls.
+          // With the public demo bucket, one new_creation request + at most four
+          // token-info requests stays within the documented 5-request burst.
+          // One pacing gap protects the bucket, then the bounded batch runs
+          // concurrently so a single slow provider response cannot push W6
+          // through the unchanged 30s outer timeout.
+          if(eligibleForInfo.length&&!gmgnRateLimitActive()){
             if(gmgnGapMs>0)await new Promise(resolve=>setTimeout(resolve,gmgnGapMs));
-            const key=tokenKey('solana',pool?.tokenAddress);
-            try{
-              const infoPerf=await gmgnTokenInfoOneMinuteSolana(pool?.tokenAddress,{force:false});
-              gmgnTokenInfoObserved.set(key,{at:Number(now()),value:infoPerf});
-            }catch(err){
-              const message=err instanceof Error?err.message:String(err);
-              gmgnTokenInfoObserved.set(key,{at:Number(now()),error:message});
+            const sampledAt=Number(now());
+            const settled=await Promise.allSettled(eligibleForInfo.map(pool=>
+              gmgnTokenInfoOneMinuteSolana(pool?.tokenAddress,{force:false})
+            ));
+            for(let i=0;i<settled.length;i++){
+              const pool=eligibleForInfo[i];
+              const key=tokenKey('solana',pool?.tokenAddress);
+              const result=settled[i];
+              if(result.status==='fulfilled'){
+                gmgnTokenInfoObserved.set(key,{at:Number(now()),value:result.value});
+                continue;
+              }
+              const message=result.reason instanceof Error?result.reason.message:String(result.reason);
+              gmgnTokenInfoObserved.set(key,{at:sampledAt,error:message});
               if(/HTTP_429|GMGN_RATE_LIMIT_COOLDOWN/.test(message)){
                 gmgnRateLimitedThisCycle=true;
                 gmgnOneMinuteError=message;
-                errors.push('gmgn:openapi:solana:token-info:1m:'+message);
-                break;
+                if(!errors.some(x=>String(x).startsWith('gmgn:openapi:solana:token-info:1m:'))){
+                  errors.push('gmgn:openapi:solana:token-info:1m:'+message);
+                }
               }
             }
           }
