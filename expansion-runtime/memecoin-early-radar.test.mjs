@@ -235,6 +235,51 @@ test('W6 public demo key derives exact 1m percent only from GMGN token-info pric
   assert.equal(out.canExecuteLive,false);
 });
 
+test('W6 demo-key sampler spends scarce token-info quota closest to one-minute pair age',async()=>{
+  const now=2_103_500_000_000;
+  const json=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
+  const launches=[
+    {address:'AGE20',symbol:'A20',price:'0.001',usd_market_cap:'10000',liquidity:'8000',created_timestamp:Math.floor((now-20_000)/1000)},
+    {address:'AGE60',symbol:'A60',price:'0.001',usd_market_cap:'10000',liquidity:'8000',created_timestamp:Math.floor((now-60_000)/1000)},
+    {address:'AGE115',symbol:'A115',price:'0.001',usd_market_cap:'10000',liquidity:'8000',created_timestamp:Math.floor((now-115_000)/1000)}
+  ];
+  const tokenInfoCalls=[];
+  const fetchImpl=async url=>{
+    const u=new URL(url);
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+      return json({code:0,data:{new_creation:launches}});
+    }
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
+      tokenInfoCalls.push(u.searchParams.get('address'));
+      return json({address:u.searchParams.get('address'),price:{price:'0.001',price_1m:'0.000001'}});
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/')){
+      const addresses=decodeURIComponent(u.pathname.split('/').pop()).split(',');
+      return json(addresses.map(address=>({
+        chainId:'solana',pairAddress:'POOL_'+address,dexId:'pump',
+        baseToken:{address,symbol:address,name:address},quoteToken:{symbol:'SOL'},
+        priceUsd:'0.001',liquidity:{usd:9000},volume:{m5:100,h1:100,h24:100},
+        txns:{m5:{buys:2,sells:0},h1:{buys:2,sells:0}},priceChange:{m5:1,h1:1},
+        marketCap:10000,fdv:10000,pairCreatedAt:now-60_000
+      })));
+    }
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],gmgnRequestGapMs:0,gmgnTokenInfoSamplePerCycle:1,
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.deepEqual(tokenInfoCalls,['AGE60']);
+  assert.equal(out.gmgnTokenInfoTargetAgeSeconds,60);
+  assert.equal(out.gmgnTokenInfoMinSampleAgeSeconds,50);
+  assert.equal(out.gmgnTokenInfoResampleSeconds,20);
+  const measured=out.rows.find(x=>x.tokenAddress==='AGE60');
+  assert.ok(measured);
+  assert.equal(measured.gmgnExactOneMinutePerformance,true);
+  assert.ok(measured.gmgnDisplayedChangePct>=99000);
+});
+
 test('W6 never drops an exact GMGN 1m match behind either 30-row selection cap',async()=>{
   const now=2_104_000_000_000;
   const json=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
