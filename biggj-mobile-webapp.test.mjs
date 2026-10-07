@@ -269,7 +269,7 @@ test('meme wallet mirrors the premium mockup structure and binds only live shado
   for(const text of ['Meme Wallet','Early Meme Scout','SHADOW_ONLY','LIVE DATA','NO REAL ORDERS · PAPER ONLY','Unrealized PnL','Realized PnL','Total PnL','ROI auf Einsatz','Gesamt reingeflossen','Performance Overview','Open Positions','Security Outcome Lab','PASS Holder Fallback','PASS Native','ABSTAIN','UNKNOWN'])assert.match(h,new RegExp(text));
   assert.match(h,/data-meme-wallet="W4_MEME_SCOUT"/);
   assert.match(h,/data-meme-wallet="W6_USER_99K_60S"/);
-  assert.match(h,/99K IN &lt;120S/);
+  assert.match(h,/GMGN 1M ≥ \+99K% · &lt;120S · 4M/);
   assert.match(h,/HOLD-LAB/);
   assert.match(h,/3 Minuten/);
   assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
