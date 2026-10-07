@@ -270,12 +270,13 @@ test('meme wallet mirrors the premium mockup structure and binds only live shado
   assert.match(h,/data-meme-wallet="W4_MEME_SCOUT"/);
   assert.match(h,/data-meme-wallet="W6_USER_99K_60S"/);
   assert.match(h,/GMGN 1M ≥ \+99K% · &lt;120S · 4M/);
-  assert.match(h,/HOLD-LAB/);
-  assert.match(h,/3 Minuten/);
+  assert.match(h,/PRIMARY EXIT/);
+  assert.match(h,/240 Sekunden/);
+  assert.match(h,/Market Cap ist kein Gate/);
   assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
   assert.match(h,/REALISTISCH MAX/);
-  assert.match(h,/EXIT-LERNEN/);
-  assert.match(h,/ruleProposalReady/);
+  assert.match(h,/SECONDARY HOLD RESEARCH/);
+  assert.match(h,/Legacy-Market-Cap-Trades sind separat/);
   assert.match(h,/data-meme-range="7D"/);
   assert.match(h,/MEME_PANEL='positions'/);
   assert.match(h,/Gesamt reingeflossen/);
