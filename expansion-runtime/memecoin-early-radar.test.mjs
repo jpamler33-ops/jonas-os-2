@@ -178,6 +178,63 @@ test('W6 joins exact GMGN New Pair identity with exact GMGN 1m change rank by to
   assert.equal(calls.filter(x=>x.url.includes('/tokens/v1/solana/')).length,1);
 });
 
+test('W6 public demo key derives exact 1m percent only from GMGN token-info prices',async()=>{
+  const now=2_103_000_000_000;
+  const calls=[];
+  const json=data=>({ok:true,status:200,headers:{get:()=>null},json:async()=>data});
+  const fetchImpl=async (url,opts={})=>{
+    calls.push({url:String(url),opts});
+    const u=new URL(url);
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+      return json({code:0,data:{new_creation:[{
+        address:'DEMOMINT',symbol:'DEMO',name:'Demo Meme',price:'0.001',
+        usd_market_cap:'10000',liquidity:'8000',
+        created_timestamp:Math.floor((now-40_000)/1000)
+      }]}});
+    }
+    if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
+      assert.equal(u.searchParams.get('chain'),'sol');
+      assert.equal(u.searchParams.get('address'),'DEMOMINT');
+      return json({
+        address:'DEMOMINT',symbol:'DEMO',
+        price:{price:'0.001',price_1m:'0.000001'}
+      });
+    }
+    if(u.hostname==='api.dexscreener.com'&&u.pathname.startsWith('/tokens/v1/solana/'))return json([{
+      chainId:'solana',pairAddress:'DEMOPOOL',dexId:'pump',
+      baseToken:{address:'DEMOMINT',symbol:'DEMO',name:'Demo Meme'},quoteToken:{symbol:'SOL'},
+      priceUsd:'0.001',liquidity:{usd:9000},volume:{m5:100,h1:100,h24:100},
+      txns:{m5:{buys:2,sells:0},h1:{buys:2,sells:0}},priceChange:{m5:1,h1:1},
+      marketCap:10000,fdv:10000,pairCreatedAt:now-40000
+    }]);
+    throw new Error('unexpected '+url);
+  };
+  const p=createMemecoinEarlyRadarProvider({
+    fetchImpl,networks:['solana'],
+    gmgnRequestGapMs:0,gmgnTokenInfoSamplePerCycle:3,
+    ultraGeckoCacheMs:1,ultraDexCacheMs:1,now:()=>now
+  });
+  const out=await p.fetchUltraEarlySolana({force:true,maxAgeSeconds:120});
+  assert.equal(calls.some(x=>x.url.includes('/v1/market/rank')),false);
+  assert.equal(calls.filter(x=>x.url.includes('/v1/token/info')).length,1);
+  assert.equal(out.source,'GMGN_OPENAPI_NEW_CREATION_1M');
+  assert.equal(out.exactGmgn,true);
+  assert.equal(out.rows.length,1);
+  assert.equal(out.rows[0].signalNewPair,true);
+  assert.equal(out.rows[0].gmgnExactTrend,true);
+  assert.equal(out.rows[0].gmgnExactNewPair,true);
+  assert.equal(out.rows[0].gmgnExactOneMinutePerformance,true);
+  assert.equal(out.rows[0].gmgnOneMinutePerformanceSource,'GMGN_OPENAPI_TOKEN_INFO_PRICE_1M');
+  assert.equal(out.rows[0].gmgnCurrentPriceUsd,0.001);
+  assert.equal(out.rows[0].gmgnOneMinuteStartPriceUsd,0.000001);
+  assert.ok(Math.abs(out.rows[0].gmgnDisplayedChangePct-99900)<1e-9);
+  assert.ok(Math.abs(out.rows[0].priceChangeSelectedPct-99900)<1e-9);
+  assert.equal(out.gmgnOneMinuteMatchedNewPairs,1);
+  assert.equal(out.gmgnOneMinuteCoverage,1);
+  assert.equal(out.gmgnTokenInfoObserved,1);
+  assert.equal(out.canExecuteLive,false);
+});
+
 test('W6 stops all exact GMGN follow-up requests during authoritative 429 cooldown',async()=>{
   let now=2_105_000_000_000;
   const calls=[];
