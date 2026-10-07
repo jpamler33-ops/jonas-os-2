@@ -20,7 +20,7 @@ function setup({newPool=false,profile=false,missingCap=false,secondPool=false}={
   if(u.pathname.startsWith('/tokens/v1/solana/'))return json([pair('FAST',secondPool?start-5000:start-25000,{marketCap:missingCap?null:120000})]);
   throw new Error('unexpected '+url);
  };
- const provider=createMemecoinEarlyRadarProvider({fetchImpl,gmgnPublicEnabled:false,now:()=>now,ultraDexCacheMs:5000,ultraGeckoCacheMs:30000});
+ const provider=createMemecoinEarlyRadarProvider({fetchImpl,gmgnApiKey:'',gmgnPublicEnabled:false,now:()=>now,ultraDexCacheMs:5000,ultraGeckoCacheMs:30000});
  return {provider,calls,setNow:t=>{now=t;}};
 }
 test('Dex latest boosts preserve discovery during Gecko 429 but cannot impersonate exact GMGN',async()=>{
@@ -95,8 +95,9 @@ test('exact GMGN New Pair result returns before hung optional multifeed discover
  assert.equal(snapshot.source,'GMGN_OPENAPI_NEW_CREATION_1M');
  assert.equal(snapshot.rows[0].tokenAddress,'EXACT');
  assert.equal(snapshot.feedStatus.optionalDiscovery.awaited,false);
+ assert.equal(snapshot.feedStatus.optionalDiscovery.started,false);
  assert.equal(snapshot.feedStatus.optionalDiscovery.reason,'EXACT_GMGN_READY');
- assert.ok(optionalCalls>=1,'optional discovery should start concurrently');
+ assert.equal(optionalCalls,0,'optional free feeds must not start in GMGN-configured W6 hotpath');
  assert.ok(elapsed<200,'exact GMGN should not wait for optional feed deadlines');
  assert.equal(snapshot.canExecuteLive,false);
 });
