@@ -5,7 +5,7 @@ import {BIGGJ_MOBILE_WEBAPP_VERSION,biggjWebManifest,biggjAppIconSvg,biggjServic
 
 const sample={generatedAt:1_800_000_000_000,biggj:{science:{frontier:{evidence:294,experiments:3}},worldModel:{markets:[{symbol:'BTCUSDT',status:'VALID',regime:'TREND',witnessAgreement:.8,support:12,score:.76,price:67842.31,priceChangePercent:1.84,priceChange:1226.4,openPrice:66615.91,highPrice:68410,lowPrice:66102,quoteVolume:38200000000}]}},health:{autonomousOperator:{mode:'HANDS_OFF',operatorNeeded:false},biggjObservability:{maturityIndex:.62,trustedSkills:3,totalSkillNodes:12,observedForecasts:44,runtimeRevision:9,evidence:{evidenceTotal:120,validationIndependentEpisodes:18},learningTimeline:{last24h:{total:7},last7d:{total:29},events:[{title:'Regime transfer checked',detail:'OOS evidence advanced'}]},researchQueue:[{title:'Liquidity transfer',nextGate:'FORWARD_SHADOW'}]},biggjProofFeed:{counts:{resolved:20}},marketRadar:{rows:[{symbol:'ETHUSDT',status:'SUPPORTED',regime:'RANGE',witnessAgreement:.7,support:8,score:.61}]}},portfolio:{equityQuote:1012,netPnlQuote:12,openPositions:1,closedTrades:3,positions:[],recentClosed:[]}};
 
-test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V21_W6_ENTRY_FUNNEL');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
+test('standalone PWA',()=>{const m=JSON.parse(biggjWebManifest());assert.equal(BIGGJ_MOBILE_WEBAPP_VERSION,'BIGGJ_USER_COMMAND_CENTER_V23_W6_TRADING_FLOOR');assert.equal(m.start_url,'/mission-control');assert.equal(m.display,'standalone');assert.match(biggjAppIconSvg(),/^<svg/)});
 test('five user surfaces include the dedicated meme wallet',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['today','markets','progress','trading','meme'])assert.match(h,new RegExp('data-tab="'+x+'"'));for(const x of ['science','world','lab','decisions','system'])assert.doesNotMatch(h,new RegExp('data-tab="'+x+'"'));assert.match(h,/BIGGJ ARBEITET FÜR DICH/);assert.match(h,/BIGGJ DISCOVERY JOURNAL/);assert.match(h,/env\(safe-area-inset-bottom\)/)});
 test('market terminal exposes price performance OHLC and SuperChart',()=>{const h=renderBiggjMobileApp(sample);for(const x of ['HIGH 24H','LOW 24H','VOLUME','LIVE TICKER','data-chart-symbol','data-chart-interval','data-chart-mode','data-chart-fullscreen'])assert.match(h,new RegExp(x));assert.match(h,/PRICE\(m\.price\)/);assert.match(h,/pct\.toFixed\(2\)/);assert.match(h,/\/superchart\.png\?/);assert.match(h,/STRUCTURE · TREND PHASES · FORECAST · LIQUIDITY · EVENTS/);assert.match(h,/terminal\.fullscreen/);assert.match(h,/fullscreen:false/);assert.match(h,/CHART\.fullscreen=!CHART\.fullscreen/);assert.match(h,/TAB==='markets'&&CHART\.fullscreen/);assert.match(h,/30000/)});
 test('market terminal exposes persistent multi-scale trend boxes and forecast-per-phase controls',()=>{
@@ -109,7 +109,7 @@ test('base mobile trading view exposes research activity without mission-control
   for(const text of ['PRIMARY +','Research Trading','Research Open','Research Closed','Wallet Research Manager','Zahlenschloss','Control','Experiment','RATCHET STATUS','Discovery Pipeline','Aktueller Blocker','Runtime Gates','Aktive Research Positionen']) assert.match(h,new RegExp(text));
   assert.match(h,/PF /);
   assert.match(h,/Expectancy \+ Profit Factor \+ Stabilität/);
-  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V21_W6_ENTRY_FUNNEL'/);
+  assert.match(h,/APP_VERSION='BIGGJ_USER_COMMAND_CENTER_V23_W6_TRADING_FLOOR'/);
   assert.match(h,/next\?\.appVersion&&next\.appVersion!==APP_VERSION/);
 });
 
@@ -318,6 +318,37 @@ test('mobile command center surfaces world-model mode and the same memecoin BUY 
   assert.match(h,/memeSignal/);
 });
 
+
+
+test('W6 trading floor is truth-first, liquidity-aware and shadow-only',()=>{
+  const h=renderBiggjMobileApp(sample);
+  for(const text of [
+    'W6 TRADING FLOOR','TRUTH-FIRST','ACTIVE AGENTS','REALIZED','EXEC OPEN','AT RISK','CUMULATIVE USED',
+    'EXECUTABLE COVERAGE','LIQUIDITY DEAD','STALE MARKS','LEGACY EXCLUDED',
+    'Observed Mark','SIZE / HOLD LAB','W6 ACTIVITY / SETTLEMENT','GMGN New Pair'
+  ])assert.match(h,new RegExp(text));
+  assert.match(h,/let MEME_WALLET='W6_USER_99K_60S'/);
+  assert.match(h,/executableUnrealizedNetPnlQuote/);
+  assert.match(h,/conservativeUnrealizedNetPnlQuote/);
+  assert.match(h,/realizableRealizedNetPnlQuote/);
+  assert.match(h,/executionPnlExecutable/);
+  assert.match(h,/liquidityDead/);
+  assert.match(h,/targetHoldSeconds/);
+  assert.match(h,/entryGreenPercent/);
+  assert.match(h,/entryNotionalSol/);
+  assert.match(h,/SHADOW_ONLY/);
+  assert.match(h,/canExecuteLive:false/);
+  assert.doesNotMatch(h,/canExecuteLive:true/);
+});
+
+test('W6 trading floor never labels observed mark PnL as realized payout',()=>{
+  const h=renderBiggjMobileApp(sample);
+  assert.match(h,/Observed Mark.*≠ auszahlbarer Gewinn/);
+  assert.match(h,/Headline\/Realized basiert auf konservativer bzw\. liquiditätsgedeckter Exit-Modellierung/);
+  assert.match(h,/UNVERIFIED/);
+  assert.match(h,/WRITE-OFF/);
+  assert.match(h,/MODELLED_LIQUIDITY_BACKED_EXIT|settlementStatus/);
+});
 
 test('research spine is visible in the discovery view',()=>{
   const h=renderBiggjMobileApp({version:'X',appVersion:BIGGJ_MOBILE_WEBAPP_VERSION,health:{biggjResearchSpine:{summary:{layers:11,ready:7,degraded:3,collecting:1,uniqueModuleReferences:60},researchLoop:'REALITY -> EVIDENCE -> FEATURES',layers:[{id:'L0_REALITY',canonicalLayer:'REALITY',label:'Reality / Raw Data',purpose:'Point-in-time observations only.',moduleCount:7,inputs:[],outputs:[{to:'L1_TRUTH_EVIDENCE'}],runtime:{state:'READY'}}]}}});
