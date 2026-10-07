@@ -131,7 +131,7 @@ test('pre-correction market-cap JONAS positions are legacy and never forced into
     entryThresholdMode:'MARKET_CAP_USD',entryMarketCapUsd:120000,
     entryLiquidityUsd:20000,entryPoolAddress:'OLDPOOL',entryDexId:null
   });
-  const x=apply(state,[{...row,tokenAddress:'OLD',symbol:'OLD',w6TrackingOnly:true,priceUsd:1.1,liquidityUsd:20000,pairAddress:'OLDPOOL'}],now+300000);
+  const x=apply(state,[{...row,tokenAddress:'OLD',symbol:'OLD',w6TrackingOnly:true,priceUsd:1.1,marketCap:120000,liquidityUsd:20000,pairAddress:'OLDPOOL'}],now+300000);
   assert.equal(x.state.wallets[W6].positions.length,1);
   assert.equal(x.state.wallets[W6].closed.length,0);
   const summary=specialistWalletSummary(x.state,{asOf:now+300000}).wallets[W6];
