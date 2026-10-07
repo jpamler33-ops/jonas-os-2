@@ -387,6 +387,10 @@ function mergeCandidate(base={},extra={}){
     priceChangeM5:pick(extra.priceChangeM5,base.priceChangeM5),
     priceChangeH1:pick(extra.priceChangeH1,base.priceChangeH1),
     priceChangeSelectedPct:pick(extra.priceChangeSelectedPct,base.priceChangeSelectedPct),
+    gmgnDisplayedChangePct:pick(extra.gmgnDisplayedChangePct,base.gmgnDisplayedChangePct),
+    gmgnOneMinutePerformanceObservedAt:pick(extra.gmgnOneMinutePerformanceObservedAt,base.gmgnOneMinutePerformanceObservedAt),
+    gmgnOneMinutePerformanceSource:pick(extra.gmgnOneMinutePerformanceSource,base.gmgnOneMinutePerformanceSource),
+    gmgnExactOneMinutePerformance:Boolean(base.gmgnExactOneMinutePerformance||extra.gmgnExactOneMinutePerformance),
     marketCap:pick(extra.marketCap,base.marketCap),
     fdv:pick(extra.fdv,base.fdv),
     pairCreatedAt:pick(extra.pairCreatedAt,base.pairCreatedAt),
@@ -1045,7 +1049,17 @@ export function createMemecoinEarlyRadarProvider({
       if(created==null)return false;
       const age=Math.max(0,(capturedAt-created)/1000);
       return age<=maxAge;
-    }).sort((a,b)=>(finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0)).slice(0,30);
+    }).sort((a,b)=>{
+      // Never discard an exact GMGN 1m observation merely because >30 newer
+      // New-Pair rows arrived. Known 1m rows are the only rows that can satisfy
+      // the user's +99,000% entry rule, so they get first claim on the bounded
+      // enrichment window. Within that set, highest 1m performance first.
+      const ap=finite(a?.gmgnDisplayedChangePct??a?.priceChangeSelectedPct);
+      const bp=finite(b?.gmgnDisplayedChangePct??b?.priceChangeSelectedPct);
+      if((ap!=null)!==(bp!=null))return ap!=null?-1:1;
+      if(ap!=null&&bp!=null&&bp!==ap)return bp-ap;
+      return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
+    }).slice(0,30);
 
     const tracked=[...new Set((Array.isArray(trackTokenAddresses)?trackTokenAddresses:[]).map(x=>String(x||'').trim()).filter(Boolean))];
     const candidateMap=new Map();
@@ -1097,6 +1111,11 @@ export function createMemecoinEarlyRadarProvider({
         signalNewPair:pool?.signalNewPair===true,
         gmgnExactTrend:pool?.gmgnExactTrend===true,
         gmgnExactNewPair:pool?.gmgnExactNewPair===true,
+        gmgnDisplayedChangePct:finite(pool?.gmgnDisplayedChangePct??pool?.priceChangeSelectedPct),
+        priceChangeSelectedPct:finite(pool?.gmgnDisplayedChangePct??pool?.priceChangeSelectedPct),
+        gmgnOneMinutePerformanceObservedAt:finite(pool?.gmgnOneMinutePerformanceObservedAt),
+        gmgnOneMinutePerformanceSource:pool?.gmgnOneMinutePerformanceSource||null,
+        gmgnExactOneMinutePerformance:pool?.gmgnExactOneMinutePerformance===true,
         trendSource:text(pool?.trendSource||trendSource,80),
         trendRank:finite(pool?.trendRank),
         ultraEarly:true,
