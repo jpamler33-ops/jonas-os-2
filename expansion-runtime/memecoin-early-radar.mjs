@@ -96,7 +96,15 @@ export function createMemecoinEarlyRadarProvider(options={}){
       job.then(()=>{if(priorPending===job)priorPending=null;},()=>{if(priorPending===job)priorPending=null;});
     }
     const legacyJob=priorPending;
-    const priorResult=providerDeadline(()=>legacyJob,legacyMs,'W6_LEGACY_DISCOVERY')
+    const gmgnConfigured=String(options.gmgnApiKey??'gmgn_solbscbaseethmonadtron').trim()!=='';
+    // The exact GMGN provider already enforces per-request deadlines and the
+    // bot keeps its unchanged 30s W6 outer bound. A second 6s wrapper deadline
+    // can falsely downgrade a still-valid exact GMGN cycle to tracking-only,
+    // especially while token-info sampling is running. Bypass only that
+    // duplicate wrapper deadline when GMGN is configured.
+    const priorResult=(gmgnConfigured
+      ?Promise.resolve(legacyJob)
+      :providerDeadline(()=>legacyJob,legacyMs,'W6_LEGACY_DISCOVERY'))
       .then(value=>({value}),error=>({error}));
     const capturedAt=Number(nowFn());
     const maxAge=Math.max(60,Math.min(600,Number(args?.maxAgeSeconds)||180));
@@ -112,7 +120,6 @@ export function createMemecoinEarlyRadarProvider(options={}){
     // exact GMGN New Pair evidence, while the separate MEME radar already owns
     // Gecko/Dex discovery. Do not even start those optional feeds in the W6
     // hotpath when GMGN is configured.
-    const gmgnConfigured=String(options.gmgnApiKey??'gmgn_solbscbaseethmonadtron').trim()!=='';
     const optionalDiscovery=gmgnConfigured
       ?null
       :Promise.allSettled(sourceSpecs.map(([,url,ttl])=>cachedJson(url,ttl)));

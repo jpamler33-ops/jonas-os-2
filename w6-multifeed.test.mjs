@@ -65,6 +65,7 @@ test('exact GMGN New Pair result returns before hung optional multifeed discover
  const fetchImpl=async(url)=>{
   const u=new URL(url);
   if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/trenches'){
+   await new Promise(resolve=>setTimeout(resolve,120));
    return json({code:0,data:{new_creation:[{
     address:'EXACT',symbol:'EXACT',name:'Exact Meme',price:'0.001',
     liquidity:'20000',usd_market_cap:'120000',
@@ -86,7 +87,7 @@ test('exact GMGN New Pair result returns before hung optional multifeed discover
  };
  const provider=createMemecoinEarlyRadarProvider({
   fetchImpl,now:()=>start,gmgnApiKey:'gmgn_solbscbaseethmonadtron',gmgnPublicEnabled:false,
-  gmgnRequestGapMs:0,ultraDiscoveryTimeoutMs:250,ultraEnrichmentTimeoutMs:100,ultraLegacyTimeoutMs:1000
+  gmgnRequestGapMs:0,ultraDiscoveryTimeoutMs:250,ultraEnrichmentTimeoutMs:100,ultraLegacyTimeoutMs:50
  });
  const began=Date.now();
  const snapshot=await provider.fetchUltraEarlySolana({maxAgeSeconds:120});
@@ -98,7 +99,7 @@ test('exact GMGN New Pair result returns before hung optional multifeed discover
  assert.equal(snapshot.feedStatus.optionalDiscovery.started,false);
  assert.equal(snapshot.feedStatus.optionalDiscovery.reason,'EXACT_GMGN_READY');
  assert.equal(optionalCalls,0,'optional free feeds must not start in GMGN-configured W6 hotpath');
- assert.ok(elapsed<200,'exact GMGN should not wait for optional feed deadlines');
+ assert.ok(elapsed>=100&&elapsed<500,'exact GMGN should bypass the duplicate wrapper deadline but not optional feed deadlines');
  assert.equal(snapshot.canExecuteLive,false);
 });
 
