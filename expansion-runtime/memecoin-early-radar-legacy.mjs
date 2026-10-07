@@ -999,13 +999,13 @@ export function createMemecoinEarlyRadarProvider({
             if(distanceA!==distanceB)return distanceA-distanceB;
             if(!aNever&&aa!==ba)return aa-ba;
             return (finite(b?.pairCreatedAt)??0)-(finite(a?.pairCreatedAt)??0);
-          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,4):gmgnTokenInfoSamples);
+          }).slice(0,gmgnDemoKey?Math.min(gmgnTokenInfoSamples,3):gmgnTokenInfoSamples);
           // Never serialize several potentially slow GMGN token-info calls.
-          // With the public demo bucket, one new_creation request + at most four
-          // token-info requests stays within the documented 5-request burst.
-          // One pacing gap protects the bucket, then the bounded batch runs
-          // concurrently so a single slow provider response cannot push W6
-          // through the unchanged 30s outer timeout.
+          // With the public demo bucket, new_creation has weight 2 and each
+          // token/info read has weight 1. Cap the demo-key batch at three so
+          // the exact New-Pair + 1m read set fits the documented 5/5 bucket
+          // even before relying on refill timing. Paid/personal keys retain
+          // the configured sample count.
           if(eligibleForInfo.length&&!gmgnRateLimitActive()){
             if(gmgnGapMs>0)await new Promise(resolve=>setTimeout(resolve,gmgnGapMs));
             const sampledAt=Number(now());
