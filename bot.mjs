@@ -5586,6 +5586,7 @@ async function refreshW6UltraEarlyOnce(reason='periodic'){
       effectiveMinMarketCapUsd:null,
       effectiveMinGmgn1mChangePct:99000,
       requireExactGmgn1m:true,
+      requireExactGmgnNewPair:true,
       fixedHoldSeconds:240,
       candidateEvidence:currentW6UltraCandidates().slice(0,100).map(row=>({tokenAddress:row.tokenAddress,ageSeconds:(Date.now()-Number(row.pairCreatedAt))/1000,gmgn1mChangePct:row.gmgnDisplayedChangePct??row.priceChangeSelectedPct??null,marketCap:row.marketCap,liquidityUsd:row.liquidityUsd,exactGmgn:row.gmgnExactTrend===true,...row.w6LaunchTracker})),
       trackingRows:ultra.trackingRows||0,
