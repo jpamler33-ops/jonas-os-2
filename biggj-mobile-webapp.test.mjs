@@ -354,12 +354,13 @@ test('W6 webapp includes the evidence-gated research analyzer',()=>{
   assert.match(h,/keine automatische Regeländerung/);
 });
 
-test('W6 webapp shows expanded sizing and 60m runner lab',()=>{
+test('W6 webapp shows expanded sizing research while keeping the exact 240s primary contract',()=>{
   const h=renderBiggjMobileApp({health:{specialistWallets:{wallets:{W6_USER_99K_60S:{openPositions:0,closedTrades:0,active:[]}}},memecoinRadar:{user99k60s:{exitLearning:{samples:0}}}}});
   assert.match(h,/0\.5\/1\/2\/3\/5\/10\/20\/40\/60\/80 SOL/);
-  assert.match(h,/REALISTISCH MAX/);
-  assert.match(h,/Runner bis max\. 60m/);
-  assert.match(h,/Liquiditäts-Price-Impact/);
+  assert.match(h,/SIZING RESEARCH/);
+  assert.match(h,/SECONDARY HOLD RESEARCH/);
+  assert.match(h,/primären 240s-Trade nicht/);
+  assert.match(h,/PRIMARY EXIT/);
   assert.match(h,/ENTRY FUNNEL/);
-  assert.match(h,/≥99K NACH AGE/);
+  assert.match(h,/GMGN ≥\+99K%/);
 });
