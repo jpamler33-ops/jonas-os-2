@@ -26,7 +26,7 @@ export function applyJonasCloneSnapshot(state,snapshot,options={}){
     minGreenChangePct:99000,
     requireExactGmgnGreen:true,
     requireTrending:true,
-    requireNewPair:false,
+    requireNewPair:true,
     minHoldSeconds:240
   });
 }
