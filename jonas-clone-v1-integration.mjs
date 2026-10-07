@@ -25,7 +25,7 @@ export function applyJonasCloneSnapshot(state,snapshot,options={}){
     minMarketCapUsd:null,
     minGreenChangePct:99000,
     requireExactGmgnGreen:true,
-    requireTrending:true,
+    requireTrending:false,
     requireNewPair:true,
     minHoldSeconds:240
   });
