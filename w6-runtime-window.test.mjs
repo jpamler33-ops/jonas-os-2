@@ -10,7 +10,7 @@ function runtime(env={}){
 }
 test('runtime retains candidates through <120s and tracks exact GMGN 1m >=99k%, never market cap',()=>{
  const r=runtime({TCX_W6_ULTRA_CANDIDATE_KEEP_SECONDS:'75'}),birth=1700000000000;
- const base={chainId:'solana',tokenAddress:'TEST',pairCreatedAt:birth,marketCap:500000,gmgnExactTrend:true,gmgnTrendInterval:'1m',signalTrending:true,signalNewPair:true,gmgnDisplayedChangePct:50000,priceChangeSelectedPct:50000};
+ const base={chainId:'solana',tokenAddress:'TEST',pairCreatedAt:birth,marketCap:500000,gmgnExactTrend:true,gmgnExactNewPair:true,gmgnExactOneMinutePerformance:true,gmgnTrendInterval:'1m',signalTrending:true,signalNewPair:true,gmgnDisplayedChangePct:50000,priceChangeSelectedPct:50000};
  r.enrichW6UltraCandidateRows({capturedAt:birth+30000,trendInterval:'1m',rows:[base]});
  for(const age of [60,75,90,119.999])assert.equal(r.currentW6UltraCandidates(birth+age*1000).length,1);
  let x=r.enrichW6UltraCandidateRows({capturedAt:birth+60000,trendInterval:'1m',rows:[{...base,marketCap:999999999,gmgnDisplayedChangePct:98999,priceChangeSelectedPct:98999}]});
@@ -23,6 +23,18 @@ test('runtime retains candidates through <120s and tracks exact GMGN 1m >=99k%, 
  assert.equal(x.rows[0].w6LaunchTracker.marketCapThresholdUsd,null);
  assert.match(x.rows[0].w6LaunchTracker.observationSemantics,/GMGN_1M_PERCENT/);
  assert.equal(r.currentW6UltraCandidates(birth+181000).length,0);
+});
+
+test('retained exact GMGN New Pair provenance can record a later >=99k 1m crossing after page rotation',()=>{
+ const r=runtime(),birth=1700000000000;
+ const x=r.enrichW6UltraCandidateRows({capturedAt:birth+90000,trendInterval:'1m',rows:[{
+   chainId:'solana',tokenAddress:'ROTATED',pairCreatedAt:birth,signalTrending:false,signalNewPair:false,
+   candidateTracking:true,gmgnExactTrend:true,gmgnExactNewPair:true,gmgnExactOneMinutePerformance:true,
+   gmgnTrendInterval:'1m',gmgnDisplayedChangePct:100000,priceChangeSelectedPct:100000
+ }]});
+ assert.equal(x.rows[0].w6LaunchTracker.exactGmgn1m,true);
+ assert.equal(x.rows[0].w6LaunchTracker.firstGreen99kObservedAgeSeconds,90);
+ assert.equal(x.rows[0].w6LaunchTracker.first99kObservedAgeSeconds,90);
 });
 test('missing GMGN 1m percentage stays unknown instead of becoming a synthetic zero',()=>{
  const r=runtime(),birth=1700000000000;
