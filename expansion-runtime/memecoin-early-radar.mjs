@@ -108,20 +108,42 @@ export function createMemecoinEarlyRadarProvider(options={}){
       ['dexLatestBoosts',dex+'/token-boosts/latest/v1',dexCacheMs],
       ['dexLatestProfiles',dex+'/token-profiles/latest/v1',Math.max(dexCacheMs,30000)]
     ];
-    // Start optional discovery concurrently, but never make an already-valid
-    // exact GMGN result wait for these non-entry feeds.
-    const optionalDiscovery=Promise.allSettled(sourceSpecs.map(([,url,ttl])=>cachedJson(url,ttl)));
+    // Production W6 always has a GMGN read key. Its entry contract requires
+    // exact GMGN New Pair evidence, while the separate MEME radar already owns
+    // Gecko/Dex discovery. Do not even start those optional feeds in the W6
+    // hotpath when GMGN is configured.
+    const gmgnConfigured=String(options.gmgnApiKey??'gmgn_solbscbaseethmonadtron').trim()!=='';
+    const optionalDiscovery=gmgnConfigured
+      ?null
+      :Promise.allSettled(sourceSpecs.map(([,url,ttl])=>cachedJson(url,ttl)));
     const legacyResult=await priorResult;
     const legacyFresh=legacyResult.value&&Number(legacyResult.value.capturedAt)>=capturedAt;
     const prior=legacyFresh?legacyResult.value:{rows:[],errors:[],exactGmgn:false};
     feedStatus.legacy={ok:!legacyResult.error};
-    if(prior.exactGmgn===true){
-      feedStatus.optionalDiscovery={awaited:false,reason:'EXACT_GMGN_READY'};
-      return Object.freeze({...prior,providerDurationMs:Date.now()-started,feedStatus});
-    }
     if(legacyResult.value&&!legacyFresh)errors.push('legacy:STALE_SNAPSHOT');
     if(legacyResult.error)errors.push('legacy:'+String(legacyResult.error?.message||legacyResult.error));
     errors.push(...(Array.isArray(prior.errors)?prior.errors:[]));
+    if(gmgnConfigured){
+      feedStatus.optionalDiscovery={
+        awaited:false,
+        started:false,
+        reason:prior.exactGmgn===true?'EXACT_GMGN_READY':'GMGN_CONFIGURED_FAIL_CLOSED'
+      };
+      const safeRows=Array.isArray(prior.rows)?prior.rows:[];
+      return Object.freeze({
+        ...prior,
+        capturedAt:Number(prior.capturedAt??capturedAt),
+        rows:Object.freeze(safeRows),
+        errors:Object.freeze([...new Set(errors)]),
+        source:prior.source||'GMGN_EXACT_UNAVAILABLE_TRACKING_ONLY',
+        sourceReady:prior.sourceReady===true,
+        providerDurationMs:Date.now()-started,
+        feedStatus,
+        execution:'SHADOW_ONLY',
+        canExecute:false,
+        canExecuteLive:false
+      });
+    }
     const settled=await optionalDiscovery;
     for(let i=0;i<settled.length;i++){
       const [name]=sourceSpecs[i],r=settled[i];
