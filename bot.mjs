@@ -5359,6 +5359,7 @@ async function currentW6SolPriceUsd({force=false}={}){
 }
 
 function w6StrategyRuntimeOptions(solPriceUsd){
+  // Exact GMGN New Pair provenance remains valid through the strict <120s entry window.
   return {
     now:Date.now(),
     marginQuote:Math.max(1,Number(process.env.TCX_W6_USER_99K_60S_MARGIN_QUOTE||100)),
