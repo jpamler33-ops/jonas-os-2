@@ -863,12 +863,13 @@ export function createMemecoinEarlyRadarProvider({
         firstSeenAt:firstSeen.get(key),
         signalNewPool:false,
         signalTrending:true,
-        signalNewPair:false,
+        signalNewPair:pool?.signalNewPair===true,
         gmgnExactTrend:pool?.gmgnExactTrend===true,
+        gmgnExactNewPair:pool?.gmgnExactNewPair===true,
         trendSource:text(pool?.trendSource||trendSource,80),
         trendRank:finite(pool?.trendRank),
         ultraEarly:true,
-        sourceSetup:pool?.gmgnExactTrend===true?'GMGN_TRENDS_1M':'TRENDS_PROXY_RESEARCH',
+        sourceSetup:pool?.gmgnExactNewPair===true?'GMGN_NEW_PAIR_1M':(pool?.gmgnExactTrend===true?'GMGN_TRENDS_1M':'TRENDS_PROXY_RESEARCH'),
         w6TrackingOnly:false,
         ultraSource:dexRow?(text(pool?.trendSource||trendSource,80)+'_PLUS_DEXSCREENER_BATCH'):text(pool?.trendSource||trendSource,80)
       };
