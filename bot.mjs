@@ -5413,7 +5413,8 @@ function enrichW6UltraCandidateRows(snapshot){
     const maxObservedMarketCapUsd=marketCapKnown
       ?Math.max(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:-Infinity,marketCap)
       :(Number.isFinite(priorMaxMarketCap)?priorMaxMarketCap:null);
-    const greenPercent=Number(row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct);
+    const greenRaw=row?.gmgnDisplayedChangePct??row?.priceChangeSelectedPct;
+    const greenPercent=greenRaw==null||greenRaw===''?NaN:Number(greenRaw);
     const greenPercentKnown=Number.isFinite(greenPercent);
     const exactGmgn1m=row?.gmgnExactTrend===true&&String(row?.gmgnTrendInterval||snapshot?.trendInterval||'1m')==='1m'&&row?.signalTrending===true&&row?.signalNewPair===true;
     const priorMaxGreen=Number(priorTracker?.maxObservedGreenPercent);
