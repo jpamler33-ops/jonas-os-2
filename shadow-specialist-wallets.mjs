@@ -672,13 +672,17 @@ export function evaluateUser99k60sEntry(row,{
   const priceUsd=finite(row?.priceUsd);
   const blockers=[];
   const trendVisible=row?.signalTrending===true||row?.w6TrendVisible===true;
-  const newPairVisible=row?.signalNewPair===true&&trendVisible;
+  const exactNewPairProvenance=row?.gmgnExactNewPair===true||row?.exactGmgnNewPair===true;
+  const newPairVisible=exactNewPairProvenance||(row?.signalNewPair===true&&trendVisible);
   if(requireTrending&&!trendVisible)blockers.push('NOT_IN_TREND_FEED');
   if(requireNewPair&&!newPairVisible)blockers.push('NOT_IN_NEW_PAIR_FEED');
   if(ageSeconds==null)blockers.push('PAIR_AGE_UNKNOWN');
   else if(ageSeconds>=Math.max(1,Number(maxAgeSeconds)||120))blockers.push('OLDER_THAN_MAX_AGE');
   if(greenMode){
-    if(requireExactGmgnGreen&&row?.gmgnExactTrend!==true)blockers.push('GMGN_EXACT_TREND_REQUIRED');
+    if(requireExactGmgnGreen&&(
+      row?.gmgnExactTrend!==true||
+      row?.gmgnExactOneMinutePerformance!==true
+    ))blockers.push('GMGN_EXACT_1M_REQUIRED');
     if(greenPercent==null)blockers.push('GMGN_GREEN_PERCENT_UNKNOWN');
     else if(greenPercent<greenThreshold)blockers.push('GMGN_GREEN_PERCENT_BELOW_THRESHOLD');
   }else{
@@ -704,7 +708,9 @@ export function evaluateUser99k60sEntry(row,{
     greenPercent,
     trendVisible,
     newPairVisible,
+    exactGmgnNewPair:exactNewPairProvenance,
     exactGmgnTrend:row?.gmgnExactTrend===true,
+    exactGmgnOneMinutePerformance:row?.gmgnExactOneMinutePerformance===true,
     trendRank:finite(row?.trendRank),
     thresholdMode:greenMode?'GMGN_GREEN_PERCENT':'MARKET_CAP_USD',
     thresholdQualified,
@@ -1506,6 +1512,8 @@ export function applyUser99k60sStrategySnapshot(input,snapshot,{
       greenPercent:user99k60sGreenPercent(row),
       gmgn1mChangePct:user99k60sGreenPercent(row),
       exactGmgnTrend:row?.gmgnExactTrend===true,
+      exactGmgnNewPair:row?.gmgnExactNewPair===true,
+      exactGmgnOneMinutePerformance:row?.gmgnExactOneMinutePerformance===true,
       signalNewPair:row?.signalNewPair===true,
       liquidityUsd:row?.liquidityUsd,
       trendFeed:row?.signalTrending===true||row?.w6TrendVisible===true
