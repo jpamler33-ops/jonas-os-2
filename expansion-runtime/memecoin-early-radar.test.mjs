@@ -189,7 +189,7 @@ test('W6 public demo key derives exact 1m percent only from GMGN token-info pric
       return json({code:0,data:{new_creation:[{
         address:'DEMOMINT',symbol:'DEMO',name:'Demo Meme',price:'0.001',
         usd_market_cap:'10000',liquidity:'8000',
-        created_timestamp:Math.floor((now-40_000)/1000)
+        created_timestamp:Math.floor((now-60_000)/1000)
       }]}});
     }
     if(u.hostname==='openapi.gmgn.ai'&&u.pathname==='/v1/token/info'){
@@ -205,7 +205,7 @@ test('W6 public demo key derives exact 1m percent only from GMGN token-info pric
       baseToken:{address:'DEMOMINT',symbol:'DEMO',name:'Demo Meme'},quoteToken:{symbol:'SOL'},
       priceUsd:'0.001',liquidity:{usd:9000},volume:{m5:100,h1:100,h24:100},
       txns:{m5:{buys:2,sells:0},h1:{buys:2,sells:0}},priceChange:{m5:1,h1:1},
-      marketCap:10000,fdv:10000,pairCreatedAt:now-40000
+      marketCap:10000,fdv:10000,pairCreatedAt:now-60000
     }]);
     throw new Error('unexpected '+url);
   };
