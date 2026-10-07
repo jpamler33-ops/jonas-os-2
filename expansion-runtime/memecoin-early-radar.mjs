@@ -144,6 +144,10 @@ export function createMemecoinEarlyRadarProvider(options={}){
         canExecuteLive:false
       });
     }
+    if(prior.exactGmgn===true){
+      feedStatus.optionalDiscovery={awaited:false,started:true,reason:'PUBLIC_GMGN_READY'};
+      return Object.freeze({...prior,providerDurationMs:Date.now()-started,feedStatus});
+    }
     const settled=await optionalDiscovery;
     for(let i=0;i<settled.length;i++){
       const [name]=sourceSpecs[i],r=settled[i];
