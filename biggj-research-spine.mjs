@@ -50,10 +50,10 @@ const FORBIDDEN=freeze([
 
 function runtimeFor(id,h,portfolio,discovery){
   const checks=[];
-  if(id==='L0_REALITY'){checks.push(['marketFabric',h?.marketDataFabric?.healthy===true],['marketRadar',arr(h?.marketRadar?.rows).length>0],['news',h?.globalIntel?.sourceReady===true],['memecoin',h?.memecoinRadar?.sourceReady===true]);}
+  if(id==='L0_REALITY'){checks.push(['marketFabric',h?.marketDataFabric?.healthy===true],['marketObservations',arr(h?.marketRadar?.rows).length>0||num(h?.marketDataFabric?.events)>0],['news',h?.globalIntel?.sourceReady===true],['memecoin',h?.memecoinRadar?.sourceReady===true]);}
   else if(id==='L1_TRUTH_EVIDENCE'){checks.push(['audit',h?.institutionalKernel?.ledgerHealthy===true],['epistemic',h?.biggjEpistemicKernel?.healthy===true],['evidenceHistory',h?.evidenceHistory?.healthy===true],['rulebook',h?.biggjRulebook?.healthy!==false]);}
   else if(id==='L2_FEATURES_INDICATORS'){checks.push(['indicatorEvolution',h?.indicatorEvolution?.healthy===true],['catalog',num(h?.indicatorEvolution?.featureFactory?.experiments)>0]);}
-  else if(id==='L3_CONTEXT_REGIME_EVENT'){checks.push(['worldModel',h?.biggjWorldModel?.healthy===true],['worldMarkets',num(h?.biggjWorldModel?.marketsObserved)>0],['events',arr(h?.globalIntel?.recent).length>0]);}
+  else if(id==='L3_CONTEXT_REGIME_EVENT'){checks.push(['worldModel',h?.biggjWorldModel?.healthy===true],['worldMarkets',num(h?.biggjWorldModel?.marketsObserved??h?.biggjWorldModel?.marketCount??h?.biggjWorldModel?.stateCount)>0],['events',arr(h?.globalIntel?.recent).length>0]);}
   else if(id==='L4_OPPORTUNITY_MAP'){checks.push(['discoveryLedger',h?.discoveryLedger?.healthy===true],['discoveryRuntime',Boolean(discovery)],['specialists',h?.specialistWallets?.healthy===true]);}
   else if(id==='L5_STRATEGY_LAB'){checks.push(['parallelWorlds',h?.parallelStrategyWorlds?.healthy===true],['strategyLeague',Boolean(h?.strategyLeagueSummary)],['walletResearch',h?.walletResearchManager?.healthy!==false]);}
   else if(id==='L6_EVIDENCE_VALIDATION'){checks.push(['researchFactory',h?.autonomousResearchFactory?.healthy===true],['proofFeed',Boolean(h?.biggjProofFeed)],['claimAssumptions',Boolean(h?.claimAssumptionResearch)]);}
